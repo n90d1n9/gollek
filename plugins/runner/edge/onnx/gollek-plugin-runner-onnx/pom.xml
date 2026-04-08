@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>tech.kayys.gollek</groupId>
+        <artifactId>gollek-onnx-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gollek-plugin-runner-onnx</artifactId>
+    <name>Gollek Plugin :: ONNX Runtime Runner</name>
+    <description>ONNX Runtime runner plugin for cross-platform inference</description>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <onnxruntime.version>1.20.0</onnxruntime.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-runner-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-runner-onnx</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-tokenizer-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-spi-inference</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.smallrye.reactive</groupId>
+            <artifactId>mutiny</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.microsoft.onnxruntime</groupId>
+            <artifactId>onnxruntime</artifactId>
+            <version>${onnxruntime.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <!-- Required -->
+                            <Plugin-Id>onnx-runner</Plugin-Id>
+                            <Plugin-Type>runner</Plugin-Type>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Name>ONNX Runtime Runner</Plugin-Name>
+                            <Plugin-Provider>tech.kayys.gollek.plugin.runner.onnx.OnnxRunnerPlugin</Plugin-Provider>
+
+                            <!-- Capabilities -->
+                            <Plugin-Capabilities>onnx-inference, cpu-inference, gpu-inference,
+                                cross-platform</Plugin-Capabilities>
+
+                            <!-- Dependencies -->
+                            <Plugin-Dependencies></Plugin-Dependencies>
+
+                            <!-- Deployment modes -->
+                            <Plugin-Deployment>standalone,microservice,hybrid</Plugin-Deployment>
+
+                            <!-- Metadata -->
+                            <Plugin-Author>Gollek Team</Plugin-Author>
+                            <Plugin-Vendor>Kayys.tech</Plugin-Vendor>
+                            <Plugin-License>MIT</Plugin-License>
+
+                            <!-- Performance -->
+                            <Plugin-Performance-Speedup>1-2x (vs baseline)</Plugin-Performance-Speedup>
+                            <Plugin-Performance-Memory-Overhead>80-150MB</Plugin-Performance-Memory-Overhead>
+
+                            <!-- Supported Formats -->
+                            <Supported-Formats>.onnx,.onnxruntime</Supported-Formats>
+                            <Supported-Architectures>
+                                bert,roberta,distilbert,whisper,clip,yolo,resnet,vit,llama,mistral</Supported-Architectures>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

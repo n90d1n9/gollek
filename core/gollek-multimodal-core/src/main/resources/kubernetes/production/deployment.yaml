@@ -1,0 +1,297 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: multimodal-production
+  labels:
+    name: multimodal-production
+    environment: production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multimodal-config
+  namespace: multimodal-production
+data:
+  # Application Configuration
+  GOLLEK_MULTIMODAL_ENABLED: "true"
+  GOLLEK_MULTIMODAL_MAX_CONCURRENT: "20"
+  GOLLEK_MULTIMODAL_TIMEOUT_MS: "30000"
+  GOLLEK_MODEL_REPO_PATH: "/app/models"
+  
+  # JVM Configuration
+  JAVA_OPTS: "-Xms8g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+  
+  # Quarkus Configuration
+  QUARKUS_HTTP_PORT: "8080"
+  QUARKUS_THREAD_POOL_MAX_SIZE: "40"
+  
+  # Logging Configuration
+  QUARKUS_LOG_LEVEL: "INFO"
+  QUARKUS_LOG_CONSOLE_FORMAT: "%d{YYYY-MM-dd HH:mm:ss} %-5p [%c{1.}] (%t) %s%e%n"
+  
+  # Metrics Configuration
+  QUARKUS_METRICS_ENABLED: "true"
+  QUARKUS_METRICS_PATH: "/metrics"
+  
+  # Health Configuration
+  QUARKUS_SMALLRYE_HEALTH_ENABLED: "true"
+  QUARKUS_SMALLRYE_HEALTH_PATH: "/q/health"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: multimodal-secrets
+  namespace: multimodal-production
+type: Opaque
+stringData:
+  # API Keys (to be populated by secrets management)
+  OPENAI_API_KEY: "placeholder-update-with-secrets"
+  ANTHROPIC_API_KEY: "placeholder-update-with-secrets"
+  GOOGLE_API_KEY: "placeholder-update-with-secrets"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multimodal-inference
+  namespace: multimodal-production
+  labels:
+    app: multimodal-inference
+    version: v1.0.0
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: multimodal-inference
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: multimodal-inference
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: multimodal-service-account
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - multimodal-inference
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: multimodal-inference
+        image: registry.example.com/multimodal-inference:v1.0.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        envFrom:
+        - configMapRef:
+            name: multimodal-config
+        - secretRef:
+            name: multimodal-secrets
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "16Gi"
+            cpu: "8"
+        livenessProbe:
+          httpGet:
+            path: /q/health/live
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /q/health/ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /q/health/started
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        volumeMounts:
+        - name: model-storage
+          mountPath: /app/models
+          readOnly: true
+        - name: tmp-storage
+          mountPath: /tmp
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: multimodal-model-pvc
+      - name: tmp-storage
+        emptyDir:
+          sizeLimit: 10Gi
+      terminationGracePeriodSeconds: 60
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multimodal-inference
+  namespace: multimodal-production
+  labels:
+    app: multimodal-inference
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-internal: "false"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: multimodal-inference
+  sessionAffinity: None
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: multimodal-inference-hpa
+  namespace: multimodal-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: multimodal-inference
+  minReplicas: 5
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: multimodal_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+      - type: Pods
+        value: 5
+        periodSeconds: 60
+      selectPolicy: Max
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: multimodal-inference-pdb
+  namespace: multimodal-production
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: multimodal-inference
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: multimodal-inference-network-policy
+  namespace: multimodal-production
+spec:
+  podSelector:
+    matchLabels:
+      app: multimodal-inference
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: multimodal-production
+    ports:
+    - protocol: TCP
+      port: 5432
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: multimodal-service-account
+  namespace: multimodal-production
+  labels:
+    app: multimodal-inference
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: multimodal-model-pvc
+  namespace: multimodal-production
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 100Gi
+  volumeMode: Filesystem

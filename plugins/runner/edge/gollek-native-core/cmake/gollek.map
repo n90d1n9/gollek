@@ -1,0 +1,31 @@
+# cmake/gollek.map
+# GNU linker version script — only export JNI + Gollek C API symbols.
+# Everything else (TFLite internals, STL, etc.) stays hidden.
+# Applied via ANDROID_EXPORT_SYMBOLS in CMakeLists.txt.
+
+{
+  global:
+    # Gollek C API
+    gollek_engine_create;
+    gollek_engine_destroy;
+    gollek_load_model_from_file;
+    gollek_load_model_from_buffer;
+    gollek_get_input_count;
+    gollek_get_output_count;
+    gollek_get_input_info;
+    gollek_get_output_info;
+    gollek_resize_input;
+    gollek_allocate_tensors;
+    gollek_set_input;
+    gollek_invoke;
+    gollek_get_output;
+    gollek_infer;
+    gollek_status_string;
+    gollek_last_error;
+    gollek_version;
+
+    # JNI entry points (Android + Desktop)
+    Java_tech_kayys_gollek_native_GollekNativeBridge_*;
+
+  local: *;
+};

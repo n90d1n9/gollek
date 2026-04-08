@@ -1,0 +1,274 @@
+/*
+ * Gollek Inference Engine — SafeTensor Module
+ * Copyright (c) 2026 Kayys.tech
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * AudioResource.java
+ * ───────────────────────
+ * REST API for audio operations.
+ */
+package tech.kayys.gollek.safetensor.audio.rest;
+
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.annotations.providers.multipart.MultipartForm;
+import tech.kayys.gollek.safetensor.audio.WhisperEngine;
+import tech.kayys.gollek.safetensor.audio.SpeechT5Engine;
+import tech.kayys.gollek.safetensor.audio.model.AudioConfig;
+import tech.kayys.gollek.safetensor.audio.model.AudioResult;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletionStage;
+
+/**
+ * REST resource for audio processing operations.
+ * <p>
+ * Provides endpoints for:
+ * <ul>
+ * <li>Speech-to-text transcription (Whisper)</li>
+ * <li>Text-to-speech synthesis (SpeechT5)</li>
+ * <li>Language detection</li>
+ * <li>Voice management</li>
+ * </ul>
+ * </p>
+ *
+ * @author Bhangun
+ * @version 1.0.0
+ */
+@Path("/api/v1/audio")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.MULTIPART_FORM_DATA)
+public class AudioResource {
+
+    private static final Logger log = Logger.getLogger(AudioResource.class);
+
+    @Inject
+    WhisperEngine whisperEngine;
+
+    @Inject
+    SpeechT5Engine ttsEngine;
+
+    /**
+     * Transcribe audio to text.
+     *
+     * @param form    multipart form with audio file and parameters
+     * @return transcription result
+     */
+    @POST
+    @Path("/transcribe")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Operation(summary = "Transcribe audio to text", description = "Transcribe audio file using Whisper model")
+    @APIResponse(responseCode = "200", description = "Transcription successful", content = @Content(schema = @Schema(implementation = AudioResult.class)))
+    @APIResponse(responseCode = "400", description = "Invalid audio file")
+    @APIResponse(responseCode = "500", description = "Transcription failed")
+    public Response transcribe(@MultipartForm TranscribeForm form) {
+
+        try {
+            if (form.audioFile == null || form.audioFile.length == 0) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("error", "Audio file is required"))
+                        .build();
+            }
+
+            AudioConfig config = AudioConfig.builder()
+                    .task("translate".equals(form.task) ? AudioConfig.Task.TRANSLATE : AudioConfig.Task.TRANSCRIBE)
+                    .language(form.language != null ? form.language : "en")
+                    .autoLanguage(form.language == null)
+                    .build();
+
+            Path modelPath = form.model != null ? Paths.get(form.model) : getDefaultWhisperModel();
+
+            AudioResult result = whisperEngine.transcribe(form.audioFile, modelPath, config)
+                    .await().indefinitely();
+
+            return result.isSuccess()
+                    ? Response.ok(result).build()
+                    : Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(result).build();
+
+        } catch (Exception e) {
+            log.errorf(e, "Transcription failed");
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(AudioResult.failure(e.getMessage()))
+                    .build();
+        }
+    }
+
+    /**
+     * Transcribe form data.
+     */
+    public static class TranscribeForm {
+        @FormParam("file")
+        public byte[] audioFile;
+
+        @FormParam("model")
+        public String model;
+
+        @FormParam("language")
+        public String language;
+
+        @FormParam("task")
+        public String task;
+    }
+
+    /**
+     * Synthesize speech from text.
+     *
+     * @param request TTS request
+     * @return WAV audio bytes
+     */
+    @POST
+    @Path("/synthesize")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_OCTET_STREAM)
+    @Operation(summary = "Synthesize speech from text", description = "Convert text to speech using SpeechT5")
+    @APIResponse(responseCode = "200", description = "Speech synthesis successful", content = @Content(mediaType = "audio/wav"))
+    @APIResponse(responseCode = "400", description = "Invalid request")
+    @APIResponse(responseCode = "500", description = "Synthesis failed")
+    public Response synthesize(
+            @RequestBody(description = "TTS request") TTSRequest request) {
+
+        try {
+            if (request.text == null || request.text.isBlank()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("error", "Text is required"))
+                        .build();
+            }
+
+            AudioConfig config = AudioConfig.builder()
+                    .voice(request.voice != null ? request.voice : "alloy")
+                    .temperature(request.speed != null ? request.speed : 1.0f)
+                    .build();
+
+            Path modelPath = request.model != null
+                    ? Paths.get(request.model)
+                    : getDefaultTTSModel();
+
+            byte[] audio = ttsEngine.synthesize(request.text, request.voice, modelPath, config)
+                    .await().indefinitely();
+
+            return Response.ok(audio)
+                    .type(MediaType.APPLICATION_OCTET_STREAM)
+                    .header("Content-Disposition", "attachment; filename=\"speech.wav\"")
+                    .build();
+
+        } catch (Exception e) {
+            log.errorf(e, "Speech synthesis failed");
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    /**
+     * Detect language from audio.
+     *
+     * @param form multipart form with audio file and model
+     * @return detected language
+     */
+    @POST
+    @Path("/detect-language")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Operation(summary = "Detect language from audio", description = "Automatically detect spoken language")
+    @APIResponse(responseCode = "200", description = "Language detected")
+    public Response detectLanguage(@MultipartForm DetectLanguageForm form) {
+
+        try {
+            if (form.audioFile == null || form.audioFile.length == 0) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("error", "Audio file is required"))
+                        .build();
+            }
+
+            Path modelPath = form.model != null ? Paths.get(form.model) : getDefaultWhisperModel();
+
+            String language = whisperEngine.detectLanguage(form.audioFile, modelPath)
+                    .await().indefinitely();
+
+            return Response.ok(Map.of("language", language))
+                    .build();
+
+        } catch (Exception e) {
+            log.errorf(e, "Language detection failed");
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        }
+    }
+
+    /**
+     * Detect language form data.
+     */
+    public static class DetectLanguageForm {
+        @FormParam("file")
+        public byte[] audioFile;
+
+        @FormParam("model")
+        public String model;
+    }
+
+    /**
+     * List available voices for TTS.
+     *
+     * @return list of voices
+     */
+    @GET
+    @Path("/voices")
+    @Operation(summary = "List available voices", description = "Get all available TTS voices")
+    @APIResponse(responseCode = "200", description = "Voices listed successfully")
+    public Response listVoices() {
+        List<String> voices = ttsEngine.getAvailableVoices();
+        return Response.ok(Map.of("voices", voices)).build();
+    }
+
+    /**
+     * Get transcription formats.
+     *
+     * @return supported formats
+     */
+    @GET
+    @Path("/transcribe/formats")
+    @Operation(summary = "List supported audio formats", description = "Get all supported audio formats for transcription")
+    @APIResponse(responseCode = "200", description = "Formats listed successfully")
+    public Response getTranscriptionFormats() {
+        return Response.ok(Map.of(
+                "formats", List.of("wav", "mp3", "flac", "ogg", "m4a", "webm"),
+                "max_duration_sec", 3600,
+                "max_file_size_mb", 100))
+                .build();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Internal helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private Path getDefaultWhisperModel() {
+        return Paths.get(System.getProperty("user.home"), ".gollek", "models", "whisper-large-v3");
+    }
+
+    private Path getDefaultTTSModel() {
+        return Paths.get(System.getProperty("user.home"), ".gollek", "models", "speecht5-tts");
+    }
+
+    /**
+     * TTS request payload.
+     */
+    public static class TTSRequest {
+        public String text;
+        public String voice;
+        public String model;
+        public Float speed;
+        public String format;
+    }
+}

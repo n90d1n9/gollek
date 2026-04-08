@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>tech.kayys.gollek</groupId>
+        <artifactId>gollek-safetensor-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gollek-plugin-runner-safetensor</artifactId>
+    <name>Gollek Plugin :: Safetensor Runner</name>
+    <description>Safetensor format runner plugin for model inference</description>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <!-- Runner Plugin Core -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-runner-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Existing Safetensor implementation -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-safetensor-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <!-- Required -->
+                            <Plugin-Id>safetensor-runner</Plugin-Id>
+                            <Plugin-Type>runner</Plugin-Type>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Name>Safetensor Runner</Plugin-Name>
+                            <Plugin-Provider>tech.kayys.gollek.plugin.runner.safetensor.SafetensorRunnerPlugin</Plugin-Provider>
+                            
+                            <!-- Capabilities -->
+                            <Plugin-Capabilities>safetensor-inference, multimodal, vision-language, gpu-inference, cpu-inference</Plugin-Capabilities>
+                            
+                            <!-- Dependencies -->
+                            <Plugin-Dependencies></Plugin-Dependencies>
+                            
+                            <!-- Deployment modes -->
+                            <Plugin-Deployment>standalone,microservice,hybrid</Plugin-Deployment>
+                            
+                            <!-- Metadata -->
+                            <Plugin-Author>Gollek Team</Plugin-Author>
+                            <Plugin-Vendor>Kayys.tech</Plugin-Vendor>
+                            <Plugin-License>MIT</Plugin-License>
+                            
+                            <!-- Performance -->
+                            <Plugin-Performance-Speedup>1-3x (vs baseline)</Plugin-Performance-Speedup>
+                            <Plugin-Performance-Memory-Overhead>100-200MB</Plugin-Performance-Memory-Overhead>
+                            
+                            <!-- Supported Formats -->
+                            <Supported-Formats>.safetensors,.safetensor,.gguf,.bin</Supported-Formats>
+                            <Supported-Architectures>llama,llama2,llama3,llama3.1,mistral,mixtral,qwen,qwen2,gemma,gemma2,phi,phi2,phi3,falcon,bert,vit,whisper</Supported-Architectures>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

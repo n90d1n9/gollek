@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>tech.kayys.gollek</groupId>
+        <artifactId>gollek-kernel-cuda-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gollek-plugin-kernel-cuda</artifactId>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-kernel-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-kernel-cuda</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <!-- Required -->
+                            <Plugin-Id>cuda-kernel</Plugin-Id>
+                            <Plugin-Type>kernel</Plugin-Type>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Name>CUDA Kernel</Plugin-Name>
+                            <Plugin-Provider>tech.kayys.gollek.plugin.kernel.cuda.CudaKernelPlugin</Plugin-Provider>
+                            
+                            <!-- Capabilities -->
+                            <Plugin-Capabilities>cuda-acceleration, flash-attention-2, flash-attention-3, paged-attention, gpu-inference</Plugin-Capabilities>
+                            
+                            <!-- Dependencies -->
+                            <Plugin-Dependencies></Plugin-Dependencies>
+                            
+                            <!-- Deployment modes -->
+                            <Plugin-Deployment>microservice,hybrid</Plugin-Deployment>
+                            
+                            <!-- Metadata -->
+                            <Plugin-Author>Gollek Team</Plugin-Author>
+                            <Plugin-Vendor>Kayys.tech</Plugin-Vendor>
+                            <Plugin-License>MIT</Plugin-License>
+                            
+                            <!-- GPU Requirements -->
+                            <Plugin-GPU-Requirement>NVIDIA GPU, CUDA 11.0+</Plugin-GPU-Requirement>
+                            <Plugin-Minimum-Compute-Capability>6.0</Plugin-Minimum-Compute-Capability>
+                            <Plugin-Minimum-Memory>4GB</Plugin-Minimum-Memory>
+                            
+                            <!-- Performance -->
+                            <Plugin-Performance-Speedup>5-10x (vs CPU)</Plugin-Performance-Speedup>
+                            <Plugin-Performance-Memory-Overhead>50-100MB</Plugin-Performance-Memory-Overhead>
+                            
+                            <!-- Supported Architectures -->
+                            <Supported-Architectures>volta,turing,ampere,ada,hopper,blackwell</Supported-Architectures>
+                            <Supported-Compute-Capabilities>6.0,6.1,7.0,7.5,8.0,8.6,8.9,9.0,10.0</Supported-Compute-Capabilities>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

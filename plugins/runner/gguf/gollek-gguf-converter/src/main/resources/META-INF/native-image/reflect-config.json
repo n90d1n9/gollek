@@ -1,0 +1,10 @@
+[
+    {
+        "name": "tech.kayys.gollek.converter.GGUFNative",
+        "allDeclaredMethods": true
+    },
+    {
+        "name": "tech.kayys.gollek.converter.GGUFConverter",
+        "allDeclaredMethods": true
+    }
+]

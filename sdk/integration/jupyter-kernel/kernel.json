@@ -1,0 +1,14 @@
+{
+  "display_name": "Gollek SDK (Java)",
+  "language": "java",
+  "argv": [
+    "java",
+    "-cp",
+    "${GOLLEK_SDK_CLASSPATH}",
+    "io.github.jupyter.java.kernel.Main",
+    "{connection_file}"
+  ],
+  "env": {
+    "GOLLEK_SDK_CLASSPATH": "${HOME}/.m2/repository/tech/kayys/gollek-sdk-complete/1.0.0/gollek-sdk-complete-1.0.0-uber.jar"
+  }
+}

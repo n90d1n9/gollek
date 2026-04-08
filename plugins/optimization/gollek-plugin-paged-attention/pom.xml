@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>tech.kayys.gollek</groupId>
+        <artifactId>gollek-optimization-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gollek-paged-attention</artifactId>
+
+    <name>Gollek Extension - PagedAttention Kernel</name>
+    <description>FFM-based PagedAttention CUDA kernel binding for efficient KV-Cache access</description>
+
+    <dependencies>
+        <!-- KV-Cache Manager -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-ext-kv-cache</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Gollek SPI -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- CDI -->
+        <dependency>
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <compilerArgs>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>io.smallrye</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <version>3.1.2</version>
+                <executions>
+                    <execution>
+                        <id>make-index</id>
+                        <goals>
+                            <goal>jandex</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <!-- Required -->
+                            <Plugin-Id>paged-attention</Plugin-Id>
+                            <Plugin-Type>optimization</Plugin-Type>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Name>PagedAttention</Plugin-Name>
+                            <Plugin-Provider>tech.kayys.gollek.plugin.optimization.paged.PagedAttentionPlugin</Plugin-Provider>
+                            
+                            <!-- Capabilities -->
+                            <Plugin-Capabilities>paged-attention, kv-cache-optimization, gpu-optimization, long-context</Plugin-Capabilities>
+                            
+                            <!-- Dependencies -->
+                            <Plugin-Dependencies></Plugin-Dependencies>
+                            
+                            <!-- Deployment modes -->
+                            <Plugin-Deployment>microservice,hybrid</Plugin-Deployment>
+                            
+                            <!-- Metadata -->
+                            <Plugin-Author>Gollek Team</Plugin-Author>
+                            <Plugin-Vendor>Kayys.tech</Plugin-Vendor>
+                            <Plugin-License>MIT</Plugin-License>
+                            
+                            <!-- GPU Requirements -->
+                            <Plugin-GPU-Requirement>CUDA 11.0+</Plugin-GPU-Requirement>
+                            <Plugin-Minimum-Compute-Capability>6.0</Plugin-Minimum-Compute-Capability>
+                            <Plugin-Minimum-Memory>8GB</Plugin-Minimum-Memory>
+                            
+                            <!-- Performance -->
+                            <Plugin-Performance-Speedup>2-4x (vs standard KV cache)</Plugin-Performance-Speedup>
+                            <Plugin-Performance-Memory-Overhead>50-100MB</Plugin-Performance-Memory-Overhead>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

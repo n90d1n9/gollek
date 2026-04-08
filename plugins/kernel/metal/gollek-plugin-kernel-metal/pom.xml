@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>tech.kayys.gollek</groupId>
+        <artifactId>gollek-kernel-metal-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>gollek-plugin-kernel-metal</artifactId>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-kernel-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-kernel-metal</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <!-- Required -->
+                            <Plugin-Id>metal-kernel</Plugin-Id>
+                            <Plugin-Type>kernel</Plugin-Type>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Name>Metal Kernel</Plugin-Name>
+                            <Plugin-Provider>tech.kayys.gollek.plugin.kernel.metal.MetalKernelPlugin</Plugin-Provider>
+                            
+                            <!-- Capabilities -->
+                            <Plugin-Capabilities>metal-acceleration, unified-memory, gpu-inference, apple-silicon</Plugin-Capabilities>
+                            
+                            <!-- Dependencies -->
+                            <Plugin-Dependencies></Plugin-Dependencies>
+                            
+                            <!-- Deployment modes -->
+                            <Plugin-Deployment>microservice,hybrid</Plugin-Deployment>
+                            
+                            <!-- Metadata -->
+                            <Plugin-Author>Gollek Team</Plugin-Author>
+                            <Plugin-Vendor>Kayys.tech</Plugin-Vendor>
+                            <Plugin-License>MIT</Plugin-License>
+                            
+                            <!-- GPU Requirements -->
+                            <Plugin-GPU-Requirement>Apple Silicon (M1/M2/M3/M4), macOS 12.0+</Plugin-GPU-Requirement>
+                            <Plugin-Minimum-Memory>8GB</Plugin-Minimum-Memory>
+                            
+                            <!-- Performance -->
+                            <Plugin-Performance-Speedup>3-8x (vs CPU)</Plugin-Performance-Speedup>
+                            <Plugin-Performance-Memory-Overhead>30-50MB</Plugin-Performance-Memory-Overhead>
+                            
+                            <!-- Supported Architectures -->
+                            <Supported-Architectures>m1,m1_pro,m1_max,m1_ultra,m2,m2_pro,m2_max,m2_ultra,m3,m3_pro,m3_max,m4,m4_pro,m4_max</Supported-Architectures>
+                            <Supported-Metal-Versions>metal_3_0,metal_3_1,metal_3_2,metal_3_3</Supported-Metal-Versions>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
