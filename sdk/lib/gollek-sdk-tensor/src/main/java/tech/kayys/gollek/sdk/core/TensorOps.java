@@ -86,7 +86,11 @@ public final class TensorOps {
         sliceRecursive(srcData, shape, strides, dim, start, end, new long[shape.length], 0, result);
 
         shape[dim] = sliceSize;
-        return Tensor.of(result.stream().mapToFloat(Float::floatValue).toArray(), shape)
+        float[] resultData = new float[result.size()];
+        for (int i = 0; i < result.size(); i++) {
+            resultData[i] = result.get(i);
+        }
+        return Tensor.of(resultData, shape)
             .requiresGrad(tensor.requiresGrad());
     }
 
@@ -123,7 +127,11 @@ public final class TensorOps {
 
         float[] indexData = indices.data();
         float[] srcData = tensor.data();
-        float[] result = new float[(int) Tensor.of(shape).numel()];
+        long numel = 1;
+        for (long s : shape) {
+            numel *= s;
+        }
+        float[] result = new float[(int) numel];
 
         long[] strides = computeStrides(tensor.shape());
         long srcStride = strides[dim];
@@ -182,7 +190,11 @@ public final class TensorOps {
         }
 
         baseShape[dim] = catSize;
-        float[] result = new float[(int) Tensor.of(baseShape).numel()];
+        long numel = 1;
+        for (long s : baseShape) {
+            numel *= s;
+        }
+        float[] result = new float[(int) numel];
 
         int offset = 0;
         for (Tensor t : tensors) {
@@ -226,7 +238,11 @@ public final class TensorOps {
         resultShape[dim] = tensors.size();
         System.arraycopy(baseShape, dim, resultShape, dim + 1, baseShape.length - dim);
 
-        float[] result = new float[(int) Tensor.of(resultShape).numel()];
+        long numel = 1;
+        for (long s : resultShape) {
+            numel *= s;
+        }
+        float[] result = new float[(int) numel];
 
         int offset = 0;
         for (Tensor t : tensors) {
@@ -261,7 +277,11 @@ public final class TensorOps {
         }
 
         long[] resultShape = indices.shape().clone();
-        float[] result = new float[(int) Tensor.of(resultShape).numel()];
+        long numel = 1;
+        for (long s : resultShape) {
+            numel *= s;
+        }
+        float[] result = new float[(int) numel];
         float[] srcData = tensor.data();
         float[] idxData = indices.data();
 
@@ -343,7 +363,11 @@ public final class TensorOps {
             return Tensor.zeros(0).requiresGrad(tensor.requiresGrad());
         }
 
-        return Tensor.of(result.stream().mapToFloat(Float::floatValue).toArray())
+        float[] resultData = new float[result.size()];
+        for (int i = 0; i < result.size(); i++) {
+            resultData[i] = result.get(i);
+        }
+        return Tensor.of(resultData)
             .requiresGrad(tensor.requiresGrad());
     }
 
