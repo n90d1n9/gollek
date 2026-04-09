@@ -25,7 +25,9 @@
         <module>gollek-sdk-nn</module>
         -->
         <module>gollek-sdk-ml</module>
+        <!-- DISABLED: gollek-sdk-data has generic type issues with Dataset<T> and missing NLP dependencies
         <module>gollek-sdk-data</module>
+        -->
         <module>gollek-sdk-nlp</module>
         <module>gollek-sdk-hub</module>
         <module>gollek-sdk-multimodal</module>
