@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Consumer;
+import tech.kayys.gollek.cli.GollekHome;
 
 final class HuggingFaceCheckpointStore {
 
@@ -54,7 +55,7 @@ final class HuggingFaceCheckpointStore {
                 return Optional.empty();
             }
 
-            Path root = Path.of(System.getProperty("user.home"), ".gollek", "models", repo);
+            Path root = GollekHome.path("models", repo);
             Files.createDirectories(root);
 
             boolean hasWeights = false;
@@ -67,20 +68,26 @@ final class HuggingFaceCheckpointStore {
                 if (target.getParent() != null) {
                     Files.createDirectories(target.getParent());
                 }
-                client.downloadFile(repo, file, target, (completed, total, progress) -> {
-                    if (progressCallback != null) {
-                        progressCallback
-                                .accept(PullProgress.of("Downloading checkpoint artifacts", null, total, completed));
-                    }
-                });
-                downloaded++;
+                try {
+                    client.downloadFile(repo, file, target, (completed, total, progress) -> {
+                        if (progressCallback != null) {
+                            progressCallback
+                                    .accept(PullProgress.of("Downloading artifact: " + file, null, total, completed));
+                        }
+                    });
+                    downloaded++;
+                } catch (Exception e) {
+                    // Log and continue to "download the rest"
+                    System.err.println("\rFailed to download " + file + ": " + e.getMessage());
+                }
             }
 
             if (progressCallback != null) {
-                progressCallback.accept(PullProgress.of("Checkpoint artifacts stored locally"));
+                progressCallback.accept(PullProgress.of("Sync complete. " + downloaded + " artifacts stored locally."));
             }
             return Optional.of(new StoreResult(root, downloaded, hasWeights));
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            System.err.println("Checkpoint store failure: " + e.getMessage());
             return Optional.empty();
         }
     }
@@ -90,7 +97,8 @@ final class HuggingFaceCheckpointStore {
             return false;
         }
         String lower = file.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".md") || lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+        if (lower.endsWith(".md") || lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
             return false;
         }
         return lower.endsWith(".safetensors")
@@ -104,7 +112,9 @@ final class HuggingFaceCheckpointStore {
                 || lower.endsWith(".txt")
                 || lower.endsWith(".model")
                 || lower.endsWith(".tiktoken")
-                || lower.endsWith(".spm");
+                || lower.endsWith(".spm")
+                || lower.endsWith(".msgpack")
+                || file.contains("model_index.json");
     }
 
     private static boolean isWeightFile(String file) {
@@ -113,6 +123,7 @@ final class HuggingFaceCheckpointStore {
                 || lower.endsWith(".bin")
                 || lower.endsWith(".pt")
                 || lower.endsWith(".pth")
-                || lower.endsWith(".litertlm");
+                || lower.endsWith(".litertlm")
+                || lower.endsWith(".ckpt");
     }
 }

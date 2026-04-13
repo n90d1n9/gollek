@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LIBTORCH_SRC="${GOLLEK_LIBTORCH_SOURCE_DIR:-$HOME/.gollek/source/vendor/libtorch}"
+resolve_gollek_home() {
+  if [ -n "${GOLLEK_HOME:-}" ]; then
+    echo "$GOLLEK_HOME"
+    return
+  fi
+  if [ -n "${WAYANG_HOME:-}" ]; then
+    echo "$WAYANG_HOME/gollek"
+    return
+  fi
+  if [ -d "$HOME/.wayang/gollek" ] || [ ! -d "$HOME/.gollek" ]; then
+    echo "$HOME/.wayang/gollek"
+    return
+  fi
+  echo "$HOME/.gollek"
+}
+
+GOLLEK_HOME_RESOLVED="$(resolve_gollek_home)"
+LIBTORCH_SRC="${GOLLEK_LIBTORCH_SOURCE_DIR:-$GOLLEK_HOME_RESOLVED/source/vendor/libtorch}"
 
 mkdir -p "$(dirname "$LIBTORCH_SRC")"
 

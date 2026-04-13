@@ -32,6 +32,8 @@ class ConvertCommandTest {
                 .quantization(QuantizationType.Q4_K_M)
                 .build();
         when(converter.resolveParams(any())).thenReturn(resolved);
+        when(converter.resolveModelBasePath()).thenReturn(Path.of("/tmp/models"));
+        when(converter.resolveConverterBasePath()).thenReturn(Path.of("/tmp/conversions"));
 
         command.inputPath = "/tmp/input";
         command.outputPath = "/tmp/output.gguf";
@@ -52,6 +54,8 @@ class ConvertCommandTest {
                 .compressionRatio(1.0)
                 .build();
         when(converter.convert(any(GGUFConversionParams.class), any())).thenReturn(result);
+        when(converter.resolveModelBasePath()).thenReturn(Path.of("/tmp/models"));
+        when(converter.resolveConverterBasePath()).thenReturn(Path.of("/tmp/conversions"));
 
         command.inputPath = "/tmp/input";
         command.outputPath = "/tmp/output.gguf";

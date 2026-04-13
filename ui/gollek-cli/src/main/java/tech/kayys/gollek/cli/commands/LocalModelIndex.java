@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import tech.kayys.gollek.cli.GollekHome;
 
 final class LocalModelIndex {
 
@@ -26,7 +27,7 @@ final class LocalModelIndex {
     }
 
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-    private static final Path INDEX_PATH = Path.of(System.getProperty("user.home"), ".gollek", "models", "index.json");
+    private static final Path INDEX_PATH = GollekHome.path("models", "index.json");
 
     private LocalModelIndex() {
     }
@@ -84,7 +85,7 @@ final class LocalModelIndex {
 
     private static List<Entry> scanDiskEntries() {
         List<Entry> out = new ArrayList<>();
-        Path root = Path.of(System.getProperty("user.home"), ".gollek", "models");
+        Path root = GollekHome.path("models");
         if (!Files.isDirectory(root)) {
             return out;
         }

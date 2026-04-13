@@ -28,6 +28,7 @@ import tech.kayys.gollek.cli.commands.LogsCommand;
 import tech.kayys.gollek.cli.commands.RegisterCommand;
 import tech.kayys.gollek.cli.commands.MultimodalCommand;
 import tech.kayys.gollek.cli.commands.LiteRTCommand;
+import tech.kayys.gollek.cli.commands.OnnxCommand;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
@@ -53,7 +54,8 @@ import picocli.CommandLine.Option;
         LogsCommand.class,
         RegisterCommand.class,
         MultimodalCommand.class,
-        LiteRTCommand.class
+        LiteRTCommand.class,
+        OnnxCommand.class
 })
 
 public class GollekCommand implements Runnable {
@@ -64,8 +66,7 @@ public class GollekCommand implements Runnable {
     private static final String MCP_SERVERS_JSON_FILE_PROPERTY = "wayang.inference.mcp.mcp-servers-json-file";
     private static final String GOLLEK_MCP_SERVERS_JSON = "GOLLEK_MCP_SERVERS_JSON";
     private static final String GOLLEK_MCP_SERVERS_FILE = "GOLLEK_MCP_SERVERS_FILE";
-    private static final Path DEFAULT_MCP_REGISTRY_FILE = Path.of(
-            System.getProperty("user.home"), ".gollek", "mcp", "servers.json");
+    private static final Path DEFAULT_MCP_REGISTRY_FILE = GollekHome.path("mcp", "servers.json");
     private static final List<String> HF_TOKEN_KEYS = List.of(
             "WAYANG_INFERENCE_REPOSITORY_HUGGINGFACE_TOKEN",
             "HF_TOKEN",
@@ -96,6 +97,7 @@ public class GollekCommand implements Runnable {
     String platform;
 
     public GollekCommand() {
+        GollekHome.applySystemProperties();
         // Enforce silent logging by default as early as possible
         System.setProperty("quarkus.log.level", "WARN");
         System.setProperty("quarkus.log.console.level", "WARN");
@@ -238,8 +240,8 @@ public class GollekCommand implements Runnable {
 
         Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         String[] candidates = {
-                "~/.gollek/libs/llama",
-                ".gollek/source/vendor/llama.cpp/build/bin"
+                GollekHome.path("libs", "llama").toString(),
+                GollekHome.path("source", "vendor", "llama.cpp", "build", "bin").toString()
         };
 
         Path current = cwd;

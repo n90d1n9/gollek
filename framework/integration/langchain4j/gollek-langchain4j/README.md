@@ -8,7 +8,7 @@
  - **Embeddings**: Native bridge from the Gollek Vision/Text embeddings pipelines.
  
  ## Architecture Mapping
- This sub-module operates inside the library tier (`gollek-sdk-lib-parent`) and interfaces entirely with `gollek-sdk-ml`, translating generic string buffers to `AiMessage`, `UserMessage`, and `SystemMessage` constructs automatically.
+ This sub-module operates inside the library tier (`gollek-sdk-ml-parent`) and interfaces entirely with `gollek-sdk-ml`, translating generic string buffers to `AiMessage`, `UserMessage`, and `SystemMessage` constructs automatically.
  
  ```java
  import dev.langchain4j.model.chat.ChatLanguageModel;

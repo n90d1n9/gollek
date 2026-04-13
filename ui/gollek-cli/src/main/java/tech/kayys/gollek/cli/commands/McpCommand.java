@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import java.util.List;
+import tech.kayys.gollek.cli.GollekHome;
 
 @Dependent
 @Unremovable
@@ -490,7 +491,7 @@ public class McpCommand implements Runnable {
 
     public static JsonObject loadRegistry() {
         try {
-            Path path = Path.of(System.getProperty("user.home"), ".gollek", "mcp", "servers.json");
+            Path path = GollekHome.path("mcp", "servers.json");
             if (Files.exists(path)) {
                 return parseJsonObject(Files.readString(path));
             }

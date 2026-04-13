@@ -20,6 +20,8 @@ import java.util.Set;
 /**
  * Cached wrapper around model repositories.
  */
+import io.quarkus.cache.CacheInvalidateAll;
+
 @ApplicationScoped
 public class CachedModelRepository {
 
@@ -72,6 +74,11 @@ public class CachedModelRepository {
     public Uni<ModelManifest> save(ModelManifest manifest) {
         return Uni.createFrom()
                 .failure(new UnsupportedOperationException("Saving via CachedModelRepository not implemented yet"));
+    }
+
+    @CacheInvalidateAll(cacheName = "model-manifests")
+    public void invalidateCache() {
+        // Clear caches (used by SDK when pulling models)
     }
 
     public Uni<Void> delete(String modelId, String requestId) {

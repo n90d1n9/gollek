@@ -1,5 +1,7 @@
 package tech.kayys.gollek.onnx.binding;
 
+import jakarta.enterprise.context.ApplicationScoped;
+import io.quarkus.arc.Unremovable;
 import org.jboss.logging.Logger;
 
 import java.lang.foreign.*;
@@ -120,6 +122,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * brew install onnxruntime
  * </pre>
  */
+@ApplicationScoped
+@Unremovable
 public class OnnxRuntimeBinding {
 
     private static final Logger LOG = Logger.getLogger(OnnxRuntimeBinding.class);
@@ -174,6 +178,11 @@ public class OnnxRuntimeBinding {
     private MemorySegment ortApiVtable = MemorySegment.NULL;
     // vtable slot method handles (resolved lazily from the vtable pointer)
     private final Map<Integer, MethodHandle> vtableHandles = new ConcurrentHashMap<>();
+
+    protected OnnxRuntimeBinding() {
+        this.lookup = null;
+        this.nativeAvailable = false;
+    }
 
     private OnnxRuntimeBinding(SymbolLookup lookup) {
         this.lookup = lookup;

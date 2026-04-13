@@ -77,6 +77,8 @@ public class StreamingHelper {
      */
     public Multi<PullProgress> createModelPullStreamPublisher(
             String modelSpec,
+            String revision,
+            boolean force,
             Consumer<PullProgress> progressCallback) {
 
         return Multi.createFrom().emitter(emitter -> {
@@ -84,6 +86,12 @@ public class StreamingHelper {
                 // Create request body
                 java.util.Map<String, Object> requestBodyMap = new java.util.HashMap<>();
                 requestBodyMap.put("model", modelSpec);
+                if (revision != null) {
+                    requestBodyMap.put("revision", revision);
+                }
+                if (force) {
+                    requestBodyMap.put("force", true);
+                }
 
                 String requestBody = objectMapper.writeValueAsString(requestBodyMap);
 

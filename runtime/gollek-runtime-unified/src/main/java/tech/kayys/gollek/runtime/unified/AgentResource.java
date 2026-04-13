@@ -7,13 +7,13 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import org.jboss.logging.Logger;
-import tech.kayys.gollek.agent.core.Agent;
-import tech.kayys.gollek.agent.core.AgentContext;
-import tech.kayys.gollek.agent.core.AgentResponse;
-import tech.kayys.gollek.agent.single.SingleAgent;
-import tech.kayys.gollek.agent.skills.SkillsLoader;
-import tech.kayys.gollek.agent.skills.executor.SkillExecutor;
-import tech.kayys.gollek.agent.tools.ToolDefinition;
+import tech.kayys.wayang.agent.spi.AgentOrchestrator;
+import tech.kayys.wayang.agent.spi.AgentResponse;
+import tech.kayys.wayang.agent.spi.AgentRequest;
+import tech.kayys.wayang.agent.core.skills.SkillsLoader;
+import tech.kayys.wayang.agent.core.skills.loader.SkillExecutor;
+import tech.kayys.wayang.agent.orchestration.ReActOrchestrator;
+import tech.kayys.gollek.spi.tool.ToolDefinition;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -29,6 +29,9 @@ public class AgentResource {
 
     private SkillExecutor skillExecutor;
     private Map<String, SkillsLoader.SkillMetadata> cachedSkills;
+
+    @Inject
+    ReActOrchestrator reActOrchestrator;
 
     /**
      * List all available agents.
@@ -122,29 +125,26 @@ public class AgentResource {
                         .build();
             }
 
-            // Create agent
-            Agent agent = createAgent(agentName, cachedSkills);
-
             // Create context
-            AgentContext context = AgentContext.builder()
+            AgentRequest context = AgentRequest.builder()
                     .userId((String) request.getOrDefault("userId", "api-user"))
                     .sessionId((String) request.getOrDefault("sessionId", UUID.randomUUID().toString()))
-                    .conversationId((String) request.getOrDefault("conversationId", UUID.randomUUID().toString()))
+                    .prompt(query)
                     .build();
 
             // Execute
             long startTime = System.currentTimeMillis();
-            AgentResponse response = agent.execute(query, context);
+            AgentResponse response = reActOrchestrator.execute(context).await().indefinitely();
             long elapsed = System.currentTimeMillis() - startTime;
 
             // Format result
             Map<String, Object> result = new LinkedHashMap<>();
-            result.put("agentName", response.agentName());
+            result.put("agentName", agentName);
             result.put("query", query);
-            result.put("answer", response.finalAnswer());
+            result.put("answer", response.answer());
             result.put("executionTimeMs", elapsed);
-            result.put("reasoningSteps", response.reasoningSteps());
-            result.put("toolCount", response.toolInvocations().size());
+            result.put("reasoningSteps", response.steps());
+            result.put("toolCount", response.steps().size());
 
             return Response.ok(result).build();
 
@@ -190,19 +190,7 @@ public class AgentResource {
         }
     }
 
-    private Agent createAgent(String name, Map<String, SkillsLoader.SkillMetadata> skills) {
-        List<ToolDefinition> tools = new ArrayList<>();
-        for (String skillName : skills.keySet()) {
-            SkillsLoader.SkillMetadata metadata = skills.get(skillName);
-            tools.add(new ToolDefinition(
-                    skillName,
-                    metadata.getDescription(),
-                    Map.of()
-            ));
-        }
-
-        return new SingleAgent("api-" + name, tools, skillExecutor);
-    }
+    // createAgent removed as it's no longer needed with ReActOrchestrator injection
 
     private synchronized void initializeSkillExecutor() throws Exception {
         if (skillExecutor == null) {

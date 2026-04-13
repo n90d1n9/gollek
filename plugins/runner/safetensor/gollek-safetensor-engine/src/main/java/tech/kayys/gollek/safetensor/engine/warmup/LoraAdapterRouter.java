@@ -33,7 +33,7 @@ public class LoraAdapterRouter {
     private static final String CONFIG_PREFIX = "gollek.safetensor.adapters.";
 
     @Inject
-    LoraAdapter loraAdapter;
+    LoraAdapterService loraAdapter;
     @Inject
     Config mpConfig;
 
@@ -70,14 +70,14 @@ public class LoraAdapterRouter {
     /**
      * Resolve the LoRA adapter for an incoming request.
      */
-    public Optional<LoraAdapter.LoadedAdapter> resolve(ProviderRequest request) {
+    public Optional<LoadedAdapter> resolve(ProviderRequest request) {
         Optional<Path> adapterPath = findAdapterPath(request);
         if (adapterPath.isEmpty())
             return Optional.empty();
 
         Path path = adapterPath.get();
         try {
-            LoraAdapter.LoadedAdapter loaded = loraAdapter.load(path);
+            LoadedAdapter loaded = loraAdapter.load(path);
             log.debugf("LoraAdapterRouter: resolved adapter for request %s → %s",
                     request.getRequestId(), path.getFileName());
             return Optional.of(loaded);

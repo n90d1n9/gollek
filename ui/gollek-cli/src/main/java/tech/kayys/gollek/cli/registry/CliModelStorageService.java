@@ -5,6 +5,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.kayys.gollek.spi.storage.ModelStorageService;
+import tech.kayys.gollek.cli.GollekHome;
 
 import java.io.IOException;
 import java.net.URI;
@@ -21,8 +22,7 @@ public class CliModelStorageService implements ModelStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(CliModelStorageService.class);
     private static final String STORAGE_ENV = "GOLLEK_REGISTRY_STORAGE_DIR";
-    private static final Path DEFAULT_BASE = Paths.get(System.getProperty("user.home"),
-            ".gollek", "registry-storage");
+    private static final Path DEFAULT_BASE = GollekHome.path("registry-storage");
 
     private Path resolveBase() {
         String override = System.getenv(STORAGE_ENV);

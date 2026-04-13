@@ -43,7 +43,12 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-kv-cache</artifactId>
+            <artifactId>gollek-plugin-kv-cache</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-spi-tensor</artifactId>
             <version>${project.version}</version>
         </dependency>
 

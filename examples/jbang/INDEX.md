@@ -108,7 +108,8 @@ jbang 04_mnist_training.java 10 32
 | Example | File | Lines | Time | Level | Topics |
 |---------|------|-------|------|-------|--------|
 | TensorOps | 01_tensor_operations.java | 700+ | 10m | ⭐ | 7 ops |
-| Vision | 02_vision_transforms.java | 800+ | 15m | ⭐⭐ | 7 transforms |
+| Native STT | `multimodal/native_whisper_stt.java` | 100+ | 5m | ⭐ | 🎙️ SIMD STT |
+| SIMD Audio | `machine_learning/simd_audio_processing.java` | 50+ | 2m | ⭐ | ⚡ Vector API |
 | Tokenization | 03_tokenization.java | 900+ | 20m | ⭐⭐ | 7 concepts |
 | MNIST | 04_mnist_training.java | 600+ | 30m | ⭐⭐⭐ | 6 stages |
 | PyTorch | 05_pytorch_comparison.java | 750+ | 10m | ⭐ | 6 areas |

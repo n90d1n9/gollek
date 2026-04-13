@@ -9,7 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-weightoffload</artifactId>
+    <artifactId>gollek-plugin-weight-offload</artifactId>
+    <name>Gollek Plugin :: Weight Offload</name>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>

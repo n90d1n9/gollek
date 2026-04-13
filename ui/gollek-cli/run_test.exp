@@ -1,6 +1,0 @@
-spawn java --add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED -Dgollek.tensor.leak-detection=true -jar target/gollek-runner.jar chat --model Qwen/Qwen2.5-0.5B-Instruct
-expect ">>>"
-send "who are you\r"
-expect ">>>"
-send "/quit\r"
-expect eof

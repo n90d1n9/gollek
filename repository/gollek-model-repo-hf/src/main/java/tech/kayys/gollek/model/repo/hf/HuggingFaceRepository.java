@@ -80,24 +80,28 @@ public final class HuggingFaceRepository implements ModelRepository {
 
     /**
      * Resolve cache directory based on model format.
-     * - Safetensors: ~/.gollek/models/safetensors/{model_id}/
-     * - GGUF: ~/.gollek/models/gguf/{model_id}.gguf
-     * - PyTorch/TorchScript: ~/.gollek/models/torchscript/{model_id}/
-     * - Default: ~/.gollek/models/{format}/{model_id}/
+     * - Safetensors: ~/.gollek/models/safetensors/{model_id}[-revision]/
+     * - GGUF: ~/.gollek/models/gguf/{model_id}[-revision].gguf
+     * - PyTorch/TorchScript: ~/.gollek/models/torchscript/{model_id}[-revision]/
+     * - Default: ~/.gollek/models/{format}/{model_id}[-revision]/
      */
     private Path resolveFormatSpecificCacheDir(ModelDescriptor descriptor) {
         String format = descriptor.format().toLowerCase();
-        String modelId = descriptor.id().replace("/", "_").replace(":", "_");
+        String revision = descriptor.metadata().get("revision");
+        String suffix = (revision == null || "main".equalsIgnoreCase(revision)) ? "" : "-" + revision;
+        
+        String repoId = descriptor.id();
+        String suffixedId = repoId + suffix;
         
         Path targetDir = switch (format) {
             case "safetensors", "safetensor" -> 
-                cacheDir.resolve("safetensors").resolve(descriptor.id());
+                cacheDir.resolve("safetensors").resolve(suffixedId);
             case "gguf" -> 
-                cacheDir.resolve("gguf").resolve(descriptor.id() + ".gguf");
+                cacheDir.resolve("gguf").resolve(suffixedId + ".gguf");
             case "pytorch", "torchscript", "pt", "pth" -> 
-                cacheDir.resolve("torchscript").resolve(descriptor.id());
+                cacheDir.resolve("torchscript").resolve(suffixedId);
             default -> 
-                cacheDir.resolve(format).resolve(descriptor.id());
+                cacheDir.resolve(format).resolve(suffixedId);
         };
         
         return targetDir;
@@ -150,26 +154,56 @@ public final class HuggingFaceRepository implements ModelRepository {
                     artifacts.put(ModelFormat.LITERT, toArtifactLocation(localLitert));
                 }
 
+                Path onnxDir = cacheDir.resolve("onnx").resolve(repoId);
+                Path localOnnx = findBestLocalArtifact(onnxDir, ModelFormat.ONNX);
+                if (localOnnx != null) {
+                    artifacts.put(ModelFormat.ONNX, toArtifactLocation(localOnnx));
+                }
+
+                // Check for suffixed (branch) local directories
+                if (artifacts.isEmpty() && repoId.contains("-")) {
+                    Path bSafetensors = cacheDir.resolve("safetensors").resolve(repoId);
+                    Path bTorch = cacheDir.resolve("torchscript").resolve(repoId);
+                    Path bLitert = cacheDir.resolve("litert").resolve(repoId);
+                    Path bOnnx = cacheDir.resolve("onnx").resolve(repoId);
+
+                    Path lbSafetensors = findBestLocalArtifact(bSafetensors, ModelFormat.SAFETENSORS);
+                    if (lbSafetensors != null) artifacts.put(ModelFormat.SAFETENSORS, toArtifactLocation(lbSafetensors));
+
+                    Path lbTorch = findBestLocalArtifact(bTorch, ModelFormat.TORCHSCRIPT);
+                    if (lbTorch != null) artifacts.put(ModelFormat.TORCHSCRIPT, toArtifactLocation(lbTorch));
+
+                    Path lbLitert = findBestLocalArtifact(bLitert, ModelFormat.LITERT);
+                    if (lbLitert != null) artifacts.put(ModelFormat.LITERT, toArtifactLocation(lbLitert));
+
+                    Path lbOnnx = findBestLocalArtifact(bOnnx, ModelFormat.ONNX);
+                    if (lbOnnx != null) artifacts.put(ModelFormat.ONNX, toArtifactLocation(lbOnnx));
+                }
+
                 // Trigger download if enabled and nothing found locally
-                if (artifacts.isEmpty() && isAutoDownloadEnabled()) {
+                // Discovery calls (requestId="community") should NOT trigger auto-downloads
+                if (artifacts.isEmpty() && isAutoDownloadEnabled() && !"community".equals(requestId)) {
                     List<String> files = client.listFiles(repoId);
                     boolean hasGguf = files.stream().anyMatch(this::isGgufFile);
                     boolean hasSafetensors = files.stream().anyMatch(this::isSafetensorFile);
                     boolean hasLitert = files.stream().anyMatch(this::isLitertFile);
                     
-                    // Choose target directory based on available formats
                     Path targetFolder;
+                    String revision = config != null ? config.revision() : DEFAULT_REVISION;
+                    String suffix = (revision == null || "main".equalsIgnoreCase(revision)) ? "" : "-" + revision;
+                    String suffixedRepoId = repoId + suffix;
+
                     if (hasGguf) {
-                        targetFolder = ggufDir.resolve(repoId + ".gguf");
+                        targetFolder = ggufDir.resolve(suffixedRepoId + ".gguf");
                     } else if (hasSafetensors) {
-                        targetFolder = safetensorsDir;
+                        targetFolder = safetensorsDir.getParent().resolve(suffixedRepoId);
                     } else if (hasLitert) {
-                        targetFolder = cacheDir.resolve("litert").resolve(repoId);
+                        targetFolder = cacheDir.resolve("litert").resolve(suffixedRepoId);
                     } else {
-                        targetFolder = torchscriptDir;
+                        targetFolder = torchscriptDir.getParent().resolve(suffixedRepoId);
                     }
 
-                    Path downloaded = downloadBestArtifact(repoId, targetFolder);
+                    Path downloaded = downloadBestArtifact(repoId, targetFolder, tech.kayys.gollek.spi.model.PullOptions.DEFAULT);
                     if (downloaded != null) {
                         ModelFormat format = detectFormat(downloaded);
                         artifacts.put(format, toArtifactLocation(downloaded));
@@ -198,6 +232,9 @@ public final class HuggingFaceRepository implements ModelRepository {
                 } else if (artifacts.containsKey(ModelFormat.LITERT)) {
                     primaryPath = Path.of(java.net.URI.create(artifacts.get(ModelFormat.LITERT).uri()));
                     primaryFormat = "LITERT";
+                } else if (artifacts.containsKey(ModelFormat.ONNX)) {
+                    primaryPath = Path.of(java.net.URI.create(artifacts.get(ModelFormat.ONNX).uri()));
+                    primaryFormat = "ONNX";
                 } else {
                     primaryPath = Path.of(java.net.URI.create(artifacts.get(ModelFormat.TORCHSCRIPT).uri()));
                     primaryFormat = "TORCHSCRIPT";
@@ -252,6 +289,34 @@ public final class HuggingFaceRepository implements ModelRepository {
     }
 
     @Override
+    public Uni<ModelManifest> pull(String modelId, tech.kayys.gollek.spi.model.PullOptions options) {
+        return Uni.createFrom().item(() -> {
+            try {
+                String repoId = normalizeRepoId(modelId);
+                String revision = options.getRevision() != null ? options.getRevision() : (config != null ? config.revision() : DEFAULT_REVISION);
+                String suffix = (revision == null || "main".equalsIgnoreCase(revision)) ? "" : "-" + revision;
+                String suffixedRepoId = repoId + suffix;
+                
+                Path targetFolder = cacheDir.resolve("safetensors").resolve(suffixedRepoId);
+                
+                Path downloaded = downloadBestArtifact(repoId, targetFolder, options);
+                ModelFormat format = detectFormat(downloaded);
+                
+                return ModelManifest.builder()
+                        .modelId(downloaded.toString())
+                        .name(repoId)
+                        .version(options.getRevision() != null ? options.getRevision() : DEFAULT_REVISION)
+                        .path(downloaded.toString())
+                        .metadata(Map.of("source", "huggingface", "repo", repoId, "format", format.name()))
+                        .build();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+
+    @Override
     public boolean isCached(String modelId, ModelFormat format) {
         if (!isHuggingFaceModelId(modelId)) {
             return false;
@@ -295,9 +360,49 @@ public final class HuggingFaceRepository implements ModelRepository {
         return normalized;
     }
 
-    private Path downloadBestArtifact(String repoId, Path targetDir) throws Exception {
+    private Path downloadBestArtifact(String repoId, Path targetDir, tech.kayys.gollek.spi.model.PullOptions options) throws Exception {
         Files.createDirectories(targetDir);
-        List<String> files = client.listFiles(repoId);
+        String revision = options.getRevision() != null ? options.getRevision() : (config != null ? config.revision() : DEFAULT_REVISION);
+        List<String> files = client.listFiles(repoId, revision);
+
+        // 0. Check for pipeline model (Stable Diffusion / Transformers pipeline)
+        boolean isPipeline = files.stream().anyMatch(name -> name.endsWith("model_index.json"));
+        if (isPipeline) {
+            LOG.infof("Pipeline model detected for %s. Downloading all mandatory components...", repoId);
+            Path primary = null;
+            
+            // Smart Filter: Deduplicate formats within directories (prefer .safetensors over .bin)
+            List<String> toDownload = filterSmartWeights(files);
+            
+            int downloadedCount = 0;
+            for (String file : toDownload) {
+                if (isCheckpointRelevant(file)) {
+                    Path target = targetDir.resolve(file);
+                    if (target.getParent() != null) {
+                        Files.createDirectories(target.getParent());
+                    }
+                    if (options.isForce() || !Files.exists(target)) {
+                        try {
+                            client.downloadFile(repoId, file, options.getRevision(), target, progressPrinter(repoId, file));
+                            downloadedCount++;
+                        } catch (Exception e) {
+                            LOG.warnf("Failed to download optional component [%s]: %s", file, e.getMessage());
+                        }
+                    }
+                    if (primary == null && (isSafetensorFile(file) || isGgufFile(file))) {
+                        primary = target;
+                    }
+                }
+            }
+            LOG.infof("Pipeline sync complete for %s. %d files downloaded/verified.", repoId, downloadedCount);
+            if (primary != null) {
+                validateDownloadedArtifact(primary);
+                return primary;
+            }
+            // If No obvious primary found but it's a pipeline, return the model_index as anchor
+            Path index = targetDir.resolve("model_index.json");
+            if (Files.exists(index)) return index;
+        }
 
         // 1. Try GGUF first if we are in a GGUF-preferred context
         Optional<String> ggufFile = files.stream()
@@ -305,11 +410,12 @@ public final class HuggingFaceRepository implements ModelRepository {
                 .findFirst();
 
         if (ggufFile.isPresent()) {
-            Path target = targetDir.resolve(fileNameOnly(ggufFile.get()));
+            Path target = targetDir.resolve(ggufFile.get());
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
             if (!Files.exists(target)) {
-                client.downloadFile(repoId, ggufFile.get(), target, progressPrinter(repoId, ggufFile.get()));
+                client.downloadFile(repoId, ggufFile.get(), revision, target, progressPrinter(repoId, ggufFile.get()));
             }
-            downloadSidecars(repoId, targetDir, files);
+            downloadSidecars(repoId, targetDir, files, revision);
             validateDownloadedArtifact(target);
             return target;
         }
@@ -320,11 +426,12 @@ public final class HuggingFaceRepository implements ModelRepository {
                 .findFirst();
 
         if (exact.isPresent()) {
-            Path target = targetDir.resolve(fileNameOnly(exact.get()));
+            Path target = targetDir.resolve(exact.get());
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
             if (!Files.exists(target)) {
-                client.downloadFile(repoId, exact.get(), target, progressPrinter(repoId, exact.get()));
+                client.downloadFile(repoId, exact.get(), revision, target, progressPrinter(repoId, exact.get()));
             }
-            downloadSidecars(repoId, targetDir, files);
+            downloadSidecars(repoId, targetDir, files, revision);
             validateDownloadedArtifact(target);
             return target;
         }
@@ -335,12 +442,13 @@ public final class HuggingFaceRepository implements ModelRepository {
                 .findFirst();
 
         if (genericSafetensors.isPresent()) {
-            Path target = targetDir.resolve(fileNameOnly(genericSafetensors.get()));
+            Path target = targetDir.resolve(genericSafetensors.get());
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
             if (!Files.exists(target)) {
-                client.downloadFile(repoId, genericSafetensors.get(), target,
+                client.downloadFile(repoId, genericSafetensors.get(), revision, target,
                         progressPrinter(repoId, genericSafetensors.get()));
             }
-            downloadSidecars(repoId, targetDir, files);
+            downloadSidecars(repoId, targetDir, files, revision);
             validateDownloadedArtifact(target);
             return target;
         }
@@ -351,12 +459,13 @@ public final class HuggingFaceRepository implements ModelRepository {
                 .findFirst();
 
         if (pytorchFile.isPresent()) {
-            Path target = targetDir.resolve(fileNameOnly(pytorchFile.get()));
+            Path target = targetDir.resolve(pytorchFile.get());
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
             if (!Files.exists(target)) {
-                client.downloadFile(repoId, pytorchFile.get(), target,
+                client.downloadFile(repoId, pytorchFile.get(), revision, target,
                         progressPrinter(repoId, pytorchFile.get()));
             }
-            downloadSidecars(repoId, targetDir, files);
+            downloadSidecars(repoId, targetDir, files, revision);
             validateDownloadedArtifact(target);
             return target;
         }
@@ -367,12 +476,13 @@ public final class HuggingFaceRepository implements ModelRepository {
                 .findFirst();
 
         if (litertFile.isPresent()) {
-            Path target = targetDir.resolve(fileNameOnly(litertFile.get()));
+            Path target = targetDir.resolve(litertFile.get());
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
             if (!Files.exists(target)) {
-                client.downloadFile(repoId, litertFile.get(), target,
+                client.downloadFile(repoId, litertFile.get(), revision, target,
                         progressPrinter(repoId, litertFile.get()));
             }
-            downloadSidecars(repoId, targetDir, files);
+            downloadSidecars(repoId, targetDir, files, revision);
             validateDownloadedArtifact(target);
             return target;
         }
@@ -456,6 +566,14 @@ public final class HuggingFaceRepository implements ModelRepository {
         return lower.endsWith(".safetensors") || lower.endsWith(".safetensor");
     }
 
+    private boolean isOnnxFile(String name) {
+        if (name == null) {
+            return false;
+        }
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".onnx");
+    }
+
     private boolean isLitertFile(String name) {
         if (name == null) {
             return false;
@@ -487,6 +605,9 @@ public final class HuggingFaceRepository implements ModelRepository {
         }
         if (name.endsWith(".safetensors") || name.endsWith(".safetensor")) {
             return ModelFormat.SAFETENSORS;
+        }
+        if (name.endsWith(".onnx")) {
+            return ModelFormat.ONNX;
         }
         if (name.endsWith(".litertlm") || name.endsWith(".task")) {
             return ModelFormat.LITERT;
@@ -551,7 +672,7 @@ public final class HuggingFaceRepository implements ModelRepository {
         };
     }
 
-    private void downloadSidecars(String repoId, Path targetDir, List<String> availableFiles) {
+    private void downloadSidecars(String repoId, Path targetDir, List<String> availableFiles, String revision) {
         for (String sidecar : sidecarCandidates()) {
             Optional<String> remote = availableFiles.stream()
                     .filter(name -> name.equalsIgnoreCase(sidecar))
@@ -559,22 +680,62 @@ public final class HuggingFaceRepository implements ModelRepository {
             if (remote.isEmpty()) {
                 continue;
             }
-            Path target = targetDir.resolve(fileNameOnly(remote.get()));
+            Path target = targetDir.resolve(remote.get());
+            if (target.getParent() != null) {
+                try {
+                    Files.createDirectories(target.getParent());
+                } catch (java.io.IOException e) {
+                    LOG.warnf("Failed to create sidecar directory %s: %s", target.getParent(), e.getMessage());
+                }
+            }
             if (Files.exists(target)) {
                 continue;
             }
             try {
-                client.downloadFile(repoId, remote.get(), target, progressPrinter(repoId, remote.get()));
+                client.downloadFile(repoId, remote.get(), revision, target, progressPrinter(repoId, remote.get()));
             } catch (Exception e) {
                 LOG.warnf("Failed to download sidecar %s for %s: %s", remote.get(), repoId, e.getMessage());
             }
         }
     }
 
+    private boolean isCheckpointRelevant(String name) {
+        if (name == null || name.startsWith(".")) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".safetensors") || lower.endsWith(".bin") || lower.endsWith(".pt") || lower.endsWith(".pth")
+                || lower.endsWith(".json") || lower.endsWith(".model") || lower.endsWith(".txt") || lower.endsWith(".spm")
+                || lower.endsWith(".msgpack") || lower.endsWith(".gguf") || lower.endsWith(".ckpt") || lower.endsWith(".onnx");
+    }
+
+    private List<String> filterSmartWeights(List<String> files) {
+        Map<String, List<String>> dirToFiles = new java.util.HashMap<>();
+        for (String f : files) {
+            int lastSlash = f.lastIndexOf('/');
+            String dir = lastSlash >= 0 ? f.substring(0, lastSlash) : "";
+            dirToFiles.computeIfAbsent(dir, k -> new java.util.ArrayList<>()).add(f);
+        }
+
+        List<String> result = new java.util.ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : dirToFiles.entrySet()) {
+            List<String> dirFiles = entry.getValue();
+            boolean hasSafetensors = dirFiles.stream().anyMatch(f -> f.endsWith(".safetensors"));
+            
+            for (String f : dirFiles) {
+                if (hasSafetensors && (f.endsWith(".bin") || f.endsWith(".pt") || f.endsWith(".pth"))) {
+                    // Skip redundant formats if safetensors exists in the same folder
+                    continue;
+                }
+                result.add(f);
+            }
+        }
+        return result;
+    }
+
     private void ensureLocalSidecars(String repoId, Path targetDir) {
         try {
-            List<String> files = client.listFiles(repoId);
-            downloadSidecars(repoId, targetDir, files);
+            String revision = config != null ? config.revision() : DEFAULT_REVISION;
+            List<String> files = client.listFiles(repoId, revision);
+            downloadSidecars(repoId, targetDir, files, revision);
         } catch (Exception e) {
             LOG.debugf("Unable to refresh sidecars for %s: %s", repoId, e.getMessage());
         }

@@ -9,7 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-waitscheduler</artifactId>
+    <artifactId>gollek-plugin-wait-scheduler</artifactId>
+    <name>Gollek Plugin :: Wait Scheduler</name>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>

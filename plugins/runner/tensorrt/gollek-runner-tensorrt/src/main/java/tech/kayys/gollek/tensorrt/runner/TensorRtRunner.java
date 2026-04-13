@@ -454,7 +454,10 @@ public class TensorRtRunner extends AbstractGollekRunner {
      * {@code cudaMemcpyHostToDevice} staging.
      */
     private void enqueueStep(List<Integer> tokenIds) {
-        int seqLen = Math.min(tokenIds.size(), maxSeqLen);
+        if (tokenIds.size() > maxSeqLen) {
+            throw new IllegalArgumentException("Input sequence length " + tokenIds.size() + " exceeds maximum allowed " + maxSeqLen);
+        }
+        int seqLen = tokenIds.size();
         for (int i = 0; i < seqLen; i++)
             deviceInputBuf.setAtIndex(ValueLayout.JAVA_LONG, i, tokenIds.get(i));
 
@@ -501,9 +504,9 @@ public class TensorRtRunner extends AbstractGollekRunner {
     public void close() {
         initialized = false;
         if (trt != null && trt.isNativeAvailable()) {
-            trt.destroyExecutionContext(trtCtx);
-            trt.destroyEngine(trtEngine);
-            trt.destroyRuntime(trtRuntime);
+            try { trt.destroyExecutionContext(trtCtx); } catch (Exception e) { log.warn("[TRT] Failed to destroy context", e); }
+            try { trt.destroyEngine(trtEngine); } catch (Exception e) { log.warn("[TRT] Failed to destroy engine", e); }
+            try { trt.destroyRuntime(trtRuntime); } catch (Exception e) { log.warn("[TRT] Failed to destroy runtime", e); }
         }
         if (deviceArena != null)
             try {

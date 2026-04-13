@@ -55,7 +55,8 @@ public class FormatAwareProviderRouter {
      * Preferred ordering of provider IDs. Providers not in this list are tried
      * last.
      */
-    private static final List<String> PROVIDER_PRIORITY = List.of("gguf", "safetensor", "libtorch");
+    private static final List<String> PROVIDER_PRIORITY = List.of("gguf", "safetensor", "onnx", "libtorch", "tflite",
+            "litertlm");
 
     @Inject
     Instance<StreamingProvider> providers;
@@ -70,10 +71,10 @@ public class FormatAwareProviderRouter {
      */
     public Uni<InferenceResponse> route(ProviderRequest request) {
         StreamingProvider provider = selectProvider(request);
-        LOG.debugf("Routing [%s] → provider=%s (gguf_requested=%b)", 
-            request.getModel(), 
-            provider.id(),
-            request.getParameter("gguf", Boolean.class).orElse(false));
+        LOG.debugf("Routing [%s] → provider=%s (gguf_requested=%b)",
+                request.getModel(),
+                provider.id(),
+                request.getParameter("gguf", Boolean.class).orElse(false));
         return provider.infer(request);
     }
 
@@ -82,10 +83,10 @@ public class FormatAwareProviderRouter {
      */
     public Multi<StreamingInferenceChunk> routeStream(ProviderRequest request) {
         StreamingProvider provider = selectProvider(request);
-        LOG.debugf("Routing stream [%s] → provider=%s (gguf_requested=%b)", 
-            request.getModel(), 
-            provider.id(),
-            request.getParameter("gguf", Boolean.class).orElse(false));
+        LOG.debugf("Routing stream [%s] → provider=%s (gguf_requested=%b)",
+                request.getModel(),
+                provider.id(),
+                request.getParameter("gguf", Boolean.class).orElse(false));
         return provider.inferStream(request);
     }
 
@@ -120,7 +121,8 @@ public class FormatAwareProviderRouter {
             if (byFormat.isPresent()) {
                 return byFormat.get();
             }
-            LOG.debugf("No provider supports detected format=%s for model=%s; falling back to generic supports()", format, modelId);
+            LOG.debugf("No provider supports detected format=%s for model=%s; falling back to generic supports()",
+                    format, modelId);
         }
 
         // Generic fallback
@@ -169,14 +171,16 @@ public class FormatAwareProviderRouter {
                         .map(ModelEntry::format)
                         .filter(f -> f == ModelFormat.GGUF)
                         .findFirst();
-                if (gguf.isPresent()) return gguf;
+                if (gguf.isPresent())
+                    return gguf;
             } else {
                 // Try for SAFETENSORS first
                 Optional<ModelFormat> st = entries.stream()
                         .map(ModelEntry::format)
                         .filter(f -> f == ModelFormat.SAFETENSORS)
                         .findFirst();
-                if (st.isPresent()) return st;
+                if (st.isPresent())
+                    return st;
             }
 
             // Fallback to first known format in the list

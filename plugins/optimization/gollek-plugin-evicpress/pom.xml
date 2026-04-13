@@ -9,7 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-evicpress</artifactId>
+    <artifactId>gollek-plugin-evicpress</artifactId>
+    <name>Gollek Plugin :: EvicPress</name>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>

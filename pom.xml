@@ -48,7 +48,10 @@
         <module>core</module>
         <module>plugins</module>
         <module>sdk</module>
+        <module>inference</module>
+        <module>framework</module>
         <module>repository/gollek-model-repo-hf</module>
+        <module>repository/gollek-model-repo-kaggle</module>
         <module>repository/gollek-model-repo-local</module>
         <module>runtime/gollek-runtime-cloud</module>
         <module>runtime/gollek-runtime-standalone</module>
@@ -202,8 +205,10 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${compiler-plugin.version}</version>
                 <configuration>
+                    <enablePreview>true</enablePreview>
                     <parameters>true</parameters>
                     <compilerArgs>
+                        <arg>--enable-preview</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>

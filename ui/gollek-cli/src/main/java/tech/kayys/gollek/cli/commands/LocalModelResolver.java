@@ -18,13 +18,13 @@ final class LocalModelResolver {
     record ResolvedModel(String modelId, ModelInfo info, Path localPath, boolean fromSdk) {
     }
 
-    static Optional<ResolvedModel> resolve(GollekSdk sdk, String requestedId) {
+    static Optional<ResolvedModel> resolve(GollekSdk sdk, String requestedId, String branch) {
         if (requestedId == null || requestedId.isBlank()) {
             return Optional.empty();
         }
 
         // 1. Check SDK/Registry for first-class resolution
-        for (String candidate : sdkCandidates(requestedId)) {
+        for (String candidate : sdkCandidates(requestedId, branch)) {
             try {
                 Optional<ModelInfo> info = sdk.getModelInfo(candidate);
                 if (info.isPresent()) {
@@ -35,14 +35,22 @@ final class LocalModelResolver {
             }
         }
 
-        // 2. Direct file check as fallback
+        // 2. Direct file/directory check as fallback
         Path input = Path.of(requestedId);
         if (Files.isRegularFile(input)) {
+            ModelInfo info = toModelInfo(requestedId, input.toAbsolutePath());
+            return Optional.of(new ResolvedModel(requestedId, info, input.toAbsolutePath(), false));
+        } else if (Files.isDirectory(input) && Files.exists(input.resolve("model_index.json"))) {
+            // It's a pipeline directory (e.g. Stable Diffusion)
             ModelInfo info = toModelInfo(requestedId, input.toAbsolutePath());
             return Optional.of(new ResolvedModel(requestedId, info, input.toAbsolutePath(), false));
         }
 
         return Optional.empty();
+    }
+
+    static Optional<ResolvedModel> resolve(GollekSdk sdk, String requestedId) {
+        return resolve(sdk, requestedId, null);
     }
 
     static Optional<Path> extractPath(ModelInfo info) {
@@ -67,17 +75,37 @@ final class LocalModelResolver {
         }
     }
 
-    private static java.util.List<String> sdkCandidates(String id) {
+    private static java.util.List<String> sdkCandidates(String id, String branch) {
         String normalized = id.startsWith("hf:") ? id.substring(3) : id;
         java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
-        // 1. Prioritize exact original ID
+        
+        // 1. Manifest-style ID (new system): org__model--branch
+        String manifestBase = normalized.replace("/", "__");
+        if (branch != null && !branch.trim().isEmpty()
+                && !branch.trim().equalsIgnoreCase("main") && !branch.trim().equalsIgnoreCase("master")) {
+            String manifestBranch = manifestBase + "--" + branch.trim();
+            candidates.add(manifestBranch);
+        }
+        candidates.add(manifestBase);
+
+        // 2. Legacy-style IDs (backward compat): org/model-branch
+        if (branch != null && !branch.trim().isEmpty() && !branch.trim().equalsIgnoreCase("main")) {
+            String branchSuffix = "-" + branch.trim();
+            candidates.add(id + branchSuffix);
+            candidates.add(normalized + branchSuffix);
+            if (!id.startsWith("hf:") && id.contains("/")) {
+                candidates.add("hf:" + id + branchSuffix);
+            }
+        }
+
+        // 3. Original ID (main branch)
         candidates.add(id);
         candidates.add(normalized);
         if (!id.startsWith("hf:") && id.contains("/")) {
             candidates.add("hf:" + id);
         }
         
-        // 2. Fall back to GGUF variants if exact ID not found
+        // 4. GGUF fallback
         candidates.add(id + "-GGUF");
         candidates.add(normalized + "-GGUF");
         if (!id.startsWith("hf:") && id.contains("/")) {

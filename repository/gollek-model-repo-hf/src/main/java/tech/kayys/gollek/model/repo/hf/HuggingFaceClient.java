@@ -49,7 +49,17 @@ public class HuggingFaceClient {
      * Get model information
      */
     public HuggingFaceModelInfo getModelInfo(String modelId) throws IOException, InterruptedException {
-        String url = config.baseUrl() + "/api/models/" + modelId;
+        return getModelInfo(modelId, config.revision());
+    }
+
+    public HuggingFaceModelInfo getModelInfo(String modelId, String revision) throws IOException, InterruptedException {
+        String effectiveRevision = revision != null ? revision : config.revision();
+        String url;
+        if (effectiveRevision != null && !effectiveRevision.trim().isEmpty() && !effectiveRevision.equalsIgnoreCase("main") && !effectiveRevision.equalsIgnoreCase("master")) {
+            url = config.baseUrl() + "/api/models/" + modelId + "/revision/" + java.net.URLEncoder.encode(effectiveRevision.trim(), java.nio.charset.StandardCharsets.UTF_8) + "?siblings=true";
+        } else {
+            url = config.baseUrl() + "/api/models/" + modelId + "?siblings=true";
+        }
 
         // Fetch model info with siblings (files)
         return fetchModelInfo(url);
@@ -59,7 +69,11 @@ public class HuggingFaceClient {
      * List files in a model repository
      */
     public List<String> listFiles(String modelId) throws IOException, InterruptedException {
-        HuggingFaceModelInfo info = getModelInfo(modelId);
+        return listFiles(modelId, config.revision());
+    }
+
+    public List<String> listFiles(String modelId, String revision) throws IOException, InterruptedException {
+        HuggingFaceModelInfo info = getModelInfo(modelId, revision);
         if (info.getFiles() == null) {
             return List.of();
         }
@@ -113,18 +127,28 @@ public class HuggingFaceClient {
             String filename,
             java.nio.file.Path targetPath,
             DownloadProgressListener progressListener) throws IOException, InterruptedException {
+        downloadFile(modelId, filename, config.revision(), targetPath, progressListener);
+    }
 
+    public void downloadFile(
+            String modelId,
+            String filename,
+            String revision,
+            java.nio.file.Path targetPath,
+            DownloadProgressListener progressListener) throws IOException, InterruptedException {
+        String effectiveRevision = revision != null ? revision : config.revision();
         String url = String.format(
-                "%s/%s/resolve/main/%s",
+                "%s/%s/resolve/%s/%s",
                 config.baseUrl(),
                 modelId,
+                effectiveRevision,
                 filename);
 
         LOG.infof("Downloading: %s from %s", filename, modelId);
 
         // First, get content length
         HttpResponse<InputStream> response = httpClient.send(
-                buildGetRequest(url, true),
+                buildGetRequest(url, true, 600),
                 HttpResponse.BodyHandlers.ofInputStream());
 
         if (response.statusCode() == 401 && hasUsableToken()) {
@@ -133,7 +157,7 @@ public class HuggingFaceClient {
             } catch (Exception ignored) {
             }
             response = httpClient.send(
-                    buildGetRequest(url, false),
+                    buildGetRequest(url, false, 600),
                     HttpResponse.BodyHandlers.ofInputStream());
         }
 
@@ -187,7 +211,13 @@ public class HuggingFaceClient {
     public void downloadRepository(String modelId, java.nio.file.Path targetDir,
             DownloadProgressListener progressListener)
             throws IOException, InterruptedException {
-        List<String> files = listFiles(modelId);
+        downloadRepository(modelId, config.revision(), targetDir, progressListener);
+    }
+
+    public void downloadRepository(String modelId, String revision, java.nio.file.Path targetDir,
+            DownloadProgressListener progressListener)
+            throws IOException, InterruptedException {
+        List<String> files = listFiles(modelId, revision);
 
         // Filter for essential files if you want to optimize,
         // but for conversion we might need everything except maybe other safetensors if
@@ -200,7 +230,7 @@ public class HuggingFaceClient {
             if (file.startsWith("."))
                 continue;
 
-            downloadFile(modelId, file, targetDir.resolve(file), progressListener);
+            downloadFile(modelId, file, revision, targetDir.resolve(file), progressListener);
         }
     }
 
@@ -279,9 +309,13 @@ public class HuggingFaceClient {
     }
 
     private HttpRequest buildGetRequest(String url, boolean withAuth) {
+        return buildGetRequest(url, withAuth, config.timeoutSeconds());
+    }
+
+    private HttpRequest buildGetRequest(String url, boolean withAuth, int timeoutSeconds) {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(config.timeoutSeconds()))
+                .timeout(Duration.ofSeconds(timeoutSeconds))
                 .header("User-Agent", config.userAgent())
                 .GET();
         if (withAuth) {

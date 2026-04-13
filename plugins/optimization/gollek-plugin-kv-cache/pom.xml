@@ -9,8 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-kv-cache</artifactId>
-    <name>gollek-ext-kv-cache</name>
+    <artifactId>gollek-plugin-kv-cache</artifactId>
+    <name>Gollek Plugin :: KV Cache</name>
     <description>Paged KV-Cache Manager for PagedAttention - manages off-heap memory blocks for efficient LLM inference</description>
 
     <dependencies>

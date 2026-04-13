@@ -5,34 +5,41 @@
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>tech.kayys.gollek</groupId>
-        <artifactId>gollek-sdk-parent</artifactId>
+        <artifactId>gollek-framework-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>gollek-framework-parent</artifactId>
+    <artifactId>gollek-framework-ml-parent</artifactId>
     <packaging>pom</packaging>
 
-    <name>gollek-framework-parent</name>
-    <description>Gollek SDK Framework/Library Parent</description>
+    <name>gollek-framework-ml-parent</name>
+    <description>Gollek ML Framework Library Parent — all tensor, nn, autograd, training modules</description>
 
     <modules>
-        <module>gollek-sdk-autograd</module>
-        <module>gollek-sdk-nn</module>
-        <module>gollek-sdk-ml</module>
-        <module>gollek-sdk-data</module>
-        <module>gollek-sdk-nlp</module>
-        <module>gollek-sdk-hub</module>
-        <module>gollek-sdk-multimodal</module>
-        <module>gollek-sdk-litert</module>
-        <module>gollek-sdk-onnx</module>
-        <module>gollek-sdk-train</module>
-        <module>gollek-sdk-optimize</module>
-        <module>gollek-sdk-vision</module>
-        <module>gollek-sdk-cnn</module>
-        <module>gollek-sdk-rnn</module>
-        <module>gollek-sdk-export</module>
-        <module>gollek-sdk-tensor</module>
-        <module>gollek-sdk-augment</module>
+        <module>gollek-ml-tensor</module>
+        <module>gollek-ml-autograd</module>
+        <module>gollek-ml-nn</module>
+        <module>gollek-ml-cnn</module>
+        <module>gollek-ml-rnn</module>
+        <module>gollek-ml-transformer</module>
+        <module>gollek-ml-data</module>
+        <module>gollek-ml-optimize</module>
+        <module>gollek-ml-train</module>
+        <module>gollek-ml-hub</module>
+        <module>gollek-ml-nlp</module>
+        <module>gollek-ml-vision</module>
+        <module>gollek-ml-audio</module>
+        <module>gollek-ml-multimodal</module>
+        <module>gollek-ml-augment</module>
+        <module>gollek-ml-export</module>
+        <module>gollek-ml-safetensor</module>
+        <module>gollek-ml-gguf</module>
+        <module>gollek-ml-litert</module>
+        <module>gollek-ml-onnx</module>
+        <module>gollek-ml-models</module>
+        <module>gollek-ml-metrics</module>
+        <module>gollek-ml-api</module>
+        <module>gollek-ml-examples</module>
     </modules>
 </project>

@@ -114,6 +114,12 @@ public class RunCommand implements Runnable {
     @Option(names = { "--gguf-outtype" }, description = "GGUF converter outtype (e.g. f16, q8_0, f32)")
     String ggufOutType;
 
+    @Option(names = { "-b", "--branch" }, description = "HuggingFace branch/revision (e.g. main, fp16, onnx)")
+    String branch;
+
+    @Option(names = { "--force" }, description = "Force re-download and replace existing files", defaultValue = "false")
+    boolean force;
+
     private static final String RESET = "\u001B[0m";
     private static final String GREEN = "\u001B[32m";
     private static final String CYAN = "\u001B[36m";
@@ -132,7 +138,7 @@ public class RunCommand implements Runnable {
 
         // Auto-detect and display kernel platform
         KernelPlatform detectedPlatform = KernelPlatformDetector.detect();
-        if (!parentCommand.verbose) {
+        if (parentCommand == null || !parentCommand.verbose) {
             System.out.println(CYAN + "Platform: " + detectedPlatform.getDisplayName() + RESET);
             if (detectedPlatform.isCpu()) {
                 System.out.println(YELLOW + "⚠️  Running on CPU (GPU acceleration not available)" + RESET);
@@ -184,11 +190,11 @@ public class RunCommand implements Runnable {
             } else {
                 // Check if model exists locally
                 System.out.printf("Checking model: %s... ", modelId);
-                var resolvedModel = LocalModelResolver.resolve(sdk, modelId);
+                var resolvedModel = LocalModelResolver.resolve(sdk, modelId, branch);
                 var modelInfoOpt = resolvedModel.map(LocalModelResolver.ResolvedModel::info);
                 boolean exists = resolvedModel.isPresent();
 
-                if (!exists) {
+                if (!exists || force) {
                     System.out.println("not found locally.");
 
                     if (offline) {
@@ -197,12 +203,12 @@ public class RunCommand implements Runnable {
                     }
 
                     if (modelId.contains("/") || modelId.startsWith("hf:")) {
-                        System.out.println("Attempting to download model from Hugging Face...");
+                        System.out.println(CYAN + "Checking model: " + modelId + (branch != null ? " (branch: " + branch + ")" : "") + "..." + RESET);
                         boolean pulled = false;
                         Exception lastPullError = null;
                         for (String pullSpec : buildPullSpecs(modelId)) {
                             try {
-                                sdk.pullModel(pullSpec, progress -> {
+                                sdk.pullModel(pullSpec, branch, force, progress -> {
                                     if (progress.getTotal() > 0) {
                                         System.out.printf("\rDownloading: %s %d%% (%d/%d MB)",
                                                 progress.getProgressBar(20),
@@ -246,7 +252,7 @@ public class RunCommand implements Runnable {
                         }
                         System.out.println("\nDownload complete!");
 
-                        resolvedModel = LocalModelResolver.resolve(sdk, modelId);
+                        resolvedModel = LocalModelResolver.resolve(sdk, modelId, branch);
                         modelInfoOpt = resolvedModel.map(LocalModelResolver.ResolvedModel::info);
                         if (resolvedModel.isPresent()) {
                             modelId = resolvedModel.get().modelId();
@@ -307,18 +313,18 @@ public class RunCommand implements Runnable {
                     .requestId(UUID.randomUUID().toString())
                     .model(modelId)
                     .temperature(temperature)
-                    .parameter("top_p", topP)
-                    .parameter("top_k", topK)
-                    .parameter("repeat_penalty", repeatPenalty)
-                    .parameter("json_mode", jsonMode)
+                    .topP(topP)
+                    .topK(topK)
+                    .repeatPenalty(repeatPenalty)
+                    .jsonMode(jsonMode)
                     .maxTokens(maxTokens)
                     .streaming(stream);
 
             if (mirostat > 0) {
-                requestBuilder.parameter("mirostat", mirostat);
+                requestBuilder.mirostat(mirostat);
             }
             if (grammar != null && !grammar.isEmpty()) {
-                requestBuilder.parameter("grammar", grammar);
+                requestBuilder.grammar(grammar);
             }
             if (customModelPathUsed) {
                 requestBuilder.parameter("model_path", modelId);
@@ -354,11 +360,24 @@ public class RunCommand implements Runnable {
             if (stream) {
                 CountDownLatch latch = new CountDownLatch(1);
                 // Streaming mode
-                java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(
-                        0);
+                java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
+                java.io.ByteArrayOutputStream imageBuffer = new java.io.ByteArrayOutputStream();
+
                 sdk.streamCompletion(request)
                         .subscribe().with(
                                 chunk -> {
+                                    if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                        if (chunk.imageDeltaBase64() != null) {
+                                            try {
+                                                byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
+                                                imageBuffer.write(decoded);
+                                            } catch (Exception e) {
+                                                System.err.println("\nFailed to decode image chunk: " + e.getMessage());
+                                            }
+                                        }
+                                        return;
+                                    }
+
                                     String delta = chunk.getDelta();
                                     if (delta != null) {
                                         if (enableJsonSse) {
@@ -377,6 +396,17 @@ public class RunCommand implements Runnable {
                                 },
                                 () -> {
                                     long duration = System.currentTimeMillis() - startTime;
+                                    
+                                    if (imageBuffer.size() > 0) {
+                                        try {
+                                            Path outputPath = Path.of("output.png");
+                                            Files.write(outputPath, imageBuffer.toByteArray());
+                                            System.out.println("\n" + GREEN + BOLD + "✓ Image saved to: " + RESET + outputPath.toAbsolutePath());
+                                        } catch (Exception e) {
+                                            System.err.println("\nFailed to save image: " + e.getMessage());
+                                        }
+                                    }
+
                                     double tps = (tokenCount.get() / (duration / 1000.0));
                                     if (enableJsonSse) {
                                         printOpenAiSseFinal(request.getRequestId(), request.getModel());
@@ -561,7 +591,7 @@ public class RunCommand implements Runnable {
 
     private void maybeAutoSelectProvider() {
         try {
-            var modelInfoOpt = LocalModelResolver.resolve(sdk, modelId).map(LocalModelResolver.ResolvedModel::info);
+            var modelInfoOpt = LocalModelResolver.resolve(sdk, modelId, branch).map(LocalModelResolver.ResolvedModel::info);
             if (modelInfoOpt.isEmpty()) {
                 return;
             }
@@ -612,7 +642,7 @@ public class RunCommand implements Runnable {
             if (providerId != null && !providerId.isBlank()) {
                 return ensureProviderHealthy(providerId);
             }
-            var modelInfoOpt = LocalModelResolver.resolve(sdk, modelId).map(LocalModelResolver.ResolvedModel::info);
+            var modelInfoOpt = LocalModelResolver.resolve(sdk, modelId, branch).map(LocalModelResolver.ResolvedModel::info);
             if (modelInfoOpt.isEmpty()) {
                 return true;
             }
@@ -634,7 +664,7 @@ public class RunCommand implements Runnable {
                     return false;
                 }
                 if (tryRefreshCompatibleModel()) {
-                    modelInfoOpt = LocalModelResolver.resolve(sdk, modelId).map(LocalModelResolver.ResolvedModel::info);
+                    modelInfoOpt = LocalModelResolver.resolve(sdk, modelId, branch).map(LocalModelResolver.ResolvedModel::info);
                     if (modelInfoOpt.isPresent()) {
                         format = modelInfoOpt.get().getFormat();
                     }
@@ -696,7 +726,7 @@ public class RunCommand implements Runnable {
         System.out.println("Checkpoint-only model detected. Trying GGUF/TorchScript fallback...");
         for (String spec : buildPullSpecs(modelId)) {
             try {
-                sdk.pullModel(spec, null);
+                sdk.pullModel(spec, branch, force, null);
             } catch (Exception e) {
                 if (isFatalPullError(e)) {
                     break;
@@ -706,7 +736,7 @@ public class RunCommand implements Runnable {
         String normalized = modelId.startsWith("hf:") ? modelId.substring(3) : modelId;
         for (String candidate : java.util.List.of(modelId, normalized, modelId + "-GGUF", normalized + "-GGUF")) {
             try {
-                var resolved = LocalModelResolver.resolve(sdk, candidate);
+                var resolved = LocalModelResolver.resolve(sdk, candidate, branch);
                 if (resolved.isPresent()) {
                     String fmt = resolved.get().info().getFormat();
                     if (!isCheckpointOnlyFormat(fmt)) {
@@ -740,6 +770,9 @@ public class RunCommand implements Runnable {
         if ("libtorch".equalsIgnoreCase(providerId)) {
             System.err.println(
                     "LibTorch runtime is not loaded. Set GOLLEK_LIBTORCH_LIB_PATH (or LIBTORCH_PATH) and include gollek-runner-libtorch.");
+        } else if ("onnx".equalsIgnoreCase(providerId)) {
+            System.err.println(
+                    "ONNX Runtime is not available or enabled. Run 'brew install onnxruntime' (macOS) and ensure gollek-runner-onnx is active.");
         } else if ("gguf".equalsIgnoreCase(providerId)) {
             System.err.println(
                     "GGUF runtime is not loaded. Set GOLLEK_LLAMA_LIB_DIR/GOLLEK_LLAMA_LIB_PATH and include gollek-ext-runner-gguf.");

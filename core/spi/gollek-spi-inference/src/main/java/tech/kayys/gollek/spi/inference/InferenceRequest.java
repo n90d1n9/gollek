@@ -243,6 +243,47 @@ public final class InferenceRequest {
         return attachments;
     }
 
+    // Parameter accessors
+    public double getTemperature() {
+        Object val = parameters.get("temperature");
+        return val instanceof Number n ? n.doubleValue() : 0.2;
+    }
+
+    public double getTopP() {
+        Object val = parameters.get("top_p");
+        return val instanceof Number n ? n.doubleValue() : 0.9;
+    }
+
+    public int getTopK() {
+        Object val = parameters.get("top_k");
+        return val instanceof Number n ? n.intValue() : 40;
+    }
+
+    public int getMaxTokens() {
+        Object val = parameters.get("max_tokens");
+        return val instanceof Number n ? n.intValue() : 256;
+    }
+
+    public double getRepeatPenalty() {
+        Object val = parameters.get("repeat_penalty");
+        return val instanceof Number n ? n.doubleValue() : 1.1;
+    }
+
+    public boolean isJsonMode() {
+        Object val = parameters.get("json_mode");
+        return val instanceof Boolean b ? b : false;
+    }
+
+    public int getMirostat() {
+        Object val = parameters.get("mirostat");
+        return val instanceof Number n ? n.intValue() : 0;
+    }
+
+    @Nullable
+    public String getGrammar() {
+        return (String) parameters.get("grammar");
+    }
+
     // Builder
     public Builder toBuilder() {
         Builder builder = new Builder()
@@ -382,6 +423,26 @@ public final class InferenceRequest {
 
         public Builder seed(int seed) {
             this.parameters.put("seed", seed);
+            return this;
+        }
+
+        public Builder repeatPenalty(double repeatPenalty) {
+            this.parameters.put("repeat_penalty", repeatPenalty);
+            return this;
+        }
+
+        public Builder jsonMode(boolean jsonMode) {
+            this.parameters.put("json_mode", jsonMode);
+            return this;
+        }
+
+        public Builder mirostat(int mirostat) {
+            this.parameters.put("mirostat", mirostat);
+            return this;
+        }
+
+        public Builder grammar(String grammar) {
+            this.parameters.put("grammar", grammar);
             return this;
         }
 

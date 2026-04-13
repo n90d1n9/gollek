@@ -65,7 +65,15 @@ public class TokenizerFactory {
             return HuggingFaceBpeTokenizer.load(hfConfig, new Gpt2PreTokenizer());
         }
 
-        throw new IOException("No supported tokenizer files found in " + modelDir + " (expected tokenizer.json or tokenizer.model)");
+        // Try vocab.json + merges.txt fallback (Legacy CLIP/BPE format)
+        Path vocabJson = modelDir.resolve("vocab.json");
+        Path mergesTxt = modelDir.resolve("merges.txt");
+        if (Files.exists(vocabJson) && Files.exists(mergesTxt)) {
+            // Assume GPT-2/CLIP style BPE
+            return HuggingFaceBpeTokenizer.load(vocabJson, mergesTxt, new Gpt2PreTokenizer(), true, false);
+        }
+
+        throw new IOException("No supported tokenizer files found in " + modelDir + " (expected tokenizer.json, tokenizer.model, or vocab.json+merges.txt)");
     }
 
     private static String detectTokenizerModelType(Path tokenizerJson) {

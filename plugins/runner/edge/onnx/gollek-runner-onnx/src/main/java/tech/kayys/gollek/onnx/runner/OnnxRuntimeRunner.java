@@ -17,7 +17,6 @@ import tech.kayys.gollek.exception.RunnerInitializationException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
-import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.model.DeviceType;
 import tech.kayys.gollek.spi.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModelManifest;
@@ -144,7 +143,7 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
 
     public static final String RUNNER_NAME = "onnxruntime";
 
-    @ConfigProperty(name = "gollek.runners.onnx.enabled", defaultValue = "false")
+    @ConfigProperty(name = "gollek.runners.onnx.enabled", defaultValue = "true")
     boolean enabled;
 
     @ConfigProperty(name = "gollek.runners.onnx.library-path", defaultValue = "/usr/lib/libonnxruntime.so")
@@ -263,9 +262,27 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         // Resolve model path from manifest
         Path modelPath = modelManifest.artifacts().values().stream()
                 .findFirst()
-                .map(loc -> Path.of(loc.uri()))
+                .map(loc -> {
+                    try {
+                        String uri = loc.uri();
+                        if (uri.startsWith("file:")) {
+                            return Path.of(java.net.URI.create(uri));
+                        }
+                        return Path.of(uri);
+                    } catch (Exception e) {
+                        return Path.of(loc.uri());
+                    }
+                })
                 .orElseThrow(() -> new RunnerInitializationException(
                         ErrorCode.INIT_NATIVE_LIBRARY_FAILED, "No .onnx artifact in manifest"));
+
+        if (!Files.exists(modelPath)) {
+            log.errorf("[ONNX] Model file DOES NOT EXIST: %s", modelPath);
+            throw new RunnerInitializationException(
+                    ErrorCode.INIT_NATIVE_LIBRARY_FAILED, "Model file not found: " + modelPath);
+        }
+
+        System.err.println("[OnnxRuntimeRunner] Loading model from: " + modelPath);
 
         // Create ORT environment
         ortEnv = ort.createEnv("gollek-ort");
@@ -280,7 +297,9 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         resolvedEp = resolveAndAttachEp(opts);
 
         // Load model
+        System.err.println("[OnnxRuntimeRunner] Creating ORT session...");
         ortSession = ort.createSession(ortEnv, modelPath.toString(), opts);
+        System.err.println("[OnnxRuntimeRunner] ORT session created successfully: " + ortSession);
         ort.releaseSessionOptions(opts);
 
         // Discover tensor names from loaded model
@@ -299,6 +318,7 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         this.manifest = modelManifest;
         this.initialized = true;
 
+        System.err.println("[OnnxRuntimeRunner] Initialization complete. Set initialized = true");
         log.infof("[ONNX] Initialized — model=%s ep=%s inputs=%d outputs=%d vocab=%d",
                 modelManifest.modelId(), resolvedEp, numInputs, numOutputs, vocabSize);
     }
@@ -643,7 +663,13 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
      * for 32 layers.
      */
     private String[] buildPastKvInputNames() {
-        int layers = 32; // TODO: read from model metadata
+        int layers = 0;
+        for (String name : inputNames) {
+            if (name.startsWith("past_key_values.") && name.endsWith(".key")) {
+                layers++;
+            }
+        }
+        if (layers == 0) layers = 32; // Fallback if no KV inputs found (e.g. non-causal LM)
         String[] names = new String[layers * 2];
         for (int l = 0; l < layers; l++) {
             names[l * 2] = "past_key_values." + l + ".key";
@@ -653,7 +679,13 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     }
 
     private String[] buildPresentKvOutputNames() {
-        int layers = 32;
+        int layers = 0;
+        for (String name : inputNames) {
+            if (name.startsWith("past_key_values.") && name.endsWith(".key")) {
+                layers++;
+            }
+        }
+        if (layers == 0) layers = 32;
         String[] names = new String[layers * 2];
         for (int l = 0; l < layers; l++) {
             names[l * 2] = "present." + l + ".key";

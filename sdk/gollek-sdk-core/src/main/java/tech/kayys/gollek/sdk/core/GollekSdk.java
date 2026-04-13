@@ -249,6 +249,25 @@ public interface GollekSdk {
 
     void pullModel(String modelSpec, Consumer<PullProgress> progressCallback) throws SdkException;
 
+    /**
+     * Pull a model with explicit revision and force options. NEW in v1.2.2.
+     * 
+     * @param modelSpec model name or hf:RepoId
+     * @param revision branch, tag or commit hash (null for default)
+     * @param force force re-download even if files exist
+     * @param progressCallback progress updates
+     */
+    default void pullModel(String modelSpec, String revision, boolean force, Consumer<PullProgress> progressCallback) throws SdkException {
+        // Default implementation for backward compatibility or implementations that don't support revision/force yet.
+        // It's better to log a warning or just delegate if revision is null and force is false.
+        if (revision == null && !force) {
+            pullModel(modelSpec, progressCallback);
+        } else {
+            throw new SdkException("SDK_ERR_NOT_SUPPORTED", 
+                "This SDK implementation does not support explicit revision or force pull.");
+        }
+    }
+
     void deleteModel(String modelId) throws SdkException;
 
     /**

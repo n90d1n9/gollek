@@ -55,7 +55,7 @@
         <!-- Optimization extensions -->
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-kv-cache</artifactId>
+            <artifactId>gollek-plugin-kv-cache</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -65,57 +65,57 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-fa3</artifactId>
+            <artifactId>gollek-plugin-fa3</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-fa4</artifactId>
+            <artifactId>gollek-plugin-fa4</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-hybridattn</artifactId>
+            <artifactId>gollek-plugin-hybrid-attn</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-prefilldecode</artifactId>
+            <artifactId>gollek-plugin-prefill-decode</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-waitscheduler</artifactId>
+            <artifactId>gollek-plugin-wait-scheduler</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-prompt-cache</artifactId>
+            <artifactId>gollek-plugin-prompt-cache</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-evicpress</artifactId>
+            <artifactId>gollek-plugin-evicpress</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-perfmode</artifactId>
+            <artifactId>gollek-plugin-perfmode</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-weightoffload</artifactId>
+            <artifactId>gollek-plugin-weight-offload</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-qlora</artifactId>
+            <artifactId>gollek-plugin-qlora</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-elasticep</artifactId>
+            <artifactId>gollek-plugin-elastic-ep</artifactId>
             <version>${project.version}</version>
         </dependency>
 

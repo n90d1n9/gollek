@@ -8,7 +8,6 @@ import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.output.Response;
 import tech.kayys.gollek.sdk.GollekClient;
-import tech.kayys.gollek.sdk.model.GenerationRequest;
 
 import java.util.List;
 import java.util.Objects;
@@ -52,16 +51,9 @@ public class GollekChatModel implements ChatLanguageModel {
         // Standard text generation
         String prompt = GollekMessageMapper.toPrompt(messages);
 
-        var request = GenerationRequest.builder()
-                .prompt(prompt)
-                .model(model)
-                .temperature(temperature)
-                .maxTokens(maxTokens)
-                .build();
+        var result = client.generate(prompt);
 
-        var response = client.generate(request);
-
-        return Response.from(AiMessage.from(response.text()));
+        return Response.from(AiMessage.from(result.text()));
     }
 
     public static class Builder {

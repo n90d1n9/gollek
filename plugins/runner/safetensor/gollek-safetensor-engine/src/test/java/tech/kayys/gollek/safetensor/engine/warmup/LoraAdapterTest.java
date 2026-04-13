@@ -28,18 +28,18 @@ class LoraAdapterTest {
     @TempDir
     Path tempDir;
 
-    private LoraAdapter loraAdapter;
+    private LoraAdapterService loraAdapter;
 
     @BeforeEach
     void setUp() {
         // Note: In a full integration test, these would be injected via CDI
         // For unit testing, we instantiate directly
-        loraAdapter = new LoraAdapter();
+        loraAdapter = new LoraAdapterService();
     }
 
     @Test
     void testAdapterConfig_DefaultValues() {
-        LoraAdapter.AdapterConfig config = new LoraAdapter.AdapterConfig(
+        AdapterConfig config = new AdapterConfig(
                 16, 16.0f, 0.0f, "none",
                 java.util.List.of("q_proj", "v_proj"), "CAUSAL_LM",
                 true, null, java.util.Map.of()
@@ -57,7 +57,7 @@ class LoraAdapterTest {
 
     @Test
     void testAdapterConfig_CustomScaling() {
-        LoraAdapter.AdapterConfig config = new LoraAdapter.AdapterConfig(
+        AdapterConfig config = new AdapterConfig(
                 8, 32.0f, 0.1f, "all",
                 java.util.List.of(), null, true, null, java.util.Map.of()
         );
@@ -115,10 +115,10 @@ class LoraAdapterTest {
     void testIsLoraTensor() {
         // Use reflection to test private method
         try {
-            java.lang.reflect.Method method = LoraAdapter.class.getDeclaredMethod("isLoraTensor", String.class);
+            java.lang.reflect.Method method = LoraAdapterService.class.getDeclaredMethod("isLoraTensor", String.class);
             method.setAccessible(true);
 
-            LoraAdapter adapter = new LoraAdapter();
+            LoraAdapterService adapter = new LoraAdapterService();
 
             assertTrue((boolean) method.invoke(adapter, "model.layers.0.self_attn.q_proj.lora_A.weight"));
             assertTrue((boolean) method.invoke(adapter, "model.layers.0.self_attn.q_proj.lora_A"));
@@ -148,23 +148,23 @@ class LoraAdapterTest {
         weights.put("model.layers.0.self_attn.q_proj.lora_A.weight", mockA);
         weights.put("model.layers.0.self_attn.q_proj.lora_B.weight", mockB);
 
-        LoraAdapter.AdapterConfig config = new LoraAdapter.AdapterConfig(
+        AdapterConfig config = new AdapterConfig(
                 16, 16.0f, 0.0f, "none",
                 java.util.List.of(), null, true, null, java.util.Map.of()
         );
 
-        LoraAdapter.LoadedAdapter loadedAdapter = new LoraAdapter.LoadedAdapter(
+        LoadedAdapter loadedAdapter = new LoadedAdapter(
                 tempDir, weights, config, System.currentTimeMillis()
         );
 
         // Test getting LoRA pair
-        java.util.Optional<LoraAdapter.LoraPair> pair = loadedAdapter.getLoraPair("model.layers.0.self_attn.q_proj");
+        java.util.Optional<LoraPair> pair = loadedAdapter.getLoraPair("model.layers.0.self_attn.q_proj");
         assertTrue(pair.isPresent());
         assertEquals(mockA, pair.get().a());
         assertEquals(mockB, pair.get().b());
 
         // Test getting non-existent module
-        java.util.Optional<LoraAdapter.LoraPair> missing = loadedAdapter.getLoraPair("model.layers.0.mlp.gate_proj");
+        java.util.Optional<LoraPair> missing = loadedAdapter.getLoraPair("model.layers.0.mlp.gate_proj");
         assertFalse(missing.isPresent());
 
         // Cleanup
@@ -193,12 +193,12 @@ class LoraAdapterTest {
         weights.put("model.layers.0.self_attn.q_proj.weight",
                 tech.kayys.gollek.inference.libtorch.core.TorchTensor.zeros(4096, 4096));
 
-        LoraAdapter.AdapterConfig config = new LoraAdapter.AdapterConfig(
+        AdapterConfig config = new AdapterConfig(
                 16, 16.0f, 0.0f, "none",
                 java.util.List.of(), null, true, null, java.util.Map.of()
         );
 
-        LoraAdapter.LoadedAdapter loadedAdapter = new LoraAdapter.LoadedAdapter(
+        LoadedAdapter loadedAdapter = new LoadedAdapter(
                 tempDir, weights, config, System.currentTimeMillis()
         );
 
@@ -221,12 +221,12 @@ class LoraAdapterTest {
         weights.put("model.layers.0.self_attn.q_proj.lora_B.weight",
                 tech.kayys.gollek.inference.libtorch.core.TorchTensor.zeros(4096, 16));
 
-        LoraAdapter.AdapterConfig config = new LoraAdapter.AdapterConfig(
+        AdapterConfig config = new AdapterConfig(
                 16, 16.0f, 0.0f, "none",
                 java.util.List.of(), null, true, null, java.util.Map.of()
         );
 
-        LoraAdapter.LoadedAdapter loadedAdapter = new LoraAdapter.LoadedAdapter(
+        LoadedAdapter loadedAdapter = new LoadedAdapter(
                 tempDir, weights, config, System.currentTimeMillis()
         );
 

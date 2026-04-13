@@ -1,5 +1,8 @@
 package tech.kayys.gollek.spi.tensor;
 
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorSpecies;
+
 /**
  * Default pure-Java CPU implementation of {@link ComputeBackend}.
  *
@@ -11,55 +14,93 @@ public final class CpuBackend implements ComputeBackend {
 
     @Override
     public float[] matmul(float[] a, long[] shapeA, float[] b, long[] shapeB) {
-        int m = (int) shapeA[0];
-        int k = (int) shapeA[1];
-        int n = (int) shapeB[1];
-        float[] c = new float[m * n];
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < n; j++) {
-                float sum = 0;
+        int m = (int) shapeA[shapeA.length - 2];
+        int k = (int) shapeA[shapeA.length - 1];
+        int n = (int) shapeB[shapeB.length - 1];
+
+        // Compute batch size statically avoiding arrays out-of-bounds on pure 2D tensors
+        int batchA = 1, batchB = 1;
+        for (int i = 0; i < shapeA.length - 2; i++) batchA *= (int) shapeA[i];
+        for (int i = 0; i < shapeB.length - 2; i++) batchB *= (int) shapeB[i];
+        int batch = Math.max(batchA, batchB);
+
+        float[] result = new float[batch * m * n];
+        VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+        int loopBound = SPECIES.loopBound(n);
+
+        // Vectorized SIMD batched multiplication via parallel row processing
+        for (int bIdx = 0; bIdx < batch; bIdx++) {
+            final int aOff = (bIdx % batchA) * m * k;
+            final int bOff = (bIdx % batchB) * k * n;
+            final int rOff = bIdx * m * n;
+            
+            java.util.stream.IntStream.range(0, m).parallel().forEach(i -> {
                 for (int p = 0; p < k; p++) {
-                    sum += a[i * k + p] * b[p * n + j];
+                    float a_ip = a[aOff + i * k + p];
+                    int j = 0;
+                    for (; j < loopBound; j += SPECIES.length()) {
+                        FloatVector rVec = FloatVector.fromArray(SPECIES, result, rOff + i * n + j);
+                        FloatVector bVec = FloatVector.fromArray(SPECIES, b, bOff + p * n + j);
+                        rVec.add(bVec.mul(a_ip)).intoArray(result, rOff + i * n + j);
+                    }
+                    for (; j < n; j++) {
+                        result[rOff + i * n + j] += a_ip * b[bOff + p * n + j];
+                    }
                 }
-                c[i * n + j] = sum;
-            }
+            });
         }
-        return c;
+        return result;
     }
 
     @Override
     public float[] add(float[] a, float[] b, long[] shape) {
         float[] c = new float[a.length];
-        for (int i = 0; i < a.length; i++) {
-            c[i] = a[i] + b[i];
+        VectorSpecies<Float> species = FloatVector.SPECIES_PREFERRED;
+        int bound = species.loopBound(a.length);
+        int i = 0;
+        for (; i < bound; i += species.length()) {
+            FloatVector.fromArray(species, a, i).add(FloatVector.fromArray(species, b, i)).intoArray(c, i);
         }
+        for (; i < a.length; i++) c[i] = a[i] + b[i];
         return c;
     }
 
     @Override
     public float[] sub(float[] a, float[] b, long[] shape) {
         float[] c = new float[a.length];
-        for (int i = 0; i < a.length; i++) {
-            c[i] = a[i] - b[i];
+        VectorSpecies<Float> species = FloatVector.SPECIES_PREFERRED;
+        int bound = species.loopBound(a.length);
+        int i = 0;
+        for (; i < bound; i += species.length()) {
+            FloatVector.fromArray(species, a, i).sub(FloatVector.fromArray(species, b, i)).intoArray(c, i);
         }
+        for (; i < a.length; i++) c[i] = a[i] - b[i];
         return c;
     }
 
     @Override
     public float[] mul(float[] a, float[] b, long[] shape) {
         float[] c = new float[a.length];
-        for (int i = 0; i < a.length; i++) {
-            c[i] = a[i] * b[i];
+        VectorSpecies<Float> species = FloatVector.SPECIES_PREFERRED;
+        int bound = species.loopBound(a.length);
+        int i = 0;
+        for (; i < bound; i += species.length()) {
+            FloatVector.fromArray(species, a, i).mul(FloatVector.fromArray(species, b, i)).intoArray(c, i);
         }
+        for (; i < a.length; i++) c[i] = a[i] * b[i];
         return c;
     }
 
     @Override
     public float[] div(float[] a, float[] b, long[] shape) {
         float[] c = new float[a.length];
-        for (int i = 0; i < a.length; i++) {
-            c[i] = a[i] / b[i];
+        VectorSpecies<Float> species = FloatVector.SPECIES_PREFERRED;
+        int bound = species.loopBound(a.length);
+        int i = 0;
+        for (; i < bound; i += species.length()) {
+            FloatVector.fromArray(species, a, i).div(FloatVector.fromArray(species, b, i)).intoArray(c, i);
         }
+        for (; i < a.length; i++) c[i] = a[i] / b[i];
         return c;
     }
 

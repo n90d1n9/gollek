@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 import tech.kayys.gollek.spi.tensor.ComputeBackend;
 import tech.kayys.gollek.spi.tensor.CpuBackend;
+import tech.kayys.gollek.runtime.tensor.Device;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -114,32 +115,72 @@ public class MetalComputeBackend implements ComputeBackend, AdvancedMetalOps {
 
     @Override
     public float[] matmul(float[] a, long[] shapeA, float[] b, long[] shapeB) {
-        if (!isNative) return cpuFallback.matmul(a, shapeA, b, shapeB);
+        int M = (int) shapeA[shapeA.length - 2];
+        int K = (int) shapeA[shapeA.length - 1];
+        int N = (int) shapeB[shapeB.length - 1];
 
-        int m = (int) shapeA[0];
-        int k = (int) shapeA[1];
-        int n = (int) shapeB[1];
-        
-        long bytesA = (long) a.length * 4L;
-        long bytesB = (long) b.length * 4L;
-        long bytesC = (long) m * n * 4L;
-        
-        ScratchBuffers buffers = ensureBuffers(bytesA, bytesB, bytesC);
+        int batchA = 1, batchB = 1;
+        for (int i = 0; i < shapeA.length - 2; i++) batchA *= (int) shapeA[i];
+        for (int i = 0; i < shapeB.length - 2; i++) batchB *= (int) shapeB[i];
+        int batch = Math.max(batchA, batchB);
+        int outSize = batch * M * N;
+
+        ScratchBuffers buffers = ensureBuffers((long)a.length * 4L, (long)b.length * 4L, (long)outSize * 4L);
         copyToMem(a, b, buffers.memA, buffers.memB);
 
-        if (metalBinding.matmul(buffers.memC, buffers.memA, buffers.memB, m, k, n, 1.0f, 0.0f) != 0) {
-            return cpuFallback.matmul(a, shapeA, b, shapeB);
+        for (int bIdx = 0; bIdx < batch; bIdx++) {
+            long offA = (long) (bIdx % batchA) * M * K * 4L;
+            long offB = (long) (bIdx % batchB) * K * N * 4L;
+            long offC = (long) bIdx * M * N * 4L;
+
+            MemorySegment sliceA = buffers.memA.asSlice(offA, (long) M * K * 4L);
+            MemorySegment sliceB = buffers.memB.asSlice(offB, (long) K * N * 4L);
+            MemorySegment sliceC = buffers.memC.asSlice(offC, (long) M * N * 4L);
+
+            metalBinding.matmul(sliceC, sliceA, sliceB, M, K, N, 1.0f, 0.0f);
         }
-        return copyFromMem(buffers.memC, m * n);
+
+        return copyFromMem(buffers.memC, outSize);
+    }
+
+    @Override
+    public void matmul(MemorySegment a, long[] shapeA, MemorySegment b, long[] shapeB, MemorySegment out) {
+        int M = (int) shapeA[shapeA.length - 2];
+        int K = (int) shapeA[shapeA.length - 1];
+        int N = (int) shapeB[shapeB.length - 1];
+
+        int batchA = 1, batchB = 1;
+        for (int i = 0; i < shapeA.length - 2; i++) batchA *= (int) shapeA[i];
+        for (int i = 0; i < shapeB.length - 2; i++) batchB *= (int) shapeB[i];
+        int batch = Math.max(batchA, batchB);
+
+        for (int bIdx = 0; bIdx < batch; bIdx++) {
+            long offA = (long) (bIdx % batchA) * M * K * 4L;
+            long offB = (long) (bIdx % batchB) * K * N * 4L;
+            long offC = (long) bIdx * M * N * 4L;
+
+            MemorySegment sliceA = a.asSlice(offA, (long) M * K * 4L);
+            MemorySegment sliceB = b.asSlice(offB, (long) K * N * 4L);
+            MemorySegment sliceC = out.asSlice(offC, (long) M * N * 4L);
+
+            metalBinding.matmul(sliceC, sliceA, sliceB, M, K, N, 1.0f, 0.0f);
+        }
     }
 
     @Override
     public float[] add(float[] a, float[] b, long[] shape) {
-        if (!isNative) return cpuFallback.add(a, b, shape);
-        int n = a.length; ScratchBuffers bfr = ensureBuffers(n * 4L, n * 4L, n * 4L);
-        copyToMem(a, b, bfr.memA, bfr.memB);
-        if (metalBinding.add(bfr.memC, bfr.memA, bfr.memB, n) != 0) return cpuFallback.add(a, b, shape);
-        return copyFromMem(bfr.memC, n);
+        int N = a.length;
+        ScratchBuffers buffers = ensureBuffers((long)N * 4L, (long)N * 4L, (long)N * 4L);
+        copyToMem(a, b, buffers.memA, buffers.memB);
+        metalBinding.add(buffers.memC, buffers.memA, buffers.memB, N);
+        return copyFromMem(buffers.memC, N);
+    }
+
+    @Override
+    public void add(MemorySegment a, MemorySegment b, MemorySegment out, long[] shape) {
+        long n = 1;
+        for (long s : shape) n *= s;
+        metalBinding.add(out, a, b, (int)n);
     }
 
     @Override

@@ -49,7 +49,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp" \
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp" \
           ./scripts/prepare-llama-source.sh
 
       - name: Prepare libtorch source (Linux/macOS)
@@ -57,7 +59,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch" \
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch" \
           ./scripts/prepare-libtorch-source.sh
 
       - name: Install native build dependencies (Linux)
@@ -74,9 +78,11 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          export GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp"
-          export GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch"
-          export GOLLEK_LIBTORCH_LIB_PATH="$HOME/.gollek/source/vendor/libtorch/lib"
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
+          export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
+          export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
           mvn -B clean package -pl ui/gollek-cli -am -DskipTests -Pnative
         env:
           MAVEN_OPTS: -Xmx3G
@@ -85,9 +91,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          export GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp"
-          export GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch"
-          export GOLLEK_LIBTORCH_LIB_PATH="$HOME/.gollek/source/vendor/libtorch/lib"
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
+          export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
+          export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
           mvn -B clean package -pl ui/gollek-cli -am -DskipTests -Pnative -Dexec.skip=true
         env:
           MAVEN_OPTS: -Xmx3G
@@ -156,22 +164,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp" \
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp" \
           ./scripts/prepare-llama-source.sh
 
       - name: Prepare libtorch source
         shell: bash
         run: |
           set -euo pipefail
-          GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch" \
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch" \
           ./scripts/prepare-libtorch-source.sh
 
       - name: Build JVM package
         shell: bash
         run: |
-          export GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp"
-          export GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch"
-          export GOLLEK_LIBTORCH_LIB_PATH="$HOME/.gollek/source/vendor/libtorch/lib"
+          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
+          export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
+          export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
           mvn -B clean package -pl ui/gollek-cli -am -DskipTests
 
       - name: Stage JVM bundle
@@ -248,13 +262,18 @@ jobs:
           REPO="__REPO__"
           TAG="__TAG__"
           INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+          WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          if [ ! -d "$GOLLEK_HOME" ] && [ -d "$HOME/.gollek" ]; then
+            GOLLEK_HOME="$HOME/.gollek"
+          fi
           TMP_DIR="$(mktemp -d)"
           trap 'rm -rf "$TMP_DIR"' EXIT
 
           OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
           case "$OS" in
-            darwin) ASSET="gollek-macos-x64" ;;
-            linux) ASSET="gollek-linux-x64" ;;
+            darwin) ASSET="gollek-macos-x64.tar.gz" ;;
+            linux) ASSET="gollek-linux-x64.tar.gz" ;;
             *)
               echo "Unsupported OS: $OS"
               exit 1
@@ -262,7 +281,8 @@ jobs:
           esac
 
           BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
-          curl -fsSL "${BASE_URL}/${ASSET}" -o "${TMP_DIR}/gollek"
+          curl -fsSL "${BASE_URL}/${ASSET}" -o "${TMP_DIR}/${ASSET}"
+          tar -xzf "${TMP_DIR}/${ASSET}" -C "${TMP_DIR}"
           chmod +x "${TMP_DIR}/gollek"
 
           if [ -w "${INSTALL_DIR}" ]; then
@@ -271,9 +291,65 @@ jobs:
             sudo cp "${TMP_DIR}/gollek" "${INSTALL_DIR}/gollek"
           fi
 
+          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,libs,source/vendor}
+
+          cat > "${GOLLEK_HOME}/config/environment" <<'ENVFILE'
+          WAYANG_HOME=${WAYANG_HOME:-$HOME/.wayang}
+          GOLLEK_HOME=${GOLLEK_HOME:-$WAYANG_HOME/gollek}
+          GOLLEK_CLI_LOG_FILE=${GOLLEK_CLI_LOG_FILE:-$GOLLEK_HOME/logs/cli.log}
+          WAYANG_SERVICE_CMD=${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek --version}
+          ENVFILE
+
           echo "Installed to ${INSTALL_DIR}/gollek"
+          echo "Runtime home: ${GOLLEK_HOME}"
           "${INSTALL_DIR}/gollek" --version || true
           INSTALL_SH
+
+          cat > release/install-service.sh <<'INSTALL_SERVICE_SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          if ! command -v systemctl >/dev/null 2>&1; then
+            echo "systemctl not found. install-service.sh currently supports Linux systemd user services."
+            exit 1
+          fi
+
+          WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
+          GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          if [ ! -d "$GOLLEK_HOME" ] && [ -d "$HOME/.gollek" ]; then
+            GOLLEK_HOME="$HOME/.gollek"
+          fi
+
+          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,run}
+          SERVICE_FILE="$HOME/.config/systemd/user/wayang-gollek.service"
+          mkdir -p "$(dirname "$SERVICE_FILE")"
+
+          cat > "$SERVICE_FILE" <<EOF
+          [Unit]
+          Description=Wayang Gollek Service
+          After=network.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          Environment=WAYANG_HOME=$WAYANG_HOME
+          Environment=GOLLEK_HOME=$GOLLEK_HOME
+          Environment=GOLLEK_CLI_LOG_FILE=$GOLLEK_HOME/logs/cli.log
+          Environment=WAYANG_SERVICE_CMD=\${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek --version}
+          ExecStart=/bin/sh -lc '\$WAYANG_SERVICE_CMD'
+          WorkingDirectory=$GOLLEK_HOME
+
+          [Install]
+          WantedBy=default.target
+          EOF
+
+          systemctl --user daemon-reload
+          systemctl --user enable wayang-gollek.service
+          echo "Installed user service template: wayang-gollek.service"
+          echo "Set WAYANG_SERVICE_CMD in \$GOLLEK_HOME/config/environment, then run:"
+          echo "  systemctl --user start wayang-gollek.service"
+          echo "Logs: $GOLLEK_HOME/logs/cli.log"
+          INSTALL_SERVICE_SH
 
           cat > release/install.ps1 <<'INSTALL_PS1'
           $ErrorActionPreference = 'Stop'
@@ -302,6 +378,7 @@ jobs:
           sed -i "s#__REPO__#${REPO}#g" release/install.sh release/install.ps1
           sed -i "s#__TAG__#${VERSION_TAG}#g" release/install.sh release/install.ps1
           chmod +x release/install.sh
+          chmod +x release/install-service.sh
 
           MAC_SHA=$(sha256sum release/gollek-macos-x64.tar.gz | awk '{print $1}')
           WIN_SHA=$(sha256sum release/gollek-windows-x64.exe | awk '{print $1}')

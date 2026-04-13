@@ -4,7 +4,7 @@ import dev.langchain4j.data.image.Image;
 import dev.langchain4j.model.image.ImageModel;
 import dev.langchain4j.model.output.Response;
 import tech.kayys.gollek.ml.Gollek;
-import tech.kayys.gollek.sdk.multimodal.MultimodalResult;
+import tech.kayys.gollek.ml.multimodal.MultimodalResult;
 
 import java.util.Collections;
 import java.util.List;

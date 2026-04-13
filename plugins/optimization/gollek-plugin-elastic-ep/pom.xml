@@ -9,7 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-elasticep</artifactId>
+    <artifactId>gollek-plugin-elastic-ep</artifactId>
+    <name>Gollek Plugin :: Elastic Expert Parallel</name>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>

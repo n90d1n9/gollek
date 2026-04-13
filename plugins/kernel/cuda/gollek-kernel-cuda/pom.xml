@@ -44,17 +44,22 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-kv-cache</artifactId>
+            <artifactId>gollek-plugin-kv-cache</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-fa4</artifactId>
+            <artifactId>gollek-spi-tensor</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ext-fa3</artifactId>
+            <artifactId>gollek-plugin-fa4</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-fa3</artifactId>
             <version>${project.version}</version>
         </dependency>
 

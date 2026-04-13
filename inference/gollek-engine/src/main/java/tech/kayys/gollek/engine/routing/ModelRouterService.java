@@ -334,13 +334,18 @@ public class ModelRouterService {
                 // We need to construct a lightweight ProviderRequest or update supports to take
                 // InferenceRequest
                 // For now, let's construct a minimal ProviderRequest
-                ProviderRequest checkRequest = ProviderRequest.builder()
+                ProviderRequest.Builder checkRequestBuilder = ProviderRequest.builder()
                                 .model(manifest.modelId())
                                 .messages(context.request().getMessages())
                                 .parameters(context.request().getParameters())
                                 .metadata(context.request().getMetadata())
-                                .metadata("tenantId", getTenantId(context.request()))
-                                .build();
+                                .metadata("tenantId", getTenantId(context.request()));
+                
+                if (manifest.path() != null && !manifest.path().isBlank()) {
+                        checkRequestBuilder.metadata("model_path", manifest.path());
+                }
+                
+                ProviderRequest checkRequest = checkRequestBuilder.build();
 
                 // Explicit provider pinning from request should be honored strictly.
                 if (context.preferredProvider().isPresent()) {
@@ -544,15 +549,20 @@ public class ModelRouterService {
                 LLMProvider provider = decision.provider();
 
                 // Build provider request
-                ProviderRequest providerRequest = ProviderRequest.builder()
+                ProviderRequest.Builder requestBuilder = ProviderRequest.builder()
                                 .model(decision.manifest().modelId())
                                 .messages(request.getMessages())
                                 .parameters(request.getParameters())
                                 .streaming(request.isStreaming())
                                 .timeout(decision.context().timeout())
                                 .metadata("request_id", request.getRequestId())
-                                .metadata("tenantId", getTenantId(request))
-                                .build();
+                                .metadata("tenantId", getTenantId(request));
+                
+                if (decision.manifest().path() != null && !decision.manifest().path().isBlank()) {
+                        requestBuilder.metadata("model_path", decision.manifest().path());
+                }
+                
+                ProviderRequest providerRequest = requestBuilder.build();
 
                 return provider.infer(providerRequest)
                                 .onItem().invoke(response -> {
@@ -589,6 +599,10 @@ public class ModelRouterService {
                                 .timeout(decision.context().timeout())
                                 .metadata("request_id", request.getRequestId())
                                 .metadata("tenantId", getTenantId(request));
+
+                if (decision.manifest().path() != null && !decision.manifest().path().isBlank()) {
+                        requestBuilder.metadata("model_path", decision.manifest().path());
+                }
 
                 return streamingProvider.inferStream(requestBuilder.build())
                                 .onFailure().invoke(error -> {
@@ -690,12 +704,11 @@ public class ModelRouterService {
                 Optional<ModelEntry> entry = localModelRegistry.resolve(modelId);
                 if (entry.isPresent()) {
                         ModelFormat fmt = entry.get().format();
-                        return fmt == ModelFormat.GGUF || fmt == ModelFormat.SAFETENSORS || fmt == ModelFormat.LITERT;
+                        return fmt == ModelFormat.GGUF || fmt == ModelFormat.SAFETENSORS || fmt == ModelFormat.LITERT || fmt == ModelFormat.ONNX;
                 }
 
-                // Detect by path / extension
                 Optional<ModelFormat> detected = formatRouter.resolveFormat(modelId);
-                return detected.map(f -> f == ModelFormat.GGUF || f == ModelFormat.SAFETENSORS || f == ModelFormat.LITERT)
+                return detected.map(f -> f == ModelFormat.GGUF || f == ModelFormat.SAFETENSORS || f == ModelFormat.LITERT || f == ModelFormat.ONNX)
                                 .orElse(false);
         }
 

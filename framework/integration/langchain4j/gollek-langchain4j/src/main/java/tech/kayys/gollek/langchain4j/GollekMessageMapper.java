@@ -7,7 +7,7 @@ import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
-import tech.kayys.gollek.sdk.multimodal.ContentPart;
+import tech.kayys.gollek.ml.multimodal.ContentPart;
 
 import java.util.ArrayList;
 import java.util.List;

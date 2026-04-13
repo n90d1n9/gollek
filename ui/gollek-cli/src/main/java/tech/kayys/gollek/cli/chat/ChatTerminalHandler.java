@@ -11,6 +11,7 @@ import org.jline.console.CmdDesc;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import tech.kayys.gollek.cli.GollekHome;
 
 /**
  * Manages JLine Terminal and LineReader for the chat session.
@@ -37,7 +38,7 @@ public class ChatTerminalHandler implements AutoCloseable {
                     .terminal(terminal)
                     .completer(completer)
                     .variable(LineReader.HISTORY_FILE,
-                            Path.of(System.getProperty("user.home"), ".gollek", "chat_history"))
+                            GollekHome.path("chat_history"))
                     .variable(LineReader.LIST_MAX, 50)
                     .option(LineReader.Option.AUTO_MENU, true)
                     .option(LineReader.Option.AUTO_LIST, true)

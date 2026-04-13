@@ -55,6 +55,7 @@ public class ModelArchitectureDetectorV2 {
             new DetectionRule("visual.blocks.0.attn.qkv", "qwen2_vl"),
             new DetectionRule("vision_tower.model.vision_tower", "deepseek_vl_v2"),
             new DetectionRule("model.vision_backbone.image_vit", "molmo"),
+            new DetectionRule("text_model.embeddings.token_embedding", "clip"),
 
             // MoE
             new DetectionRule("model.layers.0.block_sparse_moe.gate", "mixtral"),

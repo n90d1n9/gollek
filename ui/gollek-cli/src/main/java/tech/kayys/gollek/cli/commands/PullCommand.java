@@ -8,6 +8,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import tech.kayys.gollek.model.repo.hf.HuggingFaceClient;
+import tech.kayys.gollek.model.repo.kaggle.KaggleClient;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 
 /**
@@ -15,6 +16,7 @@ import tech.kayys.gollek.sdk.core.GollekSdk;
  * Usage: gollek pull <model-spec>
  * Model spec examples:
  * - hf:TheBloke/Llama-2 -> Pull from HuggingFace
+ * - kaggle:google/gemma/2b -> Pull from Kaggle
  * - llama-3.2-1b -> Default to local registry / HF
  */
 @Dependent
@@ -26,6 +28,8 @@ public class PullCommand implements Runnable {
     GollekSdk sdk;
     @Inject
     Instance<HuggingFaceClient> hfClientInstance;
+    @Inject
+    Instance<KaggleClient> kaggleClientInstance;
 
     @Parameters(index = "0", description = "Model name to pull (e.g. llama3, hf:user/repo)")
     public String modelSpec;

@@ -7,6 +7,7 @@ import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+import tech.kayys.gollek.cli.GollekHome;
 
 import java.io.StringReader;
 import java.nio.ByteBuffer;
@@ -27,7 +28,7 @@ public class SafetensorsCommand implements Runnable {
     String path;
 
     @Option(names = {
-            "--model" }, description = "Model ID under ~/.gollek/models/libtorchscript (e.g. Qwen/Qwen2.5-0.5B-Instruct)")
+            "--model" }, description = "Model ID under ~/.wayang/gollek/models/libtorchscript (legacy: ~/.gollek/models/libtorchscript)")
     String modelId;
 
     @Option(names = { "--limit" }, description = "Maximum tensors to print", defaultValue = "30")
@@ -87,7 +88,7 @@ public class SafetensorsCommand implements Runnable {
             return null;
         }
 
-        Path base = Path.of(System.getProperty("user.home"), ".gollek", "models", "libtorchscript");
+        Path base = GollekHome.path("models", "libtorchscript");
         Path direct = base.resolve(modelId + ".safetensors");
         if (Files.exists(direct)) {
             return direct;

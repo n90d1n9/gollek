@@ -64,4 +64,10 @@ public interface HuggingFaceConfig {
      */
     @WithDefault("true")
     boolean autoDownload();
+
+    /**
+     * Default revision (branch/tag/commit) to use for repository interactions.
+     */
+    @WithDefault("main")
+    String revision();
 }

@@ -9,7 +9,8 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ext-hybridattn</artifactId>
+    <artifactId>gollek-plugin-hybrid-attn</artifactId>
+    <name>Gollek Plugin :: Hybrid Attention</name>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>

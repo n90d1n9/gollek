@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LLAMA_SRC="${GOLLEK_LLAMA_SOURCE_DIR:-$HOME/.gollek/source/vendor/llama.cpp}"
+resolve_gollek_home() {
+  if [ -n "${GOLLEK_HOME:-}" ]; then
+    echo "$GOLLEK_HOME"
+    return
+  fi
+  if [ -n "${WAYANG_HOME:-}" ]; then
+    echo "$WAYANG_HOME/gollek"
+    return
+  fi
+  if [ -d "$HOME/.wayang/gollek" ] || [ ! -d "$HOME/.gollek" ]; then
+    echo "$HOME/.wayang/gollek"
+    return
+  fi
+  echo "$HOME/.gollek"
+}
+
+GOLLEK_HOME_RESOLVED="$(resolve_gollek_home)"
+LLAMA_SRC="${GOLLEK_LLAMA_SOURCE_DIR:-$GOLLEK_HOME_RESOLVED/source/vendor/llama.cpp}"
 LLAMA_REF="${GOLLEK_LLAMA_REF:-origin/master}"
 
 mkdir -p "$(dirname "$LLAMA_SRC")"

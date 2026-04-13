@@ -687,11 +687,25 @@ public class DirectInferenceEngine implements SafetensorEngine {
             return TokenizerFactory.load(modelPath, null);
         } catch (IOException e) {
             Path modelDir = Files.isRegularFile(modelPath) ? modelPath.getParent() : modelPath;
-            boolean hasTokenizerJson = modelDir != null && Files.exists(modelDir.resolve("tokenizer.json"));
-            boolean hasTokenizerModel = modelDir != null && Files.exists(modelDir.resolve("tokenizer.model"));
-            log.errorf(e, "DirectInferenceEngine: failed to load tokenizer for [%s] (dir=%s, tokenizer.json=%s, tokenizer.model=%s)",
-                    modelPath, modelDir, hasTokenizerJson, hasTokenizerModel);
-            throw new RuntimeException("Tokenizer loading failed: " + e.getMessage(), e);
+            
+            // Try tokenizer/ subdirectory (common in diffusers pipelines)
+            if (modelDir != null && Files.isDirectory(modelDir.resolve("tokenizer"))) {
+                try {
+                    return TokenizerFactory.load(modelDir.resolve("tokenizer"), null);
+                } catch (IOException ignored) {
+                    // Fall back to original error reporting
+                }
+            }
+
+            // Check root and subdirectories
+            boolean rootJson = modelDir != null && Files.exists(modelDir.resolve("tokenizer.json"));
+            boolean subJson = modelDir != null && Files.exists(modelDir.resolve("tokenizer").resolve("tokenizer.json"));
+            boolean rootVocab = modelDir != null && Files.exists(modelDir.resolve("vocab.json"));
+            boolean subVocab = modelDir != null && Files.exists(modelDir.resolve("tokenizer").resolve("vocab.json"));
+            
+            log.errorf(e, "Tokenizer loading failed for [%s]. Files found: root/tokenizer.json=%s, sub/tokenizer.json=%s, root/vocab.json=%s, sub/vocab.json=%s",
+                    modelPath, rootJson, subJson, rootVocab, subVocab);
+            throw new RuntimeException("Tokenizer loading failed. Ensure the model directory contains a supported tokenizer structure. Error: " + e.getMessage(), e);
         }
     }
 
@@ -705,6 +719,15 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 configDir = modelPath.getParent();
             }
             if (configDir != null) {
+                // If it's a pipeline directory, look into subcomponents
+                if (Files.exists(configDir.resolve("model_index.json"))) {
+                    // Try unet for SD or text_encoder for others
+                    if (Files.isDirectory(configDir.resolve("unet")) && Files.exists(configDir.resolve("unet").resolve("config.json"))) {
+                        return ModelConfig.fromDirectory(configDir.resolve("unet"), objectMapper);
+                    } else if (Files.isDirectory(configDir.resolve("text_encoder")) && Files.exists(configDir.resolve("text_encoder").resolve("config.json"))) {
+                        return ModelConfig.fromDirectory(configDir.resolve("text_encoder"), objectMapper);
+                    }
+                }
                 return ModelConfig.fromDirectory(configDir, objectMapper);
             }
             return new ModelConfig();

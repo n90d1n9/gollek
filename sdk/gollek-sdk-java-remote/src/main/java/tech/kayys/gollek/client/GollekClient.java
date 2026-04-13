@@ -595,10 +595,23 @@ public class GollekClient implements GollekSdk {
     public void pullModel(String modelSpec,
             java.util.function.Consumer<PullProgress> progressCallback)
             throws SdkException {
+        pullModel(modelSpec, null, false, progressCallback);
+    }
+
+    @Override
+    public void pullModel(String modelSpec, String revision, boolean force,
+            java.util.function.Consumer<PullProgress> progressCallback)
+            throws SdkException {
         try {
             // First, try to initiate the model pull
             java.util.Map<String, Object> requestBodyMap = new java.util.HashMap<>();
             requestBodyMap.put("model", modelSpec);
+            if (revision != null) {
+                requestBodyMap.put("revision", revision);
+            }
+            if (force) {
+                requestBodyMap.put("force", true);
+            }
 
             String requestBody = objectMapper.writeValueAsString(requestBodyMap);
 
@@ -627,7 +640,7 @@ public class GollekClient implements GollekSdk {
 
                 // Create a Multi for the streaming progress
                 Multi<PullProgress> progressMulti = helper
-                        .createModelPullStreamPublisher(modelSpec, progressCallback);
+                        .createModelPullStreamPublisher(modelSpec, revision, force, progressCallback);
 
                 // Use blocking subscribe for model pull
                 try {

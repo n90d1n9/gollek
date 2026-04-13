@@ -43,6 +43,10 @@ public interface ModelRepository {
 
     Path downloadArtifact(ModelManifest manifest, ModelFormat format);
 
+    default Uni<ModelManifest> pull(String modelId, tech.kayys.gollek.spi.model.PullOptions options) {
+        return Uni.createFrom().failure(new UnsupportedOperationException("Pull with options not supported by this repository"));
+    }
+
     boolean isCached(String modelId, ModelFormat format);
 
     void evictCache(String modelId, ModelFormat format);

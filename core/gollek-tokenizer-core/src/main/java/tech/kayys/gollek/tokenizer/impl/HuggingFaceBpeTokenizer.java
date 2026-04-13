@@ -11,6 +11,7 @@ import tech.kayys.gollek.tokenizer.spi.PreTokenizer;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -44,6 +45,40 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
 
     public static HuggingFaceBpeTokenizer load(Path tokenizerPath, PreTokenizer preTokenizer) throws IOException {
         return load(tokenizerPath, preTokenizer, true, false);
+    }
+
+    public static HuggingFaceBpeTokenizer load(Path vocabPath, Path mergesPath, PreTokenizer preTokenizer,
+            boolean useByteEncoder, boolean decodeWhitespace) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        TokenizerState state = new TokenizerState();
+
+        // Load Vocab
+        JsonNode vocabNode = mapper.readTree(vocabPath.toFile());
+        if (vocabNode.isObject()) {
+            state.tokenToId = new HashMap<>();
+            state.idToToken = new HashMap<>();
+            vocabNode.fields().forEachRemaining(e -> {
+                int id = e.getValue().asInt();
+                state.tokenToId.put(e.getKey(), id);
+                state.idToToken.put(id, e.getKey());
+            });
+            state.vocabSize = state.tokenToId.size();
+        }
+
+        // Load Merges
+        state.mergeRanks = new HashMap<>();
+        List<String> lines = Files.readAllLines(mergesPath);
+        int idx = 0;
+        for (String line : lines) {
+            line = line.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            state.mergeRanks.put(line.replace(" ", ""), idx++);
+        }
+
+        if (useByteEncoder) {
+            state.byteEncoder = buildByteEncoder();
+        }
+        return new HuggingFaceBpeTokenizer(state, preTokenizer, useByteEncoder, decodeWhitespace);
     }
 
     public static HuggingFaceBpeTokenizer load(Path tokenizerPath, PreTokenizer preTokenizer,

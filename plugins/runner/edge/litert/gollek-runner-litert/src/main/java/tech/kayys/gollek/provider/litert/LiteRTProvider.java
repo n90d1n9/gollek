@@ -201,7 +201,7 @@ public class LiteRTProvider implements StreamingProvider {
             Instant sessionAcquireStart = Instant.now();
             try {
                 if (sessionManager == null) {
-                    throw new InferenceException("Session manager not initialized");
+                    throw new InferenceException("LiteRT Session manager not initialized");
                 }
                 
                 sessionContext = sessionManager.getSession(tenantId, request.getModel(), modelPath, runnerConfig);

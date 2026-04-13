@@ -58,17 +58,27 @@ class OnnxHuggingFaceIntegrationTest {
         OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
         setField(runner, "enabled", true);
         setField(runner, "libraryPath", libraryPath);
-        setField(runner, "executionProvider", envOrProp("GOLLEK_ONNX_EXECUTION_PROVIDER", "gollek.onnx.execution-provider", "cpu"));
-        setField(runner, "intraOpThreads", Integer.parseInt(envOrProp("GOLLEK_ONNX_INTRA_OP_THREADS", "gollek.onnx.intra-op-threads", "2")));
-        setField(runner, "interOpThreads", Integer.parseInt(envOrProp("GOLLEK_ONNX_INTER_OP_THREADS", "gollek.onnx.inter-op-threads", "1")));
-        setField(runner, "graphOptLevel", Integer.parseInt(envOrProp("GOLLEK_ONNX_GRAPH_OPT_LEVEL", "gollek.onnx.graph-opt-level", "99")));
-        setField(runner, "usePastKvCache", Boolean.parseBoolean(envOrProp("GOLLEK_ONNX_USE_PAST_KV", "gollek.onnx.use-past-kv-cache", "false")));
-        setField(runner, "vocabSize", Integer.parseInt(envOrProp("GOLLEK_ONNX_VOCAB_SIZE", "gollek.onnx.vocab-size", "50257")));
+        setField(runner, "executionProvider",
+                envOrProp("GOLLEK_ONNX_EXECUTION_PROVIDER", "gollek.onnx.execution-provider", "cpu"));
+        setField(runner, "intraOpThreads",
+                Integer.parseInt(envOrProp("GOLLEK_ONNX_INTRA_OP_THREADS", "gollek.onnx.intra-op-threads", "2")));
+        setField(runner, "interOpThreads",
+                Integer.parseInt(envOrProp("GOLLEK_ONNX_INTER_OP_THREADS", "gollek.onnx.inter-op-threads", "1")));
+        setField(runner, "graphOptLevel",
+                Integer.parseInt(envOrProp("GOLLEK_ONNX_GRAPH_OPT_LEVEL", "gollek.onnx.graph-opt-level", "99")));
+        setField(runner, "usePastKvCache",
+                Boolean.parseBoolean(envOrProp("GOLLEK_ONNX_USE_PAST_KV", "gollek.onnx.use-past-kv-cache", "false")));
+        setField(runner, "vocabSize",
+                Integer.parseInt(envOrProp("GOLLEK_ONNX_VOCAB_SIZE", "gollek.onnx.vocab-size", "50257")));
 
         RunnerConfiguration config = RunnerConfiguration.builder()
-                .putParameter("execution_provider", envOrProp("GOLLEK_ONNX_EXECUTION_PROVIDER", "gollek.onnx.execution-provider", "cpu"))
-                .putParameter("vocab_size", Integer.parseInt(envOrProp("GOLLEK_ONNX_VOCAB_SIZE", "gollek.onnx.vocab-size", "50257")))
-                .putParameter("use_past_kv_cache", Boolean.parseBoolean(envOrProp("GOLLEK_ONNX_USE_PAST_KV", "gollek.onnx.use-past-kv-cache", "false")))
+                .putParameter("execution_provider",
+                        envOrProp("GOLLEK_ONNX_EXECUTION_PROVIDER", "gollek.onnx.execution-provider", "cpu"))
+                .putParameter("vocab_size",
+                        Integer.parseInt(envOrProp("GOLLEK_ONNX_VOCAB_SIZE", "gollek.onnx.vocab-size", "50257")))
+                .putParameter("use_past_kv_cache",
+                        Boolean.parseBoolean(
+                                envOrProp("GOLLEK_ONNX_USE_PAST_KV", "gollek.onnx.use-past-kv-cache", "false")))
                 .build();
 
         runner.initialize(manifest, config);
@@ -168,8 +178,7 @@ class OnnxHuggingFaceIntegrationTest {
     }
 
     private static tech.kayys.gollek.model.repo.hf.HuggingFaceClient createHfClient() throws Exception {
-        tech.kayys.gollek.model.repo.hf.HuggingFaceClient client =
-                new tech.kayys.gollek.model.repo.hf.HuggingFaceClient();
+        tech.kayys.gollek.model.repo.hf.HuggingFaceClient client = new tech.kayys.gollek.model.repo.hf.HuggingFaceClient();
         setField(client, "config", new EnvHfConfig());
         setField(client, "objectMapper", new com.fasterxml.jackson.databind.ObjectMapper());
         return client;
@@ -298,12 +307,17 @@ class OnnxHuggingFaceIntegrationTest {
 
         @Override
         public String userAgent() {
-            return "wayang-inference/1.0";
+            return "gollek-inference/1.0";
         }
 
         @Override
         public boolean autoDownload() {
             return true;
+        }
+
+        @Override
+        public String revision() {
+            return "main";
         }
     }
 }

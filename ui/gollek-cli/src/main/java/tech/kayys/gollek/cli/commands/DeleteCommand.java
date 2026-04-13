@@ -6,6 +6,7 @@ import jakarta.inject.Inject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import tech.kayys.gollek.cli.GollekHome;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 
 import java.nio.file.Files;
@@ -129,7 +130,7 @@ public class DeleteCommand implements Runnable {
                 })
                 .ifPresent(targets::add);
 
-        Path modelsRoot = Path.of(System.getProperty("user.home"), ".gollek", "models");
+        Path modelsRoot = GollekHome.path("models");
         if (!Files.isDirectory(modelsRoot)) {
             return dedupe(targets);
         }

@@ -5,7 +5,6 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import tech.kayys.gollek.sdk.GollekClient;
-import tech.kayys.gollek.sdk.model.EmbeddingRequest;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,12 +31,8 @@ public class GollekEmbeddingModel implements EmbeddingModel {
     public Response<List<Embedding>> embedAll(List<TextSegment> textSegments) {
         List<Embedding> embeddings = new ArrayList<>();
         for (TextSegment segment : textSegments) {
-            var request = EmbeddingRequest.builder()
-                    .input(segment.text())
-                    .model(model)
-                    .build();
-            var response = client.embed(request);
-            embeddings.add(Embedding.from(response.vector()));
+            float[] vector = client.embed(segment.text());
+            embeddings.add(Embedding.from(vector));
         }
         return Response.from(embeddings);
     }

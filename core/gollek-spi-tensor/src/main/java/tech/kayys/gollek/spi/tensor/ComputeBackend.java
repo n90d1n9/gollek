@@ -1,5 +1,8 @@
 package tech.kayys.gollek.spi.tensor;
 
+import java.lang.foreign.MemorySegment;
+
+
 /**
  * Service Provider Interface for hardware-accelerated tensor computation.
  *
@@ -30,6 +33,11 @@ public interface ComputeBackend {
      */
     float[] matmul(float[] a, long[] shapeA, float[] b, long[] shapeB);
 
+    /** Zero-copy MemorySegment matmul. */
+    default void matmul(MemorySegment a, long[] shapeA, MemorySegment b, long[] shapeB, MemorySegment out) {
+        throw new UnsupportedOperationException("MemorySegment matmul not implemented by " + getClass().getName());
+    }
+
     /**
      * Element-wise addition: C = A + B.
      *
@@ -40,25 +48,50 @@ public interface ComputeBackend {
      */
     float[] add(float[] a, float[] b, long[] shape);
 
+    /** Zero-copy MemorySegment addition. */
+    default void add(MemorySegment a, MemorySegment b, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment add not implemented by " + getClass().getName());
+    }
+
     /**
      * Element-wise subtraction: C = A - B.
      */
     float[] sub(float[] a, float[] b, long[] shape);
+
+    /** Zero-copy MemorySegment subtraction. */
+    default void sub(MemorySegment a, MemorySegment b, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment sub not implemented by " + getClass().getName());
+    }
 
     /**
      * Element-wise multiplication (Hadamard product): C = A ⊙ B.
      */
     float[] mul(float[] a, float[] b, long[] shape);
 
+    /** Zero-copy MemorySegment multiplication. */
+    default void mul(MemorySegment a, MemorySegment b, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment mul not implemented by " + getClass().getName());
+    }
+
     /**
      * Element-wise division: C = A / B.
      */
     float[] div(float[] a, float[] b, long[] shape);
 
+    /** Zero-copy MemorySegment division. */
+    default void div(MemorySegment a, MemorySegment b, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment div not implemented by " + getClass().getName());
+    }
+
     /**
      * ReLU activation: max(0, x) element-wise.
      */
     float[] relu(float[] data, long[] shape);
+
+    /** Zero-copy MemorySegment ReLU. */
+    default void relu(MemorySegment data, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment relu not implemented by " + getClass().getName());
+    }
 
     /**
      * Sigmoid activation: 1 / (1 + exp(-x)) element-wise.
@@ -86,6 +119,11 @@ public interface ComputeBackend {
      * @return array of length 1 containing the sum
      */
     float[] sum(float[] data, long[] shape);
+
+    /** Zero-copy MemorySegment sum. */
+    default void sum(MemorySegment data, MemorySegment out, long[] shape) {
+        throw new UnsupportedOperationException("MemorySegment sum not implemented by " + getClass().getName());
+    }
 
     /**
      * Mean of all elements.

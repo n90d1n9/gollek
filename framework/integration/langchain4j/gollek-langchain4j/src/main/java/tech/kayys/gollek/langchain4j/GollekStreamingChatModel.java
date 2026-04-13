@@ -6,11 +6,9 @@ import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.output.Response;
 import tech.kayys.gollek.sdk.GollekClient;
-import tech.kayys.gollek.sdk.model.GenerationRequest;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Gollek implementation of LangChain4j StreamingChatLanguageModel.
@@ -37,21 +35,14 @@ public class GollekStreamingChatModel implements StreamingChatLanguageModel {
     public void generate(List<ChatMessage> messages, StreamingResponseHandler<AiMessage> handler) {
         String prompt = GollekMessageMapper.toPrompt(messages);
 
-        var request = GenerationRequest.builder()
-                .prompt(prompt)
-                .temperature(temperature)
-                .maxTokens(maxTokens)
-                .stream(true)
-                .build();
-
         StringBuilder fullText = new StringBuilder();
 
-        client.generateStream(request)
+        client.generateStream(prompt)
                 .onToken(token -> {
                     fullText.append(token);
                     handler.onNext(token);
                 })
-                .onComplete(() -> {
+                .onComplete(result -> {
                     Response<AiMessage> response = Response.from(AiMessage.from(fullText.toString()));
                     handler.onComplete(response);
                 })
