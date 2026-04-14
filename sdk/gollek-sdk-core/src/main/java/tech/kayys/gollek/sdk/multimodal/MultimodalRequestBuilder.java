@@ -1,6 +1,6 @@
 package tech.kayys.gollek.sdk.multimodal;
 
-import tech.kayys.gollek.multimodal.model.ModalityType;
+import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.multimodal.model.MultimodalContent;
 import tech.kayys.gollek.multimodal.model.MultimodalRequest;
 import tech.kayys.gollek.multimodal.model.MultimodalResponse;

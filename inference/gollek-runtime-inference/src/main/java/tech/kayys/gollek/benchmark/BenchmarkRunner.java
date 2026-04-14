@@ -129,8 +129,8 @@ public final class BenchmarkRunner {
         BenchmarkResults results = resultsBuilder.build();
 
         LOG.infof("Benchmark complete: backend=%s, throughput=%.1f tok/s, P99 latency=%.1fms",
-            backend, results.getThroughput().getTokensPerSecond(),
-            results.getLatency().getP99LatencyMs());
+            backend, results.throughput().getPeakTokensPerSecond(),
+            results.latency().p99LatencyMs());
 
         return results;
     }
@@ -170,7 +170,7 @@ public final class BenchmarkRunner {
                 batchSize, totalTokens, totalTimeMs, tokensPerSec, avgLatencyMs));
 
             LOG.debugf("Batch size %d: %.1f tok/s, avg %.1fms",
-                batchSize, tokensPerSec, avgLatencyMs);
+                (Object) batchSize, tokensPerSec, avgLatencyMs);
         }
 
         // Find optimal batch size (highest throughput)

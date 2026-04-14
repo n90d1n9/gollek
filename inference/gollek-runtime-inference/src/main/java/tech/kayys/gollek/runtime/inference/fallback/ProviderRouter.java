@@ -209,7 +209,7 @@ public final class ProviderRouter {
             attemptedProviders);
 
         return new ProviderResponse(
-            context.getRequestId(),
+            context.requestId(),
             providers.get(0).modelId(),
             fallbackResponse,
             0, 0, 0,

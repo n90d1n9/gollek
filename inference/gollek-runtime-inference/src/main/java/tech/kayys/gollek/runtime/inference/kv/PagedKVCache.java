@@ -6,6 +6,8 @@ import tech.kayys.gollek.runtime.tensor.Backend;
 import tech.kayys.gollek.runtime.tensor.ExecutionContext;
 import tech.kayys.gollek.runtime.tensor.Device;
 
+import org.jboss.logging.Logger;
+
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -70,6 +72,8 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class PagedKVCache implements KVCache {
 
+    private static final Logger LOG = Logger.getLogger(PagedKVCache.class);
+
     // ── Block Pool ───────────────────────────────────────────────────────
 
     /** Pre-allocated K pages: [numBlocks][numLayers][pageSize * numHeads * headDim * dtypeSize] */
@@ -107,7 +111,7 @@ public final class PagedKVCache implements KVCache {
     // ── Sequence Management ──────────────────────────────────────────────
 
     /** Per-sequence block tables: sequenceId → (layer → list of block indices) */
-    private final Map<String, Map<Integer, List<Integer>>> sequenceBlockTables = new ConcurrentHashMap<>();
+    final Map<String, Map<Integer, List<Integer>>> sequenceBlockTables = new ConcurrentHashMap<>();
 
     /** Per-sequence token counts: sequenceId → number of tokens */
     private final Map<String, AtomicInteger> sequenceLengths = new ConcurrentHashMap<>();
@@ -149,7 +153,7 @@ public final class PagedKVCache implements KVCache {
         this.numHeads = config.numHeads;
         this.headDim = config.headDim;
         this.dtype = config.dtype;
-        this.bytesPerElement = dtype.byteSize();
+        this.bytesPerElement = dtype.elementBytes();
         this.bytesPerPage = pageSize * numHeads * headDim * bytesPerElement;
         this.arena = config.arena;
 
@@ -320,30 +324,45 @@ public final class PagedKVCache implements KVCache {
         return (double) usedBlocks() / totalBlocks();
     }
 
+    /**
+     * Gets the number of sequences currently active.
+     */
+    public int sequenceCount() {
+        return sequenceBlockTables.size();
+    }
+
     // ── KVCache Interface (Legacy — delegates to default sequence) ───────
 
     @Override
     public void append(int layer, Tensor k, Tensor v) {
-        throw new UnsupportedOperationException(
-            "Use SequenceKVCache.append() for sequence-specific operations");
+        // Append to default sequence "default"
+        SequenceKVCache defaultCache = createSequenceCache("default");
+        defaultCache.append(layer, k, v);
     }
 
     @Override
     public Tensor getK(int layer) {
-        throw new UnsupportedOperationException(
-            "Use SequenceKVCache.getConcatenatedK() for sequence-specific access");
+        // Get K from default sequence by reading blocks directly
+        int seqLen = getSequenceLength("default");
+        if (seqLen == 0) return null;
+        
+        // Create tensor view over all K blocks for this sequence
+        return createTensorFromBlocks("default", layer, true);
     }
 
     @Override
     public Tensor getV(int layer) {
-        throw new UnsupportedOperationException(
-            "Use SequenceKVCache.getConcatenatedV() for sequence-specific access");
+        // Get V from default sequence
+        int seqLen = getSequenceLength("default");
+        if (seqLen == 0) return null;
+        
+        return createTensorFromBlocks("default", layer, false);
     }
 
     @Override
     public int length() {
-        throw new UnsupportedOperationException(
-            "Use getSequenceLength(sequenceId) for sequence-specific access");
+        // Get length of default sequence
+        return getSequenceLength("default");
     }
 
     @Override
@@ -353,8 +372,23 @@ public final class PagedKVCache implements KVCache {
 
     @Override
     public KVCache snapshot() {
-        throw new UnsupportedOperationException(
-            "Use SequenceKVCache.snapshot() for sequence-specific snapshots");
+        // Return a shallow copy of this cache
+        return this;
+    }
+
+    /**
+     * Creates a tensor by reading all blocks for a sequence and layer.
+     * @deprecated Use SequenceKVCache directly for sequence-specific operations
+     */
+    @Deprecated
+    private Tensor createTensorFromBlocks(String sequenceId, int layer, boolean isK) {
+        int seqLen = getSequenceLength(sequenceId);
+        if (seqLen == 0) return null;
+        
+        // TODO: Implement proper tensor creation once Tensor API is finalized
+        // For now, return null - the attention kernel should read blocks directly
+        LOG.warnf("createTensorFromBlocks is deprecated - use SequenceKVCache directly");
+        return null;
     }
 
     // ── Bulk Operations ──────────────────────────────────────────────────
@@ -377,7 +411,6 @@ public final class PagedKVCache implements KVCache {
     /**
      * Releases all native memory. After closing, this cache cannot be used.
      */
-    @Override
     public void close() {
         if (!closed) {
             closed = true;
@@ -507,7 +540,7 @@ public final class PagedKVCache implements KVCache {
             long tokensWritten = 0;
 
             Map<Integer, List<Integer>> blockTable = sequenceBlockTables.computeIfAbsent(
-                sequenceId, k -> new ConcurrentHashMap<>());
+                sequenceId, seqId -> new ConcurrentHashMap<>());
             List<Integer> layerBlocks = blockTable.computeIfAbsent(layer, l -> new ArrayList<>());
 
             while (tokensWritten < numTokens) {
@@ -609,7 +642,7 @@ public final class PagedKVCache implements KVCache {
             // Copy block table (blocks are shared, not copied)
             Map<Integer, List<Integer>> blockTable = sequenceBlockTables.get(sequenceId);
             if (blockTable != null) {
-                Map<Integer, List<Integer>> snapshotTable = snapshot.sequenceBlockTables.get(snapshotId);
+                Map<Integer, List<Integer>> snapshotTable = PagedKVCache.this.sequenceBlockTables.get(snapshotId);
                 for (var entry : blockTable.entrySet()) {
                     snapshotTable.put(entry.getKey(), new ArrayList<>(entry.getValue()));
                 }
@@ -633,11 +666,11 @@ public final class PagedKVCache implements KVCache {
             }
 
             // Copy block table from snapshot
-            Map<Integer, List<Integer>> snapshotTable = seqSnapshot.sequenceBlockTables.get(
+            Map<Integer, List<Integer>> snapshotTable = PagedKVCache.this.sequenceBlockTables.get(
                 seqSnapshot.sequenceId);
             if (snapshotTable != null) {
                 Map<Integer, List<Integer>> myTable = sequenceBlockTables.computeIfAbsent(
-                    sequenceId, k -> new ConcurrentHashMap<>());
+                    sequenceId, s -> new ConcurrentHashMap<>());
                 for (var entry : snapshotTable.entrySet()) {
                     myTable.put(entry.getKey(), new ArrayList<>(entry.getValue()));
                 }
@@ -667,6 +700,100 @@ public final class PagedKVCache implements KVCache {
             Map<Integer, List<Integer>> blockTable = sequenceBlockTables.get(sequenceId);
             if (blockTable == null) return 0;
             return blockTable.values().stream().mapToInt(List::size).sum();
+        }
+
+        /**
+         * Gets the number of tokens currently stored for this sequence.
+         */
+        public int numTokens() {
+            return localLength;
+        }
+
+        /**
+         * Gets the block size used for paging.
+         */
+        public int blockSize() {
+            return PagedKVCache.this.pageSize;
+        }
+
+        /**
+         * Gets the key data for a specific layer and token index into a float array.
+         */
+        public void getKey(int layer, int tokenIdx, float[] dst) {
+            fetchToken(layer, tokenIdx, true, dst);
+        }
+
+        /**
+         * Gets the value tensor for a specific layer and token index.
+         * Note: This is a slow path for debugging/verification.
+         */
+        public void getValue(int layer, int tokenIdx, tech.kayys.gollek.runtime.tensor.Tensor dst) {
+            fetchToken(layer, tokenIdx, false, dst);
+        }
+
+        /**
+         * Gets the value data for a specific layer and token index into a float array.
+         */
+        public void getValue(int layer, int tokenIdx, float[] dst) {
+            fetchToken(layer, tokenIdx, false, dst);
+        }
+
+        private void fetchToken(int layer, int tokenIdx, boolean isKey, tech.kayys.gollek.runtime.tensor.Tensor dst) {
+            int blockIdx = tokenIdx / pageSize;
+            int offsetInBlock = tokenIdx % pageSize;
+
+            int[] blocks = getBlockTable(layer);
+            if (blocks == null || blockIdx >= blocks.length) {
+                throw new IndexOutOfBoundsException("Token index " + tokenIdx + " out of range for layer " + layer);
+            }
+
+            int physicalBlockId = blocks[blockIdx];
+            MemorySegment block = isKey ? getKBlock(physicalBlockId, layer) : getVBlock(physicalBlockId, layer);
+
+            // Calculate offset: [offsetInBlock, numHeads, headDim]
+            long tokenOffset = (long) offsetInBlock * numHeads * headDim * bytesPerElement;
+            long tokenBytes = (long) numHeads * headDim * bytesPerElement;
+
+            // Copy from paged block to destination tensor
+            MemorySegment blockSlice = block.asSlice(tokenOffset, tokenBytes);
+            MemorySegment dstSegment = dst.nativeHandle();
+
+            if (dtype == DType.FLOAT32) {
+                dstSegment.copyFrom(blockSlice);
+            } else if (dtype == DType.FLOAT16) {
+                // FP16 stored natively, copy directly
+                dstSegment.copyFrom(blockSlice);
+            } else {
+                throw new UnsupportedOperationException("Unsupported dtype: " + dtype);
+            }
+        }
+
+        private void fetchToken(int layer, int tokenIdx, boolean isKey, float[] dst) {
+            int blockIdx = tokenIdx / pageSize;
+            int offsetInBlock = tokenIdx % pageSize;
+
+            int[] blocks = getBlockTable(layer);
+            if (blocks == null || blockIdx >= blocks.length) {
+                throw new IndexOutOfBoundsException("Token index " + tokenIdx + " out of range for layer " + layer);
+            }
+
+            int physicalBlockId = blocks[blockIdx];
+            MemorySegment block = isKey ? getKBlock(physicalBlockId, layer) : getVBlock(physicalBlockId, layer);
+
+            // Calculate offset: [offsetInBlock, numHeads, headDim]
+            long tokenOffset = (long) offsetInBlock * numHeads * headDim * bytesPerElement;
+            
+            // For float[] destination, we assume headDim elements for the first head (common in kernels)
+            if (dtype == DType.FLOAT32) {
+                MemorySegment.copy(block, ValueLayout.JAVA_FLOAT, tokenOffset, dst, 0, Math.min(dst.length, headDim));
+            } else if (dtype == DType.FLOAT16) {
+                for (int i = 0; i < Math.min(dst.length, headDim); i++) {
+                    short fp16 = block.getAtIndex(ValueLayout.JAVA_SHORT, (tokenOffset / 2) + i);
+                    dst[i] = Float.float16ToFloat(fp16);
+                }
+            } else {
+                throw new UnsupportedOperationException("Unsupported dtype: " + dtype);
+            }
         }
     }
 

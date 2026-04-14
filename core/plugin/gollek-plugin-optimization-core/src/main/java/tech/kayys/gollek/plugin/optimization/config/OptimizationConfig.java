@@ -15,31 +15,6 @@ import java.util.Objects;
  *   <li><b>threshold</b> - Performance threshold for activation (default: 0)</li>
  * </ul>
  * 
- * <h2>Usage with Quarkus Config</h2>
- * <pre>
- * # application.properties
- * gollek.optimizations.paged-attention.enabled=true
- * gollek.optimizations.paged-attention.block-size=16
- * gollek.optimizations.paged-attention.total-blocks=2048
- * 
- * gollek.optimizations.kv-cache.enabled=true
- * gollek.optimizations.kv-cache.eviction-policy=LRU
- * 
- * gollek.optimizations.flash-attention.enabled=true
- * gollek.optimizations.flash-attention.min-seq-len=512
- * </pre>
- * 
- * <h2>Programmatic Configuration</h2>
- * <pre>
- * OptimizationConfig config = OptimizationConfig.builder()
- *     .pluginId("paged-attention")
- *     .enabled(true)
- *     .priority(10)
- *     .deviceFilter(List.of("hopper", "ada-lovelace"))
- *     .customProperty("blockSize", "16")
- *     .build();
- * </pre>
- * 
  * @since 0.1.0
  */
 public final class OptimizationConfig {
@@ -75,28 +50,17 @@ public final class OptimizationConfig {
         this.customProperties = Map.copyOf(builder.customProperties);
     }
 
-    /**
-     * Creates a builder for this configuration.
-     */
     public static Builder builder(String pluginId) {
         return new Builder(pluginId);
     }
 
-    /**
-     * Creates a default enabled configuration for a plugin.
-     */
     public static OptimizationConfig enabled(String pluginId) {
         return builder(pluginId).build();
     }
 
-    /**
-     * Creates a disabled configuration for a plugin.
-     */
     public static OptimizationConfig disabled(String pluginId) {
         return builder(pluginId).enabled(false).build();
     }
-
-    // ── Getters ─────────────────────────────────────────────────────────
 
     public String pluginId() { return pluginId; }
     public boolean enabled() { return enabled; }
@@ -106,16 +70,10 @@ public final class OptimizationConfig {
     public long maxMemoryOverheadMB() { return maxMemoryOverheadMB; }
     public Map<String, String> customProperties() { return customProperties; }
 
-    /**
-     * Gets a custom property value, or default if not set.
-     */
     public String getCustomProperty(String key, String defaultValue) {
         return customProperties.getOrDefault(key, defaultValue);
     }
 
-    /**
-     * Gets a custom property as an integer.
-     */
     public int getCustomPropertyAsInt(String key, int defaultValue) {
         String value = customProperties.get(key);
         if (value == null) return defaultValue;
@@ -126,20 +84,14 @@ public final class OptimizationConfig {
         }
     }
 
-    /**
-     * Gets a custom property as a boolean.
-     */
     public boolean getCustomPropertyAsBoolean(String key, boolean defaultValue) {
         String value = customProperties.get(key);
         if (value == null) return defaultValue;
         return Boolean.parseBoolean(value);
     }
 
-    /**
-     * Checks if this optimization should be applied for a specific device type.
-     */
     public boolean matchesDevice(String deviceType) {
-        if (deviceFilter.isEmpty()) return true;  // No filter = all devices
+        if (deviceFilter.isEmpty()) return true;
         return deviceFilter.contains(deviceType.toLowerCase());
     }
 
@@ -148,8 +100,6 @@ public final class OptimizationConfig {
         return String.format("OptimizationConfig{plugin='%s', enabled=%s, priority=%d, devices=%s}",
             pluginId, enabled, priority, deviceFilter.isEmpty() ? "all" : deviceFilter);
     }
-
-    // ── Builder ─────────────────────────────────────────────────────────
 
     public static final class Builder {
         private final String pluginId;
@@ -164,47 +114,27 @@ public final class OptimizationConfig {
             this.pluginId = pluginId;
         }
 
-        public Builder enabled(boolean enabled) {
-            this.enabled = enabled;
-            return this;
-        }
-
-        public Builder priority(int priority) {
-            this.priority = priority;
-            return this;
-        }
-
+        public Builder enabled(boolean enabled) { this.enabled = enabled; return this; }
+        public Builder priority(int priority) { this.priority = priority; return this; }
         public Builder deviceFilter(java.util.List<String> deviceFilter) {
             this.deviceFilter.clear();
             this.deviceFilter.addAll(deviceFilter);
             return this;
         }
-
         public Builder addDeviceFilter(String deviceType) {
             this.deviceFilter.add(deviceType.toLowerCase());
             return this;
         }
-
-        public Builder minSequenceLength(int minSequenceLength) {
-            this.minSequenceLength = minSequenceLength;
-            return this;
-        }
-
-        public Builder maxMemoryOverheadMB(long maxMemoryOverheadMB) {
-            this.maxMemoryOverheadMB = maxMemoryOverheadMB;
-            return this;
-        }
-
+        public Builder minSequenceLength(int minSequenceLength) { this.minSequenceLength = minSequenceLength; return this; }
+        public Builder maxMemoryOverheadMB(long maxMemoryOverheadMB) { this.maxMemoryOverheadMB = maxMemoryOverheadMB; return this; }
         public Builder customProperty(String key, String value) {
             this.customProperties.put(key, value);
             return this;
         }
-
         public Builder fromMap(Map<String, String> properties) {
             this.customProperties.putAll(properties);
             return this;
         }
-
         public OptimizationConfig build() {
             return new OptimizationConfig(this);
         }

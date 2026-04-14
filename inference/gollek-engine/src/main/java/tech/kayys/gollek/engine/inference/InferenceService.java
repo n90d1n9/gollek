@@ -311,24 +311,59 @@ public class InferenceService {
                                         (currentTime - startTime));
                             }
 
+                            // Preserve original chunk modality (TEXT, IMAGE, etc.)
+                            // Only re-wrap if we need to add sequence numbers or usage info
                             if (chunk.finished()) {
                                 long totalDuration = currentTime - startTime;
                                 StreamingInferenceChunk.ChunkUsage usage = new StreamingInferenceChunk.ChunkUsage(0,
                                         sequence, totalDuration);
-                                emitter.emit(StreamingInferenceChunk.finalTextChunk(
-                                        requestId,
-                                        sequence,
-                                        chunk.delta(),
-                                        usage));
+                                
+                                // Preserve the original chunk's modality and data
+                                if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                    // For IMAGE chunks, preserve the image data
+                                    emitter.emit(new StreamingInferenceChunk(
+                                            requestId,
+                                            sequence,
+                                            chunk.modality(),
+                                            chunk.delta(),
+                                            chunk.imageDeltaBase64(),
+                                            true,
+                                            "stop",
+                                            usage,
+                                            chunk.emittedAt(),
+                                            chunk.metadata()));
+                                } else {
+                                    // For TEXT chunks, use the original helper
+                                    emitter.emit(StreamingInferenceChunk.finalTextChunk(
+                                            requestId,
+                                            sequence,
+                                            chunk.delta(),
+                                            usage));
+                                }
 
                                 metrics.recordSuccess(requestId, request.getModel(), "unified", totalDuration);
                                 log.info("Streaming completed for request %s: duration=%d ms, chunks=%d",
                                         requestId, totalDuration, sequence);
                             } else {
-                                emitter.emit(StreamingInferenceChunk.of(
-                                        requestId,
-                                        sequence,
-                                        chunk.delta()));
+                                // Preserve original modality for non-final chunks
+                                if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                    emitter.emit(new StreamingInferenceChunk(
+                                            requestId,
+                                            sequence,
+                                            chunk.modality(),
+                                            chunk.delta(),
+                                            chunk.imageDeltaBase64(),
+                                            chunk.finished(),
+                                            chunk.finishReason(),
+                                            chunk.usage(),
+                                            chunk.emittedAt(),
+                                            chunk.metadata()));
+                                } else {
+                                    emitter.emit(StreamingInferenceChunk.of(
+                                            requestId,
+                                            sequence,
+                                            chunk.delta()));
+                                }
                             }
                         },
                         failure -> {

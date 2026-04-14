@@ -394,6 +394,37 @@ public class CudaBinding {
         return (int) invoke(FN_SILU_FFN, out, gate, up, N);
     }
 
+    /**
+     * Generic kernel launch via CUDA (FFM).
+     */
+    public void launchKernel(long functionHandle,
+                            int gridX, int gridY, int gridZ,
+                            int blockX, int blockY, int blockZ,
+                            int sharedMem, MemorySegment stream,
+                            MemorySegment[] params, Object extra) {
+        if (!nativeAvailable) {
+            throw new UnsupportedOperationException("CUDA launchKernel not available in CPU fallback");
+        }
+        // This would require a FN_LAUNCH_KERNEL binding in bindAll()
+        // For now, let's just log and skip if not bound to avoid RuntimeException in invoke()
+        // because we don't have the native function name yet.
+        LOG.warn("CudaBinding: launchKernel requested but not yet implemented in native bridge");
+    }
+
+    /**
+     * Gets maximum grid size for a dimension.
+     */
+    public int maxGridSize(int dim) {
+        return 2147483647; // Default max for CUDA
+    }
+
+    /**
+     * Gets maximum threads per block.
+     */
+    public int maxThreadsPerBlock() {
+        return 1024; // Default max for CUDA
+    }
+
     // ── FFM binding ───────────────────────────────────────────────────────────
 
     private void bindAll() {

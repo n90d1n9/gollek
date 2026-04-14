@@ -122,6 +122,13 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-hibernate-reactive-panache</artifactId>
+            <exclusions>
+                <!-- Exclude devservices that cause JBang/Quarkus bootstrap issues -->
+                <exclusion>
+                    <groupId>io.quarkus</groupId>
+                    <artifactId>quarkus-devservices</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
 

@@ -2,52 +2,40 @@
 
 Practical examples using Gollek SDK with Jupyter notebooks and jbang scripts.
 
+## 🆕 v0.3 New Examples
+
+### JBang Examples
+- **`jbang/sdk/unified_framework_demo.java`** - Comprehensive demo of all v0.3 capabilities
+- **`jbang/sdk/graph_fusion_example.java`** - Operation fusion benchmark
+
+### Jupyter Notebooks
+- **`jupyter/01-getting-started.ipynb`** - SDK basics, tensors, autograd, simple NN ✅
+- **`jupyter/06-llm-integration.ipynb`** - Unified Runner, Batching, Fusion, Quantization ✅
+
 ## Jupyter Notebooks
 
-### 1. Getting Started Notebook
+### 1. Getting Started
 
-**File**: `notebooks/01-getting-started.ipynb`
+**File**: `jupyter/01-getting-started.ipynb` ✅
 
 Topics:
 - Importing Gollek SDK
-- Creating simple layers
+- Tensor creation and operations
+- Autograd and gradient computation
 - Building sequential models
 - Running forward passes
-- Understanding tensor shapes
+- No-grad inference mode
 
-### 2. Neural Network Training
+### 6. LLM Integration (v0.3)
 
-**File**: `notebooks/02-neural-network-training.ipynb`
-
-Topics:
-- Building a classifier
-- Setting up optimizers (SGD, Adam)
-- Computing loss (CrossEntropyLoss)
-- Training loop implementation
-- Monitoring loss and accuracy
-
-### 3. Advanced Activations
-
-**File**: `notebooks/03-advanced-activations.ipynb`
+**File**: `jupyter/06-llm-integration.ipynb` ✅
 
 Topics:
-- Comparing activation functions (ReLU, ELU, Mish, etc.)
-- When to use each activation
-- Visualizing activation curves
-- Impact on training dynamics
-
-### 4. Transformers and Attention
-
-**File**: `notebooks/04-transformers.ipynb`
-
-Topics:
-- Multi-head attention mechanism
-- Causal masking for autoregressive models
-- Transformer encoder/decoder
-- Positional embeddings
-- Sequence-to-sequence models
-
-### 5. Batch Normalization
+- Unified Model Runner (GGUF, ONNX, LiteRT, TensorRT)
+- Dynamic Batching Engine
+- Graph Fusion for optimized execution
+- Quantization (INT4/INT8/FP8 with AWQ/GPTQ)
+- Shared Memory Pool for zero-copy allocation
 
 **File**: `notebooks/05-batch-normalization.ipynb`
 

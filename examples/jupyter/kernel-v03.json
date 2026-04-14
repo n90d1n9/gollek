@@ -1,0 +1,27 @@
+{
+  "display_name": "Gollek SDK v0.3 (Java 25)",
+  "language": "java",
+  "argv": [
+    "/opt/homebrew/bin/jbang",
+    "--java",
+    "25",
+    "--ea",
+    "-R-ea",
+    "--enable-preview",
+    "--add-modules",
+    "jdk.incubator.vector",
+    "-R--enable-preview",
+    "-R--add-modules",
+    "jdk.incubator.vector",
+    "--enable-native-access=ALL-UNNAMED",
+    "org.dflib.jjava:jjava-launcher:1.0-a4",
+    "%{deps:org.dflib.jjava:jjava:1.0-a4@fatjar}",
+    "{connection_file}"
+  ],
+  "env": {
+    "JJAVA_REPOS": "local,mavencentral,github=https://maven.pkg.github.com/bhangun/gollek",
+    "JJAVA_DEPS": "tech.kayys.gollek:gollek-ml-api:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-ml:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-optimize:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-onnx:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-tensor:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-autograd:0.3.0-SNAPSHOT,tech.kayys.gollek:gollek-ml-nn:0.3.0-SNAPSHOT",
+    "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+  },
+  "interrupt_mode": "message"
+}

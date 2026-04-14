@@ -91,10 +91,12 @@
             <artifactId>commons-io</artifactId>
             <version>2.18.0</version>
         </dependency>
+<!--
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-ext-runner-gguf</artifactId>
         </dependency>
+-->
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-runner-libtorch</artifactId>

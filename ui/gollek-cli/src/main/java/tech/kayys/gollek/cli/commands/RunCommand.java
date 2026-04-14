@@ -120,6 +120,25 @@ public class RunCommand implements Runnable {
     @Option(names = { "--force" }, description = "Force re-download and replace existing files", defaultValue = "false")
     boolean force;
 
+    // Stable Diffusion specific parameters
+    @Option(names = { "--seed" }, description = "Random seed for image generation (default: random)")
+    Long seed;
+
+    @Option(names = { "--output", "-o" }, description = "Output image file path (default: output.png)")
+    String outputPath;
+
+    @Option(names = { "--steps" }, description = "Number of denoising steps (default: 20)")
+    Integer steps;
+
+    @Option(names = { "--guidance-scale", "--cfg" }, description = "Classifier-free guidance scale (default: 7.5)")
+    Float guidanceScale;
+
+    @Option(names = { "--width" }, description = "Output image width in pixels (default: 512, must be multiple of 64)")
+    Integer width;
+
+    @Option(names = { "--height" }, description = "Output image height in pixels (default: 512, must be multiple of 64)")
+    Integer height;
+
     private static final String RESET = "\u001B[0m";
     private static final String GREEN = "\u001B[32m";
     private static final String CYAN = "\u001B[36m";
@@ -330,6 +349,34 @@ public class RunCommand implements Runnable {
                 requestBuilder.parameter("model_path", modelId);
             }
 
+            // Stable Diffusion parameters
+            if (seed != null) {
+                requestBuilder.parameter("seed", seed);
+            }
+            if (steps != null) {
+                requestBuilder.parameter("steps", steps);
+            }
+            if (guidanceScale != null) {
+                requestBuilder.parameter("guidance_scale", guidanceScale);
+            }
+            if (outputPath != null) {
+                requestBuilder.parameter("output_path", outputPath);
+            }
+            if (width != null) {
+                if (width % 64 != 0) {
+                    System.err.println("Warning: Width should be a multiple of 64 for Stable Diffusion. Adjusting to " + ((width + 32) / 64 * 64));
+                    width = (width + 32) / 64 * 64;
+                }
+                requestBuilder.parameter("width", width);
+            }
+            if (height != null) {
+                if (height % 64 != 0) {
+                    System.err.println("Warning: Height should be a multiple of 64 for Stable Diffusion. Adjusting to " + ((height + 32) / 64 * 64));
+                    height = (height + 32) / 64 * 64;
+                }
+                requestBuilder.parameter("height", height);
+            }
+
             if (systemPrompt != null && !systemPrompt.isEmpty()) {
                 requestBuilder.message(Message.system(systemPrompt));
             }
@@ -362,15 +409,31 @@ public class RunCommand implements Runnable {
                 // Streaming mode
                 java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
                 java.io.ByteArrayOutputStream imageBuffer = new java.io.ByteArrayOutputStream();
+                java.util.concurrent.atomic.AtomicReference<String> lastProgress = new java.util.concurrent.atomic.AtomicReference<>();
 
                 sdk.streamCompletion(request)
                         .subscribe().with(
                                 chunk -> {
+                                    // Debug: log all chunks to see what we're receiving
+                                    if (parentCommand != null && parentCommand.verbose) {
+                                        System.err.println("\n[DEBUG] Chunk received: modality=" + chunk.modality() + 
+                                            ", index=" + chunk.index() + 
+                                            ", hasImageDelta=" + (chunk.imageDeltaBase64() != null) +
+                                            ", hasDelta=" + (chunk.getDelta() != null));
+                                    }
+                                    
                                     if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                        if (parentCommand != null && parentCommand.verbose) {
+                                            System.err.println("\n[DEBUG] IMAGE chunk detected, size: " + 
+                                                (chunk.imageDeltaBase64() != null ? chunk.imageDeltaBase64().length() : 0) + " chars");
+                                        }
                                         if (chunk.imageDeltaBase64() != null) {
                                             try {
                                                 byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
                                                 imageBuffer.write(decoded);
+                                                if (parentCommand != null && parentCommand.verbose) {
+                                                    System.err.println("\n[DEBUG] Image buffer size: " + imageBuffer.size() + " bytes");
+                                                }
                                             } catch (Exception e) {
                                                 System.err.println("\nFailed to decode image chunk: " + e.getMessage());
                                             }
@@ -380,7 +443,14 @@ public class RunCommand implements Runnable {
 
                                     String delta = chunk.getDelta();
                                     if (delta != null) {
-                                        if (enableJsonSse) {
+                                        // Check if this is a progress message (SD-style)
+                                        if (delta.startsWith("[") && delta.contains("]")) {
+                                            lastProgress.set(delta);
+                                            if (!enableJsonSse) {
+                                                System.out.print("\r" + CYAN + delta + RESET + "  ");
+                                                System.out.flush();
+                                            }
+                                        } else if (enableJsonSse) {
                                             printOpenAiSseDelta(request.getRequestId(), request.getModel(), delta);
                                         } else {
                                             System.out.print(delta);
@@ -396,12 +466,21 @@ public class RunCommand implements Runnable {
                                 },
                                 () -> {
                                     long duration = System.currentTimeMillis() - startTime;
+
+                                    if (parentCommand != null && parentCommand.verbose) {
+                                        System.err.println("\n[DEBUG] onComplete - imageBuffer.size()=" + imageBuffer.size() + " bytes");
+                                    }
                                     
                                     if (imageBuffer.size() > 0) {
                                         try {
-                                            Path outputPath = Path.of("output.png");
-                                            Files.write(outputPath, imageBuffer.toByteArray());
-                                            System.out.println("\n" + GREEN + BOLD + "✓ Image saved to: " + RESET + outputPath.toAbsolutePath());
+                                            Path outPath = (outputPath != null && !outputPath.isEmpty()) 
+                                                ? Path.of(outputPath) 
+                                                : Path.of("output.png");
+                                            Files.write(outPath, imageBuffer.toByteArray());
+                                            System.out.println("\n" + GREEN + BOLD + "✓ Image saved to: " + RESET + outPath.toAbsolutePath());
+                                            
+                                            // Auto-open image on macOS
+                                            autoOpenImage(outPath);
                                         } catch (Exception e) {
                                             System.err.println("\nFailed to save image: " + e.getMessage());
                                         }
@@ -905,5 +984,35 @@ public class RunCommand implements Runnable {
                 || detail.contains("no gguf found")
                 || detail.contains("unsupported runtime format")
                 || detail.contains("checkpoint-only model");
+    }
+
+    /**
+     * Automatically opens the generated image using the system's default viewer.
+     * Supports macOS (open), Linux (xdg-open), and Windows (cmd /c start).
+     */
+    private void autoOpenImage(Path imagePath) {
+        try {
+            String os = System.getProperty("os.name").toLowerCase();
+            ProcessBuilder pb = null;
+            
+            if (os.contains("mac")) {
+                pb = new ProcessBuilder("open", imagePath.toAbsolutePath().toString());
+            } else if (os.contains("linux")) {
+                pb = new ProcessBuilder("xdg-open", imagePath.toAbsolutePath().toString());
+            } else if (os.contains("windows")) {
+                pb = new ProcessBuilder("cmd", "/c", "start", imagePath.toAbsolutePath().toString());
+            }
+            
+            if (pb != null) {
+                pb.inheritIO();
+                Process process = pb.start();
+                // Don't wait for viewer to finish
+            }
+        } catch (Exception e) {
+            // Silently fail - opening viewer is optional
+            if (parentCommand != null && parentCommand.verbose) {
+                System.err.println("Debug: Failed to auto-open image: " + e.getMessage());
+            }
+        }
     }
 }

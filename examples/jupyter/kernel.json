@@ -1,0 +1,18 @@
+{
+  "display_name": "Gollek ML (Java 25)",
+  "language": "java",
+  "argv": [
+    "/opt/homebrew/bin/jbang",
+    "--java", "25",
+    "--enable-preview",
+    "-R=--add-modules=jdk.incubator.vector",
+    "-R=--enable-native-access=ALL-UNNAMED",
+    "org.dflib.jjava:jjava-launcher:1.0-a4",
+    "%{deps:org.dflib.jjava:jjava:1.0-a4@fatjar}",
+    "{connection_file}"
+  ],
+  "env": {
+    "JJAVA_DEPS": "file:///Users/bhangun/.gollek/jupyter/gollek-error-code-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-autograd-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-cnn-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-data-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-hub-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-ml-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-multimodal-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-nlp-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-nn-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-runtime-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-sdk-api-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-inference-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-model-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-multimodal-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-plugin-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-provider-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-runtime-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-transformer-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gson-2.13.2.jar,file:///Users/bhangun/.gollek/jupyter/jackson-annotations-2.21.jar,file:///Users/bhangun/.gollek/jupyter/jackson-core-2.21.1.jar,file:///Users/bhangun/.gollek/jupyter/jackson-databind-2.15.2.jar,file:///Users/bhangun/.gollek/jupyter/slf4j-api-2.0.17.jar"
+  },
+  "interrupt_mode": "message"
+}

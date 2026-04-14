@@ -12,7 +12,28 @@
 
     <artifactId>gollek-onnx</artifactId>
     <name>gollek-onnx</name>
-    <description>ONNX Runtime integration — inference provider (stub — populate with source files)</description>
+    <description>ONNX Runtime integration — inference provider</description>
 
-    <!-- Intentionally no internal dependencies — ONNX is an external runtime -->
+    <dependencies>
+        <!-- Gollek ML API -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-ml-ml</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Gollek SPI -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-spi-model</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
 </project>

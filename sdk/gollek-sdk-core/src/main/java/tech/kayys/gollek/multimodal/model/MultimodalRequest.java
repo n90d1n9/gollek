@@ -1,5 +1,7 @@
 package tech.kayys.gollek.multimodal.model;
 
+import tech.kayys.gollek.spi.model.ModalityType;
+
 import java.util.Map;
 
 /**

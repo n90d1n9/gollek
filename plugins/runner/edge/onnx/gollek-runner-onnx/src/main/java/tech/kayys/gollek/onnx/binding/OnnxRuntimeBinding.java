@@ -132,40 +132,48 @@ public class OnnxRuntimeBinding {
     // ── ORT function names (resolved through the vtable) ─────────────────────
     private static final String FN_GET_API_BASE = "OrtGetApiBase";
 
-    // Stored vtable slot indices (OrtApi struct, ABI version 17 = ORT 1.19.x)
-    // Index = byte offset / 8 (each slot is a pointer on 64-bit)
-    private static final int SLOT_CREATE_ENV = 5;
-    private static final int SLOT_CREATE_SESSION_OPTIONS = 9;
-    private static final int SLOT_SET_INTRA_OP_THREADS = 11;
-    private static final int SLOT_SET_INTER_OP_THREADS = 12;
-    private static final int SLOT_SET_GRAPH_OPT_LEVEL = 13;
-    private static final int SLOT_APPEND_CUDA_EP = 84;
-    private static final int SLOT_APPEND_ROCM_EP = 120;
-    private static final int SLOT_CREATE_SESSION = 22;
-    private static final int SLOT_CREATE_RUN_OPTIONS = 34;
-    private static final int SLOT_SESSION_INPUT_COUNT = 24;
-    private static final int SLOT_SESSION_OUTPUT_COUNT = 26;
+    // Stored vtable slot indices (OrtApi struct, ORT 1.19.2)
+    // Counted from struct OrtApi { in onnxruntime_c_api.h
+    // Each ORT_API2_STATUS / ORT_CLASS_RELEASE entry is one slot (0-indexed)
+    private static final int SLOT_CREATE_STATUS = 0;
+    private static final int SLOT_GET_ERROR_CODE = 1;
+    private static final int SLOT_GET_ERROR_MESSAGE = 2;
+    private static final int SLOT_RELEASE_STATUS = 93;
+    private static final int SLOT_CREATE_ENV = 3;
+    private static final int SLOT_CREATE_SESSION_OPTIONS = 10;
+    private static final int SLOT_SET_INTRA_OP_THREADS = 24;
+    private static final int SLOT_SET_INTER_OP_THREADS = 25;
+    private static final int SLOT_SET_GRAPH_OPT_LEVEL = 23;
+    private static final int SLOT_GET_ALLOCATOR_WITH_DEFAULT_OPTIONS = 78;
+    private static final int SLOT_APPEND_CUDA_EP = 152;
+    private static final int SLOT_APPEND_ROCM_EP = 153;
+    private static final int SLOT_CREATE_SESSION = 7;
+    private static final int SLOT_CREATE_RUN_OPTIONS = 39;
+    private static final int SLOT_SESSION_INPUT_COUNT = 30;
+    private static final int SLOT_SESSION_OUTPUT_COUNT = 31;
     private static final int SLOT_SESSION_GET_INPUT_NAME = 36;
     private static final int SLOT_SESSION_GET_OUTPUT_NAME = 37;
-    private static final int SLOT_CREATE_CPU_MEMORY_INFO = 60;
-    private static final int SLOT_CREATE_TENSOR_WITH_DATA = 61;
-    private static final int SLOT_RUN = 23;
-    private static final int SLOT_GET_TENSOR_MUTABLE_DATA = 67;
-    private static final int SLOT_GET_TENSOR_TYPE_AND_SHAPE = 69;
-    private static final int SLOT_GET_DIMENSIONS_COUNT = 71;
-    private static final int SLOT_GET_DIMENSIONS = 72;
-    private static final int SLOT_RELEASE_SESSION = 27;
-    private static final int SLOT_RELEASE_SESSION_OPTIONS = 28;
-    private static final int SLOT_RELEASE_ENV = 18;
-    private static final int SLOT_RELEASE_VALUE = 35;
-    private static final int SLOT_RELEASE_RUN_OPTIONS = 44;
-    private static final int SLOT_RELEASE_MEMORY_INFO = 62;
+    private static final int SLOT_CREATE_CPU_MEMORY_INFO = 69;
+    private static final int SLOT_CREATE_TENSOR_WITH_DATA = 49;
+    private static final int SLOT_RUN = 9;
+    private static final int SLOT_GET_TENSOR_MUTABLE_DATA = 51;
+    private static final int SLOT_GET_TENSOR_TYPE_AND_SHAPE = 65;
+    private static final int SLOT_GET_DIMENSIONS_COUNT = 61;
+    private static final int SLOT_GET_DIMENSIONS = 62;
+    private static final int SLOT_RELEASE_SESSION = 95;
+    private static final int SLOT_RELEASE_SESSION_OPTIONS = 100;
+    private static final int SLOT_RELEASE_ENV = 92;
+    private static final int SLOT_RELEASE_VALUE = 96;
+    private static final int SLOT_RELEASE_RUN_OPTIONS = 97;
+    private static final int SLOT_RELEASE_MEMORY_INFO = 94;
+
 
     // ORT enum constants
     public static final int ORT_LOGGING_LEVEL_WARNING = 2;
     public static final int ORT_LOGGING_LEVEL_ERROR = 3;
     public static final int GRAPH_OPT_LEVEL_ENABLE_ALL = 99;
     public static final int ONNX_TENSOR_FLOAT = 1; // ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+    public static final int ONNX_TENSOR_INT32 = 6;
     public static final int ONNX_TENSOR_INT64 = 7;
     public static final int ORT_DEVICE_ALLOCATOR = 0;
     public static final int ORT_MEM_TYPE_CPU_INPUT = -2;
@@ -241,16 +249,18 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             throw unsupported("createEnv");
         try (Arena a = Arena.ofConfined()) {
-            MemorySegment logIdSeg = a.allocateFrom(logId);
+            // CRITICAL: logId must remain valid for the entire lifetime of the OrtEnv.
+            // Using Arena.global() for the string ensures it doesn't dangle.
+            MemorySegment logIdSeg = Arena.global().allocateFrom(logId);
             MemorySegment envPtr = a.allocate(ValueLayout.ADDRESS);
-            int status = (int) vtable(SLOT_CREATE_ENV,
+            MemorySegment status = (MemorySegment) vtable(SLOT_CREATE_ENV,
                     FunctionDescriptor.of(
-                            ValueLayout.JAVA_INT,
+                            ValueLayout.ADDRESS,
                             ValueLayout.JAVA_INT, // logging level
                             ValueLayout.ADDRESS, // log_id
                             ValueLayout.ADDRESS // OrtEnv** out
                     )).invokeExact(ORT_LOGGING_LEVEL_WARNING, logIdSeg, envPtr);
-            checkStatus(status, "CreateEnv");
+            checkStatusPtr(status, "CreateEnv");
             return envPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT CreateEnv failed", t);
@@ -278,10 +288,10 @@ public class OnnxRuntimeBinding {
             throw unsupported("createSessionOptions");
         try (Arena a = Arena.ofConfined()) {
             MemorySegment optsPtr = a.allocate(ValueLayout.ADDRESS);
-            int status = (int) vtable(SLOT_CREATE_SESSION_OPTIONS,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS))
+            MemorySegment status = (MemorySegment) vtable(SLOT_CREATE_SESSION_OPTIONS,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(optsPtr);
-            checkStatus(status, "CreateSessionOptions");
+            checkStatusPtr(status, "CreateSessionOptions");
             return optsPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT CreateSessionOptions failed", t);
@@ -292,10 +302,11 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             return;
         try {
-            vtable(SLOT_SET_INTRA_OP_THREADS,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_SET_INTRA_OP_THREADS,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT))
                     .invokeExact(opts, threads);
+            checkStatusPtr(status, "SetIntraOpNumThreads");
         } catch (Throwable t) {
             throw new RuntimeException("ORT SetIntraOpNumThreads failed", t);
         }
@@ -305,10 +316,11 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             return;
         try {
-            vtable(SLOT_SET_INTER_OP_THREADS,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_SET_INTER_OP_THREADS,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT))
                     .invokeExact(opts, threads);
+            checkStatusPtr(status, "SetInterOpNumThreads");
         } catch (Throwable t) {
             throw new RuntimeException("ORT SetInterOpNumThreads failed", t);
         }
@@ -318,10 +330,11 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             return;
         try {
-            vtable(SLOT_SET_GRAPH_OPT_LEVEL,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_SET_GRAPH_OPT_LEVEL,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT))
                     .invokeExact(opts, level);
+            checkStatusPtr(status, "SetGraphOptimizationLevel");
         } catch (Throwable t) {
             throw new RuntimeException("ORT SetGraphOptimizationLevel failed", t);
         }
@@ -341,7 +354,7 @@ public class OnnxRuntimeBinding {
             MemorySegment cudaOpts = a.allocate(256L, 8);
             cudaOpts.setAtIndex(ValueLayout.JAVA_INT, 0, deviceId);
             vtable(SLOT_APPEND_CUDA_EP,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(opts, cudaOpts);
         } catch (Throwable t) {
@@ -362,7 +375,7 @@ public class OnnxRuntimeBinding {
             MemorySegment rocmOpts = a.allocate(256L, 8);
             rocmOpts.setAtIndex(ValueLayout.JAVA_INT, 0, deviceId);
             vtable(SLOT_APPEND_ROCM_EP,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(opts, rocmOpts);
         } catch (Throwable t) {
@@ -437,14 +450,14 @@ public class OnnxRuntimeBinding {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment pathSeg = a.allocateFrom(modelPath);
             MemorySegment sessionPtr = a.allocate(ValueLayout.ADDRESS);
-            int status = (int) vtable(SLOT_CREATE_SESSION,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_CREATE_SESSION,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, // env
                             ValueLayout.ADDRESS, // model_path
                             ValueLayout.ADDRESS, // options
                             ValueLayout.ADDRESS // OrtSession** out
                     )).invokeExact(env, pathSeg, opts, sessionPtr);
-            checkStatus(status, "CreateSession for " + modelPath);
+            checkStatusPtr(status, "CreateSession for " + modelPath);
             return sessionPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT CreateSession failed", t);
@@ -456,10 +469,11 @@ public class OnnxRuntimeBinding {
             return 0;
         try (Arena a = Arena.ofConfined()) {
             MemorySegment countPtr = a.allocate(ValueLayout.JAVA_LONG);
-            vtable(SLOT_SESSION_INPUT_COUNT,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_SESSION_INPUT_COUNT,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(session, countPtr);
+            checkStatusPtr(status, "SessionGetInputCount");
             return countPtr.get(ValueLayout.JAVA_LONG, 0);
         } catch (Throwable t) {
             return 0;
@@ -471,13 +485,29 @@ public class OnnxRuntimeBinding {
             return 0;
         try (Arena a = Arena.ofConfined()) {
             MemorySegment countPtr = a.allocate(ValueLayout.JAVA_LONG);
-            vtable(SLOT_SESSION_OUTPUT_COUNT,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_SESSION_OUTPUT_COUNT,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(session, countPtr);
+            checkStatusPtr(status, "SessionGetOutputCount");
             return countPtr.get(ValueLayout.JAVA_LONG, 0);
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    public MemorySegment getAllocatorWithDefaultOptions() {
+        if (!nativeAvailable)
+            throw unsupported("getAllocatorWithDefaultOptions");
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment allocPtr = a.allocate(ValueLayout.ADDRESS);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_ALLOCATOR_WITH_DEFAULT_OPTIONS,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(allocPtr);
+            checkStatusPtr(status, "GetAllocatorWithDefaultOptions");
+            return allocPtr.get(ValueLayout.ADDRESS, 0);
+        } catch (Throwable t) {
+            throw new RuntimeException("ORT GetAllocatorWithDefaultOptions failed", t);
         }
     }
 
@@ -491,15 +521,19 @@ public class OnnxRuntimeBinding {
             return "input_" + index;
         try (Arena a = Arena.ofConfined()) {
             MemorySegment namePtr = a.allocate(ValueLayout.ADDRESS);
-            MemorySegment allocPtr = MemorySegment.NULL; // default allocator
-            vtable(SLOT_SESSION_GET_INPUT_NAME,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment allocator = getAllocatorWithDefaultOptions();
+            MemorySegment status = (MemorySegment) vtable(SLOT_SESSION_GET_INPUT_NAME,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
-                    .invokeExact(session, index, allocPtr, namePtr);
+                    .invokeExact(session, index, allocator, namePtr);
+            // We check status ptr inside this try-catch to avoid native failures
+            if (!isNull(status)) {
+                // If it fails, return a synthetic name
+                return "input_" + index;
+            }
             MemorySegment str = namePtr.get(ValueLayout.ADDRESS, 0);
-            return str.equals(MemorySegment.NULL) ? "input_" + index
-                    : str.reinterpret(256).getString(0);
+            return isNull(str) ? "input_" + index : str.reinterpret(256).getString(0);
         } catch (Throwable t) {
             return "input_" + index;
         }
@@ -510,17 +544,55 @@ public class OnnxRuntimeBinding {
             return "output_" + index;
         try (Arena a = Arena.ofConfined()) {
             MemorySegment namePtr = a.allocate(ValueLayout.ADDRESS);
-            MemorySegment allocPtr = MemorySegment.NULL;
-            vtable(SLOT_SESSION_GET_OUTPUT_NAME,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment allocator = getAllocatorWithDefaultOptions();
+            MemorySegment status = (MemorySegment) vtable(SLOT_SESSION_GET_OUTPUT_NAME,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
-                    .invokeExact(session, index, allocPtr, namePtr);
+                    .invokeExact(session, index, allocator, namePtr);
+            if (!isNull(status)) {
+                return "output_" + index;
+            }
             MemorySegment str = namePtr.get(ValueLayout.ADDRESS, 0);
-            return str.equals(MemorySegment.NULL) ? "output_" + index
-                    : str.reinterpret(256).getString(0);
+            return isNull(str) ? "output_" + index : str.reinterpret(256).getString(0);
         } catch (Throwable t) {
             return "output_" + index;
+        }
+    }
+
+    public long getDimensionsCount(MemorySegment info) {
+        if (!nativeAvailable)
+            return 0;
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_LONG);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_DIMENSIONS_COUNT,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(info, out);
+            checkStatusPtr(status, "GetDimensionsCount");
+            return out.get(ValueLayout.JAVA_LONG, 0);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public long[] getDimensions(MemorySegment info) {
+        if (!nativeAvailable)
+            return new long[0];
+        long count = getDimensionsCount(info);
+        if (count <= 0)
+            return new long[0];
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(count * 8L, 8);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_DIMENSIONS,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG))
+                    .invokeExact(info, out, count);
+            checkStatusPtr(status, "GetDimensions");
+            long[] dims = new long[(int) count];
+            for (int i = 0; i < (int) count; i++)
+                dims[i] = out.getAtIndex(ValueLayout.JAVA_LONG, i);
+            return dims;
+        } catch (Throwable t) {
+            return new long[0];
         }
     }
 
@@ -547,13 +619,13 @@ public class OnnxRuntimeBinding {
             throw unsupported("createCpuMemoryInfo");
         try (Arena a = Arena.ofConfined()) {
             MemorySegment infoPtr = a.allocate(ValueLayout.ADDRESS);
-            int status = (int) vtable(SLOT_CREATE_CPU_MEMORY_INFO,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_CREATE_CPU_MEMORY_INFO,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.JAVA_INT, // allocator type: OrtDeviceAllocator=0
                             ValueLayout.JAVA_INT, // mem type: OrtMemTypeDefault=0
                             ValueLayout.ADDRESS // OrtMemoryInfo** out
                     )).invokeExact(ORT_DEVICE_ALLOCATOR, 0, infoPtr);
-            checkStatus(status, "CreateCpuMemoryInfo");
+            checkStatusPtr(status, "CreateCpuMemoryInfo");
             return infoPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT CreateCpuMemoryInfo failed", t);
@@ -586,8 +658,8 @@ public class OnnxRuntimeBinding {
                 shapeSeg.setAtIndex(ValueLayout.JAVA_LONG, i, shape[i]);
 
             MemorySegment valPtr = a.allocate(ValueLayout.ADDRESS);
-            int status = (int) vtable(SLOT_CREATE_TENSOR_WITH_DATA,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_CREATE_TENSOR_WITH_DATA,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, // OrtMemoryInfo*
                             ValueLayout.ADDRESS, // data pointer
                             ValueLayout.JAVA_LONG, // data length bytes
@@ -599,7 +671,7 @@ public class OnnxRuntimeBinding {
                             memInfo, data, data.byteSize(),
                             shapeSeg, (long) shape.length,
                             dataType, valPtr);
-            checkStatus(status, "CreateTensorWithDataAsOrtValue");
+            checkStatusPtr(status, "CreateTensorWithDataAsOrtValue");
             return valPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT CreateTensorWithData failed", t);
@@ -654,8 +726,8 @@ public class OnnxRuntimeBinding {
             MemorySegment outNames = packStrings(a, outputNames);
             MemorySegment outVals = a.allocate((long) outputNames.length * 8L, 8);
 
-            int status = (int) vtable(SLOT_RUN,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_RUN,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, // session
                             ValueLayout.ADDRESS, // run options
                             ValueLayout.ADDRESS, // input names**
@@ -669,14 +741,14 @@ public class OnnxRuntimeBinding {
                             inNames, inVals, (long) inputValues.length,
                             outNames, (long) outputNames.length,
                             outVals);
-            checkStatus(status, "Run");
+            checkStatusPtr(status, "Run");
 
             MemorySegment[] result = new MemorySegment[outputNames.length];
             for (int i = 0; i < result.length; i++)
                 result[i] = outVals.getAtIndex(ValueLayout.ADDRESS, i);
             return result;
         } catch (Throwable t) {
-            throw new RuntimeException("ORT Run failed", t);
+            throw new RuntimeException("ORT Run failed: " + t.getMessage(), t);
         }
     }
 
@@ -693,10 +765,11 @@ public class OnnxRuntimeBinding {
             throw unsupported("getTensorMutableData");
         try (Arena a = Arena.ofConfined()) {
             MemorySegment dataPtr = a.allocate(ValueLayout.ADDRESS);
-            vtable(SLOT_GET_TENSOR_MUTABLE_DATA,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_TENSOR_MUTABLE_DATA,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(value, dataPtr);
+            checkStatusPtr(status, "GetTensorMutableData");
             return dataPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
             throw new RuntimeException("ORT GetTensorMutableData failed", t);
@@ -729,7 +802,7 @@ public class OnnxRuntimeBinding {
         try (Arena a = Arena.ofConfined()) {
             MemorySegment optsPtr = a.allocate(ValueLayout.ADDRESS);
             vtable(SLOT_CREATE_RUN_OPTIONS,
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS))
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS))
                     .invokeExact(optsPtr);
             return optsPtr.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
@@ -854,6 +927,36 @@ public class OnnxRuntimeBinding {
     private void checkStatus(int status, String op) {
         if (status != 0)
             throw new RuntimeException("ORT " + op + " returned non-zero status: " + status);
+    }
+
+    /** Check OrtStatus* pointer: NULL means success, non-NULL is an error. */
+    private void checkStatusPtr(MemorySegment status, String op) {
+        if (isNull(status))
+            return;
+
+        String msg = "Unknown error";
+        try {
+            // GetErrorMessage(OrtStatus*) -> const char*
+            MemorySegment msgPtr = (MemorySegment) vtable(SLOT_GET_ERROR_MESSAGE,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(status);
+            if (!isNull(msgPtr)) {
+                msg = msgPtr.reinterpret(1024).getString(0);
+            }
+        } catch (Throwable t) {
+            msg = "Failed to extract error: " + t.getMessage();
+        } finally {
+            try {
+                // ReleaseStatus(OrtStatus*)
+                vtable(SLOT_RELEASE_STATUS,
+                        FunctionDescriptor.ofVoid(ValueLayout.ADDRESS))
+                        .invokeExact(status);
+            } catch (Throwable t) {
+                LOG.warn("Failed to release ORT status", t);
+            }
+        }
+        System.err.println("!!! ORT ERROR: " + op + " failed: " + msg);
+        throw new RuntimeException("ORT " + op + " failed: " + msg);
     }
 
     private static boolean isNull(MemorySegment seg) {

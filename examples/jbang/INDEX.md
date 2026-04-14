@@ -7,6 +7,8 @@ Complete index of all JBang examples in the Gollek repository.
 ```
 gollek/examples/jbang/
 ├── sdk/
+│   ├── unified_framework_demo.java       (v0.3: Unified Runner, Batching, Fusion, Quantization)
+│   ├── graph_fusion_example.java         (v0.3: Operation fusion benchmark)
 │   ├── 01_tensor_operations.java         (700+ lines, TensorOps demo)
 │   ├── 02_vision_transforms.java         (800+ lines, Vision pipeline)
 │   ├── 03_tokenization.java              (900+ lines, NLP tokenization)
@@ -14,9 +16,27 @@ gollek/examples/jbang/
 │   ├── 05_pytorch_comparison.java        (750+ lines, PyTorch migration)
 │   ├── README.md                         (Comprehensive guide)
 │   └── [Other examples...]
-└── advanced/
-    └── [Future advanced examples]
+├── edge/                                 (Edge inference examples)
+├── quantizer/                            (Quantization examples)
+├── nlp/                                  (NLP pipeline examples)
+├── multimodal/                           (Multimodal examples)
+└── integration/                          (Third-party integration examples)
 ```
+
+## 🆕 v0.3 New Examples
+
+| Example | Description | Usage |
+|---------|-------------|-------|
+| **unified_framework_demo.java** | All v0.3 capabilities demo | `jbang unified_framework_demo.java --demo all` |
+| **graph_fusion_example.java** | Operation fusion benchmark | `jbang graph_fusion_example.java --size 8192` |
+
+### Capabilities Demonstrated
+
+- ✅ **Unified Model Runner** - Single API for GGUF, ONNX, LiteRT, TensorRT
+- ✅ **Dynamic Batching** - Automatic request batching with SLA
+- ✅ **Graph Fusion** - Fuse operations into single kernels
+- ✅ **Quantization** - INT4/INT8/FP8 with AWQ/GPTQ
+- ✅ **Memory Pool** - Zero-copy tensor allocation
 
 ## 📚 Example Categories
 

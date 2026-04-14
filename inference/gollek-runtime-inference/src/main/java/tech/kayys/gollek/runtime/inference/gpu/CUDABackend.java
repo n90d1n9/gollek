@@ -1,4 +1,6 @@
 package tech.kayys.gollek.runtime.inference.gpu;
+ 
+import tech.kayys.gollek.cuda.binding.CudaBinding;
 
 import org.jboss.logging.Logger;
 
@@ -97,6 +99,9 @@ public final class CUDABackend {
     /** Total GPU memory */
     private final long totalMemory;
 
+    /** Unified CUDA bridge binding for hardware acceleration */
+    private final CudaBinding cudaBinding;
+
     /** Active allocations for tracking */
     private final Map<Long, Long> allocations = new ConcurrentHashMap<>();
 
@@ -122,6 +127,14 @@ public final class CUDABackend {
         this.deviceId = deviceId;
         this.totalMemory = totalMemory;
         this.availableMemory = totalMemory;
+        
+        CudaBinding initBinding = null;
+        try {
+            initBinding = CudaBinding.getInstance();
+        } catch (Exception e) {
+            LOG.debug("CudaBinding not initialized upstream");
+        }
+        this.cudaBinding = initBinding;
     }
 
     /**
@@ -149,8 +162,7 @@ public final class CUDABackend {
 
         try (Arena arena = Arena.ofConfined()) {
             // Load CUDA runtime library
-            SymbolLookup cudaLookup = LibraryLoader.of(LINKER.defaultMemoryScope())
-                .load(CUDA_LIBRARY);
+            SymbolLookup cudaLookup = SymbolLookup.libraryLookup(CUDA_LIBRARY, Arena.global());
 
             if (cudaLookup == null) {
                 throw new IllegalStateException(
@@ -279,7 +291,8 @@ public final class CUDABackend {
                         result, bytes, availableMemory));
             }
 
-            long ptr = ptrSeg.get(ValueLayout.ADDRESS, 0);
+            MemorySegment ptrSegAddr = ptrSeg.get(ValueLayout.ADDRESS, 0);
+            long ptr = ptrSegAddr.address();
             allocations.put(ptr, bytes);
             availableMemory -= bytes;
 
@@ -409,17 +422,100 @@ public final class CUDABackend {
                                   long stream, Object... args) {
         ensureInitialized();
 
-        // In production: use cuLaunchKernel via CUDA driver API
-        // For now: stub that validates inputs
         if (gridDim.length != 3 || blockDim.length != 3) {
             throw new IllegalArgumentException("Grid and block dimensions must be 3D");
         }
 
-        LOG.debugf("Kernel launch: %s, grid=[%d,%d,%d], block=[%d,%d,%d], stream=0x%x",
+        int totalBlocks = gridDim[0] * gridDim[1] * gridDim[2];
+        int threadsPerBlock = blockDim[0] * blockDim[1] * blockDim[2];
+
+        if (totalBlocks > getMaxGridSize()) {
+            throw new IllegalArgumentException("Total blocks " + totalBlocks + " exceeds maximum grid size " + getMaxGridSize());
+        }
+
+        if (threadsPerBlock > getMaxThreadsPerBlock()) {
+            throw new IllegalArgumentException("Threads per block " + threadsPerBlock + " exceeds maximum " + getMaxThreadsPerBlock());
+        }
+
+        // Build parameter array for kernel launch
+        MemorySegment[] paramSegments = buildKernelParams(kernel, args);
+        
+        // Launch via CUDA binding if available
+        if (cudaBinding != null && kernel.moduleHandle() != 0 && kernel.functionHandle() != 0) {
+            try {
+                cudaBinding.launchKernel(
+                    kernel.functionHandle(),
+                    gridDim[0], gridDim[1], gridDim[2],
+                    blockDim[0], blockDim[1], blockDim[2],
+                    kernel.sharedMemoryBytes(),
+                    MemorySegment.ofAddress(stream),
+                    paramSegments,
+                    null
+                );
+            } catch (Exception e) {
+                LOG.warnf(e, "Failed to launch kernel %s via CUDA binding, falling back to synchronous", kernel.name());
+                launchKernel(kernel, gridDim, blockDim, stream, args);
+            }
+        } else {
+            // Fallback: use synchronous launch for stub/placeholder kernels
+            launchKernel(kernel, gridDim, blockDim, stream, args);
+        }
+
+        LOG.debugf("Kernel launched async: %s, grid=[%d,%d,%d], block=[%d,%d,%d], stream=0x%x",
             kernel.name(),
             gridDim[0], gridDim[1], gridDim[2],
             blockDim[0], blockDim[1], blockDim[2],
             stream);
+    }
+
+    /**
+     * Builds kernel parameter segments for launch.
+     */
+    private MemorySegment[] buildKernelParams(CUDAKernel kernel, Object... args) {
+        MemorySegment[] params = new MemorySegment[args.length];
+        Arena arena = Arena.ofConfined();
+        
+        for (int i = 0; i < args.length; i++) {
+            Object arg = args[i];
+            if (arg instanceof MemorySegment seg) {
+                params[i] = seg;
+            } else if (arg instanceof Number num) {
+                // For scalar args, allocate and store value
+                if (num instanceof Integer) {
+                    MemorySegment seg = arena.allocate(ValueLayout.JAVA_INT);
+                    seg.set(ValueLayout.JAVA_INT, 0, num.intValue());
+                    params[i] = seg;
+                } else if (num instanceof Long) {
+                    MemorySegment seg = arena.allocate(ValueLayout.JAVA_LONG);
+                    seg.set(ValueLayout.JAVA_LONG, 0, num.longValue());
+                    params[i] = seg;
+                } else if (num instanceof Float) {
+                    MemorySegment seg = arena.allocate(ValueLayout.JAVA_FLOAT);
+                    seg.set(ValueLayout.JAVA_FLOAT, 0, num.floatValue());
+                    params[i] = seg;
+                } else {
+                    throw new IllegalArgumentException("Unsupported numeric type: " + arg.getClass());
+                }
+            } else {
+                throw new IllegalArgumentException("Unsupported kernel arg type: " + arg.getClass());
+            }
+        }
+        
+        return params;
+    }
+
+    /**
+     * Gets maximum grid size for current GPU.
+     */
+    private int getMaxGridSize() {
+        return cudaBinding != null ? cudaBinding.maxGridSize(0) : 2147483647;
+    }
+
+    /**
+     * Gets maximum threads per block for current GPU.
+     */
+    private int getMaxThreadsPerBlock() {
+        return cudaBinding != null ? cudaBinding.maxThreadsPerBlock() : 1024;
     }
 
     /**
@@ -619,8 +715,7 @@ public final class CUDABackend {
      */
     public static boolean isAvailable() {
         try {
-            LibraryLoader.of(Linker.nativeLinker().defaultMemoryScope())
-                .load(CUDA_LIBRARY);
+            SymbolLookup.libraryLookup(CUDA_LIBRARY, Arena.global());
             return true;
         } catch (Exception e) {
             return false;

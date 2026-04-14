@@ -236,11 +236,15 @@ public final class CUDAKernel {
     // ── Query Methods ─────────────────────────────────────────────────
 
     public String getName() { return name; }
+    public String name() { return name; }
     public Format getFormat() { return format; }
     public int getMaxThreadsPerBlock() { return maxThreadsPerBlock; }
     public int getStaticSharedMem() { return staticSharedMem; }
+    public int sharedMemoryBytes() { return staticSharedMem; }
     public int getNumRegisters() { return numRegisters; }
     public boolean isLoaded() { return loaded; }
+    public long moduleHandle() { return moduleHandle; }
+    public long functionHandle() { return functionHandle; }
 
     /**
      * Gets the source code (PTX or CUBIN data).

@@ -275,8 +275,8 @@ public final class KVCacheManager {
         if (limit == null) return true;  // No quota
 
         long usage = getTenantUsage(tenantId);
-        // Estimate: each sequence uses ~cache.usedBlocks() / cache.sequenceCount blocks
-        int sequenceCount = cache.sequenceBlockTables.size();
+        // Estimate: each sequence uses ~cache.usedBlocks() / cache.sequenceCount() blocks
+        int sequenceCount = cache.sequenceCount();
         if (sequenceCount == 0) return true;
 
         long avgBlocksPerSequence = cache.usedBlocks() / sequenceCount;
@@ -297,7 +297,7 @@ public final class KVCacheManager {
             cache.usedBlocks(),
             cache.totalBlocks(),
             cache.memoryUtilization(),
-            cache.sequenceBlockTables.size(),
+            cache.sequenceCount(),
             cache.totalAppends(),
             cache.prefixCacheHits(),
             cache.peakUsedBlocks()

@@ -6,6 +6,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.onnx.runner.OnnxRuntimeRunner;
+import tech.kayys.gollek.onnx.runner.StableDiffusionOnnxRunner;
 import tech.kayys.gollek.runner.RunnerConfiguration;
 import tech.kayys.gollek.spi.exception.ProviderException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
@@ -143,6 +144,8 @@ public class OnnxProvider implements StreamingProvider {
                 System.err.println("[OnnxProvider] Runner initialized successfully");
 
                 var activeRunner = isStableDiffusion(modelPath) ? sdRunner : runner;
+                System.err.println("[OnnxProvider] Using runner: " + activeRunner.name());
+                
                 activeRunner.stream(InferenceRequest.builder()
                         .requestId(request.getRequestId())
                         .model(request.getModel())
@@ -150,9 +153,18 @@ public class OnnxProvider implements StreamingProvider {
                         .parameters(request.getParameters())
                         .streaming(true)
                         .build()).subscribe().with(
-                            emitter::emit,
+                            chunk -> {
+                                System.err.println("[OnnxProvider] Emitting chunk: modality=" + chunk.modality() + 
+                                    ", index=" + chunk.index() + 
+                                    ", hasImageDelta=" + (chunk.imageDeltaBase64() != null) +
+                                    ", finished=" + chunk.finished());
+                                emitter.emit(chunk);
+                            },
                             emitter::fail,
-                            emitter::complete
+                            () -> {
+                                System.err.println("[OnnxProvider] Stream complete");
+                                emitter.complete();
+                            }
                         );
 
             } catch (Exception e) {
@@ -171,15 +183,22 @@ public class OnnxProvider implements StreamingProvider {
         var activeRunner = isSd ? sdRunner : runner;
 
         if (!activeRunner.health()) {
-            System.err.println("[OnnxProvider] Initializing runner " + activeRunner.name() + "...");
+            // For SD pipelines, resolve the base directory with ONNX models
+            Path effectivePath = modelPath;
+            if (isSd) {
+                effectivePath = resolveOnnxBaseDir(modelPath);
+            }
+            System.err.println("[OnnxProvider] Initializing runner " + activeRunner.name()
+                    + " with path: " + effectivePath);
             ModelManifest manifest = ModelManifest.builder()
                     .modelId(request.getModel())
                     .name(request.getModel())
                     .version("latest")
-                    .path(modelPath.toAbsolutePath().toString())
+                    .path(effectivePath.toAbsolutePath().toString())
                     .apiKey("none")
                     .requestId(request.getRequestId())
-                    .artifacts(Map.of(ModelFormat.ONNX, new ArtifactLocation(modelPath.toUri().toString(), null, null, null)))
+                    .artifacts(Map.of(ModelFormat.ONNX,
+                            new ArtifactLocation(effectivePath.toUri().toString(), null, null, null)))
                     .build();
             
             RunnerConfiguration runnerCfg = RunnerConfiguration.builder()
@@ -189,11 +208,55 @@ public class OnnxProvider implements StreamingProvider {
         }
     }
 
+    /**
+     * Detects Stable Diffusion pipeline by checking for UNet + VAE subdirectories.
+     * Handles both ONNX variant (vae_decoder/) and safetensors variant (vae/).
+     */
     private boolean isStableDiffusion(Path modelPath) {
         if (modelPath == null) return false;
         Path dir = Files.isDirectory(modelPath) ? modelPath : modelPath.getParent();
-        return Files.isDirectory(dir.resolve("unet")) && Files.isDirectory(dir.resolve("vae_decoder"));
+        boolean hasUnet = Files.isDirectory(dir.resolve("unet"));
+        boolean hasVae = Files.isDirectory(dir.resolve("vae_decoder"))
+                       || Files.isDirectory(dir.resolve("vae"));
+        return hasUnet && hasVae;
     }
+
+    /**
+     * For SD pipelines, locates the directory that contains the actual ONNX model files.
+     * The safetensors path may not contain .onnx files — the blobs path typically does.
+     */
+    private Path resolveOnnxBaseDir(Path modelPath) {
+        // If the path already has unet/model.onnx, use it directly
+        if (Files.exists(modelPath.resolve("unet/model.onnx"))) {
+            return modelPath;
+        }
+        
+        // Try the local model registry's resolve for the blob path
+        if (localModelRegistry != null) {
+            try {
+                var entries = localModelRegistry.listAll(ModelFormat.ONNX);
+                for (var entry : entries) {
+                    if (entry.physicalPath() != null 
+                            && Files.exists(entry.physicalPath().resolve("unet/model.onnx"))) {
+                        return entry.physicalPath();
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // Fallback: search for unet/model.onnx in common model storage paths
+        Path gollekModels = Path.of(System.getProperty("user.home"), ".gollek", "models", "blobs");
+        if (Files.isDirectory(gollekModels)) {
+            try (var walk = Files.walk(gollekModels, 2)) {
+                return walk.filter(p -> Files.isDirectory(p) && Files.exists(p.resolve("unet/model.onnx")))
+                           .findFirst()
+                           .orElse(modelPath);
+            } catch (Exception ignored) {}
+        }
+
+        return modelPath;
+    }
+
 
     private Path resolveModelPath(String modelId, ProviderRequest request) {
         if (modelId == null) return null;

@@ -389,6 +389,13 @@ public final class DefaultHealthCheckService implements HealthCheckService {
     }
 
     /**
+     * Creates a new builder for configuring the health check service.
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /**
      * Builder for DefaultHealthCheckService.
      */
     public static final class Builder {

@@ -141,12 +141,12 @@ public final class ContinuousBatchScheduler {
     private volatile Thread schedulerThread;
 
     /**
-     * Creates a new continuous batching scheduler.
+     * Creates a new continuous batching scheduler with default configuration.
      *
      * @param maxBatchSize maximum concurrent requests
      */
     public ContinuousBatchScheduler(int maxBatchSize) {
-        this(maxBatchSize, "default", null, null);
+        this(maxBatchSize, "default", null, null, KVCacheStorageMode.FULL_PRECISION, null);
     }
 
     /**
