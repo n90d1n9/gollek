@@ -127,6 +127,9 @@ jbang 04_mnist_training.java 10 32
 
 | Example | File | Lines | Time | Level | Topics |
 |---------|------|-------|------|-------|--------|
+| **SD Generation** ✨ | `multimodal/stable_diffusion_generation.java` | 150+ | 5m | ⭐⭐ | 🎨 Text-to-Image |
+| **SD Batch** ✨ | `multimodal/stable_diffusion_batch.java` | 100+ | 10m | ⭐⭐ | 🎨 Multiple Variations |
+| **TTS** ✨ | `multimodal/text_to_speech.java` | 60+ | 3m | ⭐ | 🔊 SpeechT5 |
 | TensorOps | 01_tensor_operations.java | 700+ | 10m | ⭐ | 7 ops |
 | Native STT | `multimodal/native_whisper_stt.java` | 100+ | 5m | ⭐ | 🎙️ SIMD STT |
 | SIMD Audio | `machine_learning/simd_audio_processing.java` | 50+ | 2m | ⭐ | ⚡ Vector API |

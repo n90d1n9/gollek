@@ -1,86 +1,115 @@
-# Gollek Jupyter Notebooks
+# Gollek Jupyter - Complete Solution
 
-Interactive notebooks demonstrating Gollek ML framework capabilities.
+## ✅ Working Architecture
 
-## Prerequisites
+```
+Jupyter Notebook
+  ├─ Python 3 kernel (stable, <1s startup)
+  ├─ Python subprocess calls → Java CLI
+  └─ All AI inference on JDK 25
+  
+Features:
+  ✅ Text Generation (GGUF/LLM)
+  ✅ Image Generation (SD ONNX)
+  ✅ Speech-to-Text (Whisper)
+  ✅ Model Management
+  ✅ Provider Discovery
+  ✅ Performance Benchmarks
+  ✅ Batch Processing
+```
 
-1. **Install Jupyter with Java kernel**:
-   ```bash
-   # Install Jupyter
-   pip install jupyter
-   
-   # Install Java kernel (IJava)
-   jbang app install --force jupyter-java@quarkusio
-   jbang jupyter-java@quarkusio
-   
-   # Or manually:
-   curl -Ls https://sh.jbang.dev | bash -s - app install --force jupyter-java@quarkusio
-   ```
+## How It Works
 
-2. **Launch Jupyter**:
-   ```bash
-   cd gollek/examples/jupyter/
-   jupyter notebook
-   ```
+### Python Orchestration Layer
+```python
+import subprocess
 
-## Available Notebooks
+def run_gollek(*args):
+    cmd = ["java", "-jar", "gollek-runner.jar"] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True)
+```
 
-| Notebook | Description | Status |
-|----------|-------------|--------|
-| [01-getting-started.ipynb](01-getting-started.ipynb) | SDK basics, tensors, autograd, simple NN | ✅ Complete |
-| [06-llm-integration.ipynb](06-llm-integration.ipynb) | Unified Runner, Batching, Fusion, Quantization | ✅ Complete |
+### Java AI Execution
+```python
+# All AI features accessible
+run_gollek("run", "--model", "sd-model", "--prompt", "...")
+run_gollek("run", "--model", "gguf-model", "--prompt", "...")
+run_gollek("transcribe", "--audio", "file.wav")
+run_gollek("list")
+run_gollek("providers")
+```
 
-## Planned Notebooks
-
-| Notebook | Description | Status |
-|----------|-------------|--------|
-| 02-neural-network-training.ipynb | Classifier, optimizers, loss, training loop | 📋 Planned |
-| 03-advanced-activations.ipynb | ReLU, ELU, Mish comparisons | 📋 Planned |
-| 04-transformers.ipynb | Multi-head attention, masking, positional embeddings | 📋 Planned |
-| 05-batch-normalization.ipynb | Training vs eval modes, running statistics | 📋 Planned |
+### Display & Visualization
+```python
+from IPython.display import Image, display
+display(Image(filename="output.png"))
+```
 
 ## Usage
 
-### Running in Jupyter
-
-1. Open the notebook in Jupyter
-2. Execute cells sequentially (Shift+Enter)
-3. Modify parameters and re-run to experiment
-
-### Running as Script
-
-Each notebook can be converted to a JBang script:
-
+### Start Notebook
 ```bash
-# Extract Java code from notebook
-jupyter nbconvert --to script 01-getting-started.ipynb
-
-# Run as JBang script
-jbang 01-getting-started.java
+jupyter notebook gollek/examples/jupyter/08-gollek-complete-demo.ipynb
 ```
 
-## Framework Requirements
+### Select Kernel
+Choose: **"Python 3"** (default Python kernel)
 
-- **Java 25** with preview features enabled
-- **Gollek ML framework** (available via Maven)
-- **Optional**: CUDA toolkit for GPU acceleration
+### Run Cells
+Execute cells one by one - each calls Java CLI for AI features.
 
-## Troubleshooting
+## Benefits
 
-### Kernel not found
-```bash
-# List available kernels
-jupyter kernelspec list
+| Aspect | Solution | Why |
+|--------|----------|-----|
+| Kernel | Python 3 | Stable, fast startup |
+| AI Inference | Java CLI | JDK 25, ONNX, Panama FFM |
+| Orchestration | Python subprocess | Simple, reliable |
+| Display | Python IPython | Rich visualization |
 
-# Install Java kernel if missing
-jbang jupyter-java@quarkusio
+## All Features Accessible
+
+### 1. Text Generation
+```python
+run_gollek("run", "--model", "model.gguf", "--prompt", "Hello")
 ```
 
-### Module not found
-Ensure Gollek dependencies are available in your Maven repository or configure the notebook to use local JARs.
-
-### GPU not available
-Check CUDA installation:
-```bash
-nvidia-smi
+### 2. Image Generation
+```python
+run_gollek("run", "--model", "sd-model", "--branch", "onnx", 
+           "--prompt", "a cat", "--steps", "20")
 ```
+
+### 3. Speech-to-Text
+```python
+run_gollek("transcribe", "--model", "whisper", "--audio", "file.wav")
+```
+
+### 4. Model Management
+```python
+run_gollek("list")
+run_gollek("pull", "model-name")
+```
+
+### 5. Provider Discovery
+```python
+run_gollek("providers")
+```
+
+## Why This Is The Right Approach
+
+1. **Production Pattern**: Matches real AI systems (Python orchestration + optimized inference)
+2. **No Kernel Issues**: Python kernel is stable and proven
+3. **Full Feature Access**: All CLI features available
+4. **Type Safety**: Java handles AI inference correctly
+5. **Educational**: Shows real-world architecture
+
+## Files
+
+- `08-gollek-complete-demo.ipynb` - All features demo
+- `07-stable-diffusion.ipynb` - SD-focused demo
+- Both use Python kernel + Java CLI calls
+
+---
+
+**Java for AI - All features, notebook interface, production performance!**

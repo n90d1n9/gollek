@@ -6,6 +6,7 @@ import java.util.Objects;
 
 /**
  * MCP Request message.
+ * Compliant with JSON-RPC 2.0 and MCP specification 2025-11-25.
  */
 public class MCPRequest extends JsonRpcMessage {
     private final String method;
@@ -58,5 +59,11 @@ public class MCPRequest extends JsonRpcMessage {
             Objects.requireNonNull(method, "method is required");
             return new MCPRequest(this);
         }
+    }
+    
+    /**
+     * Expose Builder as MCPRequestBuilder for compatibility.
+     */
+    public static class MCPRequestBuilder extends Builder {
     }
 }

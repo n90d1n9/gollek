@@ -33,6 +33,12 @@
             <artifactId>gollek-ml-vision</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- ONNX export delegated to dedicated module -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-ml-export-onnx</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- JSON for metadata -->
         <dependency>

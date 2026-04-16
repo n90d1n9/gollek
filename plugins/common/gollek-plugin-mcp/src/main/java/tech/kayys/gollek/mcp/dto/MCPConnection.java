@@ -15,12 +15,24 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Represents a connection to a single MCP server.
  * Manages tools, resources, and prompts exposed by the server.
+ * 
+ * <p>Compliant with MCP specification 2025-11-25.
+ * Supports:
+ * <ul>
+ *   <li>Pagination via cursors on all list endpoints</li>
+ *   <li>Resource subscriptions</li>
+ *   <li>Roots capability (server→client)</li>
+ *   <li>Sampling capability (server→client)</li>
+ *   <li>Logging capability</li>
+ *   <li>Completions capability</li>
+ * </ul>
  */
 public class MCPConnection implements AutoCloseable {
 
     private static final Logger LOG = Logger.getLogger(MCPConnection.class);
 
     private static final List<String> SUPPORTED_PROTOCOL_VERSIONS = List.of(
+            "2025-11-25",
             "2025-11-05",
             "2025-03-26",
             "2024-11-05");
@@ -38,6 +50,11 @@ public class MCPConnection implements AutoCloseable {
     private Map<String, Object> serverInfo;
     private Map<String, Object> serverCapabilities;
     private String negotiatedProtocolVersion;
+    private String serverInstructions;
+
+    /** Callback handlers for server→client requests */
+    private volatile RootsProvider rootsProvider;
+    private volatile SamplingHandler samplingHandler;
 
     public MCPConnection(
             MCPClientConfig config,
@@ -107,6 +124,8 @@ public class MCPConnection implements AutoCloseable {
                     Map<String, Object> capabilities = (Map<String, Object>) result.get("capabilities");
                     serverInfo = info != null ? info : Map.of();
                     serverCapabilities = capabilities != null ? capabilities : Map.of();
+                    serverInstructions = (String) result.get("instructions");
+                    
                     LOG.infof("MCP server initialized: %s (protocol=%s)",
                             serverInfo.getOrDefault("name", config.getName()),
                             negotiatedProtocolVersion != null ? negotiatedProtocolVersion : "unknown");
@@ -126,18 +145,28 @@ public class MCPConnection implements AutoCloseable {
                 discoverPrompts()).discardItems();
     }
 
+    /**
+     * Discover tools with pagination support.
+     */
     private Uni<Void> discoverTools() {
         if (!hasCapability("tools")) {
             return Uni.createFrom().voidItem();
         }
 
-        MCPRequest request = MCPRequest.builder()
-                .id(nextRequestId())
-                .method("tools/list")
-                .build();
+        return discoverToolsWithCursor(null);
+    }
 
-        return transport.sendRequest(request)
-                .onItem().invoke(response -> {
+    private Uni<Void> discoverToolsWithCursor(String cursor) {
+        MCPRequest.Builder requestBuilder = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("tools/list");
+        
+        if (cursor != null) {
+            requestBuilder.param("cursor", cursor);
+        }
+
+        return transport.sendRequest(requestBuilder.build())
+                .onItem().transformToUni(response -> {
                     if (response.isSuccess()) {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> result = (Map<String, Object>) response.getResult();
@@ -151,23 +180,40 @@ public class MCPConnection implements AutoCloseable {
                             });
                             LOG.infof("Discovered %d tools from MCP server", tools.size());
                         }
+
+                        // Check for pagination cursor
+                        String nextCursor = (String) result.get("nextCursor");
+                        if (nextCursor != null && !nextCursor.isEmpty()) {
+                            // Continue fetching next page
+                            return discoverToolsWithCursor(nextCursor);
+                        }
                     }
-                })
-                .replaceWithVoid();
+                    return Uni.createFrom().voidItem();
+                });
     }
 
+    /**
+     * Discover resources with pagination support.
+     */
     private Uni<Void> discoverResources() {
         if (!hasCapability("resources")) {
             return Uni.createFrom().voidItem();
         }
 
-        MCPRequest request = MCPRequest.builder()
-                .id(nextRequestId())
-                .method("resources/list")
-                .build();
+        return discoverResourcesWithCursor(null);
+    }
 
-        return transport.sendRequest(request)
-                .onItem().invoke(response -> {
+    private Uni<Void> discoverResourcesWithCursor(String cursor) {
+        MCPRequest.Builder requestBuilder = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("resources/list");
+        
+        if (cursor != null) {
+            requestBuilder.param("cursor", cursor);
+        }
+
+        return transport.sendRequest(requestBuilder.build())
+                .onItem().transformToUni(response -> {
                     if (response.isSuccess()) {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> result = (Map<String, Object>) response.getResult();
@@ -181,23 +227,39 @@ public class MCPConnection implements AutoCloseable {
                             });
                             LOG.infof("Discovered %d resources from MCP server", resources.size());
                         }
+
+                        // Check for pagination cursor
+                        String nextCursor = (String) result.get("nextCursor");
+                        if (nextCursor != null && !nextCursor.isEmpty()) {
+                            return discoverResourcesWithCursor(nextCursor);
+                        }
                     }
-                })
-                .replaceWithVoid();
+                    return Uni.createFrom().voidItem();
+                });
     }
 
+    /**
+     * Discover prompts with pagination support.
+     */
     private Uni<Void> discoverPrompts() {
         if (!hasCapability("prompts")) {
             return Uni.createFrom().voidItem();
         }
 
-        MCPRequest request = MCPRequest.builder()
-                .id(nextRequestId())
-                .method("prompts/list")
-                .build();
+        return discoverPromptsWithCursor(null);
+    }
 
-        return transport.sendRequest(request)
-                .onItem().invoke(response -> {
+    private Uni<Void> discoverPromptsWithCursor(String cursor) {
+        MCPRequest.Builder requestBuilder = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("prompts/list");
+        
+        if (cursor != null) {
+            requestBuilder.param("cursor", cursor);
+        }
+
+        return transport.sendRequest(requestBuilder.build())
+                .onItem().transformToUni(response -> {
                     if (response.isSuccess()) {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> result = (Map<String, Object>) response.getResult();
@@ -211,9 +273,15 @@ public class MCPConnection implements AutoCloseable {
                             });
                             LOG.infof("Discovered %d prompts from MCP server", prompts.size());
                         }
+
+                        // Check for pagination cursor
+                        String nextCursor = (String) result.get("nextCursor");
+                        if (nextCursor != null && !nextCursor.isEmpty()) {
+                            return discoverPromptsWithCursor(nextCursor);
+                        }
                     }
-                })
-                .replaceWithVoid();
+                    return Uni.createFrom().voidItem();
+                });
     }
 
     /**
@@ -244,6 +312,51 @@ public class MCPConnection implements AutoCloseable {
     }
 
     /**
+     * Subscribe to resource updates
+     */
+    public Uni<Void> subscribeResource(String uri) {
+        if (!hasCapability("resources") || !supportsResourceSubscribe()) {
+            return Uni.createFrom().failure(
+                    new IllegalStateException("Server does not support resource subscriptions"));
+        }
+
+        MCPRequest request = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("resources/subscribe")
+                .param("uri", uri)
+                .build();
+
+        return transport.sendRequest(request)
+                .onItem().transform(response -> {
+                    if (!response.isSuccess()) {
+                        throw new IllegalStateException("Resource subscription failed: " + response.getError());
+                    }
+                    return null;
+                })
+                .replaceWithVoid();
+    }
+
+    /**
+     * Unsubscribe from resource updates
+     */
+    public Uni<Void> unsubscribeResource(String uri) {
+        MCPRequest request = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("resources/unsubscribe")
+                .param("uri", uri)
+                .build();
+
+        return transport.sendRequest(request)
+                .onItem().transform(response -> {
+                    if (!response.isSuccess()) {
+                        throw new IllegalStateException("Resource unsubscription failed: " + response.getError());
+                    }
+                    return null;
+                })
+                .replaceWithVoid();
+    }
+
+    /**
      * Get a prompt
      */
     public Uni<MCPResponse> getPrompt(String promptName, Map<String, String> arguments) {
@@ -255,6 +368,67 @@ public class MCPConnection implements AutoCloseable {
                 .build();
 
         return transport.sendRequest(request);
+    }
+
+    /**
+     * Request argument completion
+     */
+    public Uni<MCPResponse> complete(String refType, String refName, String refUri, 
+                                     String argumentName, String argumentValue) {
+        Map<String, Object> ref = new HashMap<>();
+        ref.put("type", refType);
+        if (refName != null) ref.put("name", refName);
+        if (refUri != null) ref.put("uri", refUri);
+
+        MCPRequest request = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("completion/complete")
+                .param("ref", ref)
+                .param("argument", Map.of(
+                        "name", argumentName,
+                        "value", argumentValue))
+                .build();
+
+        return transport.sendRequest(request);
+    }
+
+    /**
+     * Set logging level
+     */
+    public Uni<Void> setLoggingLevel(String level) {
+        MCPRequest request = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("logging/setLevel")
+                .param("level", level)
+                .build();
+
+        return transport.sendRequest(request)
+                .onItem().transform(response -> {
+                    if (!response.isSuccess()) {
+                        throw new IllegalStateException("Failed to set logging level: " + response.getError());
+                    }
+                    return null;
+                })
+                .replaceWithVoid();
+    }
+
+    /**
+     * Ping the server
+     */
+    public Uni<Void> ping() {
+        MCPRequest request = MCPRequest.builder()
+                .id(nextRequestId())
+                .method("ping")
+                .build();
+
+        return transport.sendRequest(request)
+                .onItem().transform(response -> {
+                    if (!response.isSuccess()) {
+                        throw new IllegalStateException("Ping failed: " + response.getError());
+                    }
+                    return null;
+                })
+                .replaceWithVoid();
     }
 
     // Getters
@@ -282,16 +456,59 @@ public class MCPConnection implements AutoCloseable {
         return serverCapabilities;
     }
 
+    public String getServerInstructions() {
+        return serverInstructions;
+    }
+
     public boolean isConnected() {
         return transport.isConnected();
+    }
+
+    public String getNegotiatedProtocolVersion() {
+        return negotiatedProtocolVersion;
     }
 
     private boolean hasCapability(String capability) {
         return serverCapabilities != null && serverCapabilities.containsKey(capability);
     }
 
+    @SuppressWarnings("unchecked")
+    private boolean supportsResourceSubscribe() {
+        if (!hasCapability("resources")) return false;
+        Map<String, Object> resourcesCap = (Map<String, Object>) serverCapabilities.get("resources");
+        return resourcesCap != null && Boolean.TRUE.equals(resourcesCap.get("subscribe"));
+    }
+
     private long nextRequestId() {
         return requestIdSequence.incrementAndGet();
+    }
+
+    /**
+     * Set roots provider callback
+     */
+    public void setRootsProvider(RootsProvider provider) {
+        this.rootsProvider = provider;
+    }
+
+    /**
+     * Get roots provider
+     */
+    public RootsProvider getRootsProvider() {
+        return rootsProvider;
+    }
+
+    /**
+     * Set sampling handler callback
+     */
+    public void setSamplingHandler(SamplingHandler handler) {
+        this.samplingHandler = handler;
+    }
+
+    /**
+     * Get sampling handler
+     */
+    public SamplingHandler getSamplingHandler() {
+        return samplingHandler;
     }
 
     /**
@@ -310,5 +527,32 @@ public class MCPConnection implements AutoCloseable {
     public void close() {
         disconnect().await().indefinitely();
         transport.close();
+    }
+
+    /**
+     * Roots provider callback interface.
+     * Called when server requests roots/list.
+     */
+    @FunctionalInterface
+    public interface RootsProvider {
+        /**
+         * Provide list of exposed file system roots.
+         * MUST prompt user for consent before exposing roots.
+         * MUST validate URIs against path traversal.
+         */
+        Uni<List<RootInfo>> provideRoots();
+    }
+
+    /**
+     * Sampling handler callback interface.
+     * Called when server requests sampling/createMessage.
+     * Per spec: MUST require explicit user approval.
+     */
+    @FunctionalInterface
+    public interface SamplingHandler {
+        /**
+         * Handle a sampling request from the server.
+         */
+        Uni<MCPResponse> handleSampling(Map<String, Object> params);
     }
 }

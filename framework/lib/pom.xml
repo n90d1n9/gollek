@@ -33,6 +33,7 @@
         <module>gollek-ml-multimodal</module>
         <module>gollek-ml-augment</module>
         <module>gollek-ml-export</module>
+        <module>gollek-ml-export-onnx</module>
         <module>gollek-ml-safetensor</module>
         <module>gollek-ml-gguf</module>
         <module>gollek-ml-litert</module>

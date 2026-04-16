@@ -65,8 +65,7 @@ public class ModelExporter {
      * @throws IOException if export fails
      */
     public void toONNX(Path outputPath) throws IOException {
-        OnnxExporter exporter = new OnnxExporter(model, inputShape, metadata);
-        exporter.export(outputPath);
+        tech.kayys.gollek.ml.export.onnx.OnnxExporter.fromModel(model).export(outputPath);
     }
 
     /**

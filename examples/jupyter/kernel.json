@@ -1,18 +1,17 @@
 {
-  "display_name": "Gollek ML (Java 25)",
-  "language": "java",
-  "argv": [
-    "/opt/homebrew/bin/jbang",
-    "--java", "25",
-    "--enable-preview",
-    "-R=--add-modules=jdk.incubator.vector",
-    "-R=--enable-native-access=ALL-UNNAMED",
-    "org.dflib.jjava:jjava-launcher:1.0-a4",
-    "%{deps:org.dflib.jjava:jjava:1.0-a4@fatjar}",
-    "{connection_file}"
-  ],
-  "env": {
-    "JJAVA_DEPS": "file:///Users/bhangun/.gollek/jupyter/gollek-error-code-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-autograd-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-cnn-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-data-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-hub-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-ml-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-multimodal-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-nlp-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-nn-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-ml-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-runtime-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-sdk-api-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-inference-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-model-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-multimodal-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-plugin-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-provider-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-runtime-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-spi-tensor-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gollek-transformer-0.1.0-SNAPSHOT.jar,file:///Users/bhangun/.gollek/jupyter/gson-2.13.2.jar,file:///Users/bhangun/.gollek/jupyter/jackson-annotations-2.21.jar,file:///Users/bhangun/.gollek/jupyter/jackson-core-2.21.1.jar,file:///Users/bhangun/.gollek/jupyter/jackson-databind-2.15.2.jar,file:///Users/bhangun/.gollek/jupyter/slf4j-api-2.0.17.jar"
-  },
-  "interrupt_mode": "message"
+    "argv": [
+        "java",
+        "--enable-preview",
+        "--add-modules=jdk.incubator.vector",
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-opens=jdk.jshell/jdk.jshell=ALL-UNNAMED",
+        "-cp",
+        "/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-sdk-java-remote/0.1.0-SNAPSHOT/gollek-sdk-java-remote-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-sdk-java-local/0.1.0-SNAPSHOT/gollek-sdk-java-local-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-sdk/0.1.0-SNAPSHOT/gollek-sdk-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/io/smallrye/reactive/mutiny/3.1.1/mutiny-3.1.1.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-sdk-core/0.1.0-SNAPSHOT/gollek-sdk-core-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/org/dflib/jjava/jjava/1.0-a4/jjava-1.0-a4.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-error-code/0.1.0-SNAPSHOT/gollek-error-code-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-autograd/0.1.0-SNAPSHOT/gollek-ml-autograd-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-cnn/0.1.0-SNAPSHOT/gollek-ml-cnn-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-data/0.1.0-SNAPSHOT/gollek-ml-data-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-hub/0.1.0-SNAPSHOT/gollek-ml-hub-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-ml/0.1.0-SNAPSHOT/gollek-ml-ml-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-multimodal/0.1.0-SNAPSHOT/gollek-ml-multimodal-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-nlp/0.1.0-SNAPSHOT/gollek-ml-nlp-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-nn/0.1.0-SNAPSHOT/gollek-ml-nn-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-ml-tensor/0.1.0-SNAPSHOT/gollek-ml-tensor-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-runtime-tensor/0.1.0-SNAPSHOT/gollek-runtime-tensor-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-sdk-api/0.1.0-SNAPSHOT/gollek-sdk-api-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-inference/0.1.0-SNAPSHOT/gollek-spi-inference-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-model/0.1.0-SNAPSHOT/gollek-spi-model-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-multimodal/0.1.0-SNAPSHOT/gollek-spi-multimodal-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-plugin/0.1.0-SNAPSHOT/gollek-spi-plugin-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-provider/0.1.0-SNAPSHOT/gollek-spi-provider-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-runtime/0.1.0-SNAPSHOT/gollek-spi-runtime-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi-tensor/0.1.0-SNAPSHOT/gollek-spi-tensor-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-spi/0.1.0-SNAPSHOT/gollek-spi-0.1.0-SNAPSHOT.jar:/Users/bhangun/.m2/repository/tech/kayys/gollek/gollek-transformer/0.1.0-SNAPSHOT/gollek-transformer-0.1.0-SNAPSHOT.jar",
+        "org.dflib.jjava.JJava",
+        "{connection_file}"
+    ],
+    "display_name": "Gollek Java 25",
+    "env": {},
+    "interrupt_mode": "message",
+    "language": "java"
 }

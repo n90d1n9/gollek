@@ -1,362 +1,225 @@
-# Jupyter & jbang Examples
+# Gollek Examples
 
-Practical examples using Gollek SDK with Jupyter notebooks and jbang scripts.
+A comprehensive collection of working examples demonstrating Gollek's capabilities across JBang scripts and Jupyter notebooks.
 
-## 🆕 v0.3 New Examples
+## 📚 Example Categories
 
-### JBang Examples
-- **`jbang/sdk/unified_framework_demo.java`** - Comprehensive demo of all v0.3 capabilities
-- **`jbang/sdk/graph_fusion_example.java`** - Operation fusion benchmark
+### 🎨 **Multimodal AI** (Image, Audio, Video)
 
-### Jupyter Notebooks
-- **`jupyter/01-getting-started.ipynb`** - SDK basics, tensors, autograd, simple NN ✅
-- **`jupyter/06-llm-integration.ipynb`** - Unified Runner, Batching, Fusion, Quantization ✅
+#### JBang Examples
+- [stable_diffusion_generation.java](jbang/multimodal/stable_diffusion_generation.java) - Text-to-image generation with Stable Diffusion ✨ NEW
+- [stable_diffusion_batch.java](jbang/multimodal/stable_diffusion_batch.java) - Batch generate multiple variations ✨ NEW
+- [stable_diffusion_metal.java](jbang/multimodal/stable_diffusion_metal.java) - SD with Metal acceleration (Apple Silicon)
+- [text_to_speech.java](jbang/multimodal/text_to_speech.java) - Text-to-Speech with SpeechT5 ✨ NEW
+- [vision_storyteller.java](jbang/multimodal/vision_storyteller.java) - Image-to-text with LLaVA
+- [native_whisper_stt.java](jbang/multimodal/native_whisper_stt.java) - Speech-to-Text with Whisper
+- [smart_transcriber.java](jbang/multimodal/smart_transcriber.java) - Audio transcription + highlights
+- [video_analyst.java](jbang/multimodal/video_analyst.java) - Video temporal analysis
+- [omni_assistant.java](jbang/multimodal/omni_assistant.java) - Mixed-modality reasoning
 
-## Jupyter Notebooks
+#### Jupyter Notebooks
+- [07-stable-diffusion.ipynb](jupyter/07-stable-diffusion.ipynb) - Interactive SD generation with visualization ✨ NEW
 
-### 1. Getting Started
+### 🗣️ **Natural Language Processing**
 
-**File**: `jupyter/01-getting-started.ipynb` ✅
+#### JBang Examples
+- [nlp_chat_qwen_gguf.java](jbang/nlp/nlp_chat_qwen_gguf.java) - Chat with Qwen GGUF model
+- [nlp_concurrent_batch_pipeline.java](jbang/nlp/nlp_concurrent_batch_pipeline.java) - High-throughput batching
+- [nlp_high_performance.java](jbang/nlp/nlp_high_performance.java) - Optimized text generation
+- [nlp_semantic_search_simd.java](jbang/nlp/nlp_semantic_search_simd.java) - Vector similarity search
+- [nlp_sentiment_analysis.java](jbang/nlp/nlp_sentiment_analysis.java) - Text classification
+- [nlp_transformer_classifier.java](jbang/nlp/nlp_transformer_classifier.java) - Custom classifier training
 
-Topics:
-- Importing Gollek SDK
-- Tensor creation and operations
-- Autograd and gradient computation
-- Building sequential models
-- Running forward passes
-- No-grad inference mode
+### 🔧 **SDK Integration**
 
-### 6. LLM Integration (v0.3)
+#### JBang Examples
+- [gollek-quickstart.java](jbang/sdk/gollek-quickstart.java) - Quick start guide
+- [gollek-sdk-core-example.java](jbang/sdk/gollek-sdk-core-example.java) - Core SDK features
+- [gollek-sdk-vision-example.java](jbang/sdk/gollek-sdk-vision-example.java) - Vision API
+- [gollek-sdk-train-example.java](jbang/sdk/gollek-sdk-train-example.java) - Training API
+- [gollek-sdk-augment-example.java](jbang/sdk/gollek-sdk-augment-example.java) - Data augmentation
+- [gollek-sdk-export-example.java](jbang/sdk/gollek-sdk-export-example.java) - Model export
+- [graph_fusion_example.java](jbang/sdk/graph_fusion_example.java) - Graph optimization
+- [unified_framework_demo.java](jbang/sdk/unified_framework_demo.java) - Unified inference
+- [mnist_training_v02.java](jbang/sdk/mnist_training_v02.java) - MNIST training
+- [pytorch_comparison_v02.java](jbang/sdk/pytorch_comparison_v02.java) - PyTorch comparison
+- [tensor_operations_v02.java](jbang/sdk/tensor_operations_v02.java) - Tensor math
+- [tokenization_v02.java](jbang/sdk/tokenization_v02.java) - Tokenizer usage
+- [vision_transforms_v02.java](jbang/sdk/vision_transforms_v02.java) - Image transforms
 
-**File**: `jupyter/06-llm-integration.ipynb` ✅
+### ⚡ **Edge Inference (LiteRT)**
 
-Topics:
-- Unified Model Runner (GGUF, ONNX, LiteRT, TensorRT)
-- Dynamic Batching Engine
-- Graph Fusion for optimized execution
-- Quantization (INT4/INT8/FP8 with AWQ/GPTQ)
-- Shared Memory Pool for zero-copy allocation
+#### JBang Examples
+- [LiteRTEdgeExample.java](jbang/edge/LiteRTEdgeExample.java) - Basic LiteRT usage
+- [ImageClassificationExample.java](jbang/edge/ImageClassificationExample.java) - Image classification
+- [ObjectDetectionExample.java](jbang/edge/ObjectDetectionExample.java) - Object detection
+- [TextGenerationExample.java](jbang/edge/TextGenerationExample.java) - On-device text generation
+- [BenchmarkExample.java](jbang/edge/BenchmarkExample.java) - Performance benchmarking
+- [LiteRTMetalBridgeExample.java](jbang/edge/LiteRTMetalBridgeExample.java) - Metal acceleration
+- [LiteRTGemmaExample.java](jbang/edge/LiteRTGemmaExample.java) - Gemma on edge
+- [LiteRTGemmaMetalExample.java](jbang/edge/LiteRTGemmaMetalExample.java) - Gemma + Metal
 
-**File**: `notebooks/05-batch-normalization.ipynb`
+### 🔢 **Quantization**
 
-Topics:
-- Training vs evaluation modes
-- Running statistics
-- Impact on learning rates
-- Combining with other layers
+#### JBang Examples
+- [gollek-quantizer-gptq.java](jbang/quantizer/gollek-quantizer-gptq.java) - GPTQ quantization
+- [gollek-quantizer-awq.java](jbang/quantizer/gollek-quantizer-awq.java) - AWQ quantization
+- [gollek-quantizer-autoround.java](jbang/quantizer/gollek-quantizer-autoround.java) - AutoRound quantization
+- [gollek-quantizer-turboquant.java](jbang/quantizer/gollek-quantizer-turboquant.java) - TurboQuant (INT4/INT8/FP8)
+- [gollek-quantizer-comparison.java](jbang/quantizer/gollek-quantizer-comparison.java) - Method comparison
 
-### 6. LLM Integration
+### 🧠 **Common/Basic**
 
-**File**: `notebooks/06-llm-integration.ipynb`
+#### JBang Examples
+- [hello_gollek.java](jbang/common/hello_gollek.java) - Hello World
+- [error_handling.java](jbang/common/error_handling.java) - Error handling patterns
+- [batch_process.java](jbang/common/batch_process.java) - Batch processing
+- [custom_module_demo.java](jbang/common/custom_module_demo.java) - Custom modules
+- [mnist_style_setup.java](jbang/common/mnist_style_setup.java) - Simple training
+- [model_persistence.java](jbang/common/model_persistence.java) - Save/load models
+- [model_persistence_safetensor.java](jbang/common/model_persistence_safetensor.java) - SafeTensors format
+- [train_cli.java](jbang/common/train_cli.java) - Training CLI
+- [train_model.java](jbang/common/train_model.java) - Model training
 
-Topics:
-- Using langchain4j with Gollek
-- Building LLM-powered applications
-- Fine-tuning strategies
-- Integration patterns
+### 🔌 **Third-Party Integrations**
 
-## jbang Scripts
+#### JBang Examples
+- [deeplearning4j_integration.java](jbang/integration/deeplearning4j_integration.java) - DL4J integration
+- [opennlp_integration.java](jbang/integration/opennlp_integration.java) - Apache OpenNLP
+- [smile_ml_integration.java](jbang/integration/smile_ml_integration.java) - Smile ML library
+- [stanford_nlp_integration.java](jbang/integration/stanford_nlp_integration.java) - Stanford NLP
+- [tribuo_integration.java](jbang/integration/tribuo_integration.java) - Oracle Tribuo
 
-### 1. Simple Example
+### 🧪 **Neural Networks & ML**
 
-**File**: `sdk/integration/jbang-templates/gollek-template.java`
+#### JBang Examples
+- [neural_network_with_gollek.java](jbang/neural_network/neural_network_with_gollek.java) - Custom NN
+- [neural-network-example.java](jbang/neural_network/neural-network-example.java) - Simple NN
+- [cv_mlp_classifier_export.java](jbang/machine_learning/cv_mlp_classifier_export.java) - MLP classifier
+- [simd_audio_processing.java](jbang/machine_learning/simd_audio_processing.java) - SIMD audio
 
-Run:
+## 🚀 Quick Start
+
+### JBang (Command-Line)
+
 ```bash
-jbang sdk/integration/jbang-templates/gollek-template.java
+# Install JBang first
+curl -Ls https://sh.jbang.dev | bash -s - app setup
+
+# Run any example
+jbang examples/jbang/multimodal/stable_diffusion_generation.java
+
+# With custom parameters
+jbang examples/jbang/multimodal/stable_diffusion_generation.java \
+  --prompt "a cyberpunk cat" \
+  --output cyberpunk.png \
+  --steps 30
 ```
 
-Output:
-```
-🚀 Gollek SDK jbang Template
-============================
-...
-```
+### Jupyter Notebook (Interactive)
 
-### 2. Neural Network Training
-
-**File**: `examples/neural-network-example.java`
-
-Run:
 ```bash
-jbang examples/neural-network-example.java
+# Install Java kernel
+jbang app install java-kernel
+
+# Register kernel
+jupyter kernelspec install examples/jupyter/kernel.json
+
+# Launch Jupyter
+jupyter notebook examples/jupyter
+
+# Open 07-stable-diffusion.ipynb for image generation
 ```
 
-Features:
-- Builds sequential model
-- Creates optimizer
-- Simulates training step
-- Shows API usage
+## 📊 Feature Matrix
 
-### 3. Batch Data Processing
+| Category | JBang | Jupyter | Description |
+|----------|-------|---------|-------------|
+| **Text-to-Image** | ✅ 3 | ✅ 1 | Stable Diffusion generation |
+| **Text-to-Speech** | ✅ 1 | ❌ | SpeechT5 synthesis |
+| **Speech-to-Text** | ✅ 2 | ❌ | Whisper transcription |
+| **Vision QA** | ✅ 1 | ❌ | LLaVA image understanding |
+| **Video Analysis** | ✅ 1 | ❌ | Temporal video understanding |
+| **NLP/Chat** | ✅ 6 | ✅ 1 | Text generation & classification |
+| **SDK Usage** | ✅ 13 | ✅ 1 | Core API examples |
+| **Edge/LiteRT** | ✅ 9 | ❌ | Mobile/edge inference |
+| **Quantization** | ✅ 5 | ❌ | Model compression |
+| **Integrations** | ✅ 5 | ❌ | Third-party libraries |
 
-**File**: `examples/batch-processor.java`
+**Total**: 53+ JBang scripts, 2+ Jupyter notebooks
 
-Run:
-```bash
-jbang examples/batch-processor.java /path/to/data
-```
+## 🎯 Learning Paths
 
-Features:
-- Reads CSV files
-- Processes in batches
-- Handles errors gracefully
+### Beginner Path
+1. `hello_gollek.java` - Basic usage
+2. `01-getting-started.ipynb` - Interactive tensors
+3. `mnist_style_setup.java` - Simple training
+4. `gollek-quickstart.java` - SDK basics
 
-### 4. Model Export
+### Intermediate Path
+1. `stable_diffusion_generation.java` - Image generation ✨ NEW
+2. `native_whisper_stt.java` - Audio processing
+3. `gollek-sdk-vision-example.java` - Computer vision
+4. `nlp_sentiment_analysis.java` - NLP basics
 
-**File**: `examples/model-export.java`
+### Advanced Path
+1. `omni_assistant.java` - Multimodal AI
+2. `gollek-quantizer-turboquant.java` - Quantization
+3. `video_analyst.java` - Video understanding
+4. `graph_fusion_example.java` - Optimization
 
-Run:
-```bash
-jbang examples/model-export.java --input model.dat --output model.json
-```
+## 📝 Creating Your Own Examples
 
-Features:
-- Saves trained models
-- Exports configuration
-- Version tracking
+### Converting Jupyter → JBang
 
-### 5. Multimodal AI (Real-World)
- 
- **Directory**: `examples/multimodal/`
- 
- These examples demonstrate the unified Vision, Audio, and Video capabilities of the Gollek SDK using the new fluent API.
- 
- #### A. Vision Storyteller
- **File**: `examples/multimodal/vision_storyteller.java`
- ```bash
- jbang examples/multimodal/vision_storyteller.java sample.jpg
- ```
- *Generates a creative story from an image.*
- 
- #### B. Smart Transcriber
- **File**: `examples/multimodal/smart_transcriber.java`
- ```bash
- jbang examples/multimodal/smart_transcriber.java meeting.wav
- ```
- *Transcribes audio and extracts key highlights.*
- 
- #### C. Video Analyst
- **File**: `examples/multimodal/video_analyst.java`
- ```bash
- jbang examples/multimodal/video_analyst.java clip.mp4
- ```
- *Second-by-second temporal scene analysis.*
- 
- #### D. Omni Assistant
- **File**: `examples/multimodal/omni_assistant.java`
- ```bash
- jbang examples/multimodal/omni_assistant.java house.jpg note.wav "How do these relate?"
- ```
- *Mixed-modality reasoning across text, image, and audio.*
- 
- ## Usage Patterns
+1. Extract code cells from `.ipynb`
+2. Add JBang header with dependencies
+3. Add CLI argument parsing
+4. Run with `jbang your_script.java`
 
-### Pattern 1: Interactive Exploration (Jupyter)
+### Converting JBang → Jupyter
 
-Perfect for:
-- Experimenting with architectures
-- Visualizing gradients
-- Learning deep learning concepts
-- Prototyping solutions
+1. Remove JBang header
+2. Split into logical code cells
+3. Add markdown explanation cells
+4. Save as `.ipynb`
 
-**Workflow**:
-1. Start Jupyter
-2. Create cells
-3. Import libraries
-4. Build and train
-5. Visualize results
-6. Refine and repeat
+## 🐛 Troubleshooting
 
-### Pattern 2: Batch Processing (jbang)
+### JBang Issues
 
-Perfect for:
-- Data preprocessing
-- Model evaluation
-- Automated training
-- Production pipelines
+**Problem**: `Error: Could not find or load main class`
+**Solution**: Ensure Java 25 is installed: `java -version`
 
-**Workflow**:
-1. Write jbang script
-2. Add dependencies
-3. Implement logic
-4. Run from command line
-5. Integrate into workflows
+**Problem**: Dependencies not resolving
+**Solution**: Run `jbang cache clear` and retry
 
-### Pattern 3: Development (Both)
+### Jupyter Issues
 
-Perfect for:
-- Prototyping in Jupyter
-- Exporting to jbang
-- Testing in production
-- Version control
+**Problem**: Kernel not found
+**Solution**: Install Java kernel: `jbang app install java-kernel`
 
-**Workflow**:
-1. Develop in Jupyter
-2. Export working code
-3. Convert to jbang script
-4. Add CLI arguments
-5. Test and deploy
+**Problem**: Imports failing
+**Solution**: Ensure Gollek JARs are in kernel classpath
 
-## Tips for Success
+## 🤝 Contributing
 
-### Jupyter Tips
+We welcome new examples! Please follow these guidelines:
 
-1. **Use Markdown cells** for explanations
-2. **Keep cells small** for reusability
-3. **Clear output** between experiments
-4. **Use print statements** for debugging
-5. **Document assumptions** clearly
+1. **Working Code**: Examples must compile and run
+2. **Clear Comments**: Explain what each section does
+3. **CLI Arguments**: Support `--help` and custom parameters
+4. **Error Handling**: Show best practices for error handling
+5. **Documentation**: Update this INDEX.md when adding new examples
 
-### jbang Tips
+## 📚 Additional Resources
 
-1. **Start with template** to learn structure
-2. **Use CLI arguments** for flexibility
-3. **Add error handling** for robustness
-4. **Cache large objects** across runs
-5. **Keep dependencies minimal**
-
-### General Tips
-
-1. **Test locally** before sharing
-2. **Use version control** for reproducibility
-3. **Document examples** thoroughly
-4. **Provide expected output** for validation
-5. **Include troubleshooting** guidance
-
-## Creating Your Own
-
-### From Jupyter to jbang
-
-1. Write and test in Jupyter
-2. Copy working cells to jbang template
-3. Add argument parsing
-4. Add error handling
-5. Test from command line
-
-```java
-// Convert this Jupyter cell:
-Module model = new Sequential(...);
-
-// Into this jbang script:
-///usr/bin/env jbang
-// DEPS tech.kayys:gollek-sdk-nn:1.0.0
-
-public class MyModel {
-    public static void main(String[] args) {
-        Module model = new Sequential(...);
-        // Use model...
-    }
-}
-```
-
-### From jbang to Jupyter
-
-1. Take jbang script
-2. Extract class definition
-3. Paste into Jupyter cell
-4. Remove main() wrapper
-5. Execute cells sequentially
-
-## Common Patterns
-
-### Pattern: Train and Evaluate
-
-```java
-// Build model
-Module model = new Sequential(...);
-
-// Train
-for (int epoch = 0; epoch < epochs; epoch++) {
-    // Forward pass
-    // Backward pass
-    // Optimizer step
-}
-
-// Evaluate
-Accuracy metric = new Accuracy();
-// Evaluate on test set
-```
-
-### Pattern: Save and Load
-
-```java
-// Save model weights
-// model.save("model.dat");
-
-// Load model weights
-// model.load("model.dat");
-```
-
-### Pattern: Hyperparameter Search
-
-```java
-// Try different parameters
-for (float lr : lrs) {
-    for (int hidden : hiddenSizes) {
-        // Build model with parameters
-        // Train and evaluate
-        // Track best
-    }
-}
-```
-
-### Pattern: Ensemble Models
-
-```java
-// Train multiple models
-Module[] models = new Module[numModels];
-for (int i = 0; i < numModels; i++) {
-    models[i] = buildModel();
-    // Train models[i]
-}
-
-// Ensemble prediction
-var predictions = new float[numClasses];
-for (var model : models) {
-    var pred = model.forward(input);
-    // Aggregate
-}
-```
-
-## Learning Path
-
-### Beginner
-
-1. Read JUPYTER_SETUP.md
-2. Run 01-getting-started.ipynb
-3. Try simple jbang script
-4. Modify examples
-
-### Intermediate
-
-1. Work through neural network notebook
-2. Write custom jbang script
-3. Combine Jupyter + jbang workflow
-4. Experiment with architectures
-
-### Advanced
-
-1. Study transformer notebook
-2. Build complex pipelines
-3. Integrate with production systems
-4. Optimize performance
-
-## Next Steps
-
-1. **Install** Jupyter/jbang (see setup guides)
-2. **Clone/download** example notebooks and scripts
-3. **Follow** one of the examples
-4. **Modify** to your use case
-5. **Share** your creations!
-
-## Resources
-
-- **Jupyter Setup**: [JUPYTER_SETUP.md](../jupyter-kernel/JUPYTER_SETUP.md)
-- **jbang Setup**: [JBANG_SETUP.md](../jbang-templates/JBANG_SETUP.md)
-- **API Reference**: [API_REFERENCE.md](../API_REFERENCE.md)
-- **Gollek SDK**: [README.md](../README.md)
+- [Stable Diffusion Tutorial](https://gollek-ai.github.io/docs/tutorials/intermediate/stable-diffusion/)
+- [API Reference](https://gollek-ai.github.io/docs/api-references/0.1.0-SNAPSHOT/modules/)
+- [CLI Documentation](https://gollek-ai.github.io/docs/cli/)
+- [Framework Guides](https://gollek-ai.github.io/docs/framework/)
 
 ---
 
-**Happy Learning! 🚀**
+**Last Updated**: April 14, 2026  
+**Total Examples**: 53+ JBang, 2+ Jupyter

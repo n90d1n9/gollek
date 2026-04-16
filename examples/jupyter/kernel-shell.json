@@ -1,0 +1,13 @@
+{
+  "display_name": "Gollek SD (Shell)",
+  "language": "bash",
+  "argv": [
+    "/opt/homebrew/bin/bash",
+    "-c",
+    "exec python3 -m bash_kernel"
+  ],
+  "env": {
+    "GOLLEK_RUNNER": "/Users/bhangun/Workspace/workkayys/Products/Wayang/wayang-platform/gollek/ui/gollek-cli/target/gollek-runner.jar"
+  },
+  "interrupt_mode": "message"
+}

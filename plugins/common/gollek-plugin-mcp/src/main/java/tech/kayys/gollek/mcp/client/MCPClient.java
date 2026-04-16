@@ -2,6 +2,7 @@ package tech.kayys.gollek.mcp.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Uni;
+import io.vertx.mutiny.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import tech.kayys.gollek.mcp.dto.MCPConnection;
@@ -15,6 +16,13 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Production-ready MCP client.
  * Manages connection to MCP server and exposes tools/resources/prompts.
+ * 
+ * <p>Compliant with MCP specification 2025-11-25.
+ * Supports:
+ * <ul>
+ *   <li>STDIO transport (local process spawning)</li>
+ *   <li>HTTP/SSE transport (remote servers)</li>
+ * </ul>
  */
 @ApplicationScoped
 public class MCPClient implements AutoCloseable {
@@ -23,6 +31,9 @@ public class MCPClient implements AutoCloseable {
 
     @Inject
     ObjectMapper objectMapper;
+
+    @Inject
+    Vertx vertx;
 
     private final Map<String, MCPConnection> connections = new ConcurrentHashMap<>();
     private final AtomicLong requestIdCounter = new AtomicLong(0);
@@ -42,15 +53,19 @@ public class MCPClient implements AutoCloseable {
         return connection.connect()
                 .onItem().invoke(() -> {
                     connections.put(config.getName(), connection);
-                    LOG.infof("Connected to MCP server: %s", config.getName());
+                    LOG.infof("Connected to MCP server: %s (transport=%s)", 
+                            config.getName(), config.getTransportType());
                 })
                 .replaceWith(connection);
     }
 
+    /**
+     * Create transport based on configuration.
+     */
     private MCPTransport createTransport(MCPClientConfig config) {
         return switch (config.getTransportType()) {
             case STDIO -> new StdioTransport(config, objectMapper);
-            case HTTP -> throw new UnsupportedOperationException("HTTP transport not yet implemented");
+            case HTTP -> new SseTransport(config, objectMapper, vertx);
             case WEBSOCKET -> throw new UnsupportedOperationException("WebSocket transport not yet implemented");
         };
     }

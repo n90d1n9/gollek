@@ -1,0 +1,20 @@
+{
+    "argv": [
+        "java",
+        "--enable-preview",
+        "--add-modules=jdk.incubator.vector",
+        "--enable-native-access=ALL-UNNAMED",
+        "-Xmx4g",
+        "-XX:+UseG1GC",
+        "-jar",
+        "{install_dir}/gollek-kernel.jar",
+        "{connection_file}"
+    ],
+    "display_name": "Gollek (Java 25 + AI/ML)",
+    "language": "java",
+    "interrupt_mode": "message",
+    "env": {},
+    "metadata": {
+        "debugger": false
+    }
+}
