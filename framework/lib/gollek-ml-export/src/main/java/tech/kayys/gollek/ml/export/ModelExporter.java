@@ -65,61 +65,39 @@ public class ModelExporter {
      * @throws IOException if export fails
      */
     public void toONNX(Path outputPath) throws IOException {
-        tech.kayys.gollek.ml.export.onnx.OnnxExporter.fromModel(model).export(outputPath);
+        tech.kayys.gollek.ml.export.onnx.OnnxExporter.fromModel(model, inputShape).export(outputPath);
     }
 
-    /**
-     * Export model to ONNX format (convenience method).
-     *
-     * @param outputPath path string
-     * @throws IOException if export fails
-     */
     public void toONNX(String outputPath) throws IOException {
         toONNX(Path.of(outputPath));
     }
 
-    /**
-     * Export model to GGUF format.
-     *
-     * @param outputPath   path to save GGUF model
-     * @param quantization quantization method
-     * @throws IOException if export fails
-     */
     public void toGGUF(Path outputPath, Quantization quantization) throws IOException {
-        GGUFExporter exporter = new GGUFExporter(model, inputShape, metadata, quantization);
-        exporter.export(outputPath);
+        tech.kayys.gollek.ml.export.gguf.GgufExporter.fromModel(model, metadata)
+                .quantization(toGgufQuant(quantization))
+                .export(outputPath);
     }
 
-    /**
-     * Export model to GGUF format (convenience method).
-     *
-     * @param outputPath   path string
-     * @param quantization quantization method
-     * @throws IOException if export fails
-     */
     public void toGGUF(String outputPath, Quantization quantization) throws IOException {
         toGGUF(Path.of(outputPath), quantization);
     }
 
-    /**
-     * Export model to LiteRT format.
-     *
-     * @param outputPath path to save LiteRT model
-     * @throws IOException if export fails
-     */
     public void toLiteRT(Path outputPath) throws IOException {
-        LiteRTExporter exporter = new LiteRTExporter(model, inputShape, metadata);
-        exporter.export(outputPath);
+        tech.kayys.gollek.ml.export.litert.LiteRTExporter.fromModel(model, inputShape).export(outputPath);
     }
 
-    /**
-     * Export model to LiteRT format (convenience method).
-     *
-     * @param outputPath path string
-     * @throws IOException if export fails
-     */
     public void toLiteRT(String outputPath) throws IOException {
         toLiteRT(Path.of(outputPath));
+    }
+
+    private static tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization toGgufQuant(Quantization q) {
+        return switch (q) {
+            case FP16 -> tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization.FP16;
+            case INT8 -> tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization.INT8;
+            case INT4 -> tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization.INT4;
+            case NF4  -> tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization.NF4;
+            default   -> tech.kayys.gollek.ml.export.gguf.GgufExporter.Quantization.NONE;
+        };
     }
 
     /**

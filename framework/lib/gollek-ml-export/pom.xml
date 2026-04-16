@@ -33,10 +33,20 @@
             <artifactId>gollek-ml-vision</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- ONNX export delegated to dedicated module -->
+        <!-- Export format modules -->
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-ml-export-onnx</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-ml-export-gguf</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-ml-export-litert</artifactId>
             <version>${project.version}</version>
         </dependency>
 
