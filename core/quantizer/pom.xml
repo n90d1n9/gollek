@@ -40,6 +40,7 @@
         <module>gollek-quantizer-autoround</module>
         <module>gollek-quantizer-awq</module>
         <module>gollek-quantizer-gptq</module>
+        <module>gollek-quantizer-quip</module>
         <!--  <module>gollek-quantizer-qwen</module>
         <module>gollek-quantizer-smoothquant</module>`
         <module>gollek-quantizer-ternary</module> -->
