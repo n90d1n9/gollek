@@ -105,10 +105,27 @@ public class FormatAwareProviderRouter {
     private StreamingProvider selectProvider(ProviderRequest request) {
         String modelId = request.getModel();
         boolean preferGguf = request.getParameter("gguf", Boolean.class).orElse(false);
+        Optional<String> preferredProviderId = request.getPreferredProvider();
 
         Optional<ModelFormat> formatOpt = detectFormat(modelId, preferGguf);
         List<StreamingProvider> ordered = orderedProviders(request);
 
+        // 1. If preferred provider is specified and it supports the model, use it strictly.
+        if (preferredProviderId.isPresent()) {
+            String preferred = preferredProviderId.get();
+            Optional<StreamingProvider> pinned = ordered.stream()
+                    .filter(p -> p.id().equalsIgnoreCase(preferred))
+                    .filter(p -> p.supports(modelId, request))
+                    .findFirst();
+            if (pinned.isPresent()) {
+                LOG.debugf("Routing to pinned preferred provider: %s", preferred);
+                return pinned.get();
+            } else {
+                LOG.warnf("Preferred provider '%s' not found or does not support model %s", preferred, modelId);
+            }
+        }
+
+        // 2. Format-aware selection
         if (formatOpt.isPresent()) {
             ModelFormat format = formatOpt.get();
             LOG.debugf("Detected format=%s for model=%s", format, modelId);
@@ -125,7 +142,7 @@ public class FormatAwareProviderRouter {
                     format, modelId);
         }
 
-        // Generic fallback
+        // 3. Generic fallback
         return ordered.stream()
                 .filter(p -> p.supports(modelId, request))
                 .findFirst()
@@ -140,12 +157,26 @@ public class FormatAwareProviderRouter {
 
     private List<StreamingProvider> orderedProviders(ProviderRequest request) {
         boolean preferGguf = request.getParameter("gguf", Boolean.class).orElse(false);
+        Optional<String> preferredProviderId = request.getPreferredProvider();
+        
         List<StreamingProvider> all = new ArrayList<>();
         providers.forEach(all::add);
 
         List<String> priority = new ArrayList<>(PROVIDER_PRIORITY);
-        if (preferGguf && priority.remove("gguf")) {
+        
+        // Adjust priority based on flags
+        if (preferGguf && priority.contains("gguf")) {
+            priority.remove("gguf");
             priority.add(0, "gguf");
+        }
+        
+        // Adjust priority based on explicit preference
+        if (preferredProviderId.isPresent()) {
+            String preferred = preferredProviderId.get();
+            if (priority.contains(preferred)) {
+                priority.remove(preferred);
+            }
+            priority.add(0, preferred);
         }
 
         all.sort(Comparator.comparingInt(p -> {

@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import tech.kayys.gollek.cli.chat.ChatUIRenderer;
 import tech.kayys.gollek.cli.util.PluginAvailabilityChecker;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.plugin.kernel.KernelPlatformDetector;
@@ -52,6 +53,8 @@ public class RunCommand implements Runnable {
     ProviderRegistry providerRegistry;
     @Inject
     PluginAvailabilityChecker pluginChecker;
+    @Inject
+    ChatUIRenderer uiRenderer;
 
     @Option(names = { "-m", "--model" }, description = "Model ID or path", required = true)
     public String modelId;
@@ -60,7 +63,7 @@ public class RunCommand implements Runnable {
     public String prompt;
 
     @Option(names = {
-            "--provider" }, description = "Provider: litert, gguf, safetensor, libtorch(experimental), gemini, openai, anthropic, cerebras")
+            "--provider" }, description = "Provider: native (pure Java), litert, gguf, safetensor, libtorch(experimental), gemini, openai, anthropic, cerebras")
     String providerId;
 
     @Option(names = { "-s", "--stream" }, description = "Stream output", defaultValue = "true")
@@ -139,12 +142,7 @@ public class RunCommand implements Runnable {
     @Option(names = { "--height" }, description = "Output image height in pixels (default: 512, must be multiple of 64)")
     Integer height;
 
-    private static final String RESET = "\u001B[0m";
-    private static final String GREEN = "\u001B[32m";
-    private static final String CYAN = "\u001B[36m";
-    private static final String YELLOW = "\u001B[33m";
-    private static final String DIM = "\u001B[2m";
-    private static final String BOLD = "\u001B[1m";
+
 
     @Override
     public void run() {
@@ -158,11 +156,11 @@ public class RunCommand implements Runnable {
         // Auto-detect and display kernel platform
         KernelPlatform detectedPlatform = KernelPlatformDetector.detect();
         if (parentCommand == null || !parentCommand.verbose) {
-            System.out.println(CYAN + "Platform: " + detectedPlatform.getDisplayName() + RESET);
+            System.out.println(ChatUIRenderer.CYAN + "Platform: " + detectedPlatform.getDisplayName() + ChatUIRenderer.RESET);
             if (detectedPlatform.isCpu()) {
-                System.out.println(YELLOW + "⚠️  Running on CPU (GPU acceleration not available)" + RESET);
+                System.out.println(ChatUIRenderer.YELLOW + "⚠️  Running on CPU (GPU acceleration not available)" + ChatUIRenderer.RESET);
             } else {
-                System.out.println(GREEN + "✓ GPU acceleration enabled" + RESET);
+                System.out.println(ChatUIRenderer.GREEN + "✓ GPU acceleration enabled" + ChatUIRenderer.RESET);
             }
             System.out.println();
         }
@@ -185,15 +183,8 @@ public class RunCommand implements Runnable {
             configureCheckpointConversionPreference();
 
             boolean customModelPathUsed = false;
-            if (!enableJsonSse) {
-                System.out.println(BOLD + YELLOW + "  _____       _      _    " + RESET);
-                System.out.println(BOLD + YELLOW + " / ____|     | |    | |   " + RESET);
-                System.out.println(BOLD + YELLOW + "| |  __  ___ | | ___| | __" + RESET);
-                System.out.println(BOLD + YELLOW + "| | |_ |/ _ \\| |/ _ \\ |/ /" + RESET);
-                System.out.println(BOLD + YELLOW + "| |__| | (_) | |  __/   < " + RESET);
-                System.out.println(BOLD + YELLOW + " \\_____|\\___/|_|\\___|_|\\_\\" + RESET);
-                System.out.println();
-            }
+            uiRenderer.setJsonMode(enableJsonSse);
+            uiRenderer.printBanner();
 
             if (isMcpProvider()) {
                 System.out.println("MCP provider selected; skipping local model lookup.");
@@ -222,7 +213,7 @@ public class RunCommand implements Runnable {
                     }
 
                     if (modelId.contains("/") || modelId.startsWith("hf:")) {
-                        System.out.println(CYAN + "Checking model: " + modelId + (branch != null ? " (branch: " + branch + ")" : "") + "..." + RESET);
+                        System.out.println(ChatUIRenderer.CYAN + "Checking model: " + modelId + (branch != null ? " (branch: " + branch + ")" : "") + "..." + ChatUIRenderer.RESET);
                         boolean pulled = false;
                         Exception lastPullError = null;
                         for (String pullSpec : buildPullSpecs(modelId)) {
@@ -392,10 +383,7 @@ public class RunCommand implements Runnable {
             boolean directProviderBypass = "safetensor".equalsIgnoreCase(providerId);
 
             if (!enableJsonSse) {
-                System.out.printf(BOLD + "Model: " + RESET + CYAN + "%s" + RESET + "%n", modelId);
-                System.out.printf(BOLD + "Provider: " + RESET + YELLOW + "%s" + RESET + "%n",
-                        providerId != null ? providerId : "auto-select");
-                System.out.println(DIM + "-".repeat(50) + RESET);
+                uiRenderer.printModelInfo(modelId, providerId, null, false);
             }
 
             if (directProviderBypass) {
@@ -405,12 +393,13 @@ public class RunCommand implements Runnable {
             }
 
             if (stream) {
+                java.io.ByteArrayOutputStream imageBuffer = new java.io.ByteArrayOutputStream();
                 CountDownLatch latch = new CountDownLatch(1);
                 // Streaming mode
-                java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
-                java.io.ByteArrayOutputStream imageBuffer = new java.io.ByteArrayOutputStream();
                 java.util.concurrent.atomic.AtomicReference<String> lastProgress = new java.util.concurrent.atomic.AtomicReference<>();
+                java.util.concurrent.atomic.AtomicReference<java.util.Map<String, Object>> metricsRef = new java.util.concurrent.atomic.AtomicReference<>();
 
+                java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
                 sdk.streamCompletion(request)
                         .subscribe().with(
                                 chunk -> {
@@ -420,6 +409,10 @@ public class RunCommand implements Runnable {
                                             ", index=" + chunk.index() + 
                                             ", hasImageDelta=" + (chunk.imageDeltaBase64() != null) +
                                             ", hasDelta=" + (chunk.getDelta() != null));
+                                    }
+
+                                    if (chunk.metadata() != null && !chunk.metadata().isEmpty()) {
+                                        metricsRef.set(chunk.metadata());
                                     }
                                     
                                     if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
@@ -447,7 +440,7 @@ public class RunCommand implements Runnable {
                                         if (delta.startsWith("[") && delta.contains("]")) {
                                             lastProgress.set(delta);
                                             if (!enableJsonSse) {
-                                                System.out.print("\r" + CYAN + delta + RESET + "  ");
+                                                System.out.print("\r" + ChatUIRenderer.CYAN + delta + ChatUIRenderer.RESET + "  ");
                                                 System.out.flush();
                                             }
                                         } else if (enableJsonSse) {
@@ -460,7 +453,7 @@ public class RunCommand implements Runnable {
                                     }
                                 },
                                 error -> {
-                                    System.err.println("\n" + YELLOW + "Error: " + RESET + error.getMessage());
+                                    uiRenderer.printError(error.getMessage(), false);
                                     printProviderHintFromError(error);
                                     latch.countDown();
                                 },
@@ -477,7 +470,7 @@ public class RunCommand implements Runnable {
                                                 ? Path.of(outputPath) 
                                                 : Path.of("output.png");
                                             Files.write(outPath, imageBuffer.toByteArray());
-                                            System.out.println("\n" + GREEN + BOLD + "✓ Image saved to: " + RESET + outPath.toAbsolutePath());
+                                            System.out.println("\n" + ChatUIRenderer.GREEN + ChatUIRenderer.BOLD + "✓ Image saved to: " + ChatUIRenderer.RESET + outPath.toAbsolutePath());
                                             
                                             // Auto-open image on macOS
                                             autoOpenImage(outPath);
@@ -490,10 +483,8 @@ public class RunCommand implements Runnable {
                                     if (enableJsonSse) {
                                         printOpenAiSseFinal(request.getRequestId(), request.getModel());
                                     } else {
-                                        System.out.printf(
-                                                "%n" + DIM + "[Chunks: %d, Duration: %.2fs, Speed: %.2f t/s]" + RESET
-                                                        + "%n",
-                                                tokenCount.get(), duration / 1000.0, tps);
+                                        uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps, false);
+                                        uiRenderer.printBenchmarks(metricsRef.get(), false);
                                     }
                                     latch.countDown();
                                 });
@@ -537,13 +528,10 @@ public class RunCommand implements Runnable {
 
     private void printResponse(InferenceResponse response, long startTime) {
         System.out.println();
-        System.out.println(GREEN + response.getContent() + RESET);
+        System.out.println(ChatUIRenderer.GREEN + response.getContent() + ChatUIRenderer.RESET);
         double seconds = Math.max(response.getDurationMs() / 1000.0, 0.001);
         double tps = response.getTokensUsed() / seconds;
-        System.out.printf("%n" + DIM + "[Tokens: %d, Duration: %.2fs, Speed: %.2f t/s]" + RESET + "%n",
-                response.getTokensUsed(),
-                response.getDurationMs() / 1000.0,
-                tps);
+        uiRenderer.printStats(response.getTokensUsed(), response.getDurationMs() / 1000.0, tps, false);
     }
 
     private void printOpenAiSseDelta(String requestId, String model, String delta) {

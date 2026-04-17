@@ -224,7 +224,7 @@ public class GGUFProvider implements StreamingProvider {
 
     @Override
     public void initialize(ProviderConfig config) throws ProviderException.ProviderInitializationException {
-        if (!initialized.get()) {
+       /*  if (!initialized.get()) {
             if (shutdown.get()) {
                 throw new ProviderException.ProviderInitializationException(
                         PROVIDER_ID,
@@ -233,7 +233,11 @@ public class GGUFProvider implements StreamingProvider {
             throw new ProviderException.ProviderInitializationException(
                     PROVIDER_ID,
                     "GGUF provider failed to initialize during startup");
-        }
+        } */
+
+        // Initialization is handled lazily via ensureInitialized() on first use,
+        // or eagerly via onStart() if prewarm is enabled.
+        log.debugf("GGUF provider [%s] initialized in registry", PROVIDER_ID);
     }
 
     @Override

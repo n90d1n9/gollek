@@ -17,6 +17,7 @@
 //JAVA_OPTIONS --enable-native-access=ALL-UNNAMED
 
 import tech.kayys.gollek.inference.gguf.*;
+import tech.kayys.gollek.gguf.tokenizer.GGUFChatTemplateService;
 import tech.kayys.gollek.spi.Message;
 import tech.kayys.gollek.spi.inference.*;
 import tech.kayys.gollek.spi.model.ModelManifest;

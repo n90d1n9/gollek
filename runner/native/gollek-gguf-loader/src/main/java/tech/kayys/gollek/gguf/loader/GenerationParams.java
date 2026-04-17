@@ -1,4 +1,4 @@
-package tech.kayys.gollek.inference.gguf;
+package tech.kayys.gollek.gguf.loader;
 
 import java.time.Duration;
 import java.util.Collections;

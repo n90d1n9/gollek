@@ -1,4 +1,4 @@
-package tech.kayys.gollek.quantizer.turboquant;
+package tech.kayys.gollek.gguf.loader;
 
 import jdk.incubator.vector.*;
 import org.slf4j.Logger;
@@ -9,48 +9,11 @@ import org.slf4j.LoggerFactory;
  *
  * GGUF (GPT-Generated Unified Format) uses block-based quantization where
  * weights are organized into fixed-size blocks, each with its own scale.
- * This is distinct from tensor-level group quantization (GPTQ/AWQ).
- *
- * ┌─────────────────────────────────────────────────────────────────────────┐
- * │ GGUF Quantization Types Supported │
- * ├──────────────┬──────────┬───────────────────────────────────────────────┤
- * │ Type │ Block sz │ Description │
- * ├──────────────┼──────────┼───────────────────────────────────────────────┤
- * │ Q4_0 │ 18 B │ 4-bit, 32 weights/block, 1×FP16 scale │
- * │ Q4_1 │ 20 B │ Q4_0 + FP16 min offset │
- * │ Q5_0 │ 22 B │ 5-bit, 32 weights/block, 1×FP16 scale │
- * │ Q5_1 │ 24 B │ Q5_0 + FP16 min offset │
- * │ Q8_0 │ 34 B │ 8-bit, 32 weights/block, 1×FP16 scale │
- * │ Q2_K │ 84 B │ 2-bit super-blocks, 256 weights │
- * │ Q3_K_S/M/L │ 110 B │ 3-bit super-blocks, 256 weights │
- * │ Q4_K_S/M │ 144 B │ 4-bit super-blocks, 256 weights (most used) │
- * │ Q5_K_S/M │ 176 B │ 5-bit super-blocks, 256 weights │
- * │ Q6_K │ 210 B │ 6-bit super-blocks, 256 weights │
- * └──────────────┴──────────┴───────────────────────────────────────────────┘
- *
- * Block layout for Q4_K_M (most popular for LLMs):
- * ┌─────────────────────────────────────────────────────────────────────────┐
- * │ Q4_K Super-Block (144 bytes, 256 elements): │
- * │ [2×FP16 d,dmin] [12×u8 scales+mins] [128×u8 quantized nibbles] │
- * │ ├── d : super-block scale (FP16, 2 bytes) │
- * │ ├── dmin : super-block min scale (FP16, 2 bytes) │
- * │ ├── scales: 12 bytes encoding 8 sub-block scales and 8 mins │
- * │ └── qs : 128 bytes of packed INT4 (256 values × 4 bits) │
- * │ │
- * │ Dequant: w[i] = d × scale[sub] × q[i] - dmin × min[sub] │
- * └─────────────────────────────────────────────────────────────────────────┘
- *
- * Vector API strategy for Q4_K_M:
- * - Load 128 bytes (256 nibbles) per super-block
- * - IntVector: unpack 8 nibbles per INT32 in parallel
- * - FloatVector: apply sub-block scale and min in SIMD batches
- * - Process F_LANES elements per SIMD iteration
  */
 public class GGUFDequantizer {
 
     private static final Logger log = LoggerFactory.getLogger(GGUFDequantizer.class);
 
-    // Use the preferred vector species for the current platform
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final VectorSpecies<Integer> INT_SPECIES = IntVector.SPECIES_PREFERRED;
     private static final int F_LANES = FLOAT_SPECIES.length();
@@ -72,9 +35,9 @@ public class GGUFDequantizer {
 
         public final int ggmlId;
         public final int blockBytes;
-        public final int blockSize; // weights per block / super-block
+        public final int blockSize; 
         public final int bits;
-        public final boolean hasMin; // whether a separate min-scale is stored
+        public final boolean hasMin; 
 
         GGMLType(int id, int blockBytes, int blockSize, int bits, boolean hasMin) {
             this.ggmlId = id;
@@ -96,20 +59,6 @@ public class GGUFDequantizer {
         }
     }
 
-    // ── Q4_0: Simple 4-bit, 32 weights/block ─────────────────────────────────
-
-    /**
-     * Dequantizes Q4_0 block-quantized data.
-     *
-     * Block layout (18 bytes):
-     * [2 bytes FP16 scale d][16 bytes: 32 INT4 weights packed as nibbles]
-     *
-     * Formula: w[i] = d × (q[i] − 8) (subtract 8 to center at 0)
-     *
-     * @param rawBlocks   raw block bytes from GGUF file
-     * @param numElements number of FP32 elements to output
-     * @param output      pre-allocated FP32 output
-     */
     public void dequantQ4_0(byte[] rawBlocks, int numElements, float[] output) {
         final int BLOCK_SIZE = 32;
         final int BLOCK_BYTES = 18;
@@ -119,12 +68,10 @@ public class GGUFDequantizer {
             int blockOff = b * BLOCK_BYTES;
             int outBase = b * BLOCK_SIZE;
 
-            // Read FP16 scale
             short dBits = (short) (((rawBlocks[blockOff + 1] & 0xFF) << 8)
                     | (rawBlocks[blockOff] & 0xFF));
             float d = fp16ToFloat(dBits);
 
-            // Unpack 32 nibbles from 16 bytes
             int nib = 0;
             while (nib < BLOCK_SIZE) {
                 int j = nib / 2;
@@ -142,16 +89,6 @@ public class GGUFDequantizer {
         }
     }
 
-    // ── Q8_0: 8-bit, 32 weights/block ────────────────────────────────────────
-
-    /**
-     * Dequantizes Q8_0 block-quantized data with Vector API inner loop.
-     *
-     * Block layout (34 bytes):
-     * [2 bytes FP16 scale d][32 bytes: INT8 weights]
-     *
-     * Formula: w[i] = d × q[i]
-     */
     public void dequantQ8_0(byte[] rawBlocks, int numElements, float[] output) {
         final int BLOCK_SIZE = 32;
         final int BLOCK_BYTES = 34;
@@ -165,47 +102,26 @@ public class GGUFDequantizer {
                     | (rawBlocks[blockOff] & 0xFF));
             float d = fp16ToFloat(dBits);
 
-            // SIMD-friendly: process F_LANES INT8 values at once
             int i = 0;
             for (; i <= BLOCK_SIZE - F_LANES && outBase + i + F_LANES <= numElements; i += F_LANES) {
                 float[] vals = new float[F_LANES];
                 for (int lane = 0; lane < F_LANES; lane++) {
-                    vals[lane] = (float) rawBlocks[blockOff + 2 + i + lane]; // signed INT8
+                    vals[lane] = (float) rawBlocks[blockOff + 2 + i + lane];
                 }
                 FloatVector vq = FloatVector.fromArray(FLOAT_SPECIES, vals, 0);
                 FloatVector vd = FloatVector.broadcast(FLOAT_SPECIES, d);
                 vq.mul(vd).intoArray(output, outBase + i);
             }
-            // Scalar tail
             for (; i < BLOCK_SIZE && outBase + i < numElements; i++) {
                 output[outBase + i] = d * rawBlocks[blockOff + 2 + i];
             }
         }
     }
 
-    // ── Q4_K: 4-bit Super-Blocks (most popular for 7B/13B LLMs) ─────────────
-
-    /**
-     * Dequantizes Q4_K_M super-block format — the most commonly used GGUF type.
-     *
-     * Super-block layout (144 bytes, 256 elements, 8 sub-blocks of 32):
-     * [2B FP16 d][2B FP16 dmin][12B scales+mins][128B packed INT4]
-     *
-     * The 12-byte scales/mins block encodes:
-     * - 8 × 6-bit sub-block scales (bits[5:0] of each scale byte)
-     * - 8 × 6-bit sub-block mins (packed into upper bits)
-     *
-     * Formula: w[i] = d × sc[sub] × q[i] − dmin × mn[sub]
-     * where sc[sub], mn[sub] are the sub-block scale and min.
-     *
-     * @param rawBlocks   raw bytes from GGUF tensor data
-     * @param numElements total FP32 elements to write
-     * @param output      output array
-     */
     public void dequantQ4K(byte[] rawBlocks, int numElements, float[] output) {
         final int SUPER_BLOCK_SIZE = 256;
         final int SUPER_BLOCK_BYTES = 144;
-        final int NUM_SUB = 8; // 8 sub-blocks per super-block
+        final int NUM_SUB = 8; 
         final int SUB_SIZE = 32;
 
         int numSuperBlocks = (numElements + SUPER_BLOCK_SIZE - 1) / SUPER_BLOCK_SIZE;
@@ -214,28 +130,22 @@ public class GGUFDequantizer {
             int sbOff = sb * SUPER_BLOCK_BYTES;
             int outBase = sb * SUPER_BLOCK_SIZE;
 
-            // Read super-block scale (FP16) and min-scale (FP16)
             float d = fp16ToFloat(readFp16(rawBlocks, sbOff));
             float dmin = fp16ToFloat(readFp16(rawBlocks, sbOff + 2));
 
-            // Decode 8 sub-block scales and 8 mins from 12 bytes
             float[] sc = new float[NUM_SUB];
             float[] mn = new float[NUM_SUB];
             decodeQ4KScales(rawBlocks, sbOff + 4, d, dmin, sc, mn);
 
-            // Dequantize 256 nibbles from 128 bytes
-            int qsOff = sbOff + 16; // nibble data starts at byte 16
+            int qsOff = sbOff + 16; 
 
             for (int sub = 0; sub < NUM_SUB; sub++) {
                 int subOutBase = outBase + sub * SUB_SIZE;
                 float scale = sc[sub];
                 float minV = mn[sub];
 
-                // Two halves of 16 nibbles each:
-                // First 16 nibbles: low bits of qs[0..15]
-                // Second 16 nibbles: high bits of qs[0..15]
-                int halfOff = qsOff + sub * 16; // low nibbles offset
-                int hiOff = qsOff + 64 + sub * 16; // high nibbles offset
+                int halfOff = qsOff + sub * 16; 
+                int hiOff = qsOff + 64 + sub * 16; 
 
                 for (int i = 0; i < 16 && subOutBase + i < numElements; i++) {
                     int bLo = rawBlocks[halfOff + i] & 0xFF;
@@ -251,41 +161,18 @@ public class GGUFDequantizer {
         }
     }
 
-    /**
-     * Decode Q4_K 12-byte scales+mins block into per-sub-block FP32 arrays.
-     *
-     * The 12 bytes encode:
-     * Bytes 0-5: lower 4 bits of scale[0..7] and lower 4 bits of min[0..7]
-     * Bytes 6-11: upper 2 bits completing each 6-bit scale and min value
-     */
     private void decodeQ4KScales(byte[] data, int off,
             float d, float dmin,
             float[] sc, float[] mn) {
         for (int i = 0; i < 8; i++) {
-            // Lower 4 bits come from bytes 0-7 (alternating scale/min)
             int lo = data[off + i] & 0xFF;
-            int scLo = lo & 0x3F; // 6-bit scale (lower 6 bits from byte i)
+            int scLo = lo & 0x3F; 
             int mnLo = (data[off + i + 4] >> 0) & 0x3F;
-            // Extend with bits from bytes 8-11
             sc[i] = d * scLo;
             mn[i] = dmin * mnLo;
         }
     }
 
-    // ── Q5_K: 5-bit Super-Blocks ──────────────────────────────────────────────
-
-    /**
-     * Dequantizes Q5_K format.
-     *
-     * Like Q4_K but with an extra high-bit byte per sub-block providing
-     * the 5th bit for each quantized value.
-     *
-     * Super-block layout (176 bytes, 256 elements):
-     * [2B d][2B dmin][12B scales][32B high bits][128B low nibbles]
-     *
-     * w[i] = d × sc[sub] × q5[i] - dmin × mn[sub]
-     * where q5[i] = (hi_bit[i] << 4) | lo_nibble[i] (0..31)
-     */
     public void dequantQ5K(byte[] rawBlocks, int numElements, float[] output) {
         final int SUPER_BLOCK_BYTES = 176;
         final int SUPER_BLOCK_SIZE = 256;
@@ -304,8 +191,8 @@ public class GGUFDequantizer {
             float[] mn = new float[NUM_SUB];
             decodeQ4KScales(rawBlocks, sbOff + 4, d, dmin, sc, mn);
 
-            int hiBitsOff = sbOff + 16; // 32 bytes of high bits
-            int qsOff = sbOff + 48; // 128 bytes of low nibbles
+            int hiBitsOff = sbOff + 16; 
+            int qsOff = sbOff + 48; 
 
             for (int sub = 0; sub < NUM_SUB; sub++) {
                 int subOut = outBase + sub * 32;
@@ -323,17 +210,6 @@ public class GGUFDequantizer {
         }
     }
 
-    // ── Q6_K: 6-bit Super-Blocks ──────────────────────────────────────────────
-
-    /**
-     * Dequantizes Q6_K (6-bit, highest quality GGUF format).
-     *
-     * Super-block layout (210 bytes, 256 elements):
-     * [128B low nibbles][64B high 2-bits][16B scales (INT8)][2B FP16 d]
-     *
-     * w[i] = d × scale[sub] × q6[i]
-     * where q6[i] = lo4_nibble[i] | (hi2_bit[i] << 4) (0..63, biased by -32)
-     */
     public void dequantQ6K(byte[] rawBlocks, int numElements, float[] output) {
         final int SUPER_BLOCK_BYTES = 210;
         final int SUPER_BLOCK_SIZE = 256;
@@ -345,34 +221,27 @@ public class GGUFDequantizer {
             int sbOff = sb * SUPER_BLOCK_BYTES;
             int outBase = sb * SUPER_BLOCK_SIZE;
 
-            // Q6_K layout: nibbles first, then high bits, then scales, then d
-            int ql = sbOff; // 128 bytes: low 4-bit nibbles
-            int qh = sbOff + 128; // 64 bytes: high 2-bit pairs
-            int sc = sbOff + 192; // 16 bytes: INT8 sub-block scales
-            int dOff = sbOff + 208; // 2 bytes: FP16 super-block scale
+            int ql = sbOff; 
+            int qh = sbOff + 128; 
+            int sc = sbOff + 192; 
+            int dOff = sbOff + 208; 
 
             float d = fp16ToFloat(readFp16(rawBlocks, dOff));
 
             for (int i = 0; i < SUPER_BLOCK_SIZE && outBase + i < numElements; i++) {
                 int sub = i / 16;
-                float subScale = d * rawBlocks[sc + sub]; // INT8 scale
+                float subScale = d * rawBlocks[sc + sub]; 
 
-                // Extract 6-bit value: lo4 from ql, hi2 from qh
                 int qIdx = i / 2;
                 int lo4 = (rawBlocks[ql + qIdx] >> ((i % 2) * 4)) & 0xF;
                 int hiIdx = i / 4;
                 int hi2 = (rawBlocks[qh + hiIdx] >> ((i % 4) * 2)) & 0x3;
                 int q6 = lo4 | (hi2 << 4);
-                output[outBase + i] = subScale * (q6 - 32); // bias by 32
+                output[outBase + i] = subScale * (q6 - 32); 
             }
         }
     }
 
-    // ── Dispatch ──────────────────────────────────────────────────────────────
-
-    /**
-     * Dispatch to the correct dequant implementation for a given GGML type.
-     */
     public void dequantize(GGMLType type, byte[] rawBlocks, int numElements, float[] output) {
         switch (type) {
             case Q4_0 -> dequantQ4_0(rawBlocks, numElements, output);
@@ -389,8 +258,6 @@ public class GGUFDequantizer {
         }
         log.debug("Dequantized {} elements using {}", numElements, type);
     }
-
-    // ── Q4_1, Q5_0 (with min offset) ─────────────────────────────────────────
 
     private void dequantQ4_1(byte[] blocks, int numElements, float[] output) {
         final int BLOCK_SIZE = 32, BLOCK_BYTES = 20;
@@ -413,7 +280,6 @@ public class GGUFDequantizer {
         for (int b = 0; b < n; b++) {
             int bOff = b * BLOCK_BYTES, outBase = b * BLOCK_SIZE;
             float d = fp16ToFloat(readFp16(blocks, bOff));
-            // 4 bytes high bits
             int qhInt = ((blocks[bOff + 2] & 0xFF)) | ((blocks[bOff + 3] & 0xFF) << 8)
                     | ((blocks[bOff + 4] & 0xFF) << 16) | ((blocks[bOff + 5] & 0xFF) << 24);
             for (int i = 0; i < BLOCK_SIZE && outBase + i < numElements; i++) {
@@ -440,8 +306,6 @@ public class GGUFDequantizer {
         }
     }
 
-    // ── FP16 Utility ──────────────────────────────────────────────────────────
-
     private static short readFp16(byte[] data, int off) {
         return (short) (((data[off + 1] & 0xFF) << 8) | (data[off] & 0xFF));
     }
@@ -456,6 +320,22 @@ public class GGUFDequantizer {
         if (exp == 31)
             return Float.intBitsToFloat((sign << 31) | 0x7F800000 | (mant << 13));
         return Float.intBitsToFloat((sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13));
+    }
+
+    public static void dequantizeF16(java.lang.foreign.MemorySegment raw, java.lang.foreign.MemorySegment f32, long numElements) {
+        byte[] rawBytes = raw.toArray(java.lang.foreign.ValueLayout.JAVA_BYTE);
+        float[] outBytes = new float[(int)numElements];
+        new GGUFDequantizer().dequantF16(rawBytes, (int)numElements, outBytes);
+        java.lang.foreign.MemorySegment heapSegment = java.lang.foreign.MemorySegment.ofArray(outBytes);
+        java.lang.foreign.MemorySegment.copy(heapSegment, 0, f32, 0, numElements * Float.BYTES);
+    }
+
+    public static void dequantizeQ8_0(java.lang.foreign.MemorySegment raw, java.lang.foreign.MemorySegment f32, long numElements) {
+        byte[] rawBytes = raw.toArray(java.lang.foreign.ValueLayout.JAVA_BYTE);
+        float[] outBytes = new float[(int)numElements];
+        new GGUFDequantizer().dequantQ8_0(rawBytes, (int)numElements, outBytes);
+        java.lang.foreign.MemorySegment heapSegment = java.lang.foreign.MemorySegment.ofArray(outBytes);
+        java.lang.foreign.MemorySegment.copy(heapSegment, 0, f32, 0, numElements * Float.BYTES);
     }
 
     public static void printCapabilities() {

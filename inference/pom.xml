@@ -47,5 +47,6 @@
         <!-- Core infrastructure -->
         <module>gollek-cluster</module>
         <module>gollek-engine</module>
+
     </modules>
 </project>

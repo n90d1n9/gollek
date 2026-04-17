@@ -1,5 +1,7 @@
 package tech.kayys.gollek.inference.gguf;
 
+import tech.kayys.gollek.gguf.tokenizer.GGUFChatTemplateService;
+
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;

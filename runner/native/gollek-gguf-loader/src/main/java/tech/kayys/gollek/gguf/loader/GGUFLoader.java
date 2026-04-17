@@ -1,7 +1,9 @@
-package tech.kayys.gollek.inference.nativeimpl;
+package tech.kayys.gollek.gguf.loader;
 
 import tech.kayys.gollek.gguf.loader.GGUFModel;
 import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
+import tech.kayys.gollek.gguf.loader.GGUFReader;
+import tech.kayys.gollek.gguf.loader.GGUFParser;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -9,11 +11,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import java.nio.file.Path;
+import java.io.IOException;
+
 /**
  * High-level loader that maps a parsed GGUF model to the engine's internal 
  * TransformerLayerWeights structures, performing necessary prepacking.
  */
 public final class GGUFLoader {
+
+    public static GGUFModel loadModel(Path path) throws IOException {
+        try (GGUFReader reader = new GGUFReader(path)) {
+            return new GGUFParser().parse(reader.segment());
+        }
+    }
 
     public static List<TransformerLayerWeights> loadLayers(GGUFModel model, Arena arena) {
         Map<String, Object> meta = model.metadata();

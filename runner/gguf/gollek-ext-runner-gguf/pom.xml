@@ -35,6 +35,17 @@
             <version>${project.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-loader</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-tokenizer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Quarkus Core -->
         <dependency>
             <groupId>io.quarkus</groupId>

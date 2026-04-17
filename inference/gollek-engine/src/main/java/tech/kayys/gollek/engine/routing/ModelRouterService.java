@@ -730,6 +730,7 @@ public class ModelRouterService {
                                 .toolChoice(request.getToolChoice())
                                 .streaming(request.isStreaming())
                                 .timeout(request.getTimeout().orElse(null))
+                                .preferredProvider(request.getPreferredProvider().orElse(null))
                                 .metadata("tenantId", tenantId)
                                 .build();
         }

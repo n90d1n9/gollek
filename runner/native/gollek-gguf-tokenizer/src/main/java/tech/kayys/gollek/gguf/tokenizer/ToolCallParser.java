@@ -1,4 +1,4 @@
-package tech.kayys.gollek.inference.gguf;
+package tech.kayys.gollek.gguf.tokenizer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

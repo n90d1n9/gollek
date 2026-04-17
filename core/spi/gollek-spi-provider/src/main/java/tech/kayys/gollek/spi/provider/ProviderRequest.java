@@ -48,8 +48,10 @@ public final class ProviderRequest {
     private final String apiKey;
 
     private final List<ToolDefinition> tools;
-
     private final Map<String, Object> metadata;
+
+    @Nullable
+    private final String preferredProvider;
 
     @JsonCreator
     public ProviderRequest(
@@ -65,7 +67,8 @@ public final class ProviderRequest {
             @JsonProperty("sessionId") String sessionId,
             @JsonProperty("traceId") String traceId,
             @JsonProperty("apiKey") String apiKey,
-            @JsonProperty("metadata") Map<String, Object> metadata) {
+            @JsonProperty("metadata") Map<String, Object> metadata,
+            @JsonProperty("preferredProvider") String preferredProvider) {
         this.requestId = Objects.requireNonNull(requestId, "requestId");
         this.model = Objects.requireNonNull(model, "model");
         this.messages = Collections.unmodifiableList(new ArrayList<>(
@@ -87,6 +90,7 @@ public final class ProviderRequest {
         this.metadata = metadata != null
                 ? Collections.unmodifiableMap(new HashMap<>(metadata))
                 : Collections.emptyMap();
+        this.preferredProvider = preferredProvider;
     }
 
     // Getters
@@ -142,6 +146,10 @@ public final class ProviderRequest {
         return metadata;
     }
 
+    public Optional<String> getPreferredProvider() {
+        return Optional.ofNullable(preferredProvider);
+    }
+
     // Parameter helpers
     public <T> Optional<T> getParameter(String key, Class<T> type) {
         Object value = parameters.get(key);
@@ -187,6 +195,7 @@ public final class ProviderRequest {
         private String traceId;
         private String apiKey;
         private Map<String, Object> metadata = new HashMap<>();
+        private String preferredProvider;
 
         public Builder requestId(String requestId) {
             this.requestId = requestId;
@@ -275,11 +284,16 @@ public final class ProviderRequest {
             return this;
         }
 
+        public Builder preferredProvider(String preferredProvider) {
+            this.preferredProvider = preferredProvider;
+            return this;
+        }
+
         public ProviderRequest build() {
             Objects.requireNonNull(model, "model is required");
             return new ProviderRequest(
                     requestId, model, messages, parameters, tools, toolChoice, streaming, timeout,
-                    userId, sessionId, traceId, apiKey, metadata);
+                    userId, sessionId, traceId, apiKey, metadata, preferredProvider);
         }
     }
 

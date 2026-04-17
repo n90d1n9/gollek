@@ -1,4 +1,4 @@
-package tech.kayys.gollek.inference.gguf;
+package tech.kayys.gollek.gguf.tokenizer;
 
 import com.hubspot.jinjava.Jinjava;
 import jakarta.enterprise.context.ApplicationScoped;

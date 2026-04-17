@@ -24,5 +24,6 @@
         <module>gollek-inference</module>
         <module>gollek-gguf-loader</module>
         <module>gollek-gguf-tokenizer</module>
+        <module>gollek-native-tensorflow</module>
     </modules>
 </project>

@@ -54,6 +54,11 @@
             <version>1.5.3</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-loader</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

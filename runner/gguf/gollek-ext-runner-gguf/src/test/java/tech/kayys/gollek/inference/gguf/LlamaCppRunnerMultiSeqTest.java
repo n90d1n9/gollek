@@ -1,5 +1,7 @@
 package tech.kayys.gollek.inference.gguf;
 
+import tech.kayys.gollek.gguf.tokenizer.GGUFChatTemplateService;
+
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import tech.kayys.gollek.spi.inference.InferenceRequest;

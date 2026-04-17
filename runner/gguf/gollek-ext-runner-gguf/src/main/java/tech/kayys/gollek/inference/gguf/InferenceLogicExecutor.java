@@ -1,5 +1,7 @@
 package tech.kayys.gollek.inference.gguf;
 
+import tech.kayys.gollek.gguf.tokenizer.GGUFChatTemplateService;
+
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;

@@ -73,4 +73,58 @@ class GGUFTokenizerDetectionTest {
         boolean res = (boolean) m.invoke(t, meta, "unknown", "unknown", tokens);
         assertTrue(res, "Expected cl100k_base encoding to be treated as raw UTF-8");
     }
+
+    @Test
+    @DisplayName("Detects tiktoken model hint via tokenizer.model metadata")
+    void detectTiktokenModelHint() throws Exception {
+        List<String> tokens = new ArrayList<>();
+        tokens.add(" hello");
+        tokens.add("world");
+
+        Map<String,Object> meta = new HashMap<>();
+        meta.put("tokenizer.ggml.tokens", tokens);
+        meta.put("tokenizer.model", "tiktoken");
+
+        GGUFTokenizer t = new GGUFTokenizer(makeModel(meta, tokens));
+        Method m = GGUFTokenizer.class.getDeclaredMethod("detectRawUtf8Vocab", Map.class, String.class, String.class, List.class);
+        m.setAccessible(true);
+        boolean res = (boolean) m.invoke(t, meta, "unknown", "tiktoken", tokens);
+        assertTrue(res, "Expected tokenizer.model=tiktoken to be treated as raw UTF-8");
+    }
+
+    @Test
+    @DisplayName("Detects cl100k alias without _base suffix")
+    void detectCl100kAlias() throws Exception {
+        List<String> tokens = new ArrayList<>();
+        tokens.add("hello");
+        tokens.add(" world");
+
+        Map<String,Object> meta = new HashMap<>();
+        meta.put("tokenizer.ggml.tokens", tokens);
+        meta.put("tokenizer.encoding", "cl100k");
+
+        GGUFTokenizer t = new GGUFTokenizer(makeModel(meta, tokens));
+        Method m = GGUFTokenizer.class.getDeclaredMethod("detectRawUtf8Vocab", Map.class, String.class, String.class, List.class);
+        m.setAccessible(true);
+        boolean res = (boolean) m.invoke(t, meta, "unknown", "unknown", tokens);
+        assertTrue(res, "Expected cl100k to be treated as raw UTF-8");
+    }
+
+    @Test
+    @DisplayName("Byte-level fallback: tokens with Ġ markers should be non-raw")
+    void detectByteLevelFallback() throws Exception {
+        List<String> tokens = new ArrayList<>();
+        tokens.add("Ġthe");
+        tokens.add("Ġquick");
+        tokens.add("Ġbrown");
+
+        Map<String,Object> meta = new HashMap<>();
+        meta.put("tokenizer.ggml.tokens", tokens);
+
+        GGUFTokenizer t = new GGUFTokenizer(makeModel(meta, tokens));
+        Method m = GGUFTokenizer.class.getDeclaredMethod("detectRawUtf8Vocab", Map.class, String.class, String.class, List.class);
+        m.setAccessible(true);
+        boolean res = (boolean) m.invoke(t, meta, "unknown", "unknown", tokens);
+        assertFalse(res, "Expected byte-level tokens (Ġ) to be detected as not raw UTF-8");
+    }
 }

@@ -1,4 +1,4 @@
-package tech.kayys.gollek.inference.nativeimpl;
+package tech.kayys.gollek.gguf.loader;
 
 import java.lang.foreign.MemorySegment;
 

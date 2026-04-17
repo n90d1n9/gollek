@@ -1,6 +1,8 @@
 package tech.kayys.gollek.cli.chat;
 
 import jakarta.enterprise.context.Dependent;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Handles terminal output rendering and colors.
@@ -43,14 +45,16 @@ public class ChatUIRenderer {
         System.out.println();
     }
 
-    public void printModelInfo(String modelId, String providerId, String outputFile) {
+    public void printModelInfo(String modelId, String providerId, String outputFile, boolean isInteractive) {
         if (jsonMode) return;
         System.out.printf(BOLD + "Model: " + RESET + CYAN + "%s" + RESET + "%n", modelId);
-        System.out.printf(BOLD + "Provider: " + RESET + YELLOW + "%s" + RESET + "%n", providerId != null ? providerId : "auto");
+        System.out.printf(BOLD + "Provider: " + RESET + YELLOW + "%s" + RESET + "%n", providerId != null ? providerId : "auto-select");
         if (outputFile != null) {
             System.out.printf(BOLD + "Output: " + RESET + YELLOW + "%s" + RESET + "%n", outputFile);
         }
-        System.out.println(DIM + "Commands: 'exit' to quit, '/reset' to clear history." + RESET);
+        if (isInteractive) {
+            System.out.println(DIM + "Commands: 'exit' to quit, '/reset' to clear history." + RESET);
+        }
         System.out.println(DIM + "-".repeat(50) + RESET);
     }
 
@@ -66,9 +70,32 @@ public class ChatUIRenderer {
     public void printStats(int tokens, double duration, double tps, boolean quiet) {
         if (jsonMode) return;
         if (!quiet) {
-            System.out.printf(DIM + "\n[Tokens: %d, Duration: %.2fs, Speed: %.2f t/s]" + RESET + "%n",
+            System.out.printf(DIM + "\n[Chunks: %d, Duration: %.2fs, Speed: %.2f t/s]" + RESET + "%n",
                     tokens, duration, tps);
         }
+    }
+
+    public void printBenchmarks(Map<String, Object> metadata, boolean quiet) {
+        if (jsonMode || quiet || metadata == null || metadata.isEmpty()) return;
+        
+        System.out.println(DIM + "Performance Metrics (llama.cpp style):" + RESET);
+        
+        Double loadMs = (Double) metadata.get("bench.load_ms");
+        Double prefillTps = (Double) metadata.get("bench.prefill_tps");
+        Double genTps = (Double) metadata.get("bench.generation_tps");
+        Double ttftMs = (Double) metadata.get("bench.ttft_ms");
+        Integer inputTokens = (Integer) metadata.get("tokens.input");
+        Integer outputTokens = (Integer) metadata.get("tokens.output");
+
+        if (loadMs != null) System.out.printf(DIM + "  load time      = %9.2f ms" + RESET + "%n", loadMs);
+        if (prefillTps != null && inputTokens != null) {
+            System.out.printf(DIM + "  prompt eval    = %9.2f t/s (%d tokens)" + RESET + "%n", prefillTps, inputTokens);
+        }
+        if (genTps != null && outputTokens != null) {
+            System.out.printf(DIM + "  generation     = %9.2f t/s (%d tokens)" + RESET + "%n", genTps, outputTokens);
+        }
+        if (ttftMs != null) System.out.printf(DIM + "  latency (ttft) = %9.2f ms" + RESET + "%n", ttftMs);
+        System.out.println();
     }
 
     public String getPrompt(boolean quiet) {
