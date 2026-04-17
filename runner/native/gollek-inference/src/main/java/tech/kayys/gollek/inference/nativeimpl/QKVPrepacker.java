@@ -1,5 +1,6 @@
 package tech.kayys.gollek.inference.nativeimpl;
 
+import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
@@ -15,41 +16,48 @@ public final class QKVPrepacker {
     private QKVPrepacker() {}
 
     public static MemorySegment prepack(
-            MemorySegment wqkv, // [hidden, 3*hidden] row-major contiguous
+            MemorySegment wqkv, // Fused [Q, K, V] row-major
             int hidden,
             int numHeads,
-            int headDim
+            int numHeadsKv,
+            int headDim,
+            Arena arena
     ) {
-        int totalOut = numHeads * headDim;
-        long packedElements = (long) 3 * numHeads * headDim * hidden;
+        int qLen = numHeads * headDim;
+        int kLen = numHeadsKv * headDim;
+        
+        long packedElements = (long) (numHeads + 2 * numHeadsKv) * headDim * hidden;
         long bytes = packedElements * Float.BYTES;
-        MemorySegment packed = MemorySegment.allocateNative(bytes);
+        MemorySegment packed = arena.allocate(bytes, 64);
 
-        for (int i = 0; i < hidden; i++) {
-            for (int j = 0; j < totalOut; j++) {
-                int head = j / headDim;
-                int dim = j % headDim;
+        for (int h = 0; h < numHeads; h++) {
+            for (int d = 0; d < headDim; d++) {
+                int row = h * headDim + d;
+                for (int c = 0; c < hidden; c++) {
+                    float val = wqkv.get(ValueLayout.JAVA_FLOAT, ((long) row * hidden + c) * Float.BYTES);
+                    long dstQ = (((long) 0 * numHeads + h) * headDim + d) * hidden + c;
+                    packed.set(ValueLayout.JAVA_FLOAT, dstQ * Float.BYTES, val);
+                }
+            }
+        }
 
-                long baseSrc = ((long)i * 3 * totalOut + j) * Float.BYTES;
-
-                float wq = wqkv.get(ValueLayout.JAVA_FLOAT, baseSrc);
-                float wk = wqkv.get(ValueLayout.JAVA_FLOAT, baseSrc + (long) totalOut * Float.BYTES);
-                float wv = wqkv.get(ValueLayout.JAVA_FLOAT, baseSrc + 2L * (long) totalOut * Float.BYTES);
-
-                long dstQ = index(0, head, dim, i, numHeads, headDim, hidden);
-                long dstK = index(1, head, dim, i, numHeads, headDim, hidden);
-                long dstV = index(2, head, dim, i, numHeads, headDim, hidden);
-
-                packed.set(ValueLayout.JAVA_FLOAT, dstQ * Float.BYTES, wq);
-                packed.set(ValueLayout.JAVA_FLOAT, dstK * Float.BYTES, wk);
-                packed.set(ValueLayout.JAVA_FLOAT, dstV * Float.BYTES, wv);
+        for (int h = 0; h < numHeadsKv; h++) {
+            for (int d = 0; d < headDim; d++) {
+                int rowK = (numHeads * headDim) + (h * headDim + d);
+                int rowV = ((numHeads + numHeadsKv) * headDim) + (h * headDim + d);
+                for (int c = 0; c < hidden; c++) {
+                    float valK = wqkv.get(ValueLayout.JAVA_FLOAT, ((long) rowK * hidden + c) * Float.BYTES);
+                    float valV = wqkv.get(ValueLayout.JAVA_FLOAT, ((long) rowV * hidden + c) * Float.BYTES);
+                    
+                    long dstK = (((long) numHeads + h) * headDim + d) * hidden + c;
+                    long dstV = (((long) numHeads + numHeadsKv + h) * headDim + d) * hidden + c;
+                    
+                    packed.set(ValueLayout.JAVA_FLOAT, dstK * Float.BYTES, valK);
+                    packed.set(ValueLayout.JAVA_FLOAT, dstV * Float.BYTES, valV);
+                }
             }
         }
 
         return packed;
-    }
-
-    private static long index(int qkv, int head, int dim, int i, int numHeads, int headDim, int hidden) {
-        return (((long) qkv * numHeads + head) * headDim + dim) * (long) hidden + i;
     }
 }
