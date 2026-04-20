@@ -191,8 +191,8 @@ public class FlashAttentionKernel {
                 long srcOff = ((long) h * seqLen + s) * headDim;
                 long dstOff = (long) pos * cacheStride0 + (long) h * headDim;
                 
-                MemorySegment.copy(kSeg, ValueLayout.JAVA_FLOAT, srcOff, ksSeg, ValueLayout.JAVA_FLOAT, dstOff, headDim);
-                MemorySegment.copy(vSeg, ValueLayout.JAVA_FLOAT, srcOff, vsSeg, ValueLayout.JAVA_FLOAT, dstOff, headDim);
+                MemorySegment.copy(kSeg, ValueLayout.JAVA_FLOAT, srcOff * ValueLayout.JAVA_FLOAT.byteSize(), ksSeg, ValueLayout.JAVA_FLOAT, dstOff * ValueLayout.JAVA_FLOAT.byteSize(), headDim);
+                MemorySegment.copy(vSeg, ValueLayout.JAVA_FLOAT, srcOff * ValueLayout.JAVA_FLOAT.byteSize(), vsSeg, ValueLayout.JAVA_FLOAT, dstOff * ValueLayout.JAVA_FLOAT.byteSize(), headDim);
             }
         }
     }
@@ -212,7 +212,7 @@ public class FlashAttentionKernel {
             for (int i = 0; i < len; i++) {
                 long srcOff = (long) i * srcStride0 + (long) h * headDim;
                 long dstOff = ((long) h * len + i) * headDim;
-                MemorySegment.copy(srcSeg, ValueLayout.JAVA_FLOAT, srcOff, dstSeg, ValueLayout.JAVA_FLOAT, dstOff, headDim);
+                MemorySegment.copy(srcSeg, ValueLayout.JAVA_FLOAT, srcOff * ValueLayout.JAVA_FLOAT.byteSize(), dstSeg, ValueLayout.JAVA_FLOAT, dstOff * ValueLayout.JAVA_FLOAT.byteSize(), headDim);
             }
         }
         return out;
@@ -220,21 +220,21 @@ public class FlashAttentionKernel {
 
     private AccelTensor repeatKV(AccelTensor kv, int groupSize) {
         long[] sh = kv.shape();
-        int b = (int) sh[0], s = (int) sh[1], nkv = (int) sh[2], dim = (int) sh[3];
-        int nq = nkv * groupSize;
+        int b = (int) sh[0], numKVHeads = (int) sh[1], seqLen = (int) sh[2], headDim = (int) sh[3];
+        int numQHeads = numKVHeads * groupSize;
         
-        AccelTensor exp = AccelTensor.zeros(b, s, nq, dim);
+        AccelTensor exp = AccelTensor.zeros(b, numQHeads, seqLen, headDim);
         MemorySegment src = kv.dataSegment();
         MemorySegment dst = exp.dataSegment();
         
         // Optimized repeatKV using bulk MemorySegment copies for [B, H, S, D]
         for (int i = 0; i < b; i++) {
-            for (int k = 0; k < nkv; k++) {
+            for (int hk = 0; hk < numKVHeads; hk++) {
                 for (int g = 0; g < groupSize; g++) {
-                    int hq = k * groupSize + g;
-                    long srcOff = ((long) i * nkv + k) * s * dim;
-                    long dstOff = ((long) i * nq + hq) * s * dim;
-                    MemorySegment.copy(src, ValueLayout.JAVA_FLOAT, srcOff, dst, ValueLayout.JAVA_FLOAT, dstOff, (long) s * dim);
+                    int hq = hk * groupSize + g;
+                    long srcOff = ((long) i * numKVHeads + hk) * seqLen * headDim;
+                    long dstOff = ((long) i * numQHeads + hq) * seqLen * headDim;
+                    MemorySegment.copy(src, ValueLayout.JAVA_FLOAT, srcOff * ValueLayout.JAVA_FLOAT.byteSize(), dst, ValueLayout.JAVA_FLOAT, dstOff * ValueLayout.JAVA_FLOAT.byteSize(), (long) seqLen * headDim);
                 }
             }
         }

@@ -270,7 +270,7 @@ public class AccelTensor implements AutoCloseable {
         long n = numel();
         float[] result = new float[(int) n];
         if (isContiguous()) {
-            MemorySegment.copy(data, ValueLayout.JAVA_FLOAT, offset, result, 0, (int) n);
+            MemorySegment.copy(data, ValueLayout.JAVA_FLOAT, offset * ValueLayout.JAVA_FLOAT.byteSize(), result, 0, (int) n);
         } else {
             // Gather via strides
             long[] idx = new long[shape.length];
@@ -438,9 +438,12 @@ public class AccelTensor implements AutoCloseable {
             long srcRow = indices[i];
             if (shape.length >= 2) {
                 // Copy row from [vocabSize, embDim]
+                // offset + srcRow * stride[0] is in ELEMENTS; MemorySegment.copy needs BYTE offsets
+                long srcByteOffset = (offset + srcRow * stride[0]) * Float.BYTES;
+                long dstByteOffset = (long) i * embDim * Float.BYTES;
                 MemorySegment.copy(
-                    data, ValueLayout.JAVA_FLOAT, (offset + srcRow * stride[0]),
-                    out.data, ValueLayout.JAVA_FLOAT, (long) i * embDim,
+                    data, ValueLayout.JAVA_FLOAT, srcByteOffset,
+                    out.data, ValueLayout.JAVA_FLOAT, dstByteOffset,
                     (int) embDim
                 );
             } else {
@@ -502,8 +505,8 @@ public class AccelTensor implements AutoCloseable {
                 for (int d = 0; d < outerShape.length; d++) {
                     srcRowOffset += outerIdx[d] * srcStride[d];
                 }
-                MemorySegment.copy(data, ValueLayout.JAVA_FLOAT, srcRowOffset * 4,
-                                   newSeg, ValueLayout.JAVA_FLOAT, row * lastDim * 4,
+                MemorySegment.copy(data, ValueLayout.JAVA_FLOAT, srcRowOffset * Float.BYTES,
+                                   newSeg, ValueLayout.JAVA_FLOAT, row * lastDim * Float.BYTES,
                                    lastDim);
                 
                 // Increment indices

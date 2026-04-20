@@ -2,7 +2,7 @@ package tech.kayys.gollek.ml.multimodal;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.TensorOps;
-import tech.kayys.gollek.ml.nn.Linear;
+import tech.kayys.gollek.ml.nn.layer.Linear;
 import tech.kayys.gollek.ml.nn.NNModule;
 
 import java.util.List;

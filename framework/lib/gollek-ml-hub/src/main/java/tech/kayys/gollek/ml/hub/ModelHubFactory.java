@@ -123,7 +123,7 @@ public final class ModelHubFactory {
             throw new RuntimeException("Failed to initialize standalone HuggingFaceClient", e);
         }
 
-        return new HuggingFaceRepository(config.cacheDir(), client, hfConfig);
+        return new HuggingFaceRepository(config.cacheDir(), client, hfConfig, new tech.kayys.gollek.model.repo.local.ManifestStore());
     }
 
     private static RepositoryContext toContext(HubConfig config) {

@@ -3,7 +3,7 @@ package tech.kayys.gollek.ml;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Disabled;
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.nn.Linear;
+import tech.kayys.gollek.ml.nn.layer.Linear;
 // TODO: nlp package - import tech.kayys.gollek.ml.nlp.Pipeline;
 import tech.kayys.gollek.runtime.tensor.Device;
 

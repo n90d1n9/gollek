@@ -107,10 +107,10 @@ public class OnnxModelRunner implements ModelRunner {
                     FunctionDescriptor.of(ValueLayout.JAVA_INT));
                 int version = (int) getVersion.invokeExact(apiBase);
 
-                MethodHandle getApi = Linker.nativeLinker().downcallHandle(
+                MethodHandle getApiWithVersion = Linker.nativeLinker().downcallHandle(
                     apiBase.get(ValueLayout.ADDRESS, 8),
                     FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
-                ortApi = (MemorySegment) getApi.invokeExact(ORT_API_VERSION);
+                ortApi = (MemorySegment) getApiWithVersion.invokeExact(ORT_API_VERSION);
 
                 nativeLibLoaded = true;
                 LOG.infof("ONNX Runtime loaded: API version %d", version);
@@ -539,7 +539,7 @@ public class OnnxModelRunner implements ModelRunner {
 
         // Copy data from input
         if (input.floatData() != null) {
-            MemorySegment.copy(input.floatData(), 0, data, 0, numel);
+            MemorySegment.copy(input.floatData(), 0, data, ValueLayout.JAVA_FLOAT, 0, (int) numel);
         } else if (input.nativeData() != null) {
             data.copyFrom(input.nativeData().asSlice(0, bytes));
         }

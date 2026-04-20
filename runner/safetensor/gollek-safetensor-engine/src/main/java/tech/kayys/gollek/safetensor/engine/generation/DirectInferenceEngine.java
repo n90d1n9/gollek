@@ -138,7 +138,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
         Objects.requireNonNull(modelPath, "modelPath must not be null");
         Path resolved = modelPath.toAbsolutePath().normalize();
-        System.out.println("[REVEAL-ENGINE] loadModel entry: " + resolved);
+
 
         if (modelsByPath.containsKey(resolved)) {
             log.infof("DirectInferenceEngine: model already loaded [%s]", resolved.getFileName());
@@ -204,7 +204,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     int[] freq = new int[config.vocabSize()];
                     Random rng = new Random();
                     int next = tokenSampler.sample(logits, cfg, freq, rng);
-                    System.err.println("[DIAG] Prefill complete. First token: " + next + " (maxNewTokens=" + cfg.maxNewTokens() + ")");
+
 
                     Set<Integer> stops = new HashSet<>();
                     stops.add(tokenizer.eosTokenId());
@@ -214,7 +214,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
                     for (int step = 0; step < cfg.maxNewTokens(); step++) {
                         String delta = decoder.decodeNext((long) next);
-                        System.err.println("[DIAG] Step " + step + ": token=" + next + ", delta='" + delta.replace("\n", "\\n") + "'");
+
                         out.append(delta);
                         String fullGeneratedText = decoder.currentText();
                         if (stops.contains(next))
@@ -263,7 +263,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 Instant t0 = Instant.now();
                 String requestId = UUID.randomUUID().toString();
                 int inputLen = 0;
-                System.out.println("[REVEAL-ENGINE] generateStream thread started prompt=\"" + prompt.substring(0, Math.min(20, prompt.length())) + "...\"");
+
 
                 try {
                     LoadedModel model = (LoadedModel) getLoadedModel(modelPath);
@@ -280,10 +280,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     ModelArchitecture arch = archRegistry.resolve(config);
 
                     // Runtime metadata logging for stability verification
-                    System.out.println(String.format("[DIAG-ENGINE] Metadata: arch=%s, layers=%d, hidden=%d, heads=%d/%d, headDim=%d, ropeTheta=%.1f, slidingWindow=%d",
-                            arch.id(), config.numHiddenLayers(), config.hiddenSize(), 
-                            config.numAttentionHeads(), config.resolvedNumKvHeads(), 
-                            config.resolvedHeadDim(), config.ropeTheta(), config.slidingWindowSize()));
+
 
                     long[] inputIds = tokenizer.encode(prompt, EncodeOptions.defaultOptions());
                     inputLen = inputIds.length;
@@ -297,25 +294,22 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         int[] freq = new int[config.vocabSize()];
                         Random rng = new Random();
                         int next = tokenSampler.sample(logits, cfg, freq, rng);
-                        System.out.println("[DIAG-STREAM] Prefill complete. First token: " + next + " (maxNewTokens=" + cfg.maxNewTokens() + ")");
+
 
                         Set<Integer> stops = new HashSet<>();
                         stops.add(tokenizer.eosTokenId());
                         stops.addAll(cfg.stopTokenIds());
 
                         StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
-                        System.out.println("[DIAG-STREAM] Decoder initialized. Stops: " + stops + " Tokenizer EOS: " + tokenizer.eosTokenId());
-                        System.out.flush();
+
 
                         for (int step = 0; step < cfg.maxNewTokens(); step++) {
-                            System.out.println("[DIAG-STREAM] Loop step " + step + " next=" + next);
-                            System.out.flush();
+
                             
                             String delta = decoder.decodeNext((long) next);
                             if (delta == null) delta = "";
                             
-                            System.out.println("[DIAG-STREAM] Step " + step + ": token=" + next + ", delta='" + delta.replace("\n", "\\n") + "'");
-                            System.out.flush();
+
                             
                             String fullGeneratedText = decoder.currentText();
 
@@ -330,7 +324,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             }
 
                             if (stops.contains(next) || emitter.isCancelled()) {
-                                System.out.println("[DIAG-STREAM] Stopping: stops=" + stops.contains(next) + " cancelled=" + emitter.isCancelled());
+
                                 break;
                             }
                             
@@ -366,9 +360,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             .build());
 
                 } catch (Throwable t) {
-                    System.out.println("[FATAL-STREAM] Generation failed: " + t.getMessage());
-                    t.printStackTrace(System.out);
-                    System.out.flush();
+                    log.error("Generation failed", t);
                     emitter.fail(t);
                 } finally {
                     emitter.complete();

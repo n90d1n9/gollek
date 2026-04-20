@@ -130,14 +130,17 @@ public class DirectSafetensorBackend {
                     : "";
 
             // Build messages list — inject a default system message if none provided
-            List<Message> messages = new ArrayList<>(request.getMessages());
-            boolean hasSystem = messages.stream().anyMatch(m -> m.getRole() == Message.Role.SYSTEM);
+            // Use raw list to work around cross-module Message class identity mismatch
+            List<tech.kayys.gollek.spi.Message> rawMessages = new ArrayList<>(request.getMessages());
+            boolean hasSystem = rawMessages.stream().anyMatch(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.SYSTEM);
             if (!hasSystem) {
-                messages.add(0, Message.system("You are a helpful assistant."));
+                rawMessages.add(0, tech.kayys.gollek.spi.Message.system("You are a helpful assistant."));
             }
 
-            // Apply the chat template appropriate for this model architecture
-            String prompt = ChatTemplateFormatter.format(messages, modelType);
+            // Apply the chat template — cast through raw List to bridge the module boundary
+            @SuppressWarnings("unchecked")
+            String prompt = ChatTemplateFormatter.format(
+                    (List) rawMessages, modelType);
             System.out.println("[DIAG-BACKEND] Chat template applied (modelType=" + modelType + "), prompt length=" + prompt.length());
 
             int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 256;
