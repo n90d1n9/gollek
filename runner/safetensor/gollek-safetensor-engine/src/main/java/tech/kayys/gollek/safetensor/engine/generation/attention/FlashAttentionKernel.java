@@ -139,13 +139,11 @@ public class FlashAttentionKernel {
 
         // Softmax
         if (layerIdx == 0 && (startPos == 0 || (startPos % 10 == 0))) {
-            System.err.println("[DIAG-KV] L" + layerIdx + "_Attention_Scores_Pre_Softmax (pos " + startPos + "): " + scaled.statistics());
         }
         AccelTensor weights = AccelOps.softmax(scaled, 3);
         scaled.close();
 
         if (layerIdx == 0 && (startPos == 0 || (startPos % 10 == 0))) {
-             System.err.println("[DIAG-KV] L" + layerIdx + "_Attn_Weights_Softmax (pos " + startPos + "): " + weights.statistics());
         }
 
         // Weights @ V

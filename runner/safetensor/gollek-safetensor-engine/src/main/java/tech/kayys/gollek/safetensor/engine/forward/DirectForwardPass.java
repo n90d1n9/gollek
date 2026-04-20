@@ -46,9 +46,7 @@ public class DirectForwardPass {
         long seqLen = embeddings.size(1);
         AccelTensor hidden = embeddings;
         
-        System.err.println("--- Embeddings (token 0, first 10 dims) ---");
-        for(int i=0; i<10; i++) System.err.print(hidden.dataSegment().getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i) + ", ");
-        System.err.println();
+
 
         for (int i = 0; i < config.numHiddenLayers(); i++) {
             AccelTensor nextHidden = transformerLayer(hidden, inputIds, weights, config, arch, kvCache, i, 0, (int) seqLen);
@@ -78,7 +76,6 @@ public class DirectForwardPass {
             if (f < min) min = f;
             if (f > max) max = f;
         }
-        System.err.println(String.format("[DIAG-KV] Prefill logits: min=%.4f, max=%.4f, avg=%.4f, size=%d", min, max, sum / result.length, result.length));
 
         return result;
     }
@@ -117,20 +114,16 @@ public class DirectForwardPass {
             String keys[] = { arch.layerQueryWeight(0), arch.layerQueryBias(0), arch.layerKeyWeight(0), arch.layerKeyBias(0) };
             for (String k : keys) {
                 AccelTensor t = weights.get(k);
-                if (t != null) System.err.println("[DIAG-KV] Weight " + k + ": " + t.statistics());
-                else System.err.println("[DIAG-KV] Weight " + k + ": NULL");
             }
         }
         AccelTensor residual = hidden;
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Residual_In: " + residual.statistics());
         }
 
         // Attention norm
         AccelTensor normedAttn = AccelOps.rmsNorm(residual, weights.get(arch.layerAttentionNormWeight(layerIdx)), config.rmsNormEps());
         
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Normed_Attn_In: " + normedAttn.statistics());
         }
 
         FlashAttentionKernel.AttentionInput attnIn = new FlashAttentionKernel.AttentionInput(
@@ -151,7 +144,6 @@ public class DirectForwardPass {
 
         AccelTensor attnOut = attentionKernel.compute(attnIn);
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Attn_Out: " + attnOut.statistics());
         }
         normedAttn.close();
 
@@ -159,7 +151,6 @@ public class DirectForwardPass {
         attnOut.close();
         
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Post_Attn_Residual: " + afterAttn.statistics());
         }
 
         // FFN norm
@@ -167,7 +158,6 @@ public class DirectForwardPass {
         AccelTensor normedFfn = AccelOps.rmsNorm(residual2, weights.get(arch.layerFfnNormWeight(layerIdx)), config.rmsNormEps());
 
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Normed_FFN_In: " + normedFfn.statistics());
         }
 
         AccelTensor ffnOut;
@@ -182,7 +172,6 @@ public class DirectForwardPass {
                     : swigluFfn(normedFfn, gW, null, uW, null, dW, null);
         }
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_FFN_Out: " + ffnOut.statistics());
         }
         normedFfn.close();
 
@@ -191,7 +180,6 @@ public class DirectForwardPass {
         residual2.close();
 
         if (layerIdx == 0 && startPos == 0) {
-            System.err.println("[DIAG-KV] L0_Layer_Output: " + output.statistics());
         }
 
         return output;
@@ -206,7 +194,6 @@ public class DirectForwardPass {
             if (Float.isInfinite(f)) inf++;
         }
         if (nan > 0 || inf > 0) {
-            System.err.println(String.format("[DIAG-STABILITY] %s: NaN=%d, Inf=%d, size=%d", label, nan, inf, arr.length));
         }
     }
 

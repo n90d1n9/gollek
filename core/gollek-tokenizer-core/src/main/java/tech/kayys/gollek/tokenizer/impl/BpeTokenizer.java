@@ -273,4 +273,9 @@ public final class BpeTokenizer implements Tokenizer {
 
     @Override
     public int padTokenId() { return padTokenId; }
+
+    @Override
+    public int[] allStopTokenIds() {
+        return eosTokenId >= 0 ? new int[]{eosTokenId} : new int[0];
+    }
 }

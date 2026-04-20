@@ -143,10 +143,11 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
                 state.specialTokens.put(content, id);
 
                 String lower = content.toLowerCase(Locale.ROOT);
-                if (lower.contains("bos") || lower.equals("<s>") || lower.equals("<|im_start|>") || lower.equals("<|begin_of_text|>")) {
-                    if (state.bosTokenId < 0) state.bosTokenId = id;
-                } else if (lower.contains("eos") || lower.equals("</s>") || lower.equals("<|im_end|>") || lower.equals("<|endoftext|>") || lower.equals("<|eot_id|>")) {
+                if (lower.contains("eos") || lower.equals("</s>") || lower.equals("<|im_end|>") || lower.equals("<|endoftext|>") || lower.equals("<|eot_id|>")) {
                     if (state.eosTokenId < 0) state.eosTokenId = id;
+                    state.stopTokenIds.add(id);
+                } else if (lower.contains("bos") || lower.equals("<s>") || lower.equals("<|im_start|>") || lower.equals("<|begin_of_text|>")) {
+                    if (state.bosTokenId < 0) state.bosTokenId = id;
                 } else if (lower.contains("pad") || lower.equals("<pad>")) {
                     state.padTokenId = id;
                 } else if (lower.contains("unk") || lower.equals("<unk>")) {
@@ -200,7 +201,7 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
                 log.debugf("  ID %d -> [%s]", id, state.idToToken.get((int)id));
             }
         }
-        System.out.println("[DIAG-TOKENIZER] Input: \"" + text + "\" -> " + Arrays.toString(result));
+
         return result;
     }
 
@@ -260,13 +261,16 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
     }
 
     private boolean isSpecialToken(int id) {
-        return id == state.bosTokenId || id == state.eosTokenId || id == state.padTokenId || id == state.unkTokenId;
+        return id == state.bosTokenId || state.stopTokenIds.contains(id) || id == state.padTokenId || id == state.unkTokenId;
     }
 
     @Override public int vocabSize() { return state.vocabSize; }
     @Override public int bosTokenId() { return state.bosTokenId; }
     @Override public int eosTokenId() { return state.eosTokenId; }
     @Override public int padTokenId() { return state.padTokenId; }
+    @Override public int[] allStopTokenIds() {
+        return state.stopTokenIds.stream().mapToInt(i -> i).toArray();
+    }
 
     private List<Long> bpeEncode(String word) {
         if (word.isEmpty()) return Collections.emptyList();
@@ -398,6 +402,7 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
         public int vocabSize;
         public int bosTokenId = -1;
         public int eosTokenId = -1;
+        public Set<Integer> stopTokenIds = new HashSet<>();
         public int padTokenId = -1;
         public int unkTokenId = -1;
     }

@@ -13,4 +13,6 @@ public interface Tokenizer {
     int eosTokenId();
 
     int padTokenId();
+    
+    int[] allStopTokenIds();
 }

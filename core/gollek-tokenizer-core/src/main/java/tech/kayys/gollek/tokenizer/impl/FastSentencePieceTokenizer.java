@@ -120,4 +120,10 @@ public class FastSentencePieceTokenizer implements Tokenizer, AutoCloseable {
     public int padTokenId() {
         return -1;
     }
+
+    @Override
+    public int[] allStopTokenIds() {
+        int eos = eosTokenId();
+        return eos != -1 ? new int[]{eos} : new int[0];
+    }
 }

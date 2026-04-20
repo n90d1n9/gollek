@@ -120,7 +120,7 @@ public class DirectSafetensorBackend {
         Path modelPath = resolveModelPath(request.getModel());
         try {
             // Load the model zero-copy into native memory Arena
-            System.out.println("[REVEAL-BACKEND] streamToPublisher entry model=" + request.getModel());
+
             String loadedKey = engine.loadModel(modelPath);
 
             // Resolve model type for chat template selection
@@ -141,7 +141,7 @@ public class DirectSafetensorBackend {
             @SuppressWarnings("unchecked")
             String prompt = ChatTemplateFormatter.format(
                     (List) rawMessages, modelType);
-            System.out.println("[DIAG-BACKEND] Chat template applied (modelType=" + modelType + "), prompt length=" + prompt.length());
+
 
             int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 256;
 
@@ -164,7 +164,7 @@ public class DirectSafetensorBackend {
                             .durationMs(infResp.getDurationMs())
                             .build());
         } catch (Exception e) {
-            System.out.println("[REVEAL-BACKEND] FATAL in streamToPublisher: " + e.getMessage());
+            System.err.println("FATAL in streamToPublisher: " + e.getMessage());
             e.printStackTrace(System.out);
             log.errorf(e, "Direct inference failed for model %s (resolved path: %s)",
                     request.getModel(), modelPath);

@@ -207,18 +207,19 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
 
                     Set<Integer> stops = new HashSet<>();
-                    stops.add(tokenizer.eosTokenId());
+                    for (int id : tokenizer.allStopTokenIds()) stops.add(id);
                     stops.addAll(cfg.stopTokenIds());
 
                     StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
 
                     for (int step = 0; step < cfg.maxNewTokens(); step++) {
+                        if (stops.contains(next))
+                            break;
+
                         String delta = decoder.decodeNext((long) next);
 
                         out.append(delta);
                         String fullGeneratedText = decoder.currentText();
-                        if (stops.contains(next))
-                            break;
                         if (!cfg.stopStrings().isEmpty()) {
                             boolean shouldStop = false;
                             for (String s : cfg.stopStrings()) {
@@ -297,7 +298,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
 
                         Set<Integer> stops = new HashSet<>();
-                        stops.add(tokenizer.eosTokenId());
+                        for (int id : tokenizer.allStopTokenIds()) stops.add(id);
                         stops.addAll(cfg.stopTokenIds());
 
                         StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
@@ -306,10 +307,12 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         for (int step = 0; step < cfg.maxNewTokens(); step++) {
 
                             
+                            if (stops.contains(next) || emitter.isCancelled()) {
+                                break;
+                            }
+
                             String delta = decoder.decodeNext((long) next);
                             if (delta == null) delta = "";
-                            
-
                             
                             String fullGeneratedText = decoder.currentText();
 
@@ -321,11 +324,6 @@ public class DirectInferenceEngine implements SafetensorEngine {
                                         .inputTokens(inputLen)
                                         .metadata("backend", "accelerate-safetensor")
                                         .build());
-                            }
-
-                            if (stops.contains(next) || emitter.isCancelled()) {
-
-                                break;
                             }
                             
                             if (!cfg.stopStrings().isEmpty()) {

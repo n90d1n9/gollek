@@ -117,6 +117,11 @@ public final class WordPieceTokenizer implements Tokenizer {
     @Override
     public int padTokenId() { return padId; }
 
+    @Override
+    public int[] allStopTokenIds() {
+        return eosId >= 0 ? new int[]{eosId} : new int[0];
+    }
+
     public int unkTokenId() { return unkId; }
 
     private List<Long> wordPiece(String word) {

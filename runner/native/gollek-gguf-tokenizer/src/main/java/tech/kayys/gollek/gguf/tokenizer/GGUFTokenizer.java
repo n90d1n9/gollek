@@ -305,4 +305,12 @@ public final class GGUFTokenizer implements Tokenizer {
     @Override public int bosTokenId() { return bosId; }
     @Override public int eosTokenId() { return eosId; }
     @Override public int padTokenId() { return padId; }
+
+    @Override
+    public int[] allStopTokenIds() {
+        List<Integer> all = new ArrayList<>();
+        if (eosId >= 0) all.add(eosId);
+        all.addAll(additionalEosIds);
+        return all.stream().mapToInt(i -> i).distinct().toArray();
+    }
 }

@@ -71,4 +71,10 @@ public class SentencePieceTokenizer implements Tokenizer {
     public int padTokenId() {
         return -1;
     }
+
+    @Override
+    public int[] allStopTokenIds() {
+        int eos = eosTokenId();
+        return eos != -1 ? new int[]{eos} : new int[0];
+    }
 }
