@@ -60,10 +60,10 @@ import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 
-
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.lang.foreign.MemorySegment;
 import java.util.*;
 
 /**
@@ -183,20 +183,19 @@ public class VisionEncoder {
             g.drawImage(img, 0, 0, targetSize, targetSize, null);
             g.dispose();
 
-            // Convert to CHW float and normalise
+            // Convert to CHW float
             float[] chw = new float[3 * targetSize * targetSize];
             for (int y = 0; y < targetSize; y++) {
                 for (int x = 0; x < targetSize; x++) {
                     int rgb = resized.getRGB(x, y);
-                    float r = ((rgb >> 16) & 0xFF) / 255.0f;
-                    float gv = ((rgb >> 8) & 0xFF) / 255.0f;
-                    float b = (rgb & 0xFF) / 255.0f;
                     int i = y * targetSize + x;
-                    chw[i] = (r - CLIP_MEAN[0]) / CLIP_STD[0];
-                    chw[targetSize * targetSize + i] = (gv - CLIP_MEAN[1]) / CLIP_STD[1];
-                    chw[2 * targetSize * targetSize + i] = (b - CLIP_MEAN[2]) / CLIP_STD[2];
+                    chw[i] = ((rgb >> 16) & 0xFF) / 255.0f;
+                    chw[targetSize * targetSize + i] = ((rgb >> 8) & 0xFF) / 255.0f;
+                    chw[2 * targetSize * targetSize + i] = (rgb & 0xFF) / 255.0f;
                 }
             }
+            // Use SIMD Normalization
+            AccelOps.normalizeImage(chw, targetSize * targetSize, CLIP_MEAN, CLIP_STD);
             return chw;
         } catch (Exception e) {
             log.warnf(e, "Image preprocessing failed — using zero image");
@@ -264,16 +263,29 @@ public class VisionEncoder {
             posEmb = weights.get(prefix + "pos_embed");
         if (posEmb == null)
             return x;
-        // posEmb: [numPatches+1, visionDim] — skip CLS token (first row)
-        long numPatches = x.shape()[0];
-        float[] posData = posEmb.toFloatArray();
-        float[] xData = x.toFloatArray();
-        long visionDim = x.shape()[1];
-        int posOffset = (int) visionDim; // skip CLS row
-        for (int i = 0; i < numPatches * visionDim; i++) {
-            xData[i] += posData[posOffset + i];
+        AccelTensor current = x.contiguous();
+        long numPatches = current.shape()[0];
+        long visionDim = current.shape()[1];
+
+        MemorySegment xSeg = current.dataSegment();
+        MemorySegment pSeg = posEmb.dataSegment();
+
+        // Skip CLS row in posEmb [numPatches+1, visionDim]
+        long posOffset = visionDim * 4;
+
+        // Vectorized add
+        int i = 0;
+        if (numPatches * visionDim >= 8) { // Arbitrary threshold
+            for (; i <= (numPatches * visionDim) - 8; i += 8) {
+                // Simplified manual vectorize since AccelOps.add is for tensors.
+                // We'll just use a loop for now or AccelOps.add if we reshape.
+            }
         }
-        return AccelTensor.fromFloatArray(xData, x.shape());
+        // Actually, let's just use AccelOps.add by slicing/reshaping.
+        AccelTensor slice = posEmb.slice(new long[] { 1, 0 }, new long[] { numPatches + 1, visionDim }).contiguous();
+        AccelTensor result = AccelOps.add(current, slice);
+        slice.close();
+        return result;
     }
 
     private AccelTensor runViTLayers(AccelTensor x, Map<String, AccelTensor> weights, VisionConfig cfg) {
@@ -292,7 +304,7 @@ public class VisionEncoder {
             AccelTensor attnNormW = weights.get(prefix + "layer_norm1.weight");
             AccelTensor attnNormB = weights.get(prefix + "layer_norm1.bias");
             if (attnNormW != null) {
-                AccelTensor normed = layerNorm(current, attnNormW, attnNormB, 1e-5);
+                AccelTensor normed = AccelOps.layerNorm(current, attnNormW, attnNormB, 1e-5);
                 // Self-attention (simplified — no KV cache for image encoding)
                 AccelTensor attnOut = selfAttention(normed, weights, prefix, cfg.numViTHeads(), i);
                 normed.close();
@@ -334,11 +346,10 @@ public class VisionEncoder {
             return visionOut; // no projection found
         }
 
-        // Linear 1 + GELU
         AccelTensor h = AccelOps.matmul(visionOut, linear1W.transpose(0, 1));
         if (linear1B != null)
             h = AccelOps.add(h, linear1B);
-        AccelTensor hGelu = gelu(h);
+        AccelTensor hGelu = AccelOps.gelu(h);
         h.close();
 
         // Linear 2
@@ -398,50 +409,11 @@ public class VisionEncoder {
         AccelTensor fc2W = weights.get(prefix + "mlp.fc2.weight");
         if (fc1W == null)
             return x;
-        AccelTensor h = gelu(AccelOps.matmul(x, fc1W.transpose(0, 1)));
+        AccelTensor h = AccelOps.gelu(AccelOps.matmul(x, fc1W.transpose(0, 1)));
         AccelTensor out = fc2W != null ? AccelOps.matmul(h, fc2W.transpose(0, 1)) : h;
         if (out != h)
             h.close();
         return out;
-    }
-
-    private static AccelTensor layerNorm(AccelTensor x, AccelTensor weight, AccelTensor bias, double eps) {
-        float[] xData = x.toFloatArray();
-        float[] wData = weight.toFloatArray();
-        long[] shape = x.shape();
-        int dim = (int) shape[shape.length - 1];
-        int rows = xData.length / dim;
-        float[] out = new float[xData.length];
-        for (int r = 0; r < rows; r++) {
-            int off = r * dim;
-            double mean = 0, var = 0;
-            for (int d = 0; d < dim; d++)
-                mean += xData[off + d];
-            mean /= dim;
-            for (int d = 0; d < dim; d++) {
-                double v = xData[off + d] - mean;
-                var += v * v;
-            }
-            var = Math.sqrt(var / dim + eps);
-            float[] biasData = bias != null ? bias.toFloatArray() : null;
-            for (int d = 0; d < dim; d++) {
-                out[off + d] = (float) ((xData[off + d] - mean) / var) * wData[d]
-                        + (biasData != null ? biasData[d] : 0f);
-            }
-        }
-        return AccelTensor.fromFloatArray(out, shape);
-    }
-
-    private static AccelTensor gelu(AccelTensor x) {
-        float[] data = x.toFloatArray();
-        float[] out = new float[data.length];
-        // GELU approximation: x * 0.5 * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
-        for (int i = 0; i < data.length; i++) {
-            float v = data[i];
-            float inner = 0.7978845608f * (v + 0.044715f * v * v * v);
-            out[i] = 0.5f * v * (1.0f + (float) Math.tanh(inner));
-        }
-        return AccelTensor.fromFloatArray(out, x.shape());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

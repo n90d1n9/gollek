@@ -627,43 +627,74 @@ public final class AccelOps {
      * RMS Normalization using Optimized Vector API.
      */
     public static AccelTensor rmsNorm(AccelTensor x, AccelTensor weight, double eps) {
+        return addRmsNorm(null, x, weight, eps);
+    }
+
+    /**
+     * Fused Residual Add + RMS Normalization.
+     * out = rmsNorm(residual + x)
+     * If residual is null, it's a standard rmsNorm.
+     */
+    public static AccelTensor addRmsNorm(AccelTensor residual, AccelTensor x, AccelTensor weight, double eps) {
         if (weight == null) return x.contiguous();
         x = x.contiguous();
+        if (residual != null) residual = residual.contiguous();
+
         long[] shape = x.shape();
         int hidden = (int) shape[shape.length - 1];
         int outer = (int) (x.numel() / hidden);
 
         AccelTensor out = AccelTensor.zeros(shape);
         MemorySegment xSeg = x.dataSegment();
+        MemorySegment rSeg = residual != null ? residual.dataSegment() : null;
         MemorySegment wSeg = weight.dataSegment();
         MemorySegment oSeg = out.dataSegment();
 
         for (int row = 0; row < outer; row++) {
             long base = (long) row * hidden;
-            FloatVector sumSqV = FloatVector.zero(SPECIES);
+            float sumSq = 0.0f;
             
+            // Pass 1: Add (if residual exists) and Sum Squares
             int i = 0;
-            for (; i < SPECIES.loopBound(hidden); i += SPECIES.length()) {
-                FloatVector v = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
-                sumSqV = sumSqV.add(v.mul(v));
+            if (hidden >= SPECIES.length()) {
+                FloatVector sumSqV = FloatVector.zero(SPECIES);
+                for (; i < SPECIES.loopBound(hidden); i += SPECIES.length()) {
+                    FloatVector vx = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                    if (rSeg != null) {
+                        FloatVector vr = FloatVector.fromMemorySegment(SPECIES, rSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                        vx = vx.add(vr);
+                        // If we want to update x in-place for residual, we could do it here, 
+                        // but for purity we'll keep x intact and use vx.
+                    }
+                    sumSqV = sumSqV.add(vx.mul(vx));
+                }
+                sumSq = sumSqV.reduceLanes(VectorOperators.ADD);
             }
-            float sumSq = sumSqV.reduceLanes(VectorOperators.ADD);
             for (; i < hidden; i++) {
                 float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                if (rSeg != null) val += rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
                 sumSq += val * val;
             }
 
             float rms = (float) (1.0 / Math.sqrt(sumSq / hidden + eps));
             FloatVector vRms = FloatVector.broadcast(SPECIES, rms);
             
+            // Pass 2: Normalize and Weight
             i = 0;
-            for (; i < SPECIES.loopBound(hidden); i += SPECIES.length()) {
-                FloatVector vx = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
-                FloatVector vw = FloatVector.fromMemorySegment(SPECIES, wSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
-                vx.mul(vRms).mul(vw).intoMemorySegment(oSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+            if (hidden >= SPECIES.length()) {
+                for (; i < SPECIES.loopBound(hidden); i += SPECIES.length()) {
+                    FloatVector vx = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                    if (rSeg != null) {
+                        FloatVector vr = FloatVector.fromMemorySegment(SPECIES, rSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                        vx = vx.add(vr);
+                    }
+                    FloatVector vw = FloatVector.fromMemorySegment(SPECIES, wSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                    vx.mul(vRms).mul(vw).intoMemorySegment(oSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                }
             }
             for (; i < hidden; i++) {
                 float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                if (rSeg != null) val += rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
                 float w = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
                 oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + i, val * rms * w);
             }
@@ -762,16 +793,48 @@ public final class AccelOps {
     }
 
     /**
+     * Fused SwiGLU: silu(gate) * up
+     */
+    public static AccelTensor swiglu(AccelTensor gate, AccelTensor up) {
+        gate = gate.contiguous();
+        up = up.contiguous();
+        long n = gate.numel();
+        AccelTensor out = AccelTensor.zeros(gate.shape());
+        MemorySegment gSeg = gate.dataSegment();
+        MemorySegment uSeg = up.dataSegment();
+        MemorySegment oSeg = out.dataSegment();
+
+        int i = 0;
+        if (n >= SPECIES.length()) {
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                FloatVector vg = FloatVector.fromMemorySegment(SPECIES, gSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                FloatVector vu = FloatVector.fromMemorySegment(SPECIES, uSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                
+                // SiLU: x * sigmoid(x) = x / (1 + exp(-x))
+                // We use our expVector approximation.
+                FloatVector sigmoid = FloatVector.broadcast(SPECIES, 1.0f).div(
+                    FloatVector.broadcast(SPECIES, 1.0f).add(expVector(vg.neg())));
+                
+                vg.mul(sigmoid).mul(vu).intoMemorySegment(oSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+            }
+        }
+        for (; i < n; i++) {
+            float g = gSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float u = uSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float silu = (float) (g / (1.0 + Math.exp(-g)));
+            oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, i, silu * u);
+        }
+        return out;
+    }
+
+    /**
      * Stable Vectorized exp(x) approximation.
      * Accurate within the range needed for DL and stable for large negatives (masking).
      */
     private static FloatVector expVector(FloatVector x) {
-        // Handle large negatives (causal masks) by clamping to zero.
-        // We clamp to [-80, 0] BEFORE Taylor expansion to avoid NaN/Infinity 
-        // from terms like x^6 when x is -1e9.
-        FloatVector clamped = x.max(-80.0f).min(0.0f);
+        // Clamp to avoid expansion instability for extreme values
+        FloatVector clamped = x.max(-20.0f).min(20.0f);
         
-        // Piecewise approximation for x >= -80
         // P(x) = 1 + x + x^2/2 + x^3/6 + x^4/24 + x^5/120 + x^6/720
         FloatVector x2 = clamped.mul(clamped);
         FloatVector x3 = x2.mul(clamped);
@@ -779,32 +842,196 @@ public final class AccelOps {
         FloatVector x5 = x4.mul(clamped);
         FloatVector x6 = x5.mul(clamped);
 
-        FloatVector res = FloatVector.broadcast(SPECIES, 1.0f)
+        return FloatVector.broadcast(SPECIES, 1.0f)
             .add(clamped)
             .add(x2.mul(1.0f / 2.0f))
             .add(x3.mul(1.0f / 6.0f))
             .add(x4.mul(1.0f / 24.0f))
             .add(x5.mul(1.0f / 120.0f))
             .add(x6.mul(1.0f / 720.0f));
-            
-        // Final sanity mask: if original x was < -20, return 0.
-        var mask = x.compare(VectorOperators.LT, -20.0f);
-        return res.blend(FloatVector.zero(SPECIES), mask);
     }
 
     /**
-     * GELU activation (approximate).
+     * Optimized Vector API GELU activation.
+     * GELU approximation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
      */
     public static AccelTensor gelu(AccelTensor x) {
-        float[] data = x.toFloatArray();
-        float[] result = new float[data.length];
-        for (int i = 0; i < data.length; i++) {
-            double v = data[i];
-            // Approximate: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-            double inner = Math.sqrt(2.0 / Math.PI) * (v + 0.044715 * v * v * v);
-            result[i] = (float) (0.5 * v * (1.0 + Math.tanh(inner)));
+        x = x.contiguous();
+        long n = x.numel();
+        AccelTensor out = AccelTensor.zeros(x.shape());
+        MemorySegment xSeg = x.dataSegment();
+        MemorySegment oSeg = out.dataSegment();
+
+        int i = 0;
+        if (n >= SPECIES.length()) {
+            FloatVector vSqrt2Pi = FloatVector.broadcast(SPECIES, 0.79788456f); // sqrt(2/pi)
+            FloatVector v044 = FloatVector.broadcast(SPECIES, 0.044715f);
+            FloatVector vOne = FloatVector.broadcast(SPECIES, 1.0f);
+            FloatVector vHalf = FloatVector.broadcast(SPECIES, 0.5f);
+
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                FloatVector vx = FloatVector.fromMemorySegment(SPECIES, xSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                // (x + 0.044715 * x^3)
+                FloatVector inner = vx.add(v044.mul(vx.mul(vx).mul(vx)));
+                // sqrt(2/pi) * inner
+                FloatVector arg = vSqrt2Pi.mul(inner);
+
+                // tanh approximation or lane-wise tanh
+                // We use a simplified tanh: x * (3 + x^2) / (1 + 3*x^2) or just use lane-wise Math.tanh for precision
+                for (int j = 0; j < SPECIES.length(); j++) {
+                    float val = arg.lane(j);
+                    float res = (float) Math.tanh(val);
+                    float xVal = vx.lane(j);
+                    oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, i + j, 0.5f * xVal * (1.0f + res));
+                }
+            }
         }
-        return AccelTensor.fromFloatArray(result, x.shape());
+        for (; i < n; i++) {
+            float v = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float inner = 0.79788456f * (v + 0.044715f * v * v * v);
+            oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, i, 0.5f * v * (1.0f + (float) Math.tanh(inner)));
+        }
+        return out;
+    }
+
+    /**
+     * Vectorized Layer Normalization.
+     */
+    public static AccelTensor layerNorm(AccelTensor x, AccelTensor weight, AccelTensor bias, double eps) {
+        x = x.contiguous();
+        long[] shape = x.shape();
+        int dim = (int) shape[shape.length - 1];
+        int rows = (int) (x.numel() / dim);
+
+        AccelTensor out = AccelTensor.zeros(shape);
+        MemorySegment xSeg = x.dataSegment();
+        MemorySegment wSeg = weight.dataSegment();
+        MemorySegment bSeg = bias != null ? bias.dataSegment() : null;
+        MemorySegment oSeg = out.dataSegment();
+
+        for (int r = 0; r < rows; r++) {
+            long base = (long) r * dim;
+            float sum = 0, sumSq = 0;
+
+            int i = 0;
+            if (dim >= SPECIES.length()) {
+                FloatVector vSum = FloatVector.zero(SPECIES);
+                FloatVector vSumSq = FloatVector.zero(SPECIES);
+                for (; i < SPECIES.loopBound(dim); i += SPECIES.length()) {
+                    FloatVector v = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                    vSum = vSum.add(v);
+                    vSumSq = vSumSq.add(v.mul(v));
+                }
+                sum = vSum.reduceLanes(VectorOperators.ADD);
+                sumSq = vSumSq.reduceLanes(VectorOperators.ADD);
+            }
+            for (; i < dim; i++) {
+                float v = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                sum += v;
+                sumSq += v * v;
+            }
+
+            float mean = sum / dim;
+            float var = (float) Math.sqrt(sumSq / dim - mean * mean + eps);
+            FloatVector vMean = FloatVector.broadcast(SPECIES, mean);
+            FloatVector vVar = FloatVector.broadcast(SPECIES, 1.0f / var);
+
+            i = 0;
+            if (dim >= SPECIES.length()) {
+                for (; i < SPECIES.loopBound(dim); i += SPECIES.length()) {
+                    FloatVector vx = FloatVector.fromMemorySegment(SPECIES, xSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                    FloatVector vw = FloatVector.fromMemorySegment(SPECIES, wSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                    FloatVector res = vx.sub(vMean).mul(vVar).mul(vw);
+                    if (bSeg != null) {
+                        FloatVector vb = FloatVector.fromMemorySegment(SPECIES, bSeg, (long) i * 4, ByteOrder.LITTLE_ENDIAN);
+                        res = res.add(vb);
+                    }
+                    res.intoMemorySegment(oSeg, (base + i) * 4, ByteOrder.LITTLE_ENDIAN);
+                }
+            }
+            for (; i < dim; i++) {
+                float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                float w = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                float b = bSeg != null ? bSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i) : 0.0f;
+                oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + i, (val - mean) / var * w + b);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Fused image normalization: (pixel - mean) / std.
+     * Efficiently processes CHW float arrays in a single SIMD pass.
+     */
+    public static void normalizeImage(float[] chw, int pixels, float[] mean, float[] std) {
+        for (int c = 0; c < 3; c++) {
+            int offset = c * pixels;
+            float m = mean[c];
+            float s = 1.0f / std[c];
+            FloatVector vMean = FloatVector.broadcast(SPECIES, m);
+            FloatVector vInvStd = FloatVector.broadcast(SPECIES, s);
+
+            int i = 0;
+            for (; i < SPECIES.loopBound(pixels); i += SPECIES.length()) {
+                FloatVector v = FloatVector.fromArray(SPECIES, chw, offset + i);
+                v.sub(vMean).mul(vInvStd).intoArray(chw, offset + i);
+            }
+            for (; i < pixels; i++) {
+                chw[offset + i] = (chw[offset + i] - m) * s;
+            }
+        }
+    }
+
+    /**
+     * SIMD-accelerated Cosine Similarity for RAG.
+     */
+    public static float cosineSimilarity(float[] a, float[] b) {
+        if (a.length != b.length) throw new IllegalArgumentException("Vector length mismatch");
+        int n = a.length;
+        float dot = 0.0f, nA = 0.0f, nB = 0.0f;
+
+        int i = 0;
+        if (n >= SPECIES.length()) {
+            FloatVector vDot = FloatVector.zero(SPECIES);
+            FloatVector vNA = FloatVector.zero(SPECIES);
+            FloatVector vNB = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+                FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+                vDot = vDot.add(va.mul(vb));
+                vNA = vNA.add(va.mul(va));
+                vNB = vNB.add(vb.mul(vb));
+            }
+            dot = vDot.reduceLanes(VectorOperators.ADD);
+            nA = vNA.reduceLanes(VectorOperators.ADD);
+            nB = vNB.reduceLanes(VectorOperators.ADD);
+        }
+        for (; i < n; i++) {
+            dot += a[i] * b[i];
+            nA += a[i] * a[i];
+            nB += b[i] * b[i];
+        }
+        if (nA == 0 || nB == 0) return 0.0f;
+        return (float) (dot / (Math.sqrt(nA) * Math.sqrt(nB)));
+    }
+
+    /**
+     * SIMD Dot Product.
+     */
+    public static float dotProduct(float[] a, float[] b) {
+        if (a.length != b.length) throw new IllegalArgumentException("Vector length mismatch");
+        int n = a.length;
+        float sum = 0;
+        int i = 0;
+        if (n >= SPECIES.length()) {
+            FloatVector vSum = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                vSum = vSum.add(FloatVector.fromArray(SPECIES, a, i).mul(FloatVector.fromArray(SPECIES, b, i)));
+            }
+            sum = vSum.reduceLanes(VectorOperators.ADD);
+        }
+        for (; i < n; i++) sum += a[i] * b[i];
+        return sum;
     }
 
     private static AccelTensor dequantize(AccelTensor qWeight) {

@@ -130,17 +130,15 @@ public class DirectSafetensorBackend {
                     : "";
 
             // Build messages list — inject a default system message if none provided
-            // Use raw list to work around cross-module Message class identity mismatch
             List<tech.kayys.gollek.spi.Message> rawMessages = new ArrayList<>(request.getMessages());
             boolean hasSystem = rawMessages.stream().anyMatch(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.SYSTEM);
             if (!hasSystem) {
                 rawMessages.add(0, tech.kayys.gollek.spi.Message.system("You are a helpful assistant."));
             }
 
-            // Apply the chat template — cast through raw List to bridge the module boundary
+            // Apply the chat template — use Object bridge to bypass cross-module generic type identity check
             @SuppressWarnings("unchecked")
-            String prompt = ChatTemplateFormatter.format(
-                    (List) rawMessages, modelType);
+            String prompt = ChatTemplateFormatter.format((java.util.List) (Object) rawMessages, modelType);
 
 
             int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 256;

@@ -12,12 +12,14 @@ package tech.kayys.gollek.safetensor.quantization;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.quantization.quantizer.FP8Quantizer;
-import tech.kayys.gollek.safetensor.quantization.quantizer.GPTQQuantizer;
-import tech.kayys.gollek.safetensor.quantization.quantizer.INT8Quantizer;
-import tech.kayys.gollek.safetensor.quantization.quantizer.Quantizer;
+import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
+import tech.kayys.gollek.safetensor.quantization.bridge.AccelSafetensorWriter;
+import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader;
+import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader.SafetensorShardSession;
+import tech.kayys.gollek.safetensor.quantization.quantizer.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -87,6 +89,12 @@ public class QuantizationEngine {
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final Map<Path, QuantResult> resultsCache = new ConcurrentHashMap<>();
 
+    @Inject
+    SafetensorShardLoader loader;
+
+    @Inject
+    AccelWeightBridge weightBridge;
+
     /**
      * Initialize quantization engine with default quantizers.
      */
@@ -94,6 +102,10 @@ public class QuantizationEngine {
         registerQuantizer(QuantStrategy.INT4, new GPTQQuantizer());
         registerQuantizer(QuantStrategy.INT8, new INT8Quantizer());
         registerQuantizer(QuantStrategy.FP8, new FP8Quantizer());
+        
+        // Add new adapters from core/quantizer
+        registerQuantizer(QuantStrategy.INT4, new TurboQuantAdapter());
+        // registerQuantizer(QuantStrategy.INT4, new BnBQuantizerAdapter()); // NF4 candidate
     }
 
     /**
@@ -388,16 +400,18 @@ public class QuantizationEngine {
     }
 
     private Map<String, AccelTensor> loadWeights(Path modelPath) throws IOException {
-        // TODO: Implement SafeTensor reader
-        // For now, return empty map - actual implementation would use SafeTensor reader
-        log.warnf("SafeTensor reader not yet implemented - returning empty weights");
-        return new HashMap<>();
+        log.infof("Loading weights for quantization from %s", modelPath);
+        try (SafetensorShardSession session = loader.open(modelPath)) {
+            return weightBridge.bridgeAll(session);
+        } catch (Exception e) {
+            throw new IOException("Failed to load weights for quantization", e);
+        }
     }
 
     private void saveWeights(Path outputPath, Map<String, AccelTensor> weights) throws IOException {
-        // TODO: Implement SafeTensor writer
-        // For now, no-op - actual implementation would use SafeTensor writer
-        log.warnf("SafeTensor writer not yet implemented - weights not saved");
+        log.infof("Saving quantized weights to %s", outputPath);
+        AccelSafetensorWriter writer = new AccelSafetensorWriter();
+        writer.save(outputPath, weights);
     }
 
     private long calculateTotalSize(Map<String, AccelTensor> weights) {

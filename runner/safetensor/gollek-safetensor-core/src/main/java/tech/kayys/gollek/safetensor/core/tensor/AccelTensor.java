@@ -59,6 +59,23 @@ public class AccelTensor implements AutoCloseable {
     private MemorySegment zeros = null;
     private int groupSize = -1; // -1 means per-channel (no groups)
 
+    /**
+     * Dequantizes this tensor back to Float32 if it is quantized.
+     * 
+     * @return a new contiguous F32 tensor, or this tensor if it is already F32
+     */
+    public AccelTensor dequantize() {
+        if (quantType == QuantType.F32) return this;
+        
+        // This is a slow fallback that uses the metadata.
+        // Optimized kernels should use direct dequantization (e.g. BnB).
+        float[] f32 = new float[(int) numel()];
+        for (int i = 0; i < f32.length; i++) {
+            f32[i] = getFlat(i); // getFlat handles quantization based on type/scales/zeros
+        }
+        return AccelTensor.fromFloatArray(f32, shape);
+    }
+
     // ── Private constructors ──────────────────────────────────────────
 
     /** Owning constructor — this tensor owns the arena. */

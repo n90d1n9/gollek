@@ -18,7 +18,7 @@ import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;
 import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader.SafetensorShardSession;
-import tech.kayys.gollek.safetensor.engine.warmup.AccelWeightBridge;
+import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
 import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
@@ -42,7 +42,6 @@ import java.time.Instant;
 import java.util.function.Supplier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.SubmissionPublisher;
 import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
@@ -115,14 +114,43 @@ public class DirectInferenceEngine implements SafetensorEngine {
             this.weightArena = weightArena;
         }
 
-        @Override public Path path() { return path; }
-        @Override public Map<String, AccelTensor> weights() { return weights; }
-        @Override public Tokenizer tokenizer() { return tokenizer; }
-        @Override public String key() { return key; }
-        @Override public boolean isQuantized() { return quantized; }
-        @Override public ModelConfig config() { return config; }
-        public String arch() { return config.primaryArchitecture(); }
-        public QuantizationEngine.QuantStrategy getQuantStrategy() { return quantStrategy; }
+        @Override
+        public Path path() {
+            return path;
+        }
+
+        @Override
+        public Map<String, AccelTensor> weights() {
+            return weights;
+        }
+
+        @Override
+        public Tokenizer tokenizer() {
+            return tokenizer;
+        }
+
+        @Override
+        public String key() {
+            return key;
+        }
+
+        @Override
+        public boolean isQuantized() {
+            return quantized;
+        }
+
+        @Override
+        public ModelConfig config() {
+            return config;
+        }
+
+        public String arch() {
+            return config.primaryArchitecture();
+        }
+
+        public QuantizationEngine.QuantStrategy getQuantStrategy() {
+            return quantStrategy;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -134,13 +162,11 @@ public class DirectInferenceEngine implements SafetensorEngine {
         return loadModel(modelPath, null, QuantizationEngine.QuantStrategy.NONE);
     }
 
-    @SuppressWarnings("unchecked")
     public String loadModel(Path modelPath, Path adapterPath,
             QuantizationEngine.QuantStrategy quantStrategy) {
 
         Objects.requireNonNull(modelPath, "modelPath must not be null");
         Path resolved = modelPath.toAbsolutePath().normalize();
-
 
         if (modelsByPath.containsKey(resolved)) {
             log.infof("DirectInferenceEngine: model already loaded [%s]", resolved.getFileName());
@@ -207,9 +233,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     Random rng = new Random();
                     int next = tokenSampler.sample(logits, cfg, freq, rng);
 
-
                     Set<Integer> stops = new HashSet<>();
-                    for (int id : tokenizer.allStopTokenIds()) stops.add(id);
+                    for (int id : tokenizer.allStopTokenIds())
+                        stops.add(id);
                     stops.addAll(cfg.stopTokenIds());
 
                     StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
@@ -267,7 +293,6 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 String requestId = UUID.randomUUID().toString();
                 int inputLen = 0;
 
-
                 try {
                     LoadedModel model = (LoadedModel) getLoadedModel(modelPath);
                     if (model == null) {
@@ -284,7 +309,6 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
                     // Runtime metadata logging for stability verification
 
-
                     long[] inputIds = tokenizer.encode(prompt, EncodeOptions.defaultOptions());
                     inputLen = inputIds.length;
 
@@ -298,24 +322,23 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         Random rng = new Random();
                         int next = tokenSampler.sample(logits, cfg, freq, rng);
 
-
                         Set<Integer> stops = new HashSet<>();
-                        for (int id : tokenizer.allStopTokenIds()) stops.add(id);
+                        for (int id : tokenizer.allStopTokenIds())
+                            stops.add(id);
                         stops.addAll(cfg.stopTokenIds());
 
                         StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
 
-
                         for (int step = 0; step < cfg.maxNewTokens(); step++) {
 
-                            
                             if (stops.contains(next) || emitter.isCancelled()) {
                                 break;
                             }
 
                             String delta = decoder.decodeNext((long) next);
-                            if (delta == null) delta = "";
-                            
+                            if (delta == null)
+                                delta = "";
+
                             String fullGeneratedText = decoder.currentText();
 
                             if (!delta.isEmpty()) {
@@ -327,7 +350,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                                         .metadata("backend", "accelerate-safetensor")
                                         .build());
                             }
-                            
+
                             if (!cfg.stopStrings().isEmpty()) {
                                 boolean shouldStop = false;
                                 for (String s : cfg.stopStrings()) {
@@ -376,10 +399,16 @@ public class DirectInferenceEngine implements SafetensorEngine {
         if (model != null) {
             modelsByKey.remove(model.key());
             model.weights().values().forEach(t -> {
-                try { t.close(); } catch (Exception ignored) {}
+                try {
+                    t.close();
+                } catch (Exception ignored) {
+                }
             });
             if (model.weightArena != null) {
-                try { model.weightArena.close(); } catch (Exception ignored) {}
+                try {
+                    model.weightArena.close();
+                } catch (Exception ignored) {
+                }
             }
             log.infof("DirectInferenceEngine: unloaded [%s]", resolved.getFileName());
         }
@@ -453,7 +482,8 @@ public class DirectInferenceEngine implements SafetensorEngine {
         }
     }
 
-    private record Alias(String from, String to) {}
+    private record Alias(String from, String to) {
+    }
 
     private Tokenizer loadTokenizer(Path modelPath) {
         try {
@@ -478,9 +508,11 @@ public class DirectInferenceEngine implements SafetensorEngine {
     }
 
     private static void applyLogitSoftcap(float[] logits, ModelConfig config) {
-        if (logits == null) return;
+        if (logits == null)
+            return;
         Double cap = config.finalLogitSoftcapping();
-        if (cap == null || cap <= 0) return;
+        if (cap == null || cap <= 0)
+            return;
         float c = cap.floatValue();
         for (int i = 0; i < logits.length; i++) {
             float x = logits[i];

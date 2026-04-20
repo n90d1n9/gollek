@@ -9,6 +9,7 @@ import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;
 import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader.SafetensorShardSession;
 import tech.kayys.gollek.safetensor.loader.SafetensorTensor;
+import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
 
 import java.io.IOException;
 import java.nio.file.Files;

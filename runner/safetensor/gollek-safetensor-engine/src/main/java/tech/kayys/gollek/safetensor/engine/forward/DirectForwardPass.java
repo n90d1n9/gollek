@@ -147,15 +147,13 @@ public class DirectForwardPass {
         }
         normedAttn.close();
 
-        AccelTensor afterAttn = AccelOps.add(residual, attnOut);
+        // Combined Add + RMSNorm
+        AccelTensor normedFfn = AccelOps.addRmsNorm(residual, attnOut, weights.get(arch.layerFfnNormWeight(layerIdx)), config.rmsNormEps());
         attnOut.close();
         
         if (layerIdx == 0 && startPos == 0) {
         }
 
-        // FFN norm
-        AccelTensor residual2 = afterAttn;
-        AccelTensor normedFfn = AccelOps.rmsNorm(residual2, weights.get(arch.layerFfnNormWeight(layerIdx)), config.rmsNormEps());
 
         if (layerIdx == 0 && startPos == 0) {
         }
@@ -175,9 +173,9 @@ public class DirectForwardPass {
         }
         normedFfn.close();
 
-        AccelTensor output = AccelOps.add(residual2, ffnOut);
+        AccelTensor output = AccelOps.add(residual, ffnOut);
         ffnOut.close();
-        residual2.close();
+        normedFfn.close();
 
         if (layerIdx == 0 && startPos == 0) {
         }
@@ -210,11 +208,9 @@ public class DirectForwardPass {
         long start = System.nanoTime();
         AccelTensor gate = AccelOps.linear(x, gateW);
         AccelTensor up = AccelOps.linear(x, upW);
-        AccelTensor activated = AccelOps.silu(gate);
-        AccelTensor combined = AccelOps.mul(activated, up);
+        AccelTensor combined = AccelOps.swiglu(gate, up);
         gate.close();
         up.close();
-        activated.close();
         AccelTensor out = AccelOps.linear(combined, downW);
         combined.close();
         return out;

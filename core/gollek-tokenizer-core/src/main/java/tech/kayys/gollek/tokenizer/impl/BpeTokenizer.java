@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.PriorityQueue;
 
 /**
  * Byte-Pair Encoding (BPE) Tokenizer implementation.
@@ -29,6 +33,7 @@ public final class BpeTokenizer implements Tokenizer {
     private final int bosTokenId;
     private final int eosTokenId;
     private final int padTokenId;
+    private final ExecutorService encoderExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     // Standard GPT-2 pre-tokenization regex
     private static final Pattern GPT2_REGEX = Pattern.compile("'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+");
@@ -115,9 +120,9 @@ public final class BpeTokenizer implements Tokenizer {
         
         List<Long> allTokens = new ArrayList<>();
         
-        // 1. Find special tokens first
+        // 1. Find special tokens
         if (specialTokens.isEmpty()) {
-            encodeBasic(text, allTokens);
+            allTokens.addAll(encodeParallel(text));
         } else {
             // Build pattern for special tokens
             StringBuilder sb = new StringBuilder();
@@ -133,13 +138,13 @@ public final class BpeTokenizer implements Tokenizer {
             int lastEnd = 0;
             while (m.find()) {
                 if (m.start() > lastEnd) {
-                    encodeBasic(text.substring(lastEnd, m.start()), allTokens);
+                    allTokens.addAll(encodeParallel(text.substring(lastEnd, m.start())));
                 }
                 allTokens.add((long) specialTokens.get(m.group()));
                 lastEnd = m.end();
             }
             if (lastEnd < text.length()) {
-                encodeBasic(text.substring(lastEnd), allTokens);
+                allTokens.addAll(encodeParallel(text.substring(lastEnd)));
             }
         }
 
@@ -148,62 +153,109 @@ public final class BpeTokenizer implements Tokenizer {
         return result;
     }
 
-    private void encodeBasic(String text, List<Long> allTokens) {
+    private List<Long> encodeParallel(String text) {
+        List<String> segments = new ArrayList<>();
         Matcher matcher = GPT2_REGEX.matcher(text);
         while (matcher.find()) {
-            String segment = matcher.group();
-            allTokens.addAll(bpeEncode(segment));
+            segments.add(matcher.group());
+        }
+
+        if (segments.size() <= 1) {
+            return segments.isEmpty() ? List.of() : bpeEncode(segments.get(0));
+        }
+
+        try {
+            List<Future<List<Long>>> futures = encoderExecutor.invokeAll(
+                segments.stream().map(s -> (java.util.concurrent.Callable<List<Long>>) () -> bpeEncode(s)).toList()
+            );
+            List<Long> result = new ArrayList<>();
+            for (Future<List<Long>> f : futures) {
+                result.addAll(f.get());
+            }
+            return result;
+        } catch (Exception e) {
+            // Fallback
+            List<Long> result = new ArrayList<>();
+            for (String s : segments) result.addAll(bpeEncode(s));
+            return result;
         }
     }
 
     private List<Long> bpeEncode(String word) {
-        List<String> symbols = new ArrayList<>();
+        if (word.isEmpty()) return List.of();
 
+        // Initial tokens from raw bytes
+        List<Symbol> symbols = new ArrayList<>();
         if (rawUtf8Vocab) {
             byte[] bytes = word.getBytes(StandardCharsets.UTF_8);
             for (byte b : bytes) {
-                String byteStr = new String(new byte[]{b}, StandardCharsets.ISO_8859_1);
-                symbols.add(byteStr);
+                symbols.add(new Symbol(new String(new byte[]{b}, StandardCharsets.ISO_8859_1)));
             }
         } else {
             byte[] bytes = word.getBytes(StandardCharsets.UTF_8);
             for (byte b : bytes) {
                 char c = (char) (b & 0xFF);
-                symbols.add(byteEncoder.getOrDefault(c, String.valueOf(c)));
+                symbols.add(new Symbol(byteEncoder.getOrDefault(c, String.valueOf(c))));
             }
         }
 
-        while (symbols.size() > 1) {
-            int bestIdx = -1;
-            int bestRank = Integer.MAX_VALUE;
-
-            for (int i = 0; i < symbols.size() - 1; i++) {
-                String s1 = symbols.get(i);
-                String s2 = symbols.get(i + 1);
-                
-                Integer rank = null;
-                if (!mergeRanks.isEmpty()) {
-                    rank = mergeRanks.get(s1 + " " + s2);
-                } else {
-                    rank = tokenToId.get(s1 + s2);
-                }
-
-                if (rank != null && rank < bestRank) {
-                    bestRank = rank;
-                    bestIdx = i;
-                }
-            }
-
-            if (bestIdx < 0) break;
-
-            String merged = symbols.get(bestIdx) + symbols.get(bestIdx + 1);
-            symbols.set(bestIdx, merged);
-            symbols.remove(bestIdx + 1);
+        if (symbols.size() <= 1) {
+            return getFinalIds(symbols);
         }
 
+        // Link segments
+        for (int i = 0; i < symbols.size(); i++) {
+            if (i > 0) symbols.get(i).prev = symbols.get(i - 1);
+            if (i < symbols.size() - 1) symbols.get(i).next = symbols.get(i + 1);
+        }
+
+        // Priority Queue for merges
+        PriorityQueue<Merge> pq = new PriorityQueue<>();
+        for (int i = 0; i < symbols.size() - 1; i++) {
+            addMerge(pq, symbols.get(i), symbols.get(i + 1));
+        }
+
+        while (!pq.isEmpty()) {
+            Merge top = pq.poll();
+            if (top.s1.deleted || top.s2.deleted) continue;
+            if (top.s1.next != top.s2) continue;
+
+            // Perform merge
+            String mergedText = top.s1.text + top.s2.text;
+            top.s1.text = mergedText;
+            top.s2.deleted = true;
+
+            // Update links
+            Symbol s3 = top.s2.next;
+            top.s1.next = s3;
+            if (s3 != null) s3.prev = top.s1;
+
+            // Add new possible merges
+            if (top.s1.prev != null) addMerge(pq, top.s1.prev, top.s1);
+            if (top.s1.next != null) addMerge(pq, top.s1, top.s1.next);
+        }
+
+        return getFinalIds(symbols);
+    }
+
+    private void addMerge(PriorityQueue<Merge> pq, Symbol s1, Symbol s2) {
+        String pair = s1.text + " " + s2.text;
+        Integer rank;
+        if (!mergeRanks.isEmpty()) {
+            rank = mergeRanks.get(pair);
+        } else {
+            rank = tokenToId.get(s1.text + s2.text);
+        }
+        if (rank != null) {
+            pq.add(new Merge(s1, s2, rank));
+        }
+    }
+
+    private List<Long> getFinalIds(List<Symbol> symbols) {
         List<Long> ids = new ArrayList<>();
-        for (String sym : symbols) {
-            Integer id = tokenToId.get(sym);
+        for (Symbol s : symbols) {
+            if (s.deleted) continue;
+            Integer id = tokenToId.get(s.text);
             if (id != null) {
                 ids.add((long) id);
             } else if (unkTokenId >= 0) {
@@ -211,6 +263,22 @@ public final class BpeTokenizer implements Tokenizer {
             }
         }
         return ids;
+    }
+
+    private static class Symbol {
+        String text;
+        Symbol prev, next;
+        boolean deleted = false;
+        Symbol(String text) { this.text = text; }
+    }
+
+    private static class Merge implements Comparable<Merge> {
+        final Symbol s1, s2;
+        final int rank;
+        Merge(Symbol s1, Symbol s2, int rank) {
+            this.s1 = s1; this.s2 = s2; this.rank = rank;
+        }
+        @Override public int compareTo(Merge o) { return Integer.compare(this.rank, o.rank); }
     }
 
     @Override
