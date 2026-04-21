@@ -1,7 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
-
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.*;
@@ -22,8 +20,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author Bhangun
  * @since 1.1.0
  */
-@Slf4j
 public class LiteRTMemoryPool {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTMemoryPool.class);
 
     // Memory pools by size category
     private final Map<SizeCategory, ConcurrentLinkedQueue<MemorySegment>> memoryPools;

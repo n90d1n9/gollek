@@ -1,6 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
 import tech.kayys.gollek.provider.litert.LiteRTNativeBindings.LitertType;
 
 import java.lang.foreign.MemorySegment;
@@ -21,8 +20,9 @@ import java.util.Arrays;
  * @author Bhangun
  * @since 1.1.0
  */
-@Slf4j
 public class LiteRTTensorUtils {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTTensorUtils.class);
 
     /**
      * Validate tensor shape compatibility.
@@ -361,23 +361,6 @@ public class LiteRTTensorUtils {
             result[i] = (int8Data[i] - zeroPoint) * scale;
         }
         return result;
-    }
-
-    /**
-     * Extract quantization parameters from tensor.
-     *
-     * <p>Note: In LiteRT 2.0, quantization info is obtained via
-     * {@code LiteRtGetPerTensorQuantization} or {@code LiteRtGetPerChannelQuantization}
-     * on the model tensor (not from the CompiledModel TensorBuffer).
-     *
-     * @deprecated Use model introspection APIs for quantization info.
-     */
-    @Deprecated
-    public static QuantizationParams extractQuantizationParams(MemorySegment tensor, LiteRTNativeBindings bindings) {
-        // LiteRT 2.0: Quantization params are accessed through model tensor introspection,
-        // not through direct tensor data access. Return defaults for backward compatibility.
-        log.debug("Quantization parameter extraction requires model tensor introspection in LiteRT 2.0");
-        return new QuantizationParams(1.0f, 0);
     }
 
     /**

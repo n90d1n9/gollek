@@ -1,6 +1,6 @@
 package tech.kayys.gollek.ml.metrics;
 
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,17 +11,20 @@ import java.util.*;
  * Lightweight training metrics tracker — logs scalar values per step and
  * provides aggregation, CSV export, and summary utilities.
  *
- * <p>Designed to be used inside a training loop as a drop-in replacement
- * for TensorBoard's scalar logging, with optional CSV export for offline analysis.
+ * <p>
+ * Designed to be used inside a training loop as a drop-in replacement
+ * for TensorBoard's scalar logging, with optional CSV export for offline
+ * analysis.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * MetricsTracker tracker = new MetricsTracker();
  *
  * for (int epoch = 0; epoch < 100; epoch++) {
  *     float loss = trainStep();
  *     tracker.log("train/loss", loss, epoch);
- *     tracker.log("train/lr",   scheduler.getLr(), epoch);
+ *     tracker.log("train/lr", scheduler.getLr(), epoch);
  * }
  *
  * System.out.println("Best loss: " + tracker.min("train/loss"));
@@ -47,7 +50,7 @@ public final class MetricsTracker {
      */
     public void log(String name, float value, int step) {
         history.computeIfAbsent(name, k -> new ArrayList<>())
-               .add(new float[]{step, value});
+                .add(new float[] { step, value });
     }
 
     /**
@@ -63,10 +66,12 @@ public final class MetricsTracker {
     // ── Retrieval ─────────────────────────────────────────────────────────
 
     /**
-     * Returns the full history for a metric as a list of {@code [step, value]} arrays.
+     * Returns the full history for a metric as a list of {@code [step, value]}
+     * arrays.
      *
      * @param name metric name
-     * @return unmodifiable list of {@code float[2]} entries, or empty list if not found
+     * @return unmodifiable list of {@code float[2]} entries, or empty list if not
+     *         found
      */
     public List<float[]> get(String name) {
         return Collections.unmodifiableList(history.getOrDefault(name, List.of()));
@@ -92,9 +97,12 @@ public final class MetricsTracker {
      */
     public float min(String name) {
         float[] vals = values(name);
-        if (vals.length == 0) return Float.NaN;
+        if (vals.length == 0)
+            return Float.NaN;
         float min = Float.MAX_VALUE;
-        for (float v : vals) if (v < min) min = v;
+        for (float v : vals)
+            if (v < min)
+                min = v;
         return min;
     }
 
@@ -135,7 +143,8 @@ public final class MetricsTracker {
     // ── Export ────────────────────────────────────────────────────────────
 
     /**
-     * Exports all tracked metrics to a CSV file with columns {@code step,name,value}.
+     * Exports all tracked metrics to a CSV file with columns
+     * {@code step,name,value}.
      *
      * @param path output file path
      * @throws IOException if the file cannot be written
@@ -168,9 +177,11 @@ public final class MetricsTracker {
     /** Extracts just the value column from the history of a metric. */
     private float[] values(String name) {
         List<float[]> h = history.get(name);
-        if (h == null || h.isEmpty()) return new float[0];
+        if (h == null || h.isEmpty())
+            return new float[0];
         float[] vals = new float[h.size()];
-        for (int i = 0; i < h.size(); i++) vals[i] = h.get(i)[1];
+        for (int i = 0; i < h.size(); i++)
+            vals[i] = h.get(i)[1];
         return vals;
     }
 }

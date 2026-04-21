@@ -1,4 +1,4 @@
-package tech.kayys.gollek.sdk;
+package tech.kayys.gollek.sdk.api;
 
 
 import java.util.List;
@@ -182,14 +182,6 @@ public interface GollekClient extends AutoCloseable {
             return durationMs > 0 ? tokenCount * 1000f / durationMs : 0f;
         }
     }
-
-    /**
-     * Model metadata.
-     *
-     * @deprecated Use {@link tech.kayys.gollek.spi.model.ModelInfo} instead.
-     */
-    @Deprecated
-    record LegacyModelInfo(String name, String architecture, long parameterCount, int contextLength) {}
 
     /**
      * Reactive stream for token-by-token generation.

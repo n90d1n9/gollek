@@ -30,8 +30,15 @@ public interface RequestContext {
      * Factory for simple context with only a request ID.
      */
     static RequestContext of(String requestId) {
+        return of(requestId, COMMUNITY_API_KEY);
+    }
+
+    /**
+     * Factory for context with request ID and API key.
+     */
+    static RequestContext of(String requestId, String apiKey) {
         return new RequestContext() {
-            @Override public String apiKey() { return COMMUNITY_API_KEY; }
+            @Override public String apiKey() { return apiKey; }
             @Override public String getRequestId() { return requestId; }
             @Override public String getTenantId() { return COMMUNITY_TENANT_ID; }
         };
@@ -41,6 +48,9 @@ public interface RequestContext {
 
     /** API key associated with this request. */
     String apiKey();
+
+    /** Alias for apiKey() for backwards compatibility. */
+    default String getApiKey() { return apiKey(); }
 
     /** Unique request identifier for tracing. */
     default String getRequestId() { return null; }

@@ -48,13 +48,13 @@ import java.util.Objects;
  */
 public final class SafetensorTensor implements AutoCloseable {
 
-    // ValueLayouts for little-endian element access
-    private static final ValueLayout.OfByte BYTE_LE = ValueLayout.JAVA_BYTE;
-    private static final ValueLayout.OfShort SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfInt INT_LE = ValueLayout.JAVA_INT.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfLong LONG_LE = ValueLayout.JAVA_LONG.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfFloat FLOAT_LE = ValueLayout.JAVA_FLOAT.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfDouble DOUBLE_LE = ValueLayout.JAVA_DOUBLE.withOrder(ByteOrder.LITTLE_ENDIAN);
+    // ValueLayouts for little-endian element access, ignoring host alignment constraints
+    private static final ValueLayout.OfByte BYTE_LE = ValueLayout.JAVA_BYTE.withByteAlignment(1);
+    private static final ValueLayout.OfShort SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN).withByteAlignment(1);
+    private static final ValueLayout.OfInt INT_LE = ValueLayout.JAVA_INT.withOrder(ByteOrder.LITTLE_ENDIAN).withByteAlignment(1);
+    private static final ValueLayout.OfLong LONG_LE = ValueLayout.JAVA_LONG.withOrder(ByteOrder.LITTLE_ENDIAN).withByteAlignment(1);
+    private static final ValueLayout.OfFloat FLOAT_LE = ValueLayout.JAVA_FLOAT.withOrder(ByteOrder.LITTLE_ENDIAN).withByteAlignment(1);
+    private static final ValueLayout.OfDouble DOUBLE_LE = ValueLayout.JAVA_DOUBLE.withOrder(ByteOrder.LITTLE_ENDIAN).withByteAlignment(1);
 
     // ─────────────────────────────────────────────────────────────────────────
 

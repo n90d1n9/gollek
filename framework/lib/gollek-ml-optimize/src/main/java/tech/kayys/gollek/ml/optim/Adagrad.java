@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.optim;
 
 import tech.kayys.gollek.ml.nn.Parameter;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.HashMap;
 import java.util.List;
@@ -11,18 +11,23 @@ import java.util.Map;
  * Adagrad optimizer — adapts learning rates per parameter based on the sum
  * of squared historical gradients.
  *
- * <p>Parameters that receive large gradients get smaller effective learning rates,
+ * <p>
+ * Parameters that receive large gradients get smaller effective learning rates,
  * making Adagrad well-suited for sparse features (NLP, recommendation systems).
  *
- * <p>Update rule:
+ * <p>
+ * Update rule:
+ * 
  * <pre>
  *   G_t = G_{t-1} + g²
  *   θ  -= lr / (√G_t + ε) · g
  * </pre>
  *
- * <p>Uses JDK 25 Vector API via {@link VectorOps} for the update loop.
+ * <p>
+ * Uses JDK 25 Vector API via {@link VectorOps} for the update loop.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * var optimizer = new Adagrad(model.parameters(), lr = 0.01f);
  * }</pre>
@@ -54,30 +59,31 @@ public final class Adagrad implements Optimizer {
      * @param weightDecay L2 regularization coefficient
      */
     public Adagrad(List<Parameter> parameters, float lr, float eps, float weightDecay) {
-        this.parameters  = parameters;
-        this.lr          = lr;
-        this.eps         = eps;
+        this.parameters = parameters;
+        this.lr = lr;
+        this.eps = eps;
         this.weightDecay = weightDecay;
     }
 
     @Override
     public void step() {
         for (Parameter p : parameters) {
-            if (p.data().grad() == null) continue;
+            if (p.data().grad() == null)
+                continue;
             float[] theta = p.data().data();
-            float[] grad  = p.data().grad().data();
+            float[] grad = p.data().grad().data();
             int len = theta.length;
             float[] G = sumSq.computeIfAbsent(p, k -> new float[len]);
 
-            // G += g²  then  θ -= lr / (√G + ε) * g  — vectorized
+            // G += g² then θ -= lr / (√G + ε) * g — vectorized
             int i = 0;
             int bound = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED.loopBound(len);
             var SPECIES = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
-            var lrV  = jdk.incubator.vector.FloatVector.broadcast(SPECIES, lr);
+            var lrV = jdk.incubator.vector.FloatVector.broadcast(SPECIES, lr);
             var epsV = jdk.incubator.vector.FloatVector.broadcast(SPECIES, eps);
 
             for (; i < bound; i += SPECIES.length()) {
-                var g  = jdk.incubator.vector.FloatVector.fromArray(SPECIES, grad, i);
+                var g = jdk.incubator.vector.FloatVector.fromArray(SPECIES, grad, i);
                 var Gi = jdk.incubator.vector.FloatVector.fromArray(SPECIES, G, i);
                 var newG = Gi.add(g.mul(g));
                 newG.intoArray(G, i);
@@ -92,8 +98,23 @@ public final class Adagrad implements Optimizer {
         }
     }
 
-    @Override public void zeroGrad()                  { parameters.forEach(p -> p.data().zeroGrad()); }
-    @Override public float learningRate()             { return lr; }
-    @Override public List<Parameter> parameters()     { return parameters; }
-    @Override public void setLearningRate(float lr)   { this.lr = lr; }
+    @Override
+    public void zeroGrad() {
+        parameters.forEach(p -> p.data().zeroGrad());
+    }
+
+    @Override
+    public float learningRate() {
+        return lr;
+    }
+
+    @Override
+    public List<Parameter> parameters() {
+        return parameters;
+    }
+
+    @Override
+    public void setLearningRate(float lr) {
+        this.lr = lr;
+    }
 }

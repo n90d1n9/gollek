@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.spi.context.RequestContext;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -31,7 +32,7 @@ public class ShowCommandTest {
                 .modelId("test-model")
                 .name("Test Model")
                 .version("1.0")
-                .apiKey("community")
+                .requestContext(RequestContext.of("community", "community"))
                 .format("GGUF")
                 .metadata(Collections.emptyMap())
                 .createdAt(Instant.now())

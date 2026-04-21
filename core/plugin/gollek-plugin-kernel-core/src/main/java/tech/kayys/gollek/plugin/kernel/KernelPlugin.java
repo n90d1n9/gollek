@@ -244,13 +244,8 @@ public interface KernelPlugin {
      * @return execution result
      * @throws KernelException if execution fails
      */
-    default <T> KernelResult<T> execute(KernelOperation operation,
-                                        KernelContext context) throws KernelException {
-        // Default: delegate to legacy method for backward compatibility
-        @SuppressWarnings("unchecked")
-        T result = (T) execute(operation.getName(), context.getParameters());
-        return KernelResult.success(result);
-    }
+    <T> KernelResult<T> execute(KernelOperation operation,
+                                KernelContext context) throws KernelException;
 
     /**
      * Execute a kernel operation asynchronously.
@@ -273,21 +268,6 @@ public interface KernelPlugin {
             future.completeExceptionally(e);
             return future;
         }
-    }
-
-    /**
-     * Execute kernel operation (legacy method for backward compatibility).
-     *
-     * @param operation Operation name
-     * @param params Operation parameters
-     * @return operation result
-     * @deprecated Use {@link #execute(KernelOperation, KernelContext)} instead
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default Object execute(String operation, Map<String, Object> params) {
-        throw new UnsupportedOperationException(
-            "Legacy execute method not implemented. " +
-            "Use execute(KernelOperation, KernelContext) instead.");
     }
 
     /**

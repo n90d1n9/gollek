@@ -15,6 +15,7 @@ import tech.kayys.gollek.spi.context.EngineContext;
 
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Plugin that checks content safety.
@@ -60,10 +61,8 @@ public class ContentSafetyPlugin implements InferencePhasePlugin {
 
     @Override
     public void execute(ExecutionContext context, EngineContext engine) throws PluginException {
-        InferenceRequest request = (InferenceRequest) context.variables().get("request");
-        if (request == null) {
-            throw new IllegalStateException("Request not found");
-        }
+        InferenceRequest request = context.getVariable("request", InferenceRequest.class)
+                .orElseThrow(() -> new IllegalStateException("Request not found in context"));
 
         for (Message message : request.getMessages()) {
             String content = message.getContent();
@@ -105,7 +104,7 @@ public class ContentSafetyPlugin implements InferencePhasePlugin {
         List<String> patterns = (List<String>) newConfig.getOrDefault("blockedPatterns", List.of());
         this.blockedPatterns = patterns.stream()
                 .map(Pattern::compile)
-                .toList();
+                .collect(Collectors.toList());
     }
 
     @Override

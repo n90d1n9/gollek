@@ -3,7 +3,7 @@ package tech.kayys.gollek.langchain4j;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-import tech.kayys.gollek.sdk.GollekClient;
+import tech.kayys.gollek.sdk.api.GollekClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;

@@ -1,6 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
 import tech.kayys.gollek.error.ErrorCode;
 import tech.kayys.gollek.spi.exception.InferenceException;
 
@@ -21,8 +20,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author Bhangun
  * @since 1.1.0
  */
-@Slf4j
 public class LiteRTErrorHandler {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTErrorHandler.class);
 
     // Error statistics
     private final AtomicLong totalErrors = new AtomicLong(0);

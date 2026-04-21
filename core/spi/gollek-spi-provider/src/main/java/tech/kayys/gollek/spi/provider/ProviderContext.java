@@ -1,7 +1,6 @@
 package tech.kayys.gollek.spi.provider;
 
 import tech.kayys.gollek.spi.context.EngineContext;
-// import tech.kayys.gollek.spi.context.RequestContext; // Temporarily commented out due to missing dependency
 
 import java.util.Optional;
 
@@ -13,15 +12,7 @@ public interface ProviderContext {
     /**
      * Get the context for this request.
      */
-    default Object getApiKeyContext() {
-        return getRequestContext();
-    }
-
-    /**
-     * @deprecated Use {@link #getApiKeyContext()}.
-     */
-    @Deprecated
-    Object getRequestContext(); // Using Object temporarily due to missing dependency
+    Object getApiKeyContext();
 
     /**
      * Access to global engine services.

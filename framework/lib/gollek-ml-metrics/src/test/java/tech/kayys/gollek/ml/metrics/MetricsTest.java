@@ -61,7 +61,7 @@ class MetricsTest {
 
     @Test
     void testRegressionMetricsMSE() {
-        double mse = tech.kayys.gollek.ml.tensor.VectorOps.sum(new float[]{0, 0, 0, 0});
+        double mse = tech.kayys.gollek.ml.autograd.VectorOps.sum(new float[]{0, 0, 0, 0});
         assertEquals(0.0, mse, 1e-8);
     }
 

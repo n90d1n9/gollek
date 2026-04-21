@@ -1,21 +1,25 @@
 package tech.kayys.gollek.ml.nn.loss;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Dice Loss — overlap-based loss for image segmentation tasks.
  *
- * <p>Optimizes the Dice coefficient (F1 score over pixels), which handles
+ * <p>
+ * Optimizes the Dice coefficient (F1 score over pixels), which handles
  * class imbalance better than cross-entropy for segmentation.
  *
- * <p>Formula:
+ * <p>
+ * Formula:
+ * 
  * <pre>
  *   Dice = 2 * |A ∩ B| / (|A| + |B|)
  *   L    = 1 - Dice
  * </pre>
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * var loss = new DiceLoss();
  * GradTensor l = loss.forward(predicted, target); // both [N, H, W] in [0,1]
@@ -28,14 +32,18 @@ public final class DiceLoss {
     /**
      * Creates a Dice loss with default smoothing of 1.0.
      */
-    public DiceLoss() { this(1.0f); }
+    public DiceLoss() {
+        this(1.0f);
+    }
 
     /**
      * Creates a Dice loss with custom smoothing.
      *
      * @param smooth Laplace smoothing constant (default 1.0)
      */
-    public DiceLoss(float smooth) { this.smooth = smooth; }
+    public DiceLoss(float smooth) {
+        this.smooth = smooth;
+    }
 
     /**
      * Computes the Dice loss between predicted probabilities and binary targets.

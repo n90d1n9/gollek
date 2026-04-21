@@ -169,12 +169,13 @@ public class DirectSafetensorBackend {
                             .durationMs(infResp.getDurationMs())
                             .build());
         } catch (Exception e) {
-            System.err.println("FATAL in streamToPublisher: " + e.getMessage());
-            e.printStackTrace(System.out);
+            String msg = (e.getMessage() != null) ? e.getMessage() : "(no message)";
+            System.err.println("FATAL in streamToPublisher [" + e.getClass().getSimpleName() + "]: " + msg);
+            e.printStackTrace(System.err);
             log.errorf(e, "Direct inference failed for model %s (resolved path: %s)",
                     request.getModel(), modelPath);
             throw new ProviderException("Direct inference failed for model "
-                    + request.getModel() + ": " + e.getMessage(), e);
+                    + request.getModel() + " [" + e.getClass().getSimpleName() + "]: " + msg, e);
         }
     }
 

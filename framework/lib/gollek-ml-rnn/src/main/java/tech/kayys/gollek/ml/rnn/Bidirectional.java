@@ -2,16 +2,18 @@ package tech.kayys.gollek.ml.rnn;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Bidirectional RNN wrapper — runs a recurrent layer in both forward and
  * backward directions and concatenates the outputs.
  *
- * <p>Equivalent to {@code torch.nn.RNN/LSTM/GRU(bidirectional=True)}.
+ * <p>
+ * Equivalent to {@code torch.nn.RNN/LSTM/GRU(bidirectional=True)}.
  * Output hidden size = 2 × hiddenSize.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * var biLSTM = new Bidirectional(new LSTM(128, 256));
  * GradTensor out = biLSTM.forward(x); // [T, N, 512]
@@ -29,7 +31,7 @@ public final class Bidirectional extends NNModule {
      * @param rnn the recurrent module to wrap (LSTM or GRU)
      */
     public Bidirectional(NNModule rnn) {
-        this.forward  = register("forward",  rnn);
+        this.forward = register("forward", rnn);
         // Backward direction uses a separate module instance
         this.backward = register("backward", cloneModule(rnn));
     }
@@ -51,19 +53,21 @@ public final class Bidirectional extends NNModule {
 
         // Concatenate along feature dim: [T, N, 2*H]
         return tech.kayys.gollek.ml.autograd.TensorOps.cat(
-            java.util.List.of(fwdOut, bwdOut), 2);
+                java.util.List.of(fwdOut, bwdOut), 2);
     }
 
     /** Extracts output tensor from LSTM/GRU output (handles both record types). */
-    private GradTensor extractOutput(GradTensor out) { return out; }
+    private GradTensor extractOutput(GradTensor out) {
+        return out;
+    }
 
     /** Reverses the time dimension (dim 0) of a [T, N, D] tensor. */
     private static GradTensor reverseTime(GradTensor x) {
         long[] s = x.shape();
-        int T = (int)s[0], N = (int)s[1], D = (int)s[2];
+        int T = (int) s[0], N = (int) s[1], D = (int) s[2];
         float[] src = x.data(), dst = new float[src.length];
         for (int t = 0; t < T; t++)
-            System.arraycopy(src, t*N*D, dst, (T-1-t)*N*D, N*D);
+            System.arraycopy(src, t * N * D, dst, (T - 1 - t) * N * D, N * D);
         return GradTensor.of(dst, s);
     }
 
@@ -71,18 +75,19 @@ public final class Bidirectional extends NNModule {
     private static NNModule cloneModule(NNModule m) {
         if (m instanceof LSTM lstm) {
             long[] ws = lstm.parameters().get(0).data().shape();
-            int H4 = (int)ws[0], inputSize = (int)ws[1];
+            int H4 = (int) ws[0], inputSize = (int) ws[1];
             return new LSTM(inputSize, H4 / 4);
         }
         if (m instanceof GRU gru) {
             long[] ws = gru.parameters().get(0).data().shape();
-            int H3 = (int)ws[0], inputSize = (int)ws[1];
+            int H3 = (int) ws[0], inputSize = (int) ws[1];
             return new GRU(inputSize, H3 / 3);
         }
         throw new IllegalArgumentException("Bidirectional only supports LSTM and GRU");
     }
 
-    @Override public String toString() {
+    @Override
+    public String toString() {
         return "Bidirectional(" + forward + ")";
     }
 }

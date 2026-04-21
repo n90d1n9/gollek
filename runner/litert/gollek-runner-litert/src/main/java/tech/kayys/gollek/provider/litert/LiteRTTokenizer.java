@@ -1,6 +1,7 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -32,8 +33,10 @@ import java.util.Optional;
  * the SPM protobuf vocab. For production use with full SPM support, a native
  * SentencePiece binding (via FFM or JNI) would be needed.
  */
-@Slf4j
+@SuppressWarnings("unused")
 public class LiteRTTokenizer implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(LiteRTTokenizer.class);
 
     // Common Gemma token IDs
     public static final int PAD_TOKEN_ID = 0;

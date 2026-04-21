@@ -1,25 +1,28 @@
 package tech.kayys.gollek.ml.metrics;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Regression evaluation metrics: MAE, RMSE, R², MAPE.
  *
- * <p>All metrics operate on flat float arrays and use {@link VectorOps}
+ * <p>
+ * All metrics operate on flat float arrays and use {@link VectorOps}
  * for SIMD-accelerated summation.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
- * float[] pred   = {1.0f, 2.0f, 3.0f};
- * float[] actual = {1.1f, 1.9f, 3.2f};
+ * float[] pred = { 1.0f, 2.0f, 3.0f };
+ * float[] actual = { 1.1f, 1.9f, 3.2f };
  * RegressionMetrics.Result r = RegressionMetrics.compute(pred, actual);
  * System.out.printf("MAE=%.4f RMSE=%.4f R²=%.4f%n", r.mae(), r.rmse(), r.r2());
  * }</pre>
  */
 public final class RegressionMetrics {
 
-    private RegressionMetrics() {}
+    private RegressionMetrics() {
+    }
 
     /**
      * Immutable result of a regression evaluation.
@@ -29,7 +32,8 @@ public final class RegressionMetrics {
      * @param r2   Coefficient of Determination (R²)
      * @param mape Mean Absolute Percentage Error (in %)
      */
-    public record Result(float mae, float rmse, float r2, float mape) {}
+    public record Result(float mae, float rmse, float r2, float mape) {
+    }
 
     /**
      * Computes all regression metrics in a single pass.
@@ -51,18 +55,18 @@ public final class RegressionMetrics {
         for (int i = 0; i < N; i++) {
             float diff = predicted[i] - actual[i];
             absErr[i] = Math.abs(diff);
-            sqErr[i]  = diff * diff;
+            sqErr[i] = diff * diff;
             pctErr[i] = actual[i] != 0 ? Math.abs(diff / actual[i]) * 100f : 0f;
             float dev = actual[i] - meanActual;
-            ssTot[i]  = dev * dev;
+            ssTot[i] = dev * dev;
         }
 
-        float mae  = VectorOps.sum(absErr) / N;
-        float mse  = VectorOps.sum(sqErr)  / N;
+        float mae = VectorOps.sum(absErr) / N;
+        float mse = VectorOps.sum(sqErr) / N;
         float rmse = (float) Math.sqrt(mse);
         float ssRes = VectorOps.sum(sqErr);
         float ssTotSum = VectorOps.sum(ssTot);
-        float r2   = ssTotSum > 0 ? 1f - ssRes / ssTotSum : 1f;
+        float r2 = ssTotSum > 0 ? 1f - ssRes / ssTotSum : 1f;
         float mape = VectorOps.sum(pctErr) / N;
 
         return new Result(mae, rmse, r2, mape);
@@ -88,7 +92,8 @@ public final class RegressionMetrics {
      */
     public static float mae(float[] predicted, float[] actual) {
         float[] abs = new float[predicted.length];
-        for (int i = 0; i < predicted.length; i++) abs[i] = Math.abs(predicted[i] - actual[i]);
+        for (int i = 0; i < predicted.length; i++)
+            abs[i] = Math.abs(predicted[i] - actual[i]);
         return VectorOps.sum(abs) / predicted.length;
     }
 
@@ -101,7 +106,10 @@ public final class RegressionMetrics {
      */
     public static float rmse(float[] predicted, float[] actual) {
         float[] sq = new float[predicted.length];
-        for (int i = 0; i < predicted.length; i++) { float d = predicted[i]-actual[i]; sq[i] = d*d; }
+        for (int i = 0; i < predicted.length; i++) {
+            float d = predicted[i] - actual[i];
+            sq[i] = d * d;
+        }
         return (float) Math.sqrt(VectorOps.sum(sq) / predicted.length);
     }
 

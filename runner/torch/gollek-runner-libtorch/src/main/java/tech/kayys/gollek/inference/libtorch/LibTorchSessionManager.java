@@ -93,17 +93,6 @@ public class LibTorchSessionManager {
     }
 
     /**
-     * @deprecated Use {@link #getSession(String, String, LibTorchProviderConfig)}
-     */
-    @Deprecated
-    public SessionContext acquire(String tenantId, String modelId, Path modelPath) {
-        String poolKey = tenantId + ":" + modelId;
-        SessionPool pool = pools.computeIfAbsent(poolKey,
-                k -> new SessionPool(k, tenantId, modelPath, getDevice(), null, null));
-        return pool.acquire();
-    }
-
-    /**
      * Release a session back to the pool.
      */
     public void releaseSession(String tenantId, String modelId, SessionContext session) {
@@ -119,14 +108,6 @@ public class LibTorchSessionManager {
             // Pool was removed (shutdown), close the runner
             closeRunner(session);
         }
-    }
-
-    /**
-     * @deprecated Use {@link #releaseSession(String, String, SessionContext)}
-     */
-    @Deprecated
-    public void release(String tenantId, String modelId, SessionContext session) {
-        releaseSession(tenantId, modelId, session);
     }
 
     public Path resolveModelPath(String modelId, LibTorchProviderConfig config) {

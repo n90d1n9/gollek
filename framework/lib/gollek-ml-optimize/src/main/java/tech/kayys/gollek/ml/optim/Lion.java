@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.optim;
 
 import tech.kayys.gollek.ml.nn.Parameter;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.HashMap;
 import java.util.List;
@@ -10,20 +10,25 @@ import java.util.Map;
 /**
  * Lion optimizer — discovered by Google Brain via program search.
  *
- * <p>Based on <em>"Symbolic Discovery of Optimization Algorithms"</em>
+ * <p>
+ * Based on <em>"Symbolic Discovery of Optimization Algorithms"</em>
  * (Chen et al., 2023). Uses only the sign of the gradient update,
  * making it memory-efficient (no second moment) and often faster than Adam.
  *
- * <p>Update rule:
+ * <p>
+ * Update rule:
+ * 
  * <pre>
  *   c_t = β₁·m_{t-1} + (1-β₁)·g
  *   θ  -= lr · (sign(c_t) + λ·θ)
  *   m_t = β₂·m_{t-1} + (1-β₂)·g
  * </pre>
  *
- * <p>Uses JDK 25 Vector API via {@link VectorOps} for the sign + update loop.
+ * <p>
+ * Uses JDK 25 Vector API via {@link VectorOps} for the sign + update loop.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * var optimizer = new Lion(model.parameters(), lr = 1e-4f, weightDecay = 0.01f);
  * }</pre>
@@ -57,20 +62,21 @@ public final class Lion implements Optimizer {
      * @param weightDecay L2 regularization coefficient
      */
     public Lion(List<Parameter> parameters, float lr,
-                float beta1, float beta2, float weightDecay) {
-        this.parameters  = parameters;
-        this.lr          = lr;
-        this.beta1       = beta1;
-        this.beta2       = beta2;
+            float beta1, float beta2, float weightDecay) {
+        this.parameters = parameters;
+        this.lr = lr;
+        this.beta1 = beta1;
+        this.beta2 = beta2;
         this.weightDecay = weightDecay;
     }
 
     @Override
     public void step() {
         for (Parameter p : parameters) {
-            if (p.data().grad() == null) continue;
+            if (p.data().grad() == null)
+                continue;
             float[] theta = p.data().data();
-            float[] grad  = p.data().grad().data();
+            float[] grad = p.data().grad().data();
             int len = theta.length;
             float[] m = momentum.computeIfAbsent(p, k -> new float[len]);
 
@@ -85,8 +91,23 @@ public final class Lion implements Optimizer {
         }
     }
 
-    @Override public void zeroGrad()                { parameters.forEach(p -> p.data().zeroGrad()); }
-    @Override public float learningRate()           { return lr; }
-    @Override public List<Parameter> parameters()   { return parameters; }
-    @Override public void setLearningRate(float lr) { this.lr = lr; }
+    @Override
+    public void zeroGrad() {
+        parameters.forEach(p -> p.data().zeroGrad());
+    }
+
+    @Override
+    public float learningRate() {
+        return lr;
+    }
+
+    @Override
+    public List<Parameter> parameters() {
+        return parameters;
+    }
+
+    @Override
+    public void setLearningRate(float lr) {
+        this.lr = lr;
+    }
 }

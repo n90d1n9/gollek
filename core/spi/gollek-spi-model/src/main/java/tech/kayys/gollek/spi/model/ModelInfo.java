@@ -2,6 +2,9 @@ package tech.kayys.gollek.spi.model;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
+import tech.kayys.gollek.spi.context.RequestContext;
+
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -22,8 +25,8 @@ public final class ModelInfo {
     private final Integer embeddingSize;
     private final Integer inputTokenLimit;
     private final Integer outputTokenLimit;
-    @Deprecated
-    private final String requestId;
+
+    private final RequestContext requestContext;
     private final String format;
     private final Long sizeBytes;
     private final String quantization;
@@ -44,7 +47,7 @@ public final class ModelInfo {
             @JsonProperty("embeddingSize") Integer embeddingSize,
             @JsonProperty("inputTokenLimit") Integer inputTokenLimit,
             @JsonProperty("outputTokenLimit") Integer outputTokenLimit,
-            @JsonProperty("requestId") String requestId,
+            @JsonProperty("requestContext") RequestContext requestContext,
             @JsonProperty("format") String format,
             @JsonProperty("sizeBytes") Long sizeBytes,
             @JsonProperty("quantization") String quantization,
@@ -62,7 +65,7 @@ public final class ModelInfo {
         this.embeddingSize = embeddingSize;
         this.inputTokenLimit = inputTokenLimit;
         this.outputTokenLimit = outputTokenLimit;
-        this.requestId = requestId;
+        this.requestContext = requestContext;
         this.format = format;
         this.sizeBytes = sizeBytes;
         this.quantization = quantization;
@@ -116,19 +119,14 @@ public final class ModelInfo {
     }
 
     public String getApiKey() {
-        if (requestId == null || requestId.isBlank()) {
-            return "community";
+        if (requestContext != null && requestContext.getApiKey() != null && !requestContext.getApiKey().isBlank()) {
+            return requestContext.getApiKey();
         }
-        return requestId;
+        return "community";
     }
 
-    /**
-     * @deprecated Tenant ID is resolved server-side from the API key.
-     *             Client code should not rely on this field.
-     */
-    @Deprecated
     public String getRequestId() {
-        return requestId;
+        return requestContext != null ? requestContext.getRequestId() : null;
     }
 
     public String getFormat() {
@@ -168,7 +166,7 @@ public final class ModelInfo {
                 .embeddingSize(embeddingSize)
                 .inputTokenLimit(inputTokenLimit)
                 .outputTokenLimit(outputTokenLimit)
-                .requestId(requestId)
+                .requestContext(requestContext)
                 .format(format)
                 .sizeBytes(sizeBytes)
                 .quantization(quantization)
@@ -211,8 +209,7 @@ public final class ModelInfo {
         private Integer embeddingSize;
         private Integer inputTokenLimit;
         private Integer outputTokenLimit;
-        @Deprecated
-        private String requestId;
+        private RequestContext requestContext;
         private String format;
         private Long sizeBytes;
         private String quantization;
@@ -275,18 +272,8 @@ public final class ModelInfo {
             return this;
         }
 
-        /**
-         * @deprecated Tenant ID is resolved server-side from the API key.
-         *             Client code should not set or rely on this value.
-         */
-        @Deprecated
-        public Builder requestId(String requestId) {
-            this.requestId = requestId;
-            return this;
-        }
-
-        public Builder apiKey(String apiKey) {
-            this.requestId = apiKey;
+        public Builder requestContext(RequestContext requestContext) {
+            this.requestContext = requestContext;
             return this;
         }
 
@@ -321,9 +308,9 @@ public final class ModelInfo {
         }
 
         public ModelInfo build() {
-            return new ModelInfo(modelId, shortId, name, version, architecture, parameterCount, 
+            return new ModelInfo(modelId, shortId, name, version, architecture, parameterCount,
                     description, contextLength, embeddingSize, inputTokenLimit, outputTokenLimit,
-                    requestId, format, sizeBytes, quantization, createdAt, updatedAt, metadata);
+                    requestContext, format, sizeBytes, quantization, createdAt, updatedAt, metadata);
         }
     }
 

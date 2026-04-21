@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.optim;
 
 import tech.kayys.gollek.ml.nn.Parameter;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.List;
 
@@ -9,19 +9,22 @@ import java.util.List;
  * SAM (Sharpness Aware Minimization) optimizer — seeks flat minima for
  * better generalization by perturbing weights toward the sharpest direction.
  *
- * <p>Based on <em>"Sharpness-Aware Minimization for Efficiently Improving
+ * <p>
+ * Based on <em>"Sharpness-Aware Minimization for Efficiently Improving
  * Generalization"</em> (Foret et al., 2021).
  *
- * <p>Two-step update per batch:
+ * <p>
+ * Two-step update per batch:
  * <ol>
- *   <li>Compute gradient at θ, perturb: θ̂ = θ + ρ·g/||g||</li>
- *   <li>Compute gradient at θ̂, update θ with base optimizer</li>
- *   <li>Restore θ from perturbation</li>
+ * <li>Compute gradient at θ, perturb: θ̂ = θ + ρ·g/||g||</li>
+ * <li>Compute gradient at θ̂, update θ with base optimizer</li>
+ * <li>Restore θ from perturbation</li>
  * </ol>
  *
  * <h3>Usage</h3>
+ * 
  * <pre>{@code
- * var sam = new SAM(model.parameters(), new SGD(model.parameters(), 0.1f), rho=0.05f);
+ * var sam = new SAM(model.parameters(), new SGD(model.parameters(), 0.1f), rho = 0.05f);
  *
  * // First forward+backward (at θ)
  * loss.backward();
@@ -48,14 +51,16 @@ public final class SAM implements Optimizer {
      * @param rho        perturbation radius (default 0.05)
      */
     public SAM(List<Parameter> parameters, Optimizer base, float rho) {
-        this.parameters   = parameters;
-        this.base         = base;
-        this.rho          = rho;
+        this.parameters = parameters;
+        this.base = base;
+        this.rho = rho;
         this.savedWeights = new float[parameters.size()][];
     }
 
     /** Creates SAM with default rho=0.05. */
-    public SAM(List<Parameter> parameters, Optimizer base) { this(parameters, base, 0.05f); }
+    public SAM(List<Parameter> parameters, Optimizer base) {
+        this(parameters, base, 0.05f);
+    }
 
     /**
      * First step: saves current weights and perturbs toward sharpest direction.
@@ -65,7 +70,8 @@ public final class SAM implements Optimizer {
         // Compute global gradient norm
         float totalSq = 0f;
         for (Parameter p : parameters) {
-            if (p.data().grad() == null) continue;
+            if (p.data().grad() == null)
+                continue;
             float[] g = p.data().grad().data();
             float[] sq = new float[g.length];
             VectorOps.mul(g, g, sq);
@@ -79,9 +85,11 @@ public final class SAM implements Optimizer {
             Parameter p = parameters.get(i);
             float[] theta = p.data().data();
             savedWeights[i] = theta.clone();
-            if (p.data().grad() == null) continue;
+            if (p.data().grad() == null)
+                continue;
             float[] g = p.data().grad().data();
-            for (int j = 0; j < theta.length; j++) theta[j] += scale * g[j];
+            for (int j = 0; j < theta.length; j++)
+                theta[j] += scale * g[j];
         }
     }
 
@@ -100,10 +108,28 @@ public final class SAM implements Optimizer {
     }
 
     /** Delegates to secondStep for compatibility with standard training loops. */
-    @Override public void step() { secondStep(); }
+    @Override
+    public void step() {
+        secondStep();
+    }
 
-    @Override public void zeroGrad()                { parameters.forEach(p -> p.data().zeroGrad()); }
-    @Override public float learningRate()           { return base.learningRate(); }
-    @Override public void setLearningRate(float lr) { base.setLearningRate(lr); }
-    @Override public List<Parameter> parameters()   { return parameters; }
+    @Override
+    public void zeroGrad() {
+        parameters.forEach(p -> p.data().zeroGrad());
+    }
+
+    @Override
+    public float learningRate() {
+        return base.learningRate();
+    }
+
+    @Override
+    public void setLearningRate(float lr) {
+        base.setLearningRate(lr);
+    }
+
+    @Override
+    public List<Parameter> parameters() {
+        return parameters;
+    }
 }

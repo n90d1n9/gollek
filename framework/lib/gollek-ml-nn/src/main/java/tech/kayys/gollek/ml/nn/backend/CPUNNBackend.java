@@ -65,7 +65,7 @@ public class CPUNNBackend implements NNBackendProvider {
         float[] outData = new float[N * Cout * Hout * Wout];
         for (int n = 0; n < N; n++) {
             float[] colN = slice(col, n * colRows * colCols, colRows * colCols);
-            float[] gemm = tech.kayys.gollek.ml.tensor.VectorOps.matmul(wFlat, colN, Cout, colRows, colCols);
+            float[] gemm = tech.kayys.gollek.ml.autograd.VectorOps.matmul(wFlat, colN, Cout, colRows, colCols);
             System.arraycopy(gemm, 0, outData, n * Cout * Hout * Wout, gemm.length);
         }
 
@@ -136,7 +136,7 @@ public class CPUNNBackend implements NNBackendProvider {
         float[] outData = new float[N * Cout * Lout];
         for (int n = 0; n < N; n++) {
             float[] colN = slice(col, n * colRows * Lout, colRows * Lout);
-            float[] gemm = tech.kayys.gollek.ml.tensor.VectorOps.matmul(wFlat, colN, Cout, colRows, Lout);
+            float[] gemm = tech.kayys.gollek.ml.autograd.VectorOps.matmul(wFlat, colN, Cout, colRows, Lout);
             System.arraycopy(gemm, 0, outData, n * Cout * Lout, gemm.length);
         }
 
@@ -271,7 +271,7 @@ public class CPUNNBackend implements NNBackendProvider {
         int outF = (int) ws[0];
 
         float[] id = input.data(), wd = weight.data();
-        float[] od = tech.kayys.gollek.ml.tensor.VectorOps.matmul(id, transpose(wd, outF, inF), N, inF, outF);
+        float[] od = tech.kayys.gollek.ml.autograd.VectorOps.matmul(id, transpose(wd, outF, inF), N, inF, outF);
 
         if (bias != null) {
             float[] bd = bias.data();

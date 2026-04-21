@@ -25,7 +25,7 @@
 package tech.kayys.gollek.ml.optimize;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

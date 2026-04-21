@@ -1,6 +1,7 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 
@@ -21,8 +22,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author Bhangun
  * @since 1.1.0
  */
-@Slf4j
+@SuppressWarnings("unused")
 public class LiteRTBatchingManager {
+
+    private static final Logger log = LoggerFactory.getLogger(LiteRTBatchingManager.class);
 
     private final LiteRTCpuRunner runner;
     private final ExecutorService executorService;

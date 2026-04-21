@@ -8,7 +8,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import lombok.extern.slf4j.Slf4j;
 import tech.kayys.gollek.converter.ConversionStorageService;
 import tech.kayys.gollek.converter.GGUFConverter;
 import tech.kayys.gollek.converter.GGUFException;
@@ -54,8 +53,9 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "GGUF Converter", description = "Model conversion to GGUF format")
-@Slf4j
 public class GGUFConverterResource {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GGUFConverterResource.class);
 
     @Inject
     GGUFConverter converter;

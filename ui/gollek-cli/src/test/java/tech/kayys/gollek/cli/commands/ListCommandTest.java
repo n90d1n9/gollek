@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 import tech.kayys.gollek.cli.commands.ListCommand;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.spi.context.RequestContext;
 
 import java.util.Collections;
 import java.util.List;
@@ -43,7 +44,7 @@ public class ListCommandTest {
                                 .modelId("test-model")
                                 .name("Test Model")
                                 .version("1.0")
-                                .apiKey("community")
+                                .requestContext(RequestContext.of("community", "community"))
                                 .build();
 
                 Mockito.when(sdk.listModels(any(Integer.class), any(Integer.class)))
@@ -63,7 +64,7 @@ public class ListCommandTest {
                                 .modelId("test-model")
                                 .name("Test Model")
                                 .version("1.0")
-                                .apiKey("community")
+                                .requestContext(RequestContext.of("community", "community"))
                                 .build();
 
                 Mockito.when(sdk.listModels(any(Integer.class), any(Integer.class)))

@@ -90,7 +90,7 @@ public class InferenceService {
 
     public Uni<InferenceResponse> inferAsync(InferenceRequest request, RequestContext requestContext) {
         RequestContext effectiveContext = resolveContext(requestContext, request);
-        String tenantId = effectiveContext.getRequestId();
+        String tenantId = effectiveContext.getTenantId() != null ? effectiveContext.getTenantId() : effectiveContext.getRequestId();
 
         log.info("Processing inference request: tenantId={}, model={}",
                 tenantId, request.getModel());
@@ -113,9 +113,9 @@ public class InferenceService {
 
         return validateTenant(tenantId, request.getRequestId())
                 .chain(tenant -> validateModel(tenant.tenantId, request.getModel())
-                        .map(model -> new ValidationContext(tenant.tenantId, model.modelId)))
+                        .map(model -> new ValidationContext(effectiveContext, model.modelId)))
                 .chain((ValidationContext ctx) -> enforceQuota(tenantId, request)
-                        .chain(() -> createAuditRecord(request, null,
+                        .chain(ignored -> createAuditRecord(request, null,
                                 InferenceRequestEntity.RequestStatus.PROCESSING))
                         .chain(auditRecord -> orchestrator
                                 .executeAsync(request.getModel(), request)
@@ -288,7 +288,7 @@ public class InferenceService {
         StreamingSession session = new StreamingSession(
                 requestId,
                 request.getModel(),
-                effectiveContext.getRequestId(),
+                effectiveContext,
                 Multi.createFrom().empty());
         streamingSessions.put(requestId, session);
 

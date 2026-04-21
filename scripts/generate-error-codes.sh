@@ -6,6 +6,8 @@ SPI_SRC="$ROOT_DIR/core/spi/gollek-spi/src/main/java"
 OUTPUT_FILE="$ROOT_DIR/docs/error-codes.md"
 BUILD_DIR="${TMPDIR:-/tmp}/gollek-error-codes"
 
+# Ensure output directory exists
+mkdir -p "$(dirname "$OUTPUT_FILE")"
 mkdir -p "$BUILD_DIR"
 
 JAVAC_BIN=""

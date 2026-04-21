@@ -1,4 +1,4 @@
-package tech.kayys.gollek.sdk;
+package tech.kayys.gollek.sdk.api;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -131,7 +131,6 @@ public class AsyncJobManager {
         AsyncJobStatus status = new AsyncJobStatus(
                 jobId,
                 request.getRequestId(),
-                effectiveRequestId,
                 "PENDING",
                 null,
                 null,
@@ -181,7 +180,6 @@ public class AsyncJobManager {
         AsyncJobStatus cancelledStatus = new AsyncJobStatus(
                 jobId,
                 status.requestId(),
-                status.apiKey(),
                 "CANCELLED",
                 null,
                 "Job cancelled by user",
@@ -253,7 +251,6 @@ public class AsyncJobManager {
                 Map<String, String> jobData = new HashMap<>();
                 jobData.put("jobId", status.jobId());
                 jobData.put("requestId", status.requestId());
-                jobData.put("apiKey", status.apiKey());
                 jobData.put("status", status.status());
                 jobData.put("submittedAt", status.submittedAt().toString());
 
@@ -298,7 +295,6 @@ public class AsyncJobManager {
         AsyncJobStatus newStatus = new AsyncJobStatus(
                 jobId,
                 currentStatus.requestId(),
-                currentStatus.apiKey(),
                 status,
                 result,
                 error,
@@ -316,7 +312,6 @@ public class AsyncJobManager {
     private AsyncJobStatus parseJobStatus(Map<String, String> jobData) {
         return new AsyncJobStatus(
                 jobData.get("jobId"),
-                jobData.get("requestId"),
                 jobData.get("requestId"),
                 jobData.get("status"),
                 null, // Result not stored in hash (too large)

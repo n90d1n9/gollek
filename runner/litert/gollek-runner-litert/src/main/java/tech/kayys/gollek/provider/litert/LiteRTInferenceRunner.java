@@ -1,6 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
 import java.lang.foreign.Arena;
@@ -26,8 +25,9 @@ import static java.lang.foreign.ValueLayout.*;
  * for production use. This runner provides basic autoregressive generation
  * using the standard CompiledModel API.
  */
-@Slf4j
 public class LiteRTInferenceRunner implements AutoCloseable {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTInferenceRunner.class);
 
     private final LiteRTNativeBindings bindings;
     private final Path modelPath;

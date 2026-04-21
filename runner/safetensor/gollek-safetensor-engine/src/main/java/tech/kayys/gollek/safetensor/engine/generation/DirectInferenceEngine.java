@@ -42,6 +42,8 @@ import java.time.Instant;
 import java.util.function.Supplier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
@@ -85,6 +87,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
     private final Map<Path, LoadedModel> modelsByPath = new ConcurrentHashMap<>();
     private final Map<String, LoadedModel> modelsByKey = new ConcurrentHashMap<>();
+    private final Map<Path, Object> modelLocks = new ConcurrentHashMap<>();
 
     // ─────────────────────────────────────────────────────────────────────────
     // LoadedModel
@@ -173,10 +176,16 @@ public class DirectInferenceEngine implements SafetensorEngine {
             return modelsByPath.get(resolved).key();
         }
 
-        log.infof("DirectInferenceEngine: loading model [%s]", resolved.getFileName());
+        synchronized (modelLocks.computeIfAbsent(resolved, k -> new Object())) {
+            // Double-check inside lock
+            if (modelsByPath.containsKey(resolved)) {
+                return modelsByPath.get(resolved).key();
+            }
 
-        Arena weightArena = Arena.ofShared();
-        Map<String, AccelTensor> weights = loadWeights(resolved);
+            log.infof("DirectInferenceEngine: loading model [%s]", resolved.getFileName());
+
+            Arena weightArena = Arena.ofShared();
+            Map<String, AccelTensor> weights = loadWeights(resolved);
 
         Tokenizer tokenizer;
         try {
@@ -188,16 +197,17 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
         ModelConfig config = loadConfig(resolved);
 
-        String key = resolved.getFileName().toString();
-        LoadedModel model = new LoadedModel(resolved, weights, tokenizer, key,
-                quantStrategy != QuantizationEngine.QuantStrategy.NONE, quantStrategy, config, weightArena);
+            String key = resolved.getFileName().toString();
+            LoadedModel model = new LoadedModel(resolved, weights, tokenizer, key,
+                    quantStrategy != QuantizationEngine.QuantStrategy.NONE, quantStrategy, config, weightArena);
 
-        modelsByPath.put(resolved, model);
-        modelsByKey.put(key, model);
+            modelsByPath.put(resolved, model);
+            modelsByKey.put(key, model);
 
-        log.infof("DirectInferenceEngine: loaded [%s] — %d weights, arch=%s (Accelerate backend)",
-                key, weights.size(), config.modelType());
-        return key;
+            log.infof("DirectInferenceEngine: loaded [%s] — %d weights, arch=%s (Accelerate backend)",
+                    key, weights.size(), config.modelType());
+            return key;
+        }
     }
 
     public Uni<InferenceResponse> generate(String prompt, Path modelPath, GenerationConfig cfg) {
@@ -494,18 +504,23 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 new Alias("model.language_model.", "model."),
                 new Alias("text_model.model.", "model."),
                 new Alias("model.text_model.model.", "model."));
+
+        Map<String, AccelTensor> updates = new HashMap<>();
+        // Defensive copy of entries to prevent CME if another thread somehow modifications the map
+        List<Map.Entry<String, AccelTensor>> entries = new ArrayList<>(weights.entrySet());
+        
         for (Alias alias : aliases) {
-            boolean hasPrefix = weights.keySet().stream().anyMatch(k -> k.startsWith(alias.from()));
-            if (!hasPrefix)
-                continue;
-            for (Map.Entry<String, AccelTensor> entry : weights.entrySet()) {
+            for (Map.Entry<String, AccelTensor> entry : entries) {
                 String key = entry.getKey();
-                if (!key.startsWith(alias.from()))
-                    continue;
-                String rewritten = alias.to() + key.substring(alias.from().length());
-                weights.putIfAbsent(rewritten, entry.getValue());
+                if (key.startsWith(alias.from())) {
+                    String rewritten = alias.to() + key.substring(alias.from().length());
+                    if (!weights.containsKey(rewritten)) {
+                        updates.putIfAbsent(rewritten, entry.getValue());
+                    }
+                }
             }
         }
+        weights.putAll(updates);
     }
 
     private record Alias(String from, String to) {

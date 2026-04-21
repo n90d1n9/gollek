@@ -35,7 +35,8 @@
             <artifactId>gollek-spi-multimodal</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- GollekPlugin and other base types are now in gollek-spi, no dependency on gollek-spi-plugin needed -->
+        <!-- GollekPlugin and other base types are now in gollek-spi, no dependency on
+        gollek-spi-plugin needed -->
 
         <!-- Mutiny for reactive types -->
         <dependency>
@@ -85,7 +86,7 @@
             <plugin>
                 <groupId>io.smallrye</groupId>
                 <artifactId>jandex-maven-plugin</artifactId>
-                <version>3.1.8</version>
+                <version>3.2.7</version>
                 <executions>
                     <execution>
                         <id>make-index</id>

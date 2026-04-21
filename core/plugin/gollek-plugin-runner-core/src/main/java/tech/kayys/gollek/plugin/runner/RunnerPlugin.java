@@ -296,30 +296,8 @@ public interface RunnerPlugin {
      * @return execution result
      * @throws RunnerException if execution fails
      */
-    default <T> RunnerResult<T> execute(RunnerRequest request,
-            RunnerContext context) throws RunnerException {
-        // Default: delegate to legacy methods for backward compatibility
-        if (request.getType() == RequestType.INFER) {
-            Uni<tech.kayys.gollek.spi.inference.InferenceResponse> uni = infer(
-                    request.getInferenceRequest().orElseThrow(
-                            () -> new RunnerException("Missing InferenceRequest in RunnerRequest")),
-                    context);
-            tech.kayys.gollek.spi.inference.InferenceResponse response = uni.await().indefinitely();
-            @SuppressWarnings("unchecked")
-            RunnerResult<T> result = (RunnerResult<T>) RunnerResult.success(response);
-            return result;
-        } else if (request.getType() == RequestType.EMBED) {
-            Uni<tech.kayys.gollek.spi.embedding.EmbeddingResponse> uni = embed(
-                    request.getEmbeddingRequest().orElseThrow(
-                            () -> new RunnerException("Missing EmbeddingRequest in RunnerRequest")),
-                    context);
-            tech.kayys.gollek.spi.embedding.EmbeddingResponse response = uni.await().indefinitely();
-            @SuppressWarnings("unchecked")
-            RunnerResult<T> result = (RunnerResult<T>) RunnerResult.success(response);
-            return result;
-        }
-        throw new UnknownRequestException(request.getType());
-    }
+    <T> RunnerResult<T> execute(RunnerRequest request,
+            RunnerContext context) throws RunnerException;
 
     /**
      * Execute a runner operation asynchronously.
@@ -341,57 +319,6 @@ public interface RunnerPlugin {
             future.completeExceptionally(e);
             return future;
         }
-    }
-
-    /**
-     * Execute inference request (legacy method for backward compatibility).
-     *
-     * @param request Inference request
-     * @param context Execution context
-     * @return inference response Uni
-     * @deprecated Use execute(RunnerRequest, RunnerContext) instead
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default io.smallrye.mutiny.Uni<tech.kayys.gollek.spi.inference.InferenceResponse> infer(
-            tech.kayys.gollek.spi.inference.InferenceRequest request,
-            RunnerContext context) {
-        throw new UnsupportedOperationException(
-                "Legacy infer method not implemented. " +
-                        "Use execute(RunnerRequest, RunnerContext) instead.");
-    }
-
-    /**
-     * Execute streaming inference (legacy method for backward compatibility).
-     *
-     * @param request Inference request
-     * @param context Execution context
-     * @return streaming chunks Multi
-     * @deprecated Use execute(RunnerRequest, RunnerContext) instead
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default io.smallrye.mutiny.Multi<tech.kayys.gollek.spi.inference.StreamingInferenceChunk> stream(
-            tech.kayys.gollek.spi.inference.InferenceRequest request,
-            RunnerContext context) {
-        throw new UnsupportedOperationException(
-                "Legacy stream method not implemented. " +
-                        "Use execute(RunnerRequest, RunnerContext) instead.");
-    }
-
-    /**
-     * Execute embedding request (legacy method for backward compatibility).
-     *
-     * @param request Embedding request
-     * @param context Execution context
-     * @return embedding response Uni
-     * @deprecated Use execute(RunnerRequest, RunnerContext) instead
-     */
-    @Deprecated(since = "2.0.0", forRemoval = false)
-    default io.smallrye.mutiny.Uni<tech.kayys.gollek.spi.embedding.EmbeddingResponse> embed(
-            tech.kayys.gollek.spi.embedding.EmbeddingRequest request,
-            RunnerContext context) {
-        throw new UnsupportedOperationException(
-                "Legacy embed method not implemented. " +
-                        "Use execute(RunnerRequest, RunnerContext) instead.");
     }
 
     // ========================================================================

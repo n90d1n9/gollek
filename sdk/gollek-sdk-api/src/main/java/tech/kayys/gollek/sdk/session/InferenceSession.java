@@ -1,6 +1,6 @@
 package tech.kayys.gollek.sdk.session;
 
-import tech.kayys.gollek.sdk.GollekClient;
+import tech.kayys.gollek.sdk.api.GollekClient;
 
 import java.util.List;
 import java.util.Map;

@@ -4,7 +4,7 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
-import tech.kayys.gollek.sdk.GollekClient;
+import tech.kayys.gollek.sdk.api.GollekClient;
 
 import java.util.ArrayList;
 import java.util.List;

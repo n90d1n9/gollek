@@ -6,7 +6,7 @@
     <parent>
         <groupId>tech.kayys.gollek</groupId>
         <artifactId>gollek-core-parent</artifactId>
-        <version>0.1.1</version>
+        <version>0.1.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>gollek-core-plugin-parent</artifactId>
@@ -32,40 +32,40 @@
                 <scope>import</scope>
             </dependency>
 
-             <!-- Core SPI -->
-        <dependency>
-            <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-spi</artifactId>
-            <version>${project.version}</version>
-            <scope>provided</scope>
-        </dependency>
+            <!-- Core SPI -->
+            <dependency>
+                <groupId>tech.kayys.gollek</groupId>
+                <artifactId>gollek-spi</artifactId>
+                <version>${project.version}</version>
+                <scope>provided</scope>
+            </dependency>
 
-        <!-- Mutiny for reactive types -->
-        <dependency>
-            <groupId>io.smallrye.reactive</groupId>
-            <artifactId>mutiny</artifactId>
-            <version>3.1.1</version>
-            <scope>provided</scope>
-        </dependency>
+            <!-- Mutiny for reactive types -->
+            <dependency>
+                <groupId>io.smallrye.reactive</groupId>
+                <artifactId>mutiny</artifactId>
+                <version>3.1.1</version>
+                <scope>provided</scope>
+            </dependency>
 
-        <!-- Logging -->
-        <dependency>
-            <groupId>org.jboss.logging</groupId>
-            <artifactId>jboss-logging</artifactId>
-            <scope>provided</scope>
-        </dependency>
+            <!-- Logging -->
+            <dependency>
+                <groupId>org.jboss.logging</groupId>
+                <artifactId>jboss-logging</artifactId>
+                <scope>provided</scope>
+            </dependency>
 
-        <!-- Testing -->
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
-            <scope>test</scope>
-        </dependency>
+            <!-- Testing -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <scope>test</scope>
+            </dependency>
 
         </dependencies>
     </dependencyManagement>

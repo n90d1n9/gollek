@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.vision.ops;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Element-wise operations for vision models with broadcasting support.

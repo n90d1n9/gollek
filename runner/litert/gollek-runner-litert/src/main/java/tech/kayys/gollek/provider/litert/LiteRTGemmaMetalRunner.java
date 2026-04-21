@@ -1,6 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -31,8 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>SwiGLU FFN: gate * silu(ff1) → down projection</li>
  * </ul>
  */
-@Slf4j
 public class LiteRTGemmaMetalRunner implements AutoCloseable {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTGemmaMetalRunner.class);
 
     private final MetalBinding metal;
     private final Path modelPath;

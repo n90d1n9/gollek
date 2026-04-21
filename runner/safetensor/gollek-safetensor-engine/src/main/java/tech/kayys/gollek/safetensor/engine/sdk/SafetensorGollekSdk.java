@@ -7,7 +7,6 @@ import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 import tech.kayys.gollek.sdk.exception.SdkException;
 import tech.kayys.gollek.spi.model.ModelInfo;
-import tech.kayys.gollek.sdk.model.ModelResolution;
 import tech.kayys.gollek.sdk.model.PullProgress;
 import tech.kayys.gollek.sdk.model.SystemInfo;
 import tech.kayys.gollek.spi.batch.BatchInferenceRequest;
@@ -17,7 +16,6 @@ import tech.kayys.gollek.spi.inference.AsyncJobStatus;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
-import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.spi.provider.ProviderInfo;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 
@@ -138,7 +136,7 @@ public class SafetensorGollekSdk implements GollekSdk {
 
     @Override
     public AsyncJobStatus getJobStatus(String jobId) throws SdkException {
-        return new AsyncJobStatus(jobId, null, null, "UNKNOWN", null, null, null, null);
+        return new AsyncJobStatus(jobId, null, "UNKNOWN", null, null, null, null);
     }
 
     @Override

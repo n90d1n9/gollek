@@ -4,15 +4,18 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.Parameter;
 import tech.kayys.gollek.ml.nn.layer.Linear;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Long Short-Term Memory (LSTM) layer — equivalent to {@code torch.nn.LSTM}.
  *
- * <p>Processes a sequence of inputs and returns the output sequence plus
+ * <p>
+ * Processes a sequence of inputs and returns the output sequence plus
  * the final hidden/cell state.
  *
- * <p>Gate equations (per time step):
+ * <p>
+ * Gate equations (per time step):
+ * 
  * <pre>
  *   i = σ(W_ii·x + b_ii + W_hi·h + b_hi)   input gate
  *   f = σ(W_if·x + b_if + W_hf·h + b_hf)   forget gate
@@ -22,16 +25,21 @@ import tech.kayys.gollek.ml.tensor.VectorOps;
  *   h' = o ⊙ tanh(c')
  * </pre>
  *
- * <p>Input:  sequence {@code [T, N, inputSize]} or {@code [N, T, inputSize]} (batchFirst)
- * <p>Output: {@code [T, N, hiddenSize]}, h_n {@code [1, N, hiddenSize]}, c_n {@code [1, N, hiddenSize]}
+ * <p>
+ * Input: sequence {@code [T, N, inputSize]} or {@code [N, T, inputSize]}
+ * (batchFirst)
+ * <p>
+ * Output: {@code [T, N, hiddenSize]}, h_n {@code [1, N, hiddenSize]}, c_n
+ * {@code [1, N, hiddenSize]}
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
- * var lstm = new LSTM(128, 256);           // inputSize=128, hiddenSize=256
- * var lstm = new LSTM(128, 256, true);     // batchFirst=true
+ * var lstm = new LSTM(128, 256); // inputSize=128, hiddenSize=256
+ * var lstm = new LSTM(128, 256, true); // batchFirst=true
  * LSTMOutput out = lstm.forward(input);
- * GradTensor sequence = out.output();     // [T, N, 256]
- * GradTensor hidden   = out.hn();         // [1, N, 256]
+ * GradTensor sequence = out.output(); // [T, N, 256]
+ * GradTensor hidden = out.hn(); // [1, N, 256]
  * }</pre>
  */
 public class LSTM extends NNModule {
@@ -41,17 +49,17 @@ public class LSTM extends NNModule {
     private final boolean batchFirst;
 
     // Combined weight matrices for efficiency: [4*hiddenSize, inputSize/hiddenSize]
-    private final Parameter weightIH; // input-hidden:  [4H, inputSize]
+    private final Parameter weightIH; // input-hidden: [4H, inputSize]
     private final Parameter weightHH; // hidden-hidden: [4H, hiddenSize]
-    private final Parameter biasIH;   // [4H]
-    private final Parameter biasHH;   // [4H]
+    private final Parameter biasIH; // [4H]
+    private final Parameter biasHH; // [4H]
 
     public LSTM(int inputSize, int hiddenSize) {
         this(inputSize, hiddenSize, false);
     }
 
     public LSTM(int inputSize, int hiddenSize, boolean batchFirst) {
-        this.inputSize  = inputSize;
+        this.inputSize = inputSize;
         this.hiddenSize = hiddenSize;
         this.batchFirst = batchFirst;
 
@@ -59,13 +67,13 @@ public class LSTM extends NNModule {
         float bound = (float) (1.0 / Math.sqrt(hiddenSize));
 
         this.weightIH = registerParameter("weight_ih",
-            GradTensor.of(randomUniform(H4 * inputSize,  -bound, bound), H4, inputSize));
+                GradTensor.of(randomUniform(H4 * inputSize, -bound, bound), H4, inputSize));
         this.weightHH = registerParameter("weight_hh",
-            GradTensor.of(randomUniform(H4 * hiddenSize, -bound, bound), H4, hiddenSize));
-        this.biasIH   = registerParameter("bias_ih",
-            GradTensor.of(new float[H4], H4));
-        this.biasHH   = registerParameter("bias_hh",
-            GradTensor.of(new float[H4], H4));
+                GradTensor.of(randomUniform(H4 * hiddenSize, -bound, bound), H4, hiddenSize));
+        this.biasIH = registerParameter("bias_ih",
+                GradTensor.of(new float[H4], H4));
+        this.biasHH = registerParameter("bias_hh",
+                GradTensor.of(new float[H4], H4));
     }
 
     /**
@@ -104,7 +112,7 @@ public class LSTM extends NNModule {
             // Extract x_t: [N, inputSize]
             float[] xt = extractTimestep(input.data(), t, T, N, inputSize, batchFirst);
 
-            // gates = W_ih @ x_t^T + b_ih + W_hh @ h^T + b_hh  → [N, 4H]
+            // gates = W_ih @ x_t^T + b_ih + W_hh @ h^T + b_hh → [N, 4H]
             float[] gates = computeGates(xt, h, wIH, wHH, bIH, bHH, N);
 
             // Apply gate activations and update h, c
@@ -115,8 +123,8 @@ public class LSTM extends NNModule {
         }
 
         GradTensor output = GradTensor.of(outData, T, N, hiddenSize);
-        GradTensor hn     = GradTensor.of(h.clone(), 1, N, hiddenSize);
-        GradTensor cn     = GradTensor.of(c.clone(), 1, N, hiddenSize);
+        GradTensor hn = GradTensor.of(h.clone(), 1, N, hiddenSize);
+        GradTensor cn = GradTensor.of(c.clone(), 1, N, hiddenSize);
         return new LSTMOutput(output, hn, cn);
     }
 
@@ -124,14 +132,14 @@ public class LSTM extends NNModule {
 
     /** Compute all 4 gates for all N samples using VectorOps matmul. */
     private float[] computeGates(float[] xt, float[] h,
-                                  float[] wIH, float[] wHH,
-                                  float[] bIH, float[] bHH, int N) {
+            float[] wIH, float[] wHH,
+            float[] bIH, float[] bHH, int N) {
         int H4 = 4 * hiddenSize;
-        // [N, inputSize] @ [inputSize, 4H]^T  →  [N, 4H]
-        float[] gatesX = VectorOps.matmul(xt,  wIH, N, inputSize,  H4);
-        float[] gatesH = VectorOps.matmul(h,   wHH, N, hiddenSize, H4);
-        float[] gates  = new float[N * H4];
-        // gates = gatesX + gatesH + bIH + bHH  (Vector API fused)
+        // [N, inputSize] @ [inputSize, 4H]^T → [N, 4H]
+        float[] gatesX = VectorOps.matmul(xt, wIH, N, inputSize, H4);
+        float[] gatesH = VectorOps.matmul(h, wHH, N, hiddenSize, H4);
+        float[] gates = new float[N * H4];
+        // gates = gatesX + gatesH + bIH + bHH (Vector API fused)
         for (int n = 0; n < N; n++) {
             for (int g = 0; g < H4; g++) {
                 int idx = n * H4 + g;
@@ -146,12 +154,12 @@ public class LSTM extends NNModule {
         int H = hiddenSize;
         for (int n = 0; n < N; n++) {
             int base = n * 4 * H;
-            int hn   = n * H;
+            int hn = n * H;
             for (int j = 0; j < H; j++) {
-                float i_gate = sigmoid(gates[base          + j]);
-                float f_gate = sigmoid(gates[base +     H  + j]);
+                float i_gate = sigmoid(gates[base + j]);
+                float f_gate = sigmoid(gates[base + H + j]);
                 float g_gate = (float) Math.tanh(gates[base + 2 * H + j]);
-                float o_gate = sigmoid(gates[base + 3 * H  + j]);
+                float o_gate = sigmoid(gates[base + 3 * H + j]);
                 c[hn + j] = f_gate * c[hn + j] + i_gate * g_gate;
                 h[hn + j] = o_gate * (float) Math.tanh(c[hn + j]);
             }
@@ -165,12 +173,12 @@ public class LSTM extends NNModule {
     }
 
     private static float[] extractTimestep(float[] data, int t, int T, int N,
-                                            int inputSize, boolean batchFirst) {
+            int inputSize, boolean batchFirst) {
         float[] xt = new float[N * inputSize];
         for (int n = 0; n < N; n++) {
             int srcOffset = batchFirst
-                ? n * T * inputSize + t * inputSize
-                : t * N * inputSize + n * inputSize;
+                    ? n * T * inputSize + t * inputSize
+                    : t * N * inputSize + n * inputSize;
             System.arraycopy(data, srcOffset, xt, n * inputSize, inputSize);
         }
         return xt;
@@ -179,7 +187,8 @@ public class LSTM extends NNModule {
     private static float[] randomUniform(int n, float lo, float hi) {
         float[] d = new float[n];
         java.util.Random rng = new java.util.Random();
-        for (int i = 0; i < n; i++) d[i] = lo + rng.nextFloat() * (hi - lo);
+        for (int i = 0; i < n; i++)
+            d[i] = lo + rng.nextFloat() * (hi - lo);
         return d;
     }
 
@@ -194,7 +203,7 @@ public class LSTM extends NNModule {
     @Override
     public String toString() {
         return String.format("LSTM(input=%d, hidden=%d, batchFirst=%b)",
-            inputSize, hiddenSize, batchFirst);
+                inputSize, hiddenSize, batchFirst);
     }
 
     // ── Output record ────────────────────────────────────────────────────
@@ -203,8 +212,9 @@ public class LSTM extends NNModule {
      * Result of an LSTM forward pass.
      *
      * @param output full sequence output [T, N, hiddenSize]
-     * @param hn     final hidden state   [1, N, hiddenSize]
-     * @param cn     final cell state     [1, N, hiddenSize]
+     * @param hn     final hidden state [1, N, hiddenSize]
+     * @param cn     final cell state [1, N, hiddenSize]
      */
-    public record LSTMOutput(GradTensor output, GradTensor hn, GradTensor cn) {}
+    public record LSTMOutput(GradTensor output, GradTensor hn, GradTensor cn) {
+    }
 }

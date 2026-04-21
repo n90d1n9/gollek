@@ -10,7 +10,7 @@ import tech.kayys.gollek.spi.routing.ModelProviderMapping;
 import tech.kayys.gollek.spi.routing.ProviderPool;
 import tech.kayys.gollek.spi.routing.QuotaExhaustedException;
 import tech.kayys.gollek.spi.routing.RoutingConfig;
-import tech.kayys.gollek.spi.provider.RoutingDecision;
+import tech.kayys.gollek.spi.routing.RoutingDecision;
 import tech.kayys.gollek.spi.routing.SelectionStrategy;
 import tech.kayys.gollek.observability.AdapterRoutingMetricsCollector;
 import tech.kayys.gollek.provider.core.quota.ProviderQuotaService;
@@ -136,7 +136,7 @@ public class MultiProviderRouter {
             RoutingContext context) {
 
         return selectProvider(modelId, context)
-                .map(decision -> providerRegistry.getProviderOrThrow(decision.providerId()))
+                .map(decision -> providerRegistry.getProviderOrThrow(decision.selectedProviderId()))
                 .onFailure(QuotaExhaustedException.class).recoverWithUni(ex -> {
                     QuotaExhaustedException qe = (QuotaExhaustedException) ex;
                     LOG.warnf("Quota exhausted for provider %s, attempting failover", qe.getProviderId());

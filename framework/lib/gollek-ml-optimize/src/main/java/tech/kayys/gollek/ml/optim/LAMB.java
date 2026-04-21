@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.optim;
 
 import tech.kayys.gollek.ml.nn.Parameter;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.HashMap;
 import java.util.List;
@@ -10,13 +10,19 @@ import java.util.Map;
 /**
  * LAMB optimizer — Layer-wise Adaptive Moments for Batch training.
  *
- * <p>Designed for large-batch training (e.g. BERT pre-training with batch size 32K+).
+ * <p>
+ * Designed for large-batch training (e.g. BERT pre-training with batch size
+ * 32K+).
  * Extends Adam with a layer-wise trust ratio that scales the update per layer.
  *
- * <p>Based on <em>"Large Batch Optimization for Deep Learning: Training BERT in 76 minutes"</em>
+ * <p>
+ * Based on <em>"Large Batch Optimization for Deep Learning: Training BERT in 76
+ * minutes"</em>
  * (You et al., 2019).
  *
- * <p>Update rule:
+ * <p>
+ * Update rule:
+ * 
  * <pre>
  *   m_t = β₁·m_{t-1} + (1-β₁)·g
  *   v_t = β₂·v_{t-1} + (1-β₂)·g²
@@ -26,11 +32,13 @@ import java.util.Map;
  *   θ -= lr · trust · r
  * </pre>
  *
- * <p>Uses JDK 25 Vector API via {@link VectorOps} for the inner update loops.
+ * <p>
+ * Uses JDK 25 Vector API via {@link VectorOps} for the inner update loops.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
- * var optimizer = new LAMB(model.parameters(), lr=1e-3f, weightDecay=0.01f);
+ * var optimizer = new LAMB(model.parameters(), lr = 1e-3f, weightDecay = 0.01f);
  * }</pre>
  */
 public final class LAMB implements Optimizer {
@@ -67,12 +75,12 @@ public final class LAMB implements Optimizer {
      * @param weightDecay L2 regularization coefficient (default 0.01)
      */
     public LAMB(List<Parameter> parameters, float lr,
-                float beta1, float beta2, float eps, float weightDecay) {
-        this.parameters  = parameters;
-        this.lr          = lr;
-        this.beta1       = beta1;
-        this.beta2       = beta2;
-        this.eps         = eps;
+            float beta1, float beta2, float eps, float weightDecay) {
+        this.parameters = parameters;
+        this.lr = lr;
+        this.beta1 = beta1;
+        this.beta2 = beta2;
+        this.eps = eps;
         this.weightDecay = weightDecay;
     }
 
@@ -83,9 +91,10 @@ public final class LAMB implements Optimizer {
         float bc2 = 1f - (float) Math.pow(beta2, step);
 
         for (Parameter p : parameters) {
-            if (p.data().grad() == null) continue;
+            if (p.data().grad() == null)
+                continue;
             float[] theta = p.data().data();
-            float[] grad  = p.data().grad().data();
+            float[] grad = p.data().grad().data();
             int len = theta.length;
 
             float[] mt = m.computeIfAbsent(p, k -> new float[len]);
@@ -106,10 +115,10 @@ public final class LAMB implements Optimizer {
             VectorOps.mul(theta, theta, thetaSq);
             VectorOps.mul(r, r, rSq);
             float normTheta = (float) Math.sqrt(VectorOps.sum(thetaSq));
-            float normR     = (float) Math.sqrt(VectorOps.sum(rSq));
+            float normR = (float) Math.sqrt(VectorOps.sum(rSq));
             float trust = (normTheta > 0 && normR > 0) ? normTheta / normR : 1f;
 
-            // Update: θ -= lr * trust * r  (SIMD via VectorOps)
+            // Update: θ -= lr * trust * r (SIMD via VectorOps)
             VectorOps.mulScalar(r, lr * trust, r);
             float[] neg = new float[len];
             VectorOps.mulScalar(r, -1f, neg);
@@ -117,8 +126,23 @@ public final class LAMB implements Optimizer {
         }
     }
 
-    @Override public void zeroGrad() { parameters.forEach(p -> p.data().zeroGrad()); }
-    @Override public float learningRate() { return lr; }
-    @Override public List<Parameter> parameters() { return parameters; }
-    @Override public void setLearningRate(float lr) { this.lr = lr; }
+    @Override
+    public void zeroGrad() {
+        parameters.forEach(p -> p.data().zeroGrad());
+    }
+
+    @Override
+    public float learningRate() {
+        return lr;
+    }
+
+    @Override
+    public List<Parameter> parameters() {
+        return parameters;
+    }
+
+    @Override
+    public void setLearningRate(float lr) {
+        this.lr = lr;
+    }
 }

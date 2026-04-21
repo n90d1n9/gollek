@@ -833,8 +833,7 @@ public class LibTorchProvider implements StreamingProvider {
                 }
 
                 try {
-                    LibTorchSessionManager.SessionContext session = sessionManager.acquire(tenantId, modelId,
-                            modelPath);
+                    LibTorchSessionManager.SessionContext session = sessionManager.getSession(tenantId, modelId, config);
                     try {
                         if (config.warmup().dummyForward()) {
                             // Run a dummy forward pass to trigger JIT compilation

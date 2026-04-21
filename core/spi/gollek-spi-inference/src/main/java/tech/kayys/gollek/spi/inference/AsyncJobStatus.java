@@ -10,7 +10,6 @@ import tech.kayys.gollek.spi.auth.ApiKeyConstants;
 public record AsyncJobStatus(
         String jobId,
         String requestId,
-        @Deprecated String apiKey,
         String status,
         InferenceResponse result,
         String error,
@@ -22,12 +21,5 @@ public record AsyncJobStatus(
      */
     public boolean isComplete() {
         return "COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status);
-    }
-
-    public String apiKey() {
-        if (apiKey == null || apiKey.isBlank()) {
-            return ApiKeyConstants.COMMUNITY_API_KEY;
-        }
-        return apiKey;
     }
 }

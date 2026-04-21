@@ -1,6 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.*;
@@ -21,8 +20,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author Bhangun
  * @since 1.1.0
  */
-@Slf4j
 public class LiteRTMonitoring {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTMonitoring.class);
 
     // Core metrics
     private final AtomicLong totalRequests = new AtomicLong(0);

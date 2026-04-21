@@ -10,6 +10,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.spi.context.RequestContext;
 
 import java.nio.file.Path;
 import java.util.Locale;
@@ -52,6 +53,7 @@ public class ShowCommand implements Runnable {
                         .format(entry.format)
                         .sizeBytes(entry.sizeBytes)
                         .updatedAt(LocalModelIndex.parseInstant(entry.updatedAt))
+                        .requestContext(RequestContext.of("community", "community"))
                         .metadata(java.util.Map.of(
                                 "path", entry.path != null ? entry.path : "",
                                 "source", entry.source != null ? entry.source : "local"))

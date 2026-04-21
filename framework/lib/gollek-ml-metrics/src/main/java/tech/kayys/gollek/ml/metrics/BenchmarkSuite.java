@@ -2,7 +2,7 @@ package tech.kayys.gollek.ml.metrics;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 import java.util.*;
 
@@ -10,10 +10,12 @@ import java.util.*;
  * Benchmark suite — measures throughput and latency of core operations
  * and compares against reference baselines.
  *
- * <p>Benchmarks are run with JVM warmup to ensure JIT compilation.
+ * <p>
+ * Benchmarks are run with JVM warmup to ensure JIT compilation.
  * Results include mean, std, min, max, and throughput (ops/sec or tokens/sec).
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * BenchmarkSuite suite = new BenchmarkSuite();
  * suite.run();
@@ -29,7 +31,9 @@ public final class BenchmarkSuite {
     /**
      * Creates a benchmark suite with default 5 warmup and 20 measure runs.
      */
-    public BenchmarkSuite() { this(5, 20); }
+    public BenchmarkSuite() {
+        this(5, 20);
+    }
 
     /**
      * Creates a benchmark suite with custom run counts.
@@ -38,7 +42,7 @@ public final class BenchmarkSuite {
      * @param measureRuns measured iterations
      */
     public BenchmarkSuite(int warmupRuns, int measureRuns) {
-        this.warmupRuns  = warmupRuns;
+        this.warmupRuns = warmupRuns;
         this.measureRuns = measureRuns;
     }
 
@@ -53,10 +57,11 @@ public final class BenchmarkSuite {
      * @param throughput operations per second (or tokens/sec for generation)
      */
     public record BenchmarkResult(String name, double meanMs, double stdMs,
-                                   double minMs, double maxMs, double throughput) {
-        @Override public String toString() {
+            double minMs, double maxMs, double throughput) {
+        @Override
+        public String toString() {
             return String.format("%-40s  mean=%7.3fms  std=%6.3fms  throughput=%,.0f ops/s",
-                name, meanMs, stdMs, throughput);
+                    name, meanMs, stdMs, throughput);
         }
     }
 
@@ -127,7 +132,8 @@ public final class BenchmarkSuite {
      */
     public void measure(String name, Runnable op, long opsPerRun) {
         // Warmup
-        for (int i = 0; i < warmupRuns; i++) op.run();
+        for (int i = 0; i < warmupRuns; i++)
+            op.run();
 
         // Measure
         double[] times = new double[measureRuns];
@@ -139,9 +145,9 @@ public final class BenchmarkSuite {
 
         double mean = Arrays.stream(times).average().orElse(0);
         double variance = Arrays.stream(times).map(t -> (t - mean) * (t - mean)).average().orElse(0);
-        double std  = Math.sqrt(variance);
-        double min  = Arrays.stream(times).min().orElse(0);
-        double max  = Arrays.stream(times).max().orElse(0);
+        double std = Math.sqrt(variance);
+        double min = Arrays.stream(times).min().orElse(0);
+        double max = Arrays.stream(times).max().orElse(0);
         double throughput = mean > 0 ? opsPerRun / (mean / 1000.0) : 0;
 
         results.add(new BenchmarkResult(name, mean, std, min, max, throughput));
@@ -152,7 +158,9 @@ public final class BenchmarkSuite {
      *
      * @return unmodifiable list of results
      */
-    public List<BenchmarkResult> results() { return Collections.unmodifiableList(results); }
+    public List<BenchmarkResult> results() {
+        return Collections.unmodifiableList(results);
+    }
 
     /**
      * Prints a formatted benchmark report to stdout.

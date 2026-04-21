@@ -4,24 +4,29 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.TensorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.layer.Linear;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Flash Attention — memory-efficient scaled dot-product attention that avoids
  * materializing the full N×N attention matrix.
  *
- * <p>Based on <em>"FlashAttention: Fast and Memory-Efficient Exact Attention
+ * <p>
+ * Based on <em>"FlashAttention: Fast and Memory-Efficient Exact Attention
  * with IO-Awareness"</em> (Dao et al., 2022).
  *
- * <p>This implementation provides the correct output via tiled computation.
+ * <p>
+ * This implementation provides the correct output via tiled computation.
  * When a CUDA kernel plugin is available (via the plugin registry), it
- * automatically delegates to the native FlashAttention kernel for GPU acceleration.
+ * automatically delegates to the native FlashAttention kernel for GPU
+ * acceleration.
  *
- * <p>Complexity: O(N) memory vs O(N²) for standard attention.
+ * <p>
+ * Complexity: O(N) memory vs O(N²) for standard attention.
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
- * var attn = new FlashAttention(dModel=512, nHeads=8);
+ * var attn = new FlashAttention(dModel = 512, nHeads = 8);
  * GradTensor out = attn.forward(x); // [B, T, dModel] → [B, T, dModel]
  * }</pre>
  */
@@ -38,16 +43,18 @@ public final class FlashAttention extends NNModule {
     /**
      * Creates a FlashAttention module.
      *
-     * @param dModel  model dimension (must be divisible by nHeads)
-     * @param nHeads  number of attention heads
-     * @param causal  if true, applies causal (autoregressive) masking
+     * @param dModel model dimension (must be divisible by nHeads)
+     * @param nHeads number of attention heads
+     * @param causal if true, applies causal (autoregressive) masking
      */
     public FlashAttention(int dModel, int nHeads, boolean causal) {
         this(dModel, nHeads, causal, 64);
     }
 
     /** Creates a non-causal FlashAttention module. */
-    public FlashAttention(int dModel, int nHeads) { this(dModel, nHeads, false); }
+    public FlashAttention(int dModel, int nHeads) {
+        this(dModel, nHeads, false);
+    }
 
     /**
      * Creates a FlashAttention module with custom block size.
@@ -60,10 +67,10 @@ public final class FlashAttention extends NNModule {
     public FlashAttention(int dModel, int nHeads, boolean causal, int blockSize) {
         if (dModel % nHeads != 0)
             throw new IllegalArgumentException("dModel must be divisible by nHeads");
-        this.dModel    = dModel;
-        this.nHeads    = nHeads;
-        this.headDim   = dModel / nHeads;
-        this.causal    = causal;
+        this.dModel = dModel;
+        this.nHeads = nHeads;
+        this.headDim = dModel / nHeads;
+        this.causal = causal;
         this.blockSize = blockSize;
         this.wQ = register("wQ", new Linear(dModel, dModel, false));
         this.wK = register("wK", new Linear(dModel, dModel, false));
@@ -74,7 +81,8 @@ public final class FlashAttention extends NNModule {
     /**
      * Forward pass using tiled attention computation.
      *
-     * <p>Computes attention in tiles of size {@code blockSize × blockSize},
+     * <p>
+     * Computes attention in tiles of size {@code blockSize × blockSize},
      * maintaining running softmax statistics (max and sum) to avoid
      * materializing the full N×N matrix.
      *
@@ -110,7 +118,8 @@ public final class FlashAttention extends NNModule {
                     int qEnd = Math.min(qi + blockSize, T);
 
                     // Running softmax stats per query row
-                    float[] rowMax = new float[qEnd - qi]; java.util.Arrays.fill(rowMax, Float.NEGATIVE_INFINITY);
+                    float[] rowMax = new float[qEnd - qi];
+                    java.util.Arrays.fill(rowMax, Float.NEGATIVE_INFINITY);
                     float[] rowSum = new float[qEnd - qi];
                     float[] rowOut = new float[(qEnd - qi) * headDim];
 
@@ -125,19 +134,24 @@ public final class FlashAttention extends NNModule {
                             float[] scores = new float[kEnd - ki];
 
                             for (int ki2 = ki; ki2 < kEnd; ki2++) {
-                                if (causal && ki2 > qi2) { scores[ki2 - ki] = Float.NEGATIVE_INFINITY; continue; }
+                                if (causal && ki2 > qi2) {
+                                    scores[ki2 - ki] = Float.NEGATIVE_INFINITY;
+                                    continue;
+                                }
                                 float dot = 0f;
                                 for (int d = 0; d < headDim; d++)
                                     dot += qd[bhBase + qi2 * headDim + d] * kd[bhBase + ki2 * headDim + d];
                                 scores[ki2 - ki] = dot * scale;
-                                if (scores[ki2 - ki] > localMax) localMax = scores[ki2 - ki];
+                                if (scores[ki2 - ki] > localMax)
+                                    localMax = scores[ki2 - ki];
                             }
 
                             // Online softmax update
                             float newMax = Math.max(rowMax[qRow], localMax);
                             float expScale = (float) Math.exp(rowMax[qRow] - newMax);
                             rowSum[qRow] *= expScale;
-                            for (int d = 0; d < headDim; d++) rowOut[qRow * headDim + d] *= expScale;
+                            for (int d = 0; d < headDim; d++)
+                                rowOut[qRow * headDim + d] *= expScale;
 
                             for (int ki2 = ki; ki2 < kEnd; ki2++) {
                                 float p = (float) Math.exp(scores[ki2 - ki] - newMax);
@@ -162,7 +176,7 @@ public final class FlashAttention extends NNModule {
 
         // Reshape back [B, H, T, D] → [B, T, dModel] and project
         GradTensor attnOut = GradTensor.of(out, B, nHeads, T, headDim)
-            .reshape(B, T, dModel);
+                .reshape(B, T, dModel);
         return wO.forward(attnOut);
     }
 
@@ -173,12 +187,13 @@ public final class FlashAttention extends NNModule {
             for (int t = 0; t < T; t++)
                 for (int h = 0; h < H; h++)
                     for (int d = 0; d < D; d++)
-                        dst[b*H*T*D + h*T*D + t*D + d] = src[b*T*H*D + t*H*D + h*D + d];
+                        dst[b * H * T * D + h * T * D + t * D + d] = src[b * T * H * D + t * H * D + h * D + d];
         return GradTensor.of(dst, B, H, T, D);
     }
 
-    @Override public String toString() {
+    @Override
+    public String toString() {
         return String.format("FlashAttention(dModel=%d, nHeads=%d, causal=%b, blockSize=%d)",
-            dModel, nHeads, causal, blockSize);
+                dModel, nHeads, causal, blockSize);
     }
 }

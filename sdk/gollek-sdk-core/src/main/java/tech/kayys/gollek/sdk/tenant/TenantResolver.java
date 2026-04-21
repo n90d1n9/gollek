@@ -13,15 +13,7 @@ public interface TenantResolver {
      * @return The API key, never null
      * @throws IllegalStateException if API key cannot be resolved
      */
-    default String resolveApiKey() {
-        return resolveRequestId();
-    }
-
-    /**
-     * @deprecated Use {@link #resolveApiKey()}.
-     */
-    @Deprecated
-    String resolveRequestId();
+    String resolveApiKey();
 
     /**
      * Default implementation that returns a fixed API key.
@@ -32,19 +24,6 @@ public interface TenantResolver {
             public String resolveApiKey() {
                 return apiKey;
             }
-
-            @Override
-            public String resolveRequestId() {
-                return apiKey;
-            }
         };
-    }
-
-    /**
-     * @deprecated Use {@link #fixedApiKey(String)}.
-     */
-    @Deprecated
-    static TenantResolver fixed(String requestId) {
-        return fixedApiKey(requestId);
     }
 }

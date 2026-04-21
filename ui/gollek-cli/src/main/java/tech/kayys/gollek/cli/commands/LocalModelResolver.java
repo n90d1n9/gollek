@@ -2,6 +2,7 @@ package tech.kayys.gollek.cli.commands;
 
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.spi.context.RequestContext;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -157,6 +158,7 @@ final class LocalModelResolver {
                 .name(file.getFileName().toString())
                 .sizeBytes(size)
                 .updatedAt(updated)
+                .requestContext(RequestContext.of("community", "community"))
                 .metadata(Map.of("path", file.toAbsolutePath().toString()))
                 .build();
     }

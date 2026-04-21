@@ -24,11 +24,10 @@ import java.time.Instant;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.model.ModelManifest;
-// Additional imports for model classes
 import tech.kayys.gollek.spi.model.DeviceType;
 import tech.kayys.gollek.spi.model.ModelFormat;
 import tech.kayys.gollek.spi.provider.RoutingContext;
-import tech.kayys.gollek.spi.provider.RoutingDecision;
+import tech.kayys.gollek.spi.routing.RoutingDecision;
 import tech.kayys.gollek.engine.context.DevicePreferenceResolver;
 import tech.kayys.gollek.model.core.HardwareDetector;
 import tech.kayys.gollek.observability.AdapterRoutingMetricsCollector;
@@ -155,9 +154,9 @@ public class ModelRouterService {
                                         decisionCache.put(request.getRequestId(), decision);
 
                                         LOG.infof("Routing model %s to provider %s (score: %d)",
-                                                        modelId, decision.providerId(), decision.score());
+                                                        modelId, decision.selectedProviderId(), decision.score());
 
-                                        return executeWithProvider(decision, request);
+                                        return executeWithProvider(decision, request, manifest, context);
                                 })
                                 .onFailure().retry().withBackOff(Duration.ofMillis(100))
                                 .atMost(3)
@@ -202,7 +201,7 @@ public class ModelRouterService {
                                 .onItem().transformToMulti(manifest -> {
                                         RoutingContext context = buildRoutingContext(request, manifest);
                                         RoutingDecision decision = selectProvider(manifest, context);
-                                        return executeStreamWithProvider(decision, request);
+                                        return executeStreamWithProvider(decision, request, manifest, context);
                                 });
         }
 
@@ -289,10 +288,11 @@ public class ModelRouterService {
                         // Detect format from extension
                         String filename = modelPath.getFileName().toString().toLowerCase();
                         ModelFormat format = ModelFormat.GGUF; // Default
-                        if (filename.endsWith(".litertlm") || filename.endsWith(".tflite") || filename.endsWith(".task")) {
-                            format = ModelFormat.LITERT;
+                        if (filename.endsWith(".litertlm") || filename.endsWith(".tflite")
+                                        || filename.endsWith(".task")) {
+                                format = ModelFormat.LITERT;
                         } else if (filename.endsWith(".safetensors")) {
-                            format = ModelFormat.SAFETENSORS;
+                                format = ModelFormat.SAFETENSORS;
                         }
 
                         return ModelManifest.builder()
@@ -340,11 +340,11 @@ public class ModelRouterService {
                                 .parameters(context.request().getParameters())
                                 .metadata(context.request().getMetadata())
                                 .metadata("tenantId", getTenantId(context.request()));
-                
+
                 if (manifest.path() != null && !manifest.path().isBlank()) {
                         checkRequestBuilder.metadata("model_path", manifest.path());
                 }
-                
+
                 ProviderRequest checkRequest = checkRequestBuilder.build();
 
                 // Explicit provider pinning from request should be honored strictly.
@@ -357,12 +357,9 @@ public class ModelRouterService {
                         if (pinned.isPresent()) {
                                 LLMProvider provider = pinned.get();
                                 return RoutingDecision.builder()
-                                                .providerId(provider.id())
-                                                .provider(provider)
+                                                .selectedProviderId(provider.id())
                                                 .score(10_000)
                                                 .fallbackProviders(java.util.List.of())
-                                                .manifest(manifest)
-                                                .context(context)
                                                 .build();
                         }
                 }
@@ -384,12 +381,9 @@ public class ModelRouterService {
                                 ProviderCandidate fallback = ggufFallback.get();
                                 LOG.warnf("Using GGUF fallback provider for model %s", manifest.modelId());
                                 return RoutingDecision.builder()
-                                                .providerId(fallback.providerId())
-                                                .provider(fallback.provider())
+                                                .selectedProviderId(fallback.providerId())
                                                 .score(fallback.score())
                                                 .fallbackProviders(java.util.List.of())
-                                                .manifest(manifest)
-                                                .context(context)
                                                 .build();
                         }
                         LOG.warnf("No compatible provider found for model %s. Available providers: %s",
@@ -408,8 +402,7 @@ public class ModelRouterService {
                         if (preferredCandidate.isPresent()) {
                                 ProviderCandidate selected = preferredCandidate.get();
                                 return RoutingDecision.builder()
-                                                .providerId(selected.providerId())
-                                                .provider(selected.provider())
+                                                .selectedProviderId(selected.providerId())
                                                 .score(selected.score())
                                                 .fallbackProviders(candidates.stream()
                                                                 .filter(c -> !c.providerId()
@@ -418,8 +411,6 @@ public class ModelRouterService {
                                                                 .limit(2)
                                                                 .map(ProviderCandidate::providerId)
                                                                 .collect(Collectors.toList()))
-                                                .manifest(manifest)
-                                                .context(context)
                                                 .build();
                         }
                 }
@@ -438,16 +429,13 @@ public class ModelRouterService {
                                 candidates.size() - 1);
 
                 return RoutingDecision.builder()
-                                .providerId(winner.providerId())
-                                .provider(winner.provider())
+                                .selectedProviderId(winner.providerId())
                                 .score(winner.score())
                                 .fallbackProviders(candidates.stream()
                                                 .skip(1)
                                                 .limit(2)
                                                 .map(ProviderCandidate::providerId)
                                                 .collect(Collectors.toList()))
-                                .manifest(manifest)
-                                .context(context)
                                 .build();
         }
 
@@ -545,23 +533,25 @@ public class ModelRouterService {
 
         private Uni<InferenceResponse> executeWithProvider(
                         RoutingDecision decision,
-                        InferenceRequest request) {
-                LLMProvider provider = decision.provider();
+                        InferenceRequest request,
+                        ModelManifest manifest,
+                        RoutingContext context) {
+                LLMProvider provider = providerRegistry.getProviderOrThrow(decision.selectedProviderId());
 
                 // Build provider request
                 ProviderRequest.Builder requestBuilder = ProviderRequest.builder()
-                                .model(decision.manifest().modelId())
+                                .model(manifest.modelId())
                                 .messages(request.getMessages())
                                 .parameters(request.getParameters())
                                 .streaming(request.isStreaming())
-                                .timeout(decision.context().timeout())
+                                .timeout(context.timeout())
                                 .metadata("request_id", request.getRequestId())
                                 .metadata("tenantId", getTenantId(request));
-                
-                if (decision.manifest().path() != null && !decision.manifest().path().isBlank()) {
-                        requestBuilder.metadata("model_path", decision.manifest().path());
+
+                if (manifest.path() != null && !manifest.path().isBlank()) {
+                        requestBuilder.metadata("model_path", manifest.path());
                 }
-                
+
                 ProviderRequest providerRequest = requestBuilder.build();
 
                 return provider.infer(providerRequest)
@@ -569,22 +559,24 @@ public class ModelRouterService {
                                         // Record metrics
                                         metricsCache.recordSuccess(
                                                         provider.id(),
-                                                        decision.manifest().modelId(),
+                                                        manifest.modelId(),
                                                         response.getDurationMs());
                                 })
                                 .onFailure().invoke(error -> {
                                         // Record failure
                                         metricsCache.recordFailure(
                                                         provider.id(),
-                                                        decision.manifest().modelId(),
+                                                        manifest.modelId(),
                                                         error.getClass().getSimpleName());
                                 });
         }
 
         private Multi<StreamingInferenceChunk> executeStreamWithProvider(
                         RoutingDecision decision,
-                        InferenceRequest request) {
-                LLMProvider provider = decision.provider();
+                        InferenceRequest request,
+                        ModelManifest manifest,
+                        RoutingContext context) {
+                LLMProvider provider = providerRegistry.getProviderOrThrow(decision.selectedProviderId());
 
                 if (!(provider instanceof StreamingProvider streamingProvider)) {
                         return Multi.createFrom().failure(new UnsupportedOperationException(
@@ -592,23 +584,23 @@ public class ModelRouterService {
                 }
 
                 ProviderRequest.Builder requestBuilder = ProviderRequest.builder()
-                                .model(decision.manifest().modelId())
+                                .model(manifest.modelId())
                                 .messages(request.getMessages())
                                 .parameters(request.getParameters())
                                 .streaming(true)
-                                .timeout(decision.context().timeout())
+                                .timeout(context.timeout())
                                 .metadata("request_id", request.getRequestId())
                                 .metadata("tenantId", getTenantId(request));
 
-                if (decision.manifest().path() != null && !decision.manifest().path().isBlank()) {
-                        requestBuilder.metadata("model_path", decision.manifest().path());
+                if (manifest.path() != null && !manifest.path().isBlank()) {
+                        requestBuilder.metadata("model_path", manifest.path());
                 }
 
                 return streamingProvider.inferStream(requestBuilder.build())
                                 .onFailure().invoke(error -> {
                                         metricsCache.recordFailure(
                                                         provider.id(),
-                                                        decision.manifest().modelId(),
+                                                        manifest.modelId(),
                                                         error.getClass().getSimpleName());
                                 });
         }
@@ -704,11 +696,13 @@ public class ModelRouterService {
                 Optional<ModelEntry> entry = localModelRegistry.resolve(modelId);
                 if (entry.isPresent()) {
                         ModelFormat fmt = entry.get().format();
-                        return fmt == ModelFormat.GGUF || fmt == ModelFormat.SAFETENSORS || fmt == ModelFormat.LITERT || fmt == ModelFormat.ONNX;
+                        return fmt == ModelFormat.GGUF || fmt == ModelFormat.SAFETENSORS || fmt == ModelFormat.LITERT
+                                        || fmt == ModelFormat.ONNX;
                 }
 
                 Optional<ModelFormat> detected = formatRouter.resolveFormat(modelId);
-                return detected.map(f -> f == ModelFormat.GGUF || f == ModelFormat.SAFETENSORS || f == ModelFormat.LITERT || f == ModelFormat.ONNX)
+                return detected.map(f -> f == ModelFormat.GGUF || f == ModelFormat.SAFETENSORS
+                                || f == ModelFormat.LITERT || f == ModelFormat.ONNX)
                                 .orElse(false);
         }
 

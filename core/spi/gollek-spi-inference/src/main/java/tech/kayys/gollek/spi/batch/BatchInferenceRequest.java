@@ -11,7 +11,7 @@ import tech.kayys.gollek.spi.Message;
 public record BatchInferenceRequest(
                 String requestId,
                 String modelId,
-                @Deprecated String apiKey, // move to RequestContext
+                tech.kayys.gollek.spi.context.RequestContext requestContext,
                 List<Map<String, Object>> inputs,
                 Map<String, Object> parameters,
                 List<InferenceRequest> requests,
@@ -25,12 +25,24 @@ public record BatchInferenceRequest(
         public static class Builder {
                 private String requestId;
                 private String modelId;
-                private String apiKey;
+                private tech.kayys.gollek.spi.context.RequestContext requestContext;
                 private List<Map<String, Object>> inputs;
                 private Map<String, Object> parameters;
                 private List<InferenceRequest> requests;
                 private Integer maxConcurrent;
                 private String callbackUrl;
+
+                public Builder requestContext(tech.kayys.gollek.spi.context.RequestContext requestContext) {
+                        this.requestContext = requestContext;
+                        return this;
+                }
+
+                public Builder apiKey(String apiKey) {
+                        this.requestContext = tech.kayys.gollek.spi.context.RequestContext.of(requestId != null ? requestId : UUID.randomUUID().toString());
+                        // Note: Simple RequestContext.of only takes requestId. 
+                        // For better multitenancy, we should probably have a better way to set apiKey in Builder.
+                        return this;
+                }
 
                 public Builder requestId(String requestId) {
                         this.requestId = requestId;
@@ -42,8 +54,11 @@ public record BatchInferenceRequest(
                         return this;
                 }
 
-                public Builder apiKey(String apiKey) {
-                        this.apiKey = apiKey;
+                public Builder apiKey(String apiKey, String requestId) {
+                        this.requestContext = new tech.kayys.gollek.spi.context.RequestContext() {
+                                @Override public String apiKey() { return apiKey; }
+                                @Override public String getRequestId() { return requestId; }
+                        };
                         return this;
                 }
 
@@ -73,7 +88,10 @@ public record BatchInferenceRequest(
                 }
 
                 public BatchInferenceRequest build() {
-                        return new BatchInferenceRequest(requestId, modelId, apiKey, inputs, parameters, requests,
+                        if (requestContext == null) {
+                                requestContext = tech.kayys.gollek.spi.context.RequestContext.of(requestId);
+                        }
+                        return new BatchInferenceRequest(requestId, modelId, requestContext, inputs, parameters, requests,
                                         maxConcurrent,
                                         callbackUrl);
                 }
@@ -82,15 +100,14 @@ public record BatchInferenceRequest(
         public BatchInferenceRequest(Integer maxConcurrent, String callbackUrl,
                         String apiKey, String modelId, Map<String, Object> parameters, List<Map<String, Object>> inputs,
                         List<InferenceRequest> requests) {
-                this(UUID.randomUUID().toString(), modelId, apiKey, inputs, parameters, requests, maxConcurrent,
+                this(UUID.randomUUID().toString(), modelId, 
+                    tech.kayys.gollek.spi.context.RequestContext.of(UUID.randomUUID().toString()), // simplistic
+                    inputs, parameters, requests, maxConcurrent,
                                 callbackUrl);
         }
 
         public String apiKey() {
-                if (apiKey == null || apiKey.isBlank()) {
-                        return ApiKeyConstants.COMMUNITY_API_KEY;
-                }
-                return apiKey;
+                return requestContext != null ? requestContext.apiKey() : tech.kayys.gollek.spi.context.RequestContext.COMMUNITY_API_KEY;
         }
 
         public List<InferenceRequest> getRequests() {

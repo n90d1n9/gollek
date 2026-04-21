@@ -1,8 +1,5 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
-
-import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -36,8 +33,9 @@ import java.util.Optional;
  * <p>Also parses standalone .task files (MediaPipe Task Bundles) to extract
  * embedded SPM tokenizer and detect LLM model type from TFLite metadata.
  */
-@Slf4j
 public class LiteRTContainerParser {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTContainerParser.class);
 
     private static final byte[] LITERTLM_MAGIC = "LITERTLM".getBytes();
     private static final byte[] TFL3_MAGIC = { 'T', 'F', 'L', '3' };

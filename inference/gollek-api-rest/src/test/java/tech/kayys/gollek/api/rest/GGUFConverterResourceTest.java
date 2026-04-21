@@ -54,7 +54,7 @@ class GGUFConverterResourceTest {
         assertThat(payload.getOutputPath()).isEqualTo("/tmp/out.gguf");
         assertThat(payload.getInputBasePath()).isNotBlank();
         assertThat(payload.getOutputBasePath()).isNotBlank();
-        assertThat(payload.getDerivedOutputName()).isEqualTo("out.gguf");
+        assertThat(payload.getDerivedOutputName()).isEqualTo("model-Q4_K_M.gguf");
     }
 
     @Test

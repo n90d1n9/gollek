@@ -22,7 +22,11 @@ import org.junit.jupiter.api.DisplayName;
 import static org.junit.jupiter.api.Assertions.*;
 import tech.kayys.gollek.plugin.runner.RunnerPlugin;
 import tech.kayys.gollek.plugin.runner.RunnerSession;
+import tech.kayys.gollek.plugin.runner.RunnerRequest;
+import tech.kayys.gollek.plugin.runner.RunnerContext;
+import tech.kayys.gollek.plugin.runner.RunnerResult;
 import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.spi.context.RequestContext;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
@@ -300,6 +304,11 @@ class RunnerPluginRegistryTest {
         public RunnerSession createSession(String modelPath, Map<String, Object> config) {
             return new MockRunnerSession(modelPath, this);
         }
+
+        @Override
+        public <T> RunnerResult<T> execute(RunnerRequest request, RunnerContext context) {
+            return RunnerResult.failed("Operation not supported in mock");
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────
@@ -379,6 +388,7 @@ class RunnerPluginRegistryTest {
                     .parameterCount(String.valueOf(7_000_000_000L))
                     .contextLength(4096L)
                     .embeddingSize(4096)
+                    .requestContext(RequestContext.of("community", "community"))
                     .metadata(Map.of())
                     .build();
         }

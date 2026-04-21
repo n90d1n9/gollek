@@ -346,8 +346,8 @@ public final class PagedKVCache implements KVCache {
         int seqLen = getSequenceLength("default");
         if (seqLen == 0) return null;
         
-        // Create tensor view over all K blocks for this sequence
-        return createTensorFromBlocks("default", layer, true);
+        // Return null - the attention kernel should read blocks directly
+        return null;
     }
 
     @Override
@@ -356,7 +356,7 @@ public final class PagedKVCache implements KVCache {
         int seqLen = getSequenceLength("default");
         if (seqLen == 0) return null;
         
-        return createTensorFromBlocks("default", layer, false);
+        return null;
     }
 
     @Override
@@ -374,21 +374,6 @@ public final class PagedKVCache implements KVCache {
     public KVCache snapshot() {
         // Return a shallow copy of this cache
         return this;
-    }
-
-    /**
-     * Creates a tensor by reading all blocks for a sequence and layer.
-     * @deprecated Use SequenceKVCache directly for sequence-specific operations
-     */
-    @Deprecated
-    private Tensor createTensorFromBlocks(String sequenceId, int layer, boolean isK) {
-        int seqLen = getSequenceLength(sequenceId);
-        if (seqLen == 0) return null;
-        
-        // TODO: Implement proper tensor creation once Tensor API is finalized
-        // For now, return null - the attention kernel should read blocks directly
-        LOG.warnf("createTensorFromBlocks is deprecated - use SequenceKVCache directly");
-        return null;
     }
 
     // ── Bulk Operations ──────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 package tech.kayys.gollek.provider.litert;
 
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -29,8 +30,10 @@ import static java.lang.foreign.ValueLayout.*;
  *
  * @see <a href="https://github.com/google-ai-edge/LiteRT/tree/main/litert/c">LiteRT C API Headers</a>
  */
-@Slf4j
+@SuppressWarnings("unused")
 public class LiteRTNativeBindings {
+
+    private static final Logger log = LoggerFactory.getLogger(LiteRTNativeBindings.class);
 
     // ========================================================================
     // Status Codes (from litert_common.h)

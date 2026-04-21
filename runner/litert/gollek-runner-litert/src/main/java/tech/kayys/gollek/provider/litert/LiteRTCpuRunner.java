@@ -2,7 +2,6 @@ package tech.kayys.gollek.provider.litert;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
 import tech.kayys.gollek.error.ErrorCode;
 import tech.kayys.gollek.spi.exception.InferenceException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
@@ -39,8 +38,9 @@ import static java.lang.foreign.ValueLayout.*;
  *   <li>For each inference: create TensorBuffers → Run → read outputs</li>
  * </ol>
  */
-@Slf4j
 public class LiteRTCpuRunner implements AutoCloseable {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LiteRTCpuRunner.class);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -462,7 +462,7 @@ public class LiteRTCpuRunner implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private TensorData parseSingleTensorInput(Map<String, Object> item, int idx) {
-        TensorData.TensorDataBuilder builder = TensorData.builder();
+        TensorData.Builder builder = TensorData.builder();
         builder.name(item.containsKey("name") ? item.get("name").toString() : "input_" + idx);
 
         if (item.containsKey("data") && item.get("data") instanceof String b64) {

@@ -6,7 +6,7 @@
     <parent>
         <groupId>tech.kayys.gollek</groupId>
         <artifactId>gollek-parent</artifactId>
-        <version>0.1.1</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -119,7 +119,7 @@
             <plugin>
                 <groupId>io.smallrye</groupId>
                 <artifactId>jandex-maven-plugin</artifactId>
-                <version>3.1.8</version>
+                <version>3.2.7</version>
                 <executions>
                     <execution>
                         <id>make-index</id>

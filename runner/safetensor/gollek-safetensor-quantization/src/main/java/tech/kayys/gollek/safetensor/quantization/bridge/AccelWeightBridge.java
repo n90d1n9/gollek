@@ -113,16 +113,16 @@ public class AccelWeightBridge {
                 for (int i = 0; i < n; i++) f32[i] = seg.get(ValueLayout.JAVA_BYTE, i);
             }
             case I16, U16 -> {
-                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_SHORT, i);
+                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_SHORT.withByteAlignment(1), i);
             }
             case I32, U32 -> {
-                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_INT, i);
+                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_INT.withByteAlignment(1), i);
             }
             case I64, U64 -> {
-                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_LONG, i);
+                for (int i = 0; i < n; i++) f32[i] = seg.getAtIndex(ValueLayout.JAVA_LONG.withByteAlignment(1), i);
             }
             case F64 -> {
-                for (int i = 0; i < n; i++) f32[i] = (float) seg.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                for (int i = 0; i < n; i++) f32[i] = (float) seg.getAtIndex(ValueLayout.JAVA_DOUBLE.withByteAlignment(1), i);
             }
             case U8 -> {
                 for (int i = 0; i < n; i++) f32[i] = Byte.toUnsignedInt(seg.get(ValueLayout.JAVA_BYTE, i));

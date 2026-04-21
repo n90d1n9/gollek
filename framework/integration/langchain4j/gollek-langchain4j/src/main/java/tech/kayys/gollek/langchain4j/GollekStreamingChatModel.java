@@ -5,7 +5,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.output.Response;
-import tech.kayys.gollek.sdk.GollekClient;
+import tech.kayys.gollek.sdk.api.GollekClient;
 
 import java.util.List;
 import java.util.Objects;

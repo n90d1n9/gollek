@@ -4,14 +4,17 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.Parameter;
 import tech.kayys.gollek.ml.nn.layer.Linear;
-import tech.kayys.gollek.ml.tensor.VectorOps;
+import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Gated Recurrent Unit (GRU) — equivalent to {@code torch.nn.GRU}.
  *
- * <p>Lighter than LSTM (no cell state), often comparable accuracy.
+ * <p>
+ * Lighter than LSTM (no cell state), often comparable accuracy.
  *
- * <p>Gate equations:
+ * <p>
+ * Gate equations:
+ * 
  * <pre>
  *   r = σ(W_ir·x + b_ir + W_hr·h + b_hr)   reset gate
  *   z = σ(W_iz·x + b_iz + W_hz·h + b_hz)   update gate
@@ -19,8 +22,10 @@ import tech.kayys.gollek.ml.tensor.VectorOps;
  *   h' = (1 - z) ⊙ n + z ⊙ h
  * </pre>
  *
- * <p>Input:  {@code [T, N, inputSize]}
- * <p>Output: {@code [T, N, hiddenSize]}, h_n {@code [1, N, hiddenSize]}
+ * <p>
+ * Input: {@code [T, N, inputSize]}
+ * <p>
+ * Output: {@code [T, N, hiddenSize]}, h_n {@code [1, N, hiddenSize]}
  */
 public class GRU extends NNModule {
 
@@ -30,15 +35,15 @@ public class GRU extends NNModule {
 
     private final Parameter weightIH; // [3H, inputSize]
     private final Parameter weightHH; // [3H, hiddenSize]
-    private final Parameter biasIH;   // [3H]
-    private final Parameter biasHH;   // [3H]
+    private final Parameter biasIH; // [3H]
+    private final Parameter biasHH; // [3H]
 
     public GRU(int inputSize, int hiddenSize) {
         this(inputSize, hiddenSize, false);
     }
 
     public GRU(int inputSize, int hiddenSize, boolean batchFirst) {
-        this.inputSize  = inputSize;
+        this.inputSize = inputSize;
         this.hiddenSize = hiddenSize;
         this.batchFirst = batchFirst;
 
@@ -46,14 +51,15 @@ public class GRU extends NNModule {
         float bound = (float) (1.0 / Math.sqrt(hiddenSize));
 
         this.weightIH = registerParameter("weight_ih",
-            GradTensor.of(randomUniform(H3 * inputSize,  -bound, bound), H3, inputSize));
+                GradTensor.of(randomUniform(H3 * inputSize, -bound, bound), H3, inputSize));
         this.weightHH = registerParameter("weight_hh",
-            GradTensor.of(randomUniform(H3 * hiddenSize, -bound, bound), H3, hiddenSize));
-        this.biasIH   = registerParameter("bias_ih", GradTensor.of(new float[H3], H3));
-        this.biasHH   = registerParameter("bias_hh", GradTensor.of(new float[H3], H3));
+                GradTensor.of(randomUniform(H3 * hiddenSize, -bound, bound), H3, hiddenSize));
+        this.biasIH = registerParameter("bias_ih", GradTensor.of(new float[H3], H3));
+        this.biasHH = registerParameter("bias_hh", GradTensor.of(new float[H3], H3));
     }
 
-    public record GRUOutput(GradTensor output, GradTensor hn) {}
+    public record GRUOutput(GradTensor output, GradTensor hn) {
+    }
 
     /**
      * Forward pass over a full sequence (required by NNModule contract).
@@ -93,47 +99,47 @@ public class GRU extends NNModule {
         }
 
         return new GRUOutput(
-            GradTensor.of(outData, T, N, hiddenSize),
-            GradTensor.of(h.clone(), 1, N, hiddenSize)
-        );
+                GradTensor.of(outData, T, N, hiddenSize),
+                GradTensor.of(h.clone(), 1, N, hiddenSize));
     }
 
     private void stepGRU(float[] xt, float[] h,
-                          float[] wIH, float[] wHH,
-                          float[] bIH, float[] bHH, int N) {
+            float[] wIH, float[] wHH,
+            float[] bIH, float[] bHH, int N) {
         int H = hiddenSize, H3 = 3 * H;
-        // gatesX = W_ih @ xt  [N, 3H]
-        float[] gX = VectorOps.matmul(xt, wIH, N, inputSize,  H3);
-        // gatesH = W_hh @ h   [N, 3H]
-        float[] gH = VectorOps.matmul(h,  wHH, N, hiddenSize, H3);
+        // gatesX = W_ih @ xt [N, 3H]
+        float[] gX = VectorOps.matmul(xt, wIH, N, inputSize, H3);
+        // gatesH = W_hh @ h [N, 3H]
+        float[] gH = VectorOps.matmul(h, wHH, N, hiddenSize, H3);
 
         for (int n = 0; n < N; n++) {
             int base = n * H3, hn = n * H;
             // r, z gates use full gH
             float[] r = new float[H], z = new float[H];
             for (int j = 0; j < H; j++) {
-                r[j] = sigmoid(gX[base + j]     + bIH[j]     + gH[base + j]     + bHH[j]);
+                r[j] = sigmoid(gX[base + j] + bIH[j] + gH[base + j] + bHH[j]);
                 z[j] = sigmoid(gX[base + H + j] + bIH[H + j] + gH[base + H + j] + bHH[H + j]);
             }
             // n gate: r ⊙ (W_hn·h + b_hn)
             for (int j = 0; j < H; j++) {
                 float n_gate = (float) Math.tanh(
-                    gX[base + 2*H + j] + bIH[2*H + j] +
-                    r[j] * (gH[base + 2*H + j] + bHH[2*H + j])
-                );
+                        gX[base + 2 * H + j] + bIH[2 * H + j] +
+                                r[j] * (gH[base + 2 * H + j] + bHH[2 * H + j]));
                 h[hn + j] = (1f - z[j]) * n_gate + z[j] * h[hn + j];
             }
         }
     }
 
-    private static float sigmoid(float x) { return 1f / (1f + (float) Math.exp(-x)); }
+    private static float sigmoid(float x) {
+        return 1f / (1f + (float) Math.exp(-x));
+    }
 
     private static float[] extractTimestep(float[] data, int t, int T, int N,
-                                            int inputSize, boolean batchFirst) {
+            int inputSize, boolean batchFirst) {
         float[] xt = new float[N * inputSize];
         for (int n = 0; n < N; n++) {
             int src = batchFirst ? n * T * inputSize + t * inputSize
-                                 : t * N * inputSize + n * inputSize;
+                    : t * N * inputSize + n * inputSize;
             System.arraycopy(data, src, xt, n * inputSize, inputSize);
         }
         return xt;
@@ -142,7 +148,8 @@ public class GRU extends NNModule {
     private static float[] randomUniform(int n, float lo, float hi) {
         float[] d = new float[n];
         java.util.Random rng = new java.util.Random();
-        for (int i = 0; i < n; i++) d[i] = lo + rng.nextFloat() * (hi - lo);
+        for (int i = 0; i < n; i++)
+            d[i] = lo + rng.nextFloat() * (hi - lo);
         return d;
     }
 
@@ -157,6 +164,6 @@ public class GRU extends NNModule {
     @Override
     public String toString() {
         return String.format("GRU(input=%d, hidden=%d, batchFirst=%b)",
-            inputSize, hiddenSize, batchFirst);
+                inputSize, hiddenSize, batchFirst);
     }
 }

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import tech.kayys.gollek.spi.Message;
 import tech.kayys.gollek.spi.auth.ApiKeyConstants;
+import tech.kayys.gollek.spi.context.RequestContext;
 import tech.kayys.gollek.spi.tool.ToolDefinition;
 
 import org.jetbrains.annotations.Nullable;
@@ -29,10 +30,6 @@ public final class InferenceRequest {
 
     @NotBlank
     private final String requestId;
-
-    @Nullable
-    @Deprecated
-    private final String apiKey;
 
     @NotBlank
     private final String model;
@@ -59,15 +56,8 @@ public final class InferenceRequest {
 
     private final boolean cacheBypass;
 
-    // Context fields (migrated from RequestContext)
-    @Nullable
-    private final String userId;
-
-    @Nullable
-    private final String sessionId;
-
-    @Nullable
-    private final String traceId;
+    @NotNull
+    private final RequestContext requestContext;
 
     @Nullable
     private final InferenceStage inferenceStage;
@@ -101,7 +91,32 @@ public final class InferenceRequest {
             @JsonProperty("metadata") Map<String, Object> metadata,
             @JsonProperty("attachments") List<Attachment> attachments) {
         this.requestId = Objects.requireNonNull(requestId, "requestId");
-        this.apiKey = apiKey;
+        this.requestContext = new RequestContext() {
+            @Override
+            public String apiKey() {
+                return apiKey;
+            }
+
+            @Override
+            public String getRequestId() {
+                return requestId;
+            }
+
+            @Override
+            public String userId() {
+                return userId;
+            }
+
+            @Override
+            public String sessionId() {
+                return sessionId;
+            }
+
+            @Override
+            public String traceId() {
+                return traceId;
+            }
+        };
         this.model = Objects.requireNonNull(model, "model");
         this.messages = Collections.unmodifiableList(new ArrayList<>(
                 Objects.requireNonNull(messages, "messages")));
@@ -115,9 +130,6 @@ public final class InferenceRequest {
         this.timeout = timeout;
         this.priority = priority;
         this.cacheBypass = cacheBypass;
-        this.userId = userId;
-        this.sessionId = sessionId;
-        this.traceId = traceId;
         this.inferenceStage = inferenceStage;
         this.promptTokenCount = promptTokenCount;
         this.metadata = metadata != null
@@ -138,10 +150,11 @@ public final class InferenceRequest {
     }
 
     public String getApiKey() {
-        if (apiKey == null || apiKey.isBlank()) {
-            return ApiKeyConstants.COMMUNITY_API_KEY;
-        }
-        return apiKey;
+        return requestContext.getApiKey();
+    }
+
+    public RequestContext getRequestContext() {
+        return requestContext;
     }
 
     public List<Message> getMessages() {
@@ -159,7 +172,6 @@ public final class InferenceRequest {
         // Message.hashCode() is stable and includes role, content, and tool details.
         return Integer.toHexString(messages.hashCode());
     }
-
 
     /**
      * Convenience method to get the prompt from parameters or last user message.
@@ -212,15 +224,15 @@ public final class InferenceRequest {
     }
 
     public Optional<String> getUserId() {
-        return Optional.ofNullable(userId);
+        return Optional.ofNullable(requestContext.userId());
     }
 
     public Optional<String> getSessionId() {
-        return Optional.ofNullable(sessionId);
+        return Optional.ofNullable(requestContext.sessionId());
     }
 
     public Optional<String> getTraceId() {
-        return Optional.ofNullable(traceId);
+        return Optional.ofNullable(requestContext.traceId());
     }
 
     public Map<String, Object> getMetadata() {
@@ -288,7 +300,7 @@ public final class InferenceRequest {
     public Builder toBuilder() {
         Builder builder = new Builder()
                 .requestId(requestId)
-                .apiKey(apiKey)
+                .apiKey(requestContext.apiKey())
                 .model(model)
                 .messages(messages)
                 .parameters(parameters)
@@ -297,9 +309,9 @@ public final class InferenceRequest {
                 .streaming(streaming)
                 .priority(priority)
                 .cacheBypass(cacheBypass)
-                .userId(userId)
-                .sessionId(sessionId)
-                .traceId(traceId)
+                .userId(requestContext.userId())
+                .sessionId(requestContext.sessionId())
+                .traceId(requestContext.traceId())
                 .inferenceStage(inferenceStage)
                 .promptTokenCount(promptTokenCount)
                 .metadata(metadata)
@@ -471,10 +483,14 @@ public final class InferenceRequest {
          * 0 -> CRITICAL, 1 -> HIGH, 2-5 -> NORMAL, >5 -> LOW.
          */
         public Builder priority(int priority) {
-            if (priority <= 0) this.priority = Priority.CRITICAL;
-            else if (priority == 1) this.priority = Priority.HIGH;
-            else if (priority <= 5) this.priority = Priority.NORMAL;
-            else this.priority = Priority.LOW;
+            if (priority <= 0)
+                this.priority = Priority.CRITICAL;
+            else if (priority == 1)
+                this.priority = Priority.HIGH;
+            else if (priority <= 5)
+                this.priority = Priority.NORMAL;
+            else
+                this.priority = Priority.LOW;
             return this;
         }
 
@@ -553,15 +569,15 @@ public final class InferenceRequest {
                 messages.equals(that.messages) &&
                 Objects.equals(tools, that.tools) &&
                 Objects.equals(toolChoice, that.toolChoice) &&
-                Objects.equals(userId, that.userId) &&
-                Objects.equals(sessionId, that.sessionId) &&
-                Objects.equals(traceId, that.traceId);
+                Objects.equals(requestContext.userId(), that.requestContext.userId()) &&
+                Objects.equals(requestContext.sessionId(), that.requestContext.sessionId()) &&
+                Objects.equals(requestContext.traceId(), that.requestContext.traceId());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(requestId, model, messages, tools, toolChoice, streaming, priority, userId, sessionId,
-                traceId);
+        return Objects.hash(requestId, model, messages, tools, toolChoice, streaming, priority, 
+                requestContext.userId(), requestContext.sessionId(), requestContext.traceId());
     }
 
     @Override
@@ -572,7 +588,7 @@ public final class InferenceRequest {
                 ", messageCount=" + messages.size() +
                 ", streaming=" + streaming +
                 ", priority=" + priority +
-                ", userId='" + userId + '\'' +
+                ", userId='" + requestContext.userId() + '\'' +
                 '}';
     }
 }
