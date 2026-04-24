@@ -346,4 +346,9 @@ public final class BpeTokenizer implements Tokenizer {
     public int[] allStopTokenIds() {
         return eosTokenId >= 0 ? new int[]{eosTokenId} : new int[0];
     }
+
+    @Override
+    public java.util.Map<String, Integer> specialTokens() {
+        return java.util.Collections.unmodifiableMap(specialTokens);
+    }
 }

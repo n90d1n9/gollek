@@ -1,18 +1,13 @@
-package tech.kayys.gollek.gguf.loader;
+package tech.kayys.gollek.spi.tensor.weights;
 
 import jdk.incubator.vector.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * GGUF/GGML Dequantization Engine — JDK 25 Vector API.
- *
- * GGUF (GPT-Generated Unified Format) uses block-based quantization where
- * weights are organized into fixed-size blocks, each with its own scale.
+ * Native Dequantization Engine — JDK 25 Vector API.
+ * Supports GGUF/GGML quantization types.
  */
-public class GGUFDequantizer {
+public class Dequantizer {
 
-    private static final Logger log = LoggerFactory.getLogger(GGUFDequantizer.class);
 
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final VectorSpecies<Integer> INT_SPECIES = IntVector.SPECIES_PREFERRED;
@@ -256,7 +251,6 @@ public class GGUFDequantizer {
             default -> throw new UnsupportedOperationException(
                     "GGML type not yet implemented: " + type);
         }
-        log.debug("Dequantized {} elements using {}", numElements, type);
     }
 
     private void dequantQ4_1(byte[] blocks, int numElements, float[] output) {

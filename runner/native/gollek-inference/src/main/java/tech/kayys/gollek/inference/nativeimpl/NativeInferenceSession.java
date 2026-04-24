@@ -6,7 +6,9 @@ import java.lang.foreign.ValueLayout;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import tech.kayys.gollek.gguf.loader.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 /**
  * Manages request-scoped state for the native inference runtime.
@@ -45,8 +47,9 @@ public final class NativeInferenceSession implements AutoCloseable {
         
         this.layerBuffers = new ArrayList<>();
         int ffnDim = engine.getFfnDim();
+        int numExperts = engine.getNumExperts();
         for (int i = 0; i < engine.getNLayers(); i++) {
-            layerBuffers.add(new LayerBuffers(arena, engine.getHidden(), engine.getNHeadsKv(), engine.getHeadDim(), ffnDim));
+            layerBuffers.add(new LayerBuffers(arena, engine.getHidden(), engine.getNHeadsKv(), engine.getHeadDim(), ffnDim, numExperts));
         }
         
         this.x = arena.allocate((long) engine.getHidden() * Float.BYTES, 64);
@@ -66,7 +69,9 @@ public final class NativeInferenceSession implements AutoCloseable {
                 engine.getNHeadsKv(), engine.getHeadDim(), engine.isNeox(),
                 engine.getEps(), engine.getAttnSoftCap(),
                 engine.getArchitecture().addOneToRmsNormWeight(),
-                engine.getArchitecture().activationType(), executor
+                engine.getArchitecture().activationType(),
+                engine.getNumExperts(), engine.getNumExpertsPerTok(),
+                executor
             );
             
             MemorySegment.copy(xNext, 0, x, 0, x.byteSize());
@@ -84,15 +89,15 @@ public final class NativeInferenceSession implements AutoCloseable {
     public MemorySegment getX() { return x; }
 
     public void lookupEmbedding(int tokenId, MemorySegment dst) {
-        tech.kayys.gollek.gguf.loader.TensorData embd = engine.getTokenEmbeddings();
+        TensorData embd = engine.getTokenEmbeddings();
         if (embd.isQ8_0()) {
             long blocksPerRow = engine.getHidden() / 32;
             long bytesPerRow = blocksPerRow * 34;
             long offset = (long) tokenId * bytesPerRow;
-            tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeQ8_0(embd.segment(), offset, dst, engine.getHidden());
+            Dequantizer.dequantizeQ8_0(embd.segment(), offset, dst, engine.getHidden());
         } else if (embd.isF16()) {
             long offset = (long) tokenId * engine.getHidden() * 2L;
-            tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeF16(embd.segment(), offset, dst, engine.getHidden());
+            Dequantizer.dequantizeF16(embd.segment(), offset, dst, engine.getHidden());
         } else {
             MemorySegment.copy(embd.segment(), (long) tokenId * engine.getHidden() * 4L, dst, 0, (long) engine.getHidden() * 4L);
         }

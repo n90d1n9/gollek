@@ -9,6 +9,8 @@ import java.util.concurrent.ExecutorService;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 /**
  * Applies a linear projection and accumulates the result into a residual tensor.
@@ -16,14 +18,14 @@ import jdk.incubator.vector.VectorSpecies;
  * Optimized to reduce task submission overhead.
  */
 public final class LinearResidualKernel {
-
+ 
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
-
+ 
     private LinearResidualKernel() {}
-
+ 
     public static void computeParallel(
             MemorySegment in,         // [inDim]
-            tech.kayys.gollek.gguf.loader.TensorData weight, // [outDim, inDim]
+            TensorData weight,        // [outDim, inDim]
             MemorySegment bias,       // [outDim] or null
             MemorySegment residual,   // [outDim]
             MemorySegment out,        // [outDim] (can be the same as residual)
@@ -45,10 +47,10 @@ public final class LinearResidualKernel {
                         float sum = 0;
                         if (weight.isQ8_0()) {
                             long bytesPerRow = (inDim / 32) * 34L;
-                            tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeQ8_0(weight.segment(), h * bytesPerRow, rowF32, inDim);
+                            Dequantizer.dequantizeQ8_0(weight.segment(), h * bytesPerRow, rowF32, inDim);
                             sum = dot(in, rowF32, 0, inDim);
                         } else if (weight.isF16()) {
-                            tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeF16(weight.segment(), (long) h * inDim * 2L, rowF32, inDim);
+                            Dequantizer.dequantizeF16(weight.segment(), (long) h * inDim * 2L, rowF32, inDim);
                             sum = dot(in, rowF32, 0, inDim);
                         } else {
                             sum = dot(in, weight.segment(), (long) h * inDim, inDim);

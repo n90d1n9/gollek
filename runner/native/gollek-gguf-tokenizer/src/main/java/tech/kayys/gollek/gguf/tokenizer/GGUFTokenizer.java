@@ -327,4 +327,9 @@ public final class GGUFTokenizer implements Tokenizer {
         all.addAll(additionalEosIds);
         return all.stream().mapToInt(i -> i).distinct().toArray();
     }
+
+    @Override
+    public java.util.Map<String, Integer> specialTokens() {
+        return delegate.specialTokens();
+    }
 }

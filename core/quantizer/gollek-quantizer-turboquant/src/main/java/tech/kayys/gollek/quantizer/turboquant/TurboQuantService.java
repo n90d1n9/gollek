@@ -148,7 +148,7 @@ public class TurboQuantService implements AutoCloseable {
             case BNB_NF4, BNB_INT8 -> new BnBDequantizer();
             case HQQ -> new HQQDequantizer(4, 128, HQQDequantizer.QuantAxis.INPUT); // Default: 4-bit, groupSize=128
             case SQUEEZELLM -> new SqueezeLLMDequantizer();
-            case GGUF -> new tech.kayys.gollek.gguf.loader.GGUFDequantizer();
+            case GGUF -> new tech.kayys.gollek.spi.tensor.weights.Dequantizer();
             default -> null;
         };
     }

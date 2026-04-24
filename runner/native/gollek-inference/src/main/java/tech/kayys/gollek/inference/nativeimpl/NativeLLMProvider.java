@@ -324,16 +324,23 @@ public class NativeLLMProvider implements StreamingProvider {
 
         // 1. Prepare prompt with ChatTemplate
         String arch = (String) engine.getModel().metadata().getOrDefault("general.architecture", "llama");
+        System.out.println("Chat Template from Metadata: " + engine.getModel().metadata().get("tokenizer.chat_template"));
         System.out.println("Applying chat template...");
         ChatTemplate template = ChatTemplate.forArchitecture(arch);
-        String promptText = template.apply(request.getMessages());
+        String promptText = template.apply(request.getMessages(), tokenizer.specialTokens());
 
         System.out.println("Encoding prompt...");
         long[] baseTokens = tokenizer.encode(promptText, EncodeOptions.builder().build());
         long[] tokens;
-        if (tokenizer instanceof GGUFTokenizer gt && gt.shouldAddBos() && gt.bosTokenId() >= 0) {
+        boolean isGemma = arch.toLowerCase().contains("gemma");
+        boolean shouldAddBos = isGemma;
+        if (tokenizer instanceof GGUFTokenizer gt && gt.shouldAddBos()) {
+            shouldAddBos = true;
+        }
+
+        if (shouldAddBos && tokenizer.bosTokenId() >= 0) {
             tokens = new long[baseTokens.length + 1];
-            tokens[0] = gt.bosTokenId();
+            tokens[0] = tokenizer.bosTokenId();
             System.arraycopy(baseTokens, 0, tokens, 1, baseTokens.length);
         } else {
             tokens = baseTokens;
@@ -353,6 +360,13 @@ public class NativeLLMProvider implements StreamingProvider {
             for (int t = 0; t < nPrompt; t++) {
                 xBatch[t] = session.getArena().allocate(engine.getHidden() * 4, 64);
                 session.lookupEmbedding((int) tokens[t], xBatch[t]);
+                float scale = engine.getArchitecture().embeddingScaleFactor(engine.getHidden());
+                if (scale != 1.0f) {
+                    for (int j = 0; j < engine.getHidden(); j++) {
+                        float v = xBatch[t].get(java.lang.foreign.ValueLayout.JAVA_FLOAT, (long) j * 4);
+                        xBatch[t].set(java.lang.foreign.ValueLayout.JAVA_FLOAT, (long) j * 4, v * scale);
+                    }
+                }
             }
 
             // 2. Process layer by layer
@@ -363,7 +377,7 @@ public class NativeLLMProvider implements StreamingProvider {
 
                 // Dequantize this layer's weights ONCE for the whole batch
                 try (java.lang.foreign.Arena layerArena = java.lang.foreign.Arena.ofConfined()) {
-                    tech.kayys.gollek.gguf.loader.TransformerLayerWeights dequantWeights = engine.getLayers().get(i)
+                    tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights dequantWeights = engine.getLayers().get(i)
                             .dequantize(layerArena);
 
                     // Process all tokens for this layer
@@ -375,7 +389,10 @@ public class NativeLLMProvider implements StreamingProvider {
                                 engine.getNHeadsKv(), engine.getHeadDim(), engine.isNeox(),
                                 engine.getEps(), engine.getAttnSoftCap(),
                                 engine.getArchitecture().addOneToRmsNormWeight(),
-                                engine.getArchitecture().activationType(), executor);
+                                engine.getArchitecture().activationType(),
+                                engine.getNumExperts(),
+                                engine.getNumExpertsPerTok(),
+                                executor);
                     }
                 }
             }

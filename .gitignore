@@ -222,3 +222,6 @@ Desktop.ini
 # JBang Example
 **/sdk/integration/jbang-templates/examples/lib*.zip
 *.dylib
+
+
+.notes

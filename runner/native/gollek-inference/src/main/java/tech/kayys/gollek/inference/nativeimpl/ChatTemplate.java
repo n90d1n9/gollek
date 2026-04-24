@@ -8,8 +8,8 @@ import java.util.List;
  */
 public interface ChatTemplate {
     
-    String apply(List<Message> messages);
-
+    String apply(List<Message> messages, java.util.Map<String, Integer> specialTokens);
+    
     static ChatTemplate forArchitecture(String arch) {
         if (arch == null) return new DefaultTemplate();
         String lower = arch.toLowerCase();
@@ -29,16 +29,19 @@ public interface ChatTemplate {
  */
 class GemmaTemplate implements ChatTemplate {
     @Override
-    public String apply(List<Message> messages) {
+    public String apply(List<Message> messages, java.util.Map<String, Integer> specialTokens) {
+        String start = specialTokens.containsKey("<|turn>") ? "<|turn>" : "<start_of_turn>";
+        String end = specialTokens.containsKey("<turn|>") ? "<turn|>" : "<end_of_turn>";
+        
         StringBuilder sb = new StringBuilder();
         for (Message msg : messages) {
             String role = msg.getRole() != null ? msg.getRole().name().toLowerCase() : "user";
             if (role.equals("assistant")) role = "model";
-            sb.append("<start_of_turn>").append(role).append("\n")
+            sb.append(start).append(role).append("\n")
               .append(msg.getContent())
-              .append("<end_of_turn>\n");
+              .append(end).append("\n");
         }
-        sb.append("<start_of_turn>model\n");
+        sb.append(start).append("model\n");
         return sb.toString();
     }
 }
@@ -48,7 +51,7 @@ class GemmaTemplate implements ChatTemplate {
  */
 class ChatMLTemplate implements ChatTemplate {
     @Override
-    public String apply(List<Message> messages) {
+    public String apply(List<Message> messages, java.util.Map<String, Integer> specialTokens) {
         StringBuilder sb = new StringBuilder();
         for (Message msg : messages) {
             String role = msg.getRole() != null ? msg.getRole().name().toLowerCase() : "user";
@@ -66,7 +69,7 @@ class ChatMLTemplate implements ChatTemplate {
  */
 class DefaultTemplate implements ChatTemplate {
     @Override
-    public String apply(List<Message> messages) {
+    public String apply(List<Message> messages, java.util.Map<String, Integer> specialTokens) {
         StringBuilder sb = new StringBuilder();
         for (Message msg : messages) {
             sb.append(msg.getContent()).append("\n");

@@ -1,11 +1,11 @@
 package tech.kayys.gollek.inference.nativeimpl;
 
 import tech.kayys.gollek.gguf.loader.GGUFModel;
-import tech.kayys.gollek.gguf.loader.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
 import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
-import tech.kayys.gollek.gguf.loader.GGUFDequantizer;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 import tech.kayys.gollek.gguf.loader.GGUFLoader;
-import tech.kayys.gollek.gguf.loader.TensorData;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -41,6 +41,8 @@ public final class NativeInferenceEngine implements AutoCloseable {
     private final float attnSoftCap;
     private final float finalSoftCap;
     private final float eps;
+    private final int numExperts;
+    private final int numExpertsPerTok;
     private final tech.kayys.gollek.spi.model.ModelArchitecture architecture;
 
     public NativeInferenceEngine(GGUFModel model, tech.kayys.gollek.spi.model.ModelArchitecture architecture) {
@@ -126,6 +128,13 @@ public final class NativeInferenceEngine implements AutoCloseable {
         if (attnSoftCap > 0 || finalSoftCap > 0) {
             LOG.info("Soft-capping enabled: attn={}, final={}", attnSoftCap, finalSoftCap);
         }
+        
+        this.numExperts = getMetaInt(arch + ".expert_count", "general.expert_count");
+        this.numExpertsPerTok = getMetaInt(arch + ".expert_used_count", "general.expert_used_count");
+        
+        if (numExperts > 0) {
+            LOG.info("MoE initialized: {} experts, {} per token", numExperts, numExpertsPerTok);
+        }
     }
 
     public GGUFModel getModel() { return model; }
@@ -145,6 +154,8 @@ public final class NativeInferenceEngine implements AutoCloseable {
     public float getAttnSoftCap() { return attnSoftCap; }
     public float getFinalSoftCap() { return finalSoftCap; }
     public float getEps() { return eps; }
+    public int getNumExperts() { return numExperts; }
+    public int getNumExpertsPerTok() { return numExpertsPerTok; }
 
     public int getFfnDim() {
         if (layers.isEmpty()) return 0;
@@ -190,9 +201,9 @@ public final class NativeInferenceEngine implements AutoCloseable {
         
         MemorySegment f32 = weightArena.allocate((long) numElements * Float.BYTES, 64);
         if (info.typeId() == 1) { // F16
-            GGUFDequantizer.dequantizeF16(raw, f32, numElements);
+            Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) { // Q8_0
-            GGUFDequantizer.dequantizeQ8_0(raw, f32, numElements);
+            Dequantizer.dequantizeQ8_0(raw, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported tensor type: " + info.typeId());
         }

@@ -1,5 +1,6 @@
 import tech.kayys.gollek.gguf.loader.GGUFModel;
 import tech.kayys.gollek.gguf.loader.GGUFLoader;
+import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -7,16 +8,22 @@ import java.util.Map;
 public class DumpVocab {
     public static void main(String[] args) throws Exception {
         String path = "/Users/bhangun/.gollek/models/gguf/google_gemma-4-E4B-it.gguf";
-        GGUFModel model = GGUFLoader.load(Path.of(path));
+        GGUFModel model = GGUFLoader.loadModel(Path.of(path));
         List<String> tokens = (List<String>) model.metadata().get("tokenizer.ggml.tokens");
         if (tokens == null) tokens = (List<String>) model.metadata().get("tokenizer.tokens");
         
         System.out.println("Vocab size: " + tokens.size());
-        for (int i = 0; i < Math.min(1000, tokens.size()); i++) {
-            String t = tokens.get(i);
-            if (t.contains("turn") || t.contains("start") || t.contains("end")) {
-                System.out.println("Token [" + i + "]: '" + t + "'");
-            }
+        System.out.println("Chat Template: " + model.metadata().get("tokenizer.chat_template"));
+        
+        System.out.println("Tensors (Count: " + model.tensors().size() + "):");
+        for (int i = 0; i < Math.min(20, model.tensors().size()); i++) {
+            GGUFTensorInfo t = model.tensors().get(i);
+            System.out.println("  " + t.name() + " " + java.util.Arrays.toString(t.shape()));
         }
     }
 }
+
+
+/* 
+java -cp scratch:runner/native/gollek-gguf-loader/target/gollek-gguf-loader-0.1.0-SNAPSHOT.jar:runner/native/gollek-gguf-tokenizer/target/gollek-gguf-tokenizer-0.1.0-SNAPSHOT.jar DumpVocab
+*/

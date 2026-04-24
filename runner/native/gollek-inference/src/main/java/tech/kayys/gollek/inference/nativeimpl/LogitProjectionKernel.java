@@ -10,8 +10,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import tech.kayys.gollek.gguf.loader.TensorData;
-import tech.kayys.gollek.gguf.loader.GGUFDequantizer;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 /**
  * SIMD-optimized Logit Projection Kernel.
@@ -54,10 +54,10 @@ public final class LogitProjectionKernel {
                         float sum;
                         if (outputWeight.isQ8_0()) {
                             long bytesPerRow = (hidden / 32) * 34L;
-                            GGUFDequantizer.dequantizeQ8_0(wBase, (long) v * bytesPerRow, rowF32, hidden);
+                            Dequantizer.dequantizeQ8_0(wBase, (long) v * bytesPerRow, rowF32, hidden);
                             sum = dot(x, rowF32, 0, hidden);
                         } else if (outputWeight.isF16()) {
-                            GGUFDequantizer.dequantizeF16(wBase, (long) v * hidden * 2L, rowF32, hidden);
+                            Dequantizer.dequantizeF16(wBase, (long) v * hidden * 2L, rowF32, hidden);
                             sum = dot(x, rowF32, 0, hidden);
                         } else {
                             // F32 - use absolute offset

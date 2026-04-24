@@ -3,7 +3,7 @@ package tech.kayys.gollek.quantizer.turboquant;
 import org.junit.jupiter.api.*;
 
 import static org.junit.jupiter.api.Assertions.*;
-import tech.kayys.gollek.gguf.loader.GGUFDequantizer;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 /**
  * Tests covering GGUF, BnB NF4, HQQ, SqueezeLLM, Registry, and infrastructure.
@@ -19,7 +19,7 @@ class ExtendedQuantizerTest {
     @Order(1)
     @DisplayName("GGUF Q4_0: single block dequant (q=8 → w=0)")
     void testGgufQ4_0MidZero() {
-        GGUFDequantizer dq = new GGUFDequantizer();
+        Dequantizer dq = new Dequantizer();
         // 1 block = 32 elements = 18 bytes
         // scale = 1.0 (FP16 = 0x3C00), all nibbles = 8 → q-8 = 0
         byte[] block = new byte[18];
@@ -40,7 +40,7 @@ class ExtendedQuantizerTest {
     @Order(2)
     @DisplayName("GGUF Q4_0: extreme nibbles (0 → -8d, 15 → +7d)")
     void testGgufQ4_0Extremes() {
-        GGUFDequantizer dq = new GGUFDequantizer();
+        Dequantizer dq = new Dequantizer();
         byte[] block = new byte[18];
         // scale = 0.5 FP16 = 0x3800 → bytes [0x00, 0x38]
         block[0] = 0x00;
@@ -61,7 +61,7 @@ class ExtendedQuantizerTest {
     @Order(3)
     @DisplayName("GGUF Q8_0: simple single block")
     void testGgufQ8_0() {
-        GGUFDequantizer dq = new GGUFDequantizer();
+        Dequantizer dq = new Dequantizer();
         byte[] block = new byte[34];
         // scale = 1.0 FP16
         block[0] = 0x00;
@@ -80,7 +80,7 @@ class ExtendedQuantizerTest {
     @Order(4)
     @DisplayName("GGUF Q8_0: negative INT8 weights")
     void testGgufQ8_0Negative() {
-        GGUFDequantizer dq = new GGUFDequantizer();
+        Dequantizer dq = new Dequantizer();
         byte[] block = new byte[34];
         block[0] = 0x00;
         block[1] = 0x3C; // scale=1.0
@@ -97,7 +97,7 @@ class ExtendedQuantizerTest {
     @Order(5)
     @DisplayName("GGUF dispatch: F32 pass-through")
     void testGgufF32Passthrough() {
-        GGUFDequantizer dq = new GGUFDequantizer();
+        Dequantizer dq = new Dequantizer();
         // 2 FP32 values: 1.0 and -2.5
         byte[] raw = new byte[8];
         int bits1 = Float.floatToIntBits(1.0f);
@@ -108,7 +108,7 @@ class ExtendedQuantizerTest {
             raw[4 + b] = (byte) (bits2 >> (b * 8));
 
         float[] out = new float[2];
-        dq.dequantize(GGUFDequantizer.GGMLType.F32, raw, 2, out);
+        dq.dequantize(Dequantizer.GGMLType.F32, raw, 2, out);
         assertEquals(1.0f, out[0], 1e-5f);
         assertEquals(-2.5f, out[1], 1e-5f);
     }
@@ -117,12 +117,12 @@ class ExtendedQuantizerTest {
     @Order(6)
     @DisplayName("GGUF GGMLType: properties")
     void testGgmlTypeProperties() {
-        assertEquals(18, GGUFDequantizer.GGMLType.Q4_0.blockBytes);
-        assertEquals(34, GGUFDequantizer.GGMLType.Q8_0.blockBytes);
-        assertEquals(144, GGUFDequantizer.GGMLType.Q4_K.blockBytes);
-        assertEquals(210, GGUFDequantizer.GGMLType.Q6_K.blockBytes);
-        assertEquals(8.0, GGUFDequantizer.GGMLType.Q4_0.compressionRatio(), 0.01);
-        assertEquals(4.0, GGUFDequantizer.GGMLType.Q8_0.compressionRatio(), 0.01);
+        assertEquals(18, Dequantizer.GGMLType.Q4_0.blockBytes);
+        assertEquals(34, Dequantizer.GGMLType.Q8_0.blockBytes);
+        assertEquals(144, Dequantizer.GGMLType.Q4_K.blockBytes);
+        assertEquals(210, Dequantizer.GGMLType.Q6_K.blockBytes);
+        assertEquals(8.0, Dequantizer.GGMLType.Q4_0.compressionRatio(), 0.01);
+        assertEquals(4.0, Dequantizer.GGMLType.Q8_0.compressionRatio(), 0.01);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -413,17 +413,17 @@ class ExtendedQuantizerTest {
     @Order(21)
     @DisplayName("GGUF: GGMLType.fromId lookup")
     void testGgmlTypeFromId() {
-        assertEquals(GGUFDequantizer.GGMLType.Q4_0, GGUFDequantizer.GGMLType.fromId(2));
-        assertEquals(GGUFDequantizer.GGMLType.Q8_0, GGUFDequantizer.GGMLType.fromId(8));
-        assertEquals(GGUFDequantizer.GGMLType.Q4_K, GGUFDequantizer.GGMLType.fromId(12));
-        assertEquals(GGUFDequantizer.GGMLType.F32, GGUFDequantizer.GGMLType.fromId(999));
+        assertEquals(Dequantizer.GGMLType.Q4_0, Dequantizer.GGMLType.fromId(2));
+        assertEquals(Dequantizer.GGMLType.Q8_0, Dequantizer.GGMLType.fromId(8));
+        assertEquals(Dequantizer.GGMLType.Q4_K, Dequantizer.GGMLType.fromId(12));
+        assertEquals(Dequantizer.GGMLType.F32, Dequantizer.GGMLType.fromId(999));
     }
 
     @Test
     @Order(22)
     @DisplayName("GGUF: all block sizes are positive")
     void testGgmlBlockSizes() {
-        for (GGUFDequantizer.GGMLType t : GGUFDequantizer.GGMLType.values()) {
+        for (Dequantizer.GGMLType t : Dequantizer.GGMLType.values()) {
             assertTrue(t.blockBytes > 0, t.name() + " blockBytes must be positive");
             assertTrue(t.blockSize > 0, t.name() + " blockSize must be positive");
         }

@@ -2,10 +2,11 @@ package tech.kayys.gollek.gguf.loader;
 
 import tech.kayys.gollek.gguf.loader.GGUFModel;
 import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
-import tech.kayys.gollek.gguf.loader.TensorData;
 import tech.kayys.gollek.gguf.loader.GGUFReader;
 import tech.kayys.gollek.gguf.loader.GGUFParser;
-import tech.kayys.gollek.gguf.loader.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
+import tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -84,6 +85,13 @@ public final class GGUFLoader {
         }
         
         if (headDim == 0) headDim = hidden / nHeads;
+ 
+        int numExperts = getMetadataIntOptional(meta, arch + ".expert_count", "general.expert_count");
+        int numExpertsPerTok = getMetadataIntOptional(meta, arch + ".expert_used_count", "general.expert_used_count");
+        
+        if (numExperts > 0) {
+            System.out.println("MoE detected: " + numExperts + " experts, " + numExpertsPerTok + " per token.");
+        }
 
         
         System.out.println("Loading " + nLayer + " layers: arch=" + arch + ", hidden=" + hidden + ", nHeads=" + nHeads + ", nHeadsKv=" + nHeadsKv);
@@ -144,7 +152,13 @@ public final class GGUFLoader {
 
             MemorySegment ffnNorm = findAndPrepareTensor(model, prefix + "ffn_norm.weight", arena);
             MemorySegment postAttnNorm = findAndPrepareTensorOptional(model, prefix + "post_attention_layernorm.weight", arena);
+            if (postAttnNorm == null) postAttnNorm = findAndPrepareTensorOptional(model, prefix + "ffn_pre_norm.weight", arena);
+            
             MemorySegment postFfnNorm = findAndPrepareTensorOptional(model, prefix + "post_feedforward_layernorm.weight", arena);
+            if (postFfnNorm == null) postFfnNorm = findAndPrepareTensorOptional(model, prefix + "ffn_post_norm.weight", arena);
+
+            MemorySegment attnQNorm = findAndPrepareTensorOptional(model, prefix + "attn_q_norm.weight", arena);
+            MemorySegment attnKNorm = findAndPrepareTensorOptional(model, prefix + "attn_k_norm.weight", arena);
             
             TensorData wG = findTensorLazy(model, prefix + "ffn_gate.weight");
             MemorySegment bg = findAndPrepareTensorOptional(model, prefix + "ffn_gate.bias", arena);
@@ -154,6 +168,23 @@ public final class GGUFLoader {
             
             TensorData wD = findTensorLazy(model, prefix + "ffn_down.weight");
             MemorySegment bd = findAndPrepareTensorOptional(model, prefix + "ffn_down.bias", arena);
+ 
+            MemorySegment ffnGateInp = null;
+            TensorData[] wGExps = null;
+            TensorData[] wUExps = null;
+            TensorData[] wDExps = null;
+            
+            if (numExperts > 0) {
+                ffnGateInp = findAndPrepareTensorOptional(model, prefix + "ffn_gate_inp.weight", arena);
+                wGExps = new TensorData[numExperts];
+                wUExps = new TensorData[numExperts];
+                wDExps = new TensorData[numExperts];
+                for (int e = 0; e < numExperts; e++) {
+                    wGExps[e] = findTensorLazyOptional(model, prefix + "ffn_gate." + e + ".weight");
+                    wUExps[e] = findTensorLazyOptional(model, prefix + "ffn_up." + e + ".weight");
+                    wDExps[e] = findTensorLazyOptional(model, prefix + "ffn_down." + e + ".weight");
+                }
+            }
 
             layers.add(new TransformerLayerWeights(
                 rms,
@@ -164,12 +195,18 @@ public final class GGUFLoader {
                 ffnNorm,
                 postAttnNorm,
                 postFfnNorm,
+                attnQNorm,
+                attnKNorm,
                 wG,
                 bg,
                 wU,
                 bu,
                 wD,
-                bd
+                bd,
+                ffnGateInp,
+                wGExps,
+                wUExps,
+                wDExps
             ));
         }
 
@@ -182,6 +219,19 @@ public final class GGUFLoader {
             .filter(t -> t.name().equals(name))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Tensor not found: " + name));
+
+        MemorySegment raw = model.segment().asSlice(model.dataStart() + info.offset(), info.sizeInBytes());
+        long numElements = 1;
+        for (long d : info.shape()) numElements *= d;
+        return new TensorData(raw, info.typeId(), numElements);
+    }
+
+    public static TensorData findTensorLazyOptional(GGUFModel model, String name) {
+        GGUFTensorInfo info = model.tensors().stream()
+            .filter(t -> t.name().equals(name))
+            .findFirst()
+            .orElse(null);
+        if (info == null) return null;
 
         MemorySegment raw = model.segment().asSlice(model.dataStart() + info.offset(), info.sizeInBytes());
         long numElements = 1;
@@ -222,9 +272,9 @@ public final class GGUFLoader {
         MemorySegment f32 = arena.allocate(numElements * Float.BYTES, 64);
         
         if (info.typeId() == 1) { // F16
-            GGUFDequantizer.dequantizeF16(raw, f32, numElements);
+            Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) { // Q8_0
-            GGUFDequantizer.dequantizeQ8_0(raw, f32, numElements);
+            Dequantizer.dequantizeQ8_0(raw, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported tensor type for loader: " + info.typeId() + " (" + info.name() + ")");
         }
@@ -248,9 +298,9 @@ public final class GGUFLoader {
         MemorySegment f32 = arena.allocate(numElements * Float.BYTES, 64);
 
         if (info.typeId() == 1) {
-            GGUFDequantizer.dequantizeF16(raw, f32, numElements);
+            Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) {
-            GGUFDequantizer.dequantizeQ8_0(raw, f32, numElements);
+            Dequantizer.dequantizeQ8_0(raw, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported optional tensor type: " + info.typeId());
         }

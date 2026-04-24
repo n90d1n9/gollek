@@ -2,13 +2,13 @@ package tech.kayys.gollek.inference.nativeimpl;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import tech.kayys.gollek.gguf.loader.GGUFDequantizer;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 import java.lang.foreign.ValueLayout;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
-import tech.kayys.gollek.gguf.loader.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
@@ -25,13 +25,19 @@ public final class FusedFFNKernel {
 
     public static void computeParallel(
             MemorySegment x,          // [hidden]
-            TransformerLayerWeights w,
+            tech.kayys.gollek.spi.tensor.weights.TensorData wG,
+            MemorySegment bg,
+            tech.kayys.gollek.spi.tensor.weights.TensorData wU,
+            MemorySegment bu,
+            tech.kayys.gollek.spi.tensor.weights.TensorData wD,
+            MemorySegment bd,
             MemorySegment ffnState,   // [ffnDim]
             MemorySegment residual,   // [hidden]
             MemorySegment out,        // [hidden]
             int hidden,
             int ffnDim,
             tech.kayys.gollek.spi.model.FFNActivationType activation,
+            float scale,
             ExecutorService executor
     ) {
         // Step 1: Up and Gate Projection (SwiGLU) -> stores in ffnState
@@ -47,30 +53,30 @@ public final class FusedFFNKernel {
                     MemorySegment rowF32 = taskArena.allocate((long) hidden * Float.BYTES, 64);
                     for (int f = s; f < e; f++) {
                         float sumG = 0;
-                        if (w.wG.isQ8_0()) {
+                        if (wG.isQ8_0()) {
                             long bytesPerRow = (hidden / 32) * 34L;
-                            GGUFDequantizer.dequantizeQ8_0(w.wG.segment(), f * bytesPerRow, rowF32, hidden);
+                            Dequantizer.dequantizeQ8_0(wG.segment(), f * bytesPerRow, rowF32, hidden);
                             sumG = dot(x, rowF32, 0, hidden);
-                        } else if (w.wG.isF16()) {
-                            GGUFDequantizer.dequantizeF16(w.wG.segment(), (long) f * hidden * 2L, rowF32, hidden);
+                        } else if (wG.isF16()) {
+                            Dequantizer.dequantizeF16(wG.segment(), (long) f * hidden * 2L, rowF32, hidden);
                             sumG = dot(x, rowF32, 0, hidden);
                         } else {
-                            sumG = dot(x, w.wG.segment(), (long) f * hidden, hidden);
+                            sumG = dot(x, wG.segment(), (long) f * hidden, hidden);
                         }
-                        if (w.bg != null) sumG += w.bg.get(ValueLayout.JAVA_FLOAT, (long) f * 4L);
+                        if (bg != null) sumG += bg.get(ValueLayout.JAVA_FLOAT, (long) f * 4L);
                         
                         float sumU = 0;
-                        if (w.wU.isQ8_0()) {
+                        if (wU.isQ8_0()) {
                             long bytesPerRow = (hidden / 32) * 34L;
-                            GGUFDequantizer.dequantizeQ8_0(w.wU.segment(), f * bytesPerRow, rowF32, hidden);
+                            Dequantizer.dequantizeQ8_0(wU.segment(), f * bytesPerRow, rowF32, hidden);
                             sumU = dot(x, rowF32, 0, hidden);
-                        } else if (w.wU.isF16()) {
-                            GGUFDequantizer.dequantizeF16(w.wU.segment(), (long) f * hidden * 2L, rowF32, hidden);
+                        } else if (wU.isF16()) {
+                            Dequantizer.dequantizeF16(wU.segment(), (long) f * hidden * 2L, rowF32, hidden);
                             sumU = dot(x, rowF32, 0, hidden);
                         } else {
-                            sumU = dot(x, w.wU.segment(), (long) f * hidden, hidden);
+                            sumU = dot(x, wU.segment(), (long) f * hidden, hidden);
                         }
-                        if (w.bu != null) sumU += w.bu.get(ValueLayout.JAVA_FLOAT, (long) f * 4L);
+                        if (bu != null) sumU += bu.get(ValueLayout.JAVA_FLOAT, (long) f * 4L);
 
                         float act;
                         switch (activation) {
@@ -111,20 +117,20 @@ public final class FusedFFNKernel {
                     MemorySegment rowF32 = taskArena.allocate((long) ffnDim * Float.BYTES, 64);
                     for (int h = s; h < e; h++) {
                         float sumD = 0;
-                        if (w.wD.isQ8_0()) {
+                        if (wD.isQ8_0()) {
                             long bytesPerRow = (ffnDim / 32) * 34L;
-                            GGUFDequantizer.dequantizeQ8_0(w.wD.segment(), h * bytesPerRow, rowF32, ffnDim);
+                            Dequantizer.dequantizeQ8_0(wD.segment(), h * bytesPerRow, rowF32, ffnDim);
                             sumD = dot(ffnState, rowF32, 0, ffnDim);
-                        } else if (w.wD.isF16()) {
-                            GGUFDequantizer.dequantizeF16(w.wD.segment(), (long) h * ffnDim * 2L, rowF32, ffnDim);
+                        } else if (wD.isF16()) {
+                            Dequantizer.dequantizeF16(wD.segment(), (long) h * ffnDim * 2L, rowF32, ffnDim);
                             sumD = dot(ffnState, rowF32, 0, ffnDim);
                         } else {
-                            sumD = dot(ffnState, w.wD.segment(), (long) h * ffnDim, ffnDim);
+                            sumD = dot(ffnState, wD.segment(), (long) h * ffnDim, ffnDim);
                         }
-                        if (w.bd != null) sumD += w.bd.get(ValueLayout.JAVA_FLOAT, (long) h * 4L);
+                        if (bd != null) sumD += bd.get(ValueLayout.JAVA_FLOAT, (long) h * 4L);
                         
                         float res = (residual != null) ? residual.get(ValueLayout.JAVA_FLOAT, (long) h * 4L) : 0.0f;
-                        out.set(ValueLayout.JAVA_FLOAT, (long) h * 4L, res + sumD);
+                        out.set(ValueLayout.JAVA_FLOAT, (long) h * 4L, res + (scale * sumD));
                     }
                 }
                 return null;

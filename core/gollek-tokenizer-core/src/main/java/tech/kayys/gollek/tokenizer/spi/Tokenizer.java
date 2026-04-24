@@ -15,4 +15,8 @@ public interface Tokenizer {
     int padTokenId();
     
     int[] allStopTokenIds();
+
+    default java.util.Map<String, Integer> specialTokens() {
+        return java.util.Collections.emptyMap();
+    }
 }

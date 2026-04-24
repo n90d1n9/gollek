@@ -1,4 +1,4 @@
-package tech.kayys.gollek.gguf.loader;
+package tech.kayys.gollek.spi.tensor.weights;
 
 import java.lang.foreign.MemorySegment;
 
@@ -19,6 +19,8 @@ public final class TransformerLayerWeights {
     public final MemorySegment ffnNormWeight;    // [hidden]
     public final MemorySegment postAttnNormWeight; // [hidden] Optional for Gemma 2
     public final MemorySegment postFfnNormWeight;  // [hidden] Optional for Gemma 2
+    public final MemorySegment attnQNormWeight;    // [headDim] Gemma 2
+    public final MemorySegment attnKNormWeight;    // [headDim] Gemma 2
 
     public final TensorData wG;               // [ffnDim, hidden]
     public final MemorySegment bg;               // [ffnDim] (Bias for gate projection)
@@ -26,6 +28,12 @@ public final class TransformerLayerWeights {
     public final MemorySegment bu;               // [ffnDim] (Bias for up projection)
     public final TensorData wD;               // [hidden, ffnDim]
     public final MemorySegment bd;               // [hidden] (Bias for down projection)
+
+    // MoE specific weights
+    public final MemorySegment ffnGateInpWeight; // [num_experts, hidden] -> router
+    public final TensorData[] wGExperts;         // [num_experts] of [ffnDim, hidden]
+    public final TensorData[] wUExperts;         // [num_experts] of [ffnDim, hidden]
+    public final TensorData[] wDExperts;         // [num_experts] of [hidden, ffnDim]
 
     public TransformerLayerWeights(
             MemorySegment rmsWeight,
@@ -36,12 +44,18 @@ public final class TransformerLayerWeights {
             MemorySegment ffnNormWeight,
             MemorySegment postAttnNormWeight,
             MemorySegment postFfnNormWeight,
+            MemorySegment attnQNormWeight,
+            MemorySegment attnKNormWeight,
             TensorData wG,
             MemorySegment bg,
             TensorData wU,
             MemorySegment bu,
             TensorData wD,
-            MemorySegment bd) {
+            MemorySegment bd,
+            MemorySegment ffnGateInpWeight,
+            TensorData[] wGExperts,
+            TensorData[] wUExperts,
+            TensorData[] wDExperts) {
         this.rmsWeight = rmsWeight;
         this.wqkvPacked = wqkvPacked;
         this.bqkv = bqkv;
@@ -50,30 +64,54 @@ public final class TransformerLayerWeights {
         this.ffnNormWeight = ffnNormWeight;
         this.postAttnNormWeight = postAttnNormWeight;
         this.postFfnNormWeight = postFfnNormWeight;
+        this.attnQNormWeight = attnQNormWeight;
+        this.attnKNormWeight = attnKNormWeight;
         this.wG = wG;
         this.bg = bg;
         this.wU = wU;
         this.bu = bu;
         this.wD = wD;
         this.bd = bd;
+        this.ffnGateInpWeight = ffnGateInpWeight;
+        this.wGExperts = wGExperts;
+        this.wUExperts = wUExperts;
+        this.wDExperts = wDExperts;
     }
 
     public TransformerLayerWeights dequantize(java.lang.foreign.Arena arena) {
+        TensorData[] dqWG = null, dqWU = null, dqWD = null;
+        if (wGExperts != null) {
+            dqWG = new TensorData[wGExperts.length];
+            dqWU = new TensorData[wUExperts.length];
+            dqWD = new TensorData[wDExperts.length];
+            for (int i = 0; i < wGExperts.length; i++) {
+                dqWG[i] = wGExperts[i] != null ? wGExperts[i].dequantize(arena) : null;
+                dqWU[i] = wUExperts[i] != null ? wUExperts[i].dequantize(arena) : null;
+                dqWD[i] = wDExperts[i] != null ? wDExperts[i].dequantize(arena) : null;
+            }
+        }
+
         return new TransformerLayerWeights(
             rmsWeight,
             wqkvPacked,
             bqkv,
-            wo.dequantize(arena),
+            wo != null ? wo.dequantize(arena) : null,
             bo,
             ffnNormWeight,
             postAttnNormWeight,
             postFfnNormWeight,
-            wG.dequantize(arena),
+            attnQNormWeight,
+            attnKNormWeight,
+            wG != null ? wG.dequantize(arena) : null,
             bg,
-            wU.dequantize(arena),
+            wU != null ? wU.dequantize(arena) : null,
             bu,
-            wD.dequantize(arena),
-            bd
+            wD != null ? wD.dequantize(arena) : null,
+            bd,
+            ffnGateInpWeight,
+            dqWG,
+            dqWU,
+            dqWD
         );
     }
 }

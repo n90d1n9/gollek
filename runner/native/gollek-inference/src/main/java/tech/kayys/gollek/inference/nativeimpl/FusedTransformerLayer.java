@@ -3,7 +3,7 @@ package tech.kayys.gollek.inference.nativeimpl;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.util.concurrent.ExecutorService;
-import tech.kayys.gollek.gguf.loader.TransformerLayerWeights;
+import tech.kayys.gollek.spi.tensor.weights.TransformerLayerWeights;
 
 /**
  * Executes a single transformer layer end-to-end with zero intermediary allocations.
@@ -30,6 +30,8 @@ public final class FusedTransformerLayer {
         float attnSoftCap,
         boolean addOneToWeight,
         tech.kayys.gollek.spi.model.FFNActivationType activation,
+        int numExperts,
+        int numExpertsPerTok,
         ExecutorService executor
     ) {
         // 1. RMSNorm (Attention) -> buf.norm
@@ -37,6 +39,20 @@ public final class FusedTransformerLayer {
         
         // 2. QKV Projection -> buf.q, buf.k, buf.v (handles QKV biases)
         PrepackedQKVKernel.computeParallel(buf.norm, w.wqkvPacked, w.bqkv, buf.q, buf.k, buf.v, hidden, numHeads, numHeadsKv, headDim, executor);
+
+        // 2b. Gemma 2 per-head normalization
+        if (w.attnQNormWeight != null) {
+            for (int h = 0; h < numHeads; h++) {
+                MemorySegment qHead = buf.q.asSlice((long) h * headDim * Float.BYTES, (long) headDim * Float.BYTES);
+                RMSNormKernel.execute(qHead, qHead, w.attnQNormWeight, headDim, eps, false);
+            }
+        }
+        if (w.attnKNormWeight != null) {
+            for (int h = 0; h < numHeadsKv; h++) {
+                MemorySegment kHead = buf.k.asSlice((long) h * headDim * Float.BYTES, (long) headDim * Float.BYTES);
+                RMSNormKernel.execute(kHead, kHead, w.attnKNormWeight, headDim, eps, false);
+            }
+        }
 
         // 3. Apply RoPE
         for (int h = 0; h < numHeads; h++) {
@@ -79,13 +95,25 @@ public final class FusedTransformerLayer {
 
         // 8. FFN
         int ffnDim = (int) (buf.ffn.byteSize() / Float.BYTES);
-        if (w.postFfnNormWeight != null) {
-            FusedFFNKernel.computeParallel(buf.norm, w, buf.ffn, null, buf.norm, hidden, ffnDim, activation, executor);
-            RMSNormKernel.execute(buf.norm, buf.norm, w.postFfnNormWeight, hidden, eps, addOneToWeight);
-            addInPlace(x, buf.norm, hidden);
-            MemorySegment.copy(x, 0, xNext, 0, x.byteSize()); // Ensure xNext has the result
+        if (numExperts > 0 && w.ffnGateInpWeight != null) {
+            FusedMoEKernel.executeParallel(buf.norm, w, buf, hidden, ffnDim, numExperts, numExpertsPerTok, activation, executor);
+            if (w.postFfnNormWeight != null) {
+                RMSNormKernel.execute(buf.ffnExpertOut, buf.ffnExpertOut, w.postFfnNormWeight, hidden, eps, addOneToWeight);
+                addInPlace(x, buf.ffnExpertOut, hidden);
+                MemorySegment.copy(x, 0, xNext, 0, x.byteSize());
+            } else {
+                addInPlace(x, buf.ffnExpertOut, hidden);
+                MemorySegment.copy(x, 0, xNext, 0, x.byteSize());
+            }
         } else {
-            FusedFFNKernel.computeParallel(buf.norm, w, buf.ffn, x, xNext, hidden, ffnDim, activation, executor);
+            if (w.postFfnNormWeight != null) {
+                FusedFFNKernel.computeParallel(buf.norm, w.wG, w.bg, w.wU, w.bu, w.wD, w.bd, buf.ffn, null, buf.norm, hidden, ffnDim, activation, 1.0f, executor);
+                RMSNormKernel.execute(buf.norm, buf.norm, w.postFfnNormWeight, hidden, eps, addOneToWeight);
+                addInPlace(x, buf.norm, hidden);
+                MemorySegment.copy(x, 0, xNext, 0, x.byteSize()); // Ensure xNext has the result
+            } else {
+                FusedFFNKernel.computeParallel(buf.norm, w.wG, w.bg, w.wU, w.bu, w.wD, w.bd, buf.ffn, x, xNext, hidden, ffnDim, activation, 1.0f, executor);
+            }
         }
     }
 
