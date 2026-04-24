@@ -20,7 +20,7 @@ import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 import tech.kayys.gollek.spi.provider.ProviderMetadata;
 import tech.kayys.gollek.spi.provider.ProviderCapabilities;
 import tech.kayys.gollek.spi.provider.ProviderConfig;
-import tech.kayys.gollek.safetensor.engine.warmup.DirectSafetensorBackend;
+// import tech.kayys.gollek.safetensor.engine.warmup.DirectSafetensorBackend;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -39,19 +39,23 @@ public class NativeLLMProvider implements StreamingProvider {
 
     private static final Logger LOG = Logger.getLogger(NativeLLMProvider.class);
 
-    @Inject
-    DirectSafetensorBackend directSafetensorBackend;
+    // @Inject
+    // DirectSafetensorBackend directSafetensorBackend;
 
     @Inject
     @Any
     Instance<StreamingProvider> availableProviders;
+
+    @Inject
+    tech.kayys.gollek.models.core.ModelArchitectureRegistry architectureRegistry;
 
     /**
      * Lazily resolves the LibTorch provider from the CDI container.
      * Returns null if it's not available on the classpath.
      */
     private StreamingProvider resolveLibTorchFallback() {
-        if (availableProviders == null) return null;
+        if (availableProviders == null)
+            return null;
         for (StreamingProvider p : availableProviders) {
             if ("libtorch".equalsIgnoreCase(p.id())) {
                 return p;
@@ -87,9 +91,10 @@ public class NativeLLMProvider implements StreamingProvider {
                 .streaming(true)
                 .supportedFormats(java.util.Set.of(
                         tech.kayys.gollek.spi.model.ModelFormat.GGUF,
-                        tech.kayys.gollek.spi.model.ModelFormat.SAFETENSORS
-                ))
-                .supportedDevices(java.util.Set.of(tech.kayys.gollek.spi.model.DeviceType.CPU)) // Extension handles acceleration if available
+                        tech.kayys.gollek.spi.model.ModelFormat.SAFETENSORS))
+                .supportedDevices(java.util.Set.of(tech.kayys.gollek.spi.model.DeviceType.CPU)) // Extension handles
+                                                                                                // acceleration if
+                                                                                                // available
                 .features(java.util.Set.of("native_jit", "ffm_acceleration"))
                 .build();
     }
@@ -97,9 +102,9 @@ public class NativeLLMProvider implements StreamingProvider {
     @Override
     public void initialize(ProviderConfig config) {
         LOG.info("Gollek Native inference engine initialized");
-        if (directSafetensorBackend != null) {
-            directSafetensorBackend.initialize(config);
-        }
+        // if (directSafetensorBackend != null) {
+        // LOG.info("Direct Safetensor backend detected and ready");
+        // }
         StreamingProvider libtorch = resolveLibTorchFallback();
         if (libtorch != null) {
             try {
@@ -140,16 +145,19 @@ public class NativeLLMProvider implements StreamingProvider {
         // 4. Metadata check for format
         if (request != null) {
             Object format = request.getMetadata().get("format");
-            if ("GGUF".equalsIgnoreCase(String.valueOf(format)) || "SAFETENSORS".equalsIgnoreCase(String.valueOf(format)) || "SAFETENSOR".equalsIgnoreCase(String.valueOf(format))) {
+            if ("GGUF".equalsIgnoreCase(String.valueOf(format))
+                    || "SAFETENSORS".equalsIgnoreCase(String.valueOf(format))
+                    || "SAFETENSOR".equalsIgnoreCase(String.valueOf(format))) {
                 return true;
             }
-            
+
             // Check model_path in metadata
             Object path = request.getMetadata().get("model_path");
             if (path != null) {
                 String pathStr = String.valueOf(path);
                 String lowerPathStr = pathStr.toLowerCase();
-                if (lowerPathStr.endsWith(".gguf") || lowerPathStr.endsWith(".safetensors") || lowerPathStr.endsWith(".safetensor")) {
+                if (lowerPathStr.endsWith(".gguf") || lowerPathStr.endsWith(".safetensors")
+                        || lowerPathStr.endsWith(".safetensor")) {
                     return true;
                 }
                 if (containsSafetensorFiles(pathStr)) {
@@ -177,7 +185,7 @@ public class NativeLLMProvider implements StreamingProvider {
 
     // Shared executor for parallel kernel operations
     private final ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-    
+
     // Simple cache for engine instances
     private final Map<String, NativeInferenceEngine> engineCache = new HashMap<>();
 
@@ -185,7 +193,8 @@ public class NativeLLMProvider implements StreamingProvider {
         String modelPath = request.getParameter("model_path", String.class)
                 .or(() -> Optional.ofNullable((String) request.getMetadata().get("model_path")))
                 .orElse(request.getModel());
-        if (modelPath == null) return false;
+        if (modelPath == null)
+            return false;
         String lowerPath = modelPath.toLowerCase();
         if (lowerPath.endsWith(".safetensors") || lowerPath.endsWith(".safetensor")) {
             return true;
@@ -195,13 +204,16 @@ public class NativeLLMProvider implements StreamingProvider {
 
     /**
      * Checks if a given path is a directory containing .safetensors model files.
-     * This handles the common case where the SDK resolves a model to a blob directory
-     * (e.g. ~/.gollek/models/blobs/UUID/) containing model.safetensors and config.json.
+     * This handles the common case where the SDK resolves a model to a blob
+     * directory
+     * (e.g. ~/.gollek/models/blobs/UUID/) containing model.safetensors and
+     * config.json.
      */
     private static boolean containsSafetensorFiles(String pathStr) {
         try {
             Path dir = Path.of(pathStr);
-            if (!Files.isDirectory(dir)) return false;
+            if (!Files.isDirectory(dir))
+                return false;
             try (var stream = Files.list(dir)) {
                 return stream.anyMatch(f -> {
                     String name = f.getFileName().toString().toLowerCase();
@@ -243,17 +255,7 @@ public class NativeLLMProvider implements StreamingProvider {
     @Override
     public Uni<InferenceResponse> infer(ProviderRequest request) {
         if (isSafetensorModel(request)) {
-            LOG.info("Native engine delegating Safetensor evaluation to DirectSafetensorBackend");
-            ProviderRequest resolved = requestWithResolvedModelPath(request);
-            return directSafetensorBackend.infer(resolved)
-                    .onFailure().recoverWithUni(failure -> {
-                        LOG.warn("DirectSafetensorBackend failed, attempting LibTorch fallback", failure);
-                        StreamingProvider libtorch = resolveLibTorchFallback();
-                        if (libtorch != null) {
-                            return libtorch.infer(resolved);
-                        }
-                        return Uni.createFrom().failure(failure);
-                    });
+            throw new UnsupportedOperationException("Safetensor support is currently disabled in the native engine");
         }
 
         return inferStream(request)
@@ -272,17 +274,7 @@ public class NativeLLMProvider implements StreamingProvider {
     @Override
     public Multi<StreamingInferenceChunk> inferStream(ProviderRequest request) {
         if (isSafetensorModel(request)) {
-            LOG.info("Native engine delegating streaming Safetensor evaluation to DirectSafetensorBackend");
-            ProviderRequest resolved = requestWithResolvedModelPath(request);
-            return directSafetensorBackend.inferStream(resolved)
-                    .onFailure().recoverWithMulti(failure -> {
-                        LOG.warn("DirectSafetensorBackend failed, attempting LibTorch fallback", failure);
-                        StreamingProvider libtorch = resolveLibTorchFallback();
-                        if (libtorch != null) {
-                            return libtorch.inferStream(resolved);
-                        }
-                        return Multi.createFrom().failure(failure);
-                    });
+            throw new UnsupportedOperationException("Safetensor support is currently disabled in the native engine");
         }
 
         return Multi.createFrom().emitter(emitter -> {
@@ -298,13 +290,28 @@ public class NativeLLMProvider implements StreamingProvider {
     private synchronized NativeInferenceEngine getOrLoadEngine(String modelPath) throws Exception {
         if (!engineCache.containsKey(modelPath)) {
             GGUFModel model = GGUFLoader.loadModel(Path.of(modelPath));
-            NativeInferenceEngine engine = new NativeInferenceEngine(model);
+            String arch = (String) model.metadata().getOrDefault("general.architecture", "llama");
+            if (arch.equals("gemma")) {
+                Object aCap = model.metadata().get(arch + ".attention.logit_softcapping");
+                int nLayers = 0;
+                Object blockCountObj = model.metadata().get(arch + ".block_count");
+                if (blockCountObj instanceof Number n)
+                    nLayers = n.intValue();
+                if (aCap != null || nLayers == 42 || nLayers == 26 || nLayers == 46
+                        || model.tensors().stream().anyMatch(t -> t.name().contains("post_attention_layernorm"))) {
+                    arch = "gemma2";
+                }
+                System.out.println("Heuristic: aCap=" + aCap + ", nLayers=" + nLayers + " -> arch=" + arch);
+            }
+            tech.kayys.gollek.spi.model.ModelArchitecture architecture = architectureRegistry.resolveGguf(arch);
+            NativeInferenceEngine engine = new NativeInferenceEngine(model, architecture);
             engineCache.put(modelPath, engine);
         }
         return engineCache.get(modelPath);
     }
 
-    private void executeInference(ProviderRequest request, MultiEmitter<? super StreamingInferenceChunk> emitter) throws Exception {
+    private void executeInference(ProviderRequest request, MultiEmitter<? super StreamingInferenceChunk> emitter)
+            throws Exception {
         String modelPath = request.getParameter("model_path", String.class)
                 .or(() -> Optional.ofNullable((String) request.getMetadata().get("model_path")))
                 .orElse(request.getModel());
@@ -312,7 +319,7 @@ public class NativeLLMProvider implements StreamingProvider {
         long loadStartTime = System.nanoTime();
         NativeInferenceEngine engine = getOrLoadEngine(modelPath);
         long loadEndTime = System.nanoTime();
-        
+
         GGUFTokenizer tokenizer = new GGUFTokenizer(engine.getModel());
 
         // 1. Prepare prompt with ChatTemplate
@@ -322,41 +329,85 @@ public class NativeLLMProvider implements StreamingProvider {
         String promptText = template.apply(request.getMessages());
 
         System.out.println("Encoding prompt...");
-        long[] tokens = tokenizer.encode(promptText, EncodeOptions.builder().build());
+        long[] baseTokens = tokenizer.encode(promptText, EncodeOptions.builder().build());
+        long[] tokens;
+        if (tokenizer instanceof GGUFTokenizer gt && gt.shouldAddBos() && gt.bosTokenId() >= 0) {
+            tokens = new long[baseTokens.length + 1];
+            tokens[0] = gt.bosTokenId();
+            System.arraycopy(baseTokens, 0, tokens, 1, baseTokens.length);
+        } else {
+            tokens = baseTokens;
+        }
         System.out.println("Encoded " + tokens.length + " tokens.");
-        
+        for (int i = 0; i < tokens.length; i++) {
+            System.out.println("Token [" + i + "]: " + tokens[i] + " -> '" + tokenizer.decode(new long[]{tokens[i]}, null) + "'");
+        }
+
         try (NativeInferenceSession session = new NativeInferenceSession(engine, 4096)) {
-            System.out.println("Starting pre-fill...");
+            System.out.println("Starting optimized batch pre-fill...");
             long prefillStartTime = System.nanoTime();
-            
-            // Prefill loop (process all but the last prompt token)
-            for (int i = 0; i < tokens.length - 1; i++) {
-                if (i % 10 == 0 && i > 0) System.out.println("Pre-fill progress: " + i + "/" + (tokens.length - 1));
-                session.tick((int) tokens[i], executor);
+
+            // 1. Embedding lookup for all prompt tokens
+            int nPrompt = tokens.length - 1;
+            MemorySegment[] xBatch = new MemorySegment[nPrompt];
+            for (int t = 0; t < nPrompt; t++) {
+                xBatch[t] = session.getArena().allocate(engine.getHidden() * 4, 64);
+                session.lookupEmbedding((int) tokens[t], xBatch[t]);
             }
-            System.out.println("Pre-fill complete.");
+
+            // 2. Process layer by layer
+            int ffnDim = engine.getFfnDim();
+            for (int i = 0; i < engine.getNLayers(); i++) {
+                System.out.print("\rPre-filling layer " + i + "/" + engine.getNLayers() + "... ");
+                System.out.flush();
+
+                // Dequantize this layer's weights ONCE for the whole batch
+                try (java.lang.foreign.Arena layerArena = java.lang.foreign.Arena.ofConfined()) {
+                    tech.kayys.gollek.gguf.loader.TransformerLayerWeights dequantWeights = engine.getLayers().get(i)
+                            .dequantize(layerArena);
+
+                    // Process all tokens for this layer
+                    for (int t = 0; t < nPrompt; t++) {
+                        FusedTransformerLayer.execute(
+                                i, t, xBatch[t], xBatch[t], // use same buffer for in/out
+                                dequantWeights, session.getLayerBuffers().get(i), session.getKvCache(),
+                                engine.getRopeCache(), engine.getHidden(), engine.getNHeads(),
+                                engine.getNHeadsKv(), engine.getHeadDim(), engine.isNeox(),
+                                engine.getEps(), engine.getAttnSoftCap(),
+                                engine.getArchitecture().addOneToRmsNormWeight(),
+                                engine.getArchitecture().activationType(), executor);
+                    }
+                }
+            }
+            System.out.println("\nPre-fill complete.");
+
+            // 3. Last prompt token goes to the session residual 'x'
+            session.setPos(nPrompt);
+            session.lookupEmbedding((int) tokens[tokens.length - 1], session.getX());
 
             long prefillEndTime = System.nanoTime();
+
             long firstTokenTime = 0;
-            
+
             int lastToken = (int) tokens[tokens.length - 1];
             int maxNewTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 512;
-            
+
             System.out.println("Starting generation loop...");
 
-
-            
             // Extract sampling parameters using standardized helper methods
             float temperature = request.getTemperature() > 0 ? (float) request.getTemperature() : 1.0f;
             int topK = request.getTopK() > 0 ? request.getTopK() : 40;
             float topP = request.getTopP() > 0 ? (float) request.getTopP() : 0.9f;
             float repPenalty = request.getRepeatPenalty() > 0 ? (float) request.getRepeatPenalty() : 1.1f;
 
-            // Handle greedy decoding explicitly if temperature is set to exactly 0 in request
-            if (request.getTemperature() == 0.0) temperature = 0.0f;
+            // Handle greedy decoding explicitly if temperature is set to exactly 0 in
+            // request
+            if (request.getTemperature() == 0.0)
+                temperature = 0.0f;
 
             List<Integer> tokenHistory = new ArrayList<>();
-            for (long t : tokens) tokenHistory.add((int) t);
+            for (long t : tokens)
+                tokenHistory.add((int) t);
 
             int generatedCount = 0;
             // Robust vocab size lookup
@@ -367,50 +418,54 @@ public class NativeLLMProvider implements StreamingProvider {
 
                 for (int i = 0; i < maxNewTokens; i++) {
                     MemorySegment hidden = session.tick(lastToken, executor);
-                    
-                    if (i == 0) firstTokenTime = System.nanoTime();
+
+                    if (i == 0)
+                        firstTokenTime = System.nanoTime();
 
                     // Logit Projection
-                    LogitProjectionKernel.execute(hidden, engine.getOutputWeight(), logits, engine.getHidden(), vocabSize, engine.getFinalSoftCap());
-                    
+                    LogitProjectionKernel.execute(hidden, engine.getOutputWeight(), logits, engine.getHidden(),
+                            vocabSize, engine.getFinalSoftCap(), executor);
+
                     // Controlled Sampling
-                    lastToken = SamplingKernel.sample(logits, vocabSize, temperature, topK, topP, repPenalty, tokenHistory);
+                    lastToken = SamplingKernel.sample(logits, vocabSize, temperature, topK, topP, repPenalty,
+                            tokenHistory);
                     tokenHistory.add(lastToken);
                     generatedCount++;
 
-                    if (tokenizer.isEosToken(lastToken)) break;
+                    if (tokenizer.isEosToken(lastToken))
+                        break;
 
-                    String delta = tokenizer.decode(new long[]{lastToken}, null);
+                    String delta = tokenizer.decode(new long[] { lastToken }, null);
                     emitter.emit(StreamingInferenceChunk.of(request.getRequestId(), i, delta));
                 }
             }
 
             long generationEndTime = System.nanoTime();
-            
+
             // 2. Wrap up metrics
             Map<String, Object> metrics = new HashMap<>();
             metrics.put("bench.load_ms", (loadEndTime - loadStartTime) / 1_000_000.0);
             metrics.put("bench.prefill_ms", (prefillEndTime - prefillStartTime) / 1_000_000.0);
             metrics.put("bench.decode_ms", (generationEndTime - prefillEndTime) / 1_000_000.0);
             metrics.put("bench.ttft_ms", (firstTokenTime - prefillStartTime) / 1_000_000.0);
-            
+
             double prefillTps = (tokens.length - 1) / ((prefillEndTime - prefillStartTime) / 1_000_000_000.0);
             double genTps = generatedCount / ((generationEndTime - prefillEndTime) / 1_000_000_000.0);
-            
+
             metrics.put("bench.prefill_tps", prefillTps);
             metrics.put("bench.generation_tps", genTps);
             metrics.put("tokens.input", tokens.length);
             metrics.put("tokens.output", generatedCount);
 
             emitter.emit(StreamingInferenceChunk.withMetadata(
-                request.getRequestId(), 
-                generatedCount, 
-                "", 
-                metrics
-            ));
-            
-            LOG.infof("Inference Bench: Prefill %.2f t/s, Gen %.2f t/s, TTFT %.2f ms", prefillTps, genTps, (firstTokenTime - prefillStartTime) / 1_000_000.0);
-            
+                    request.getRequestId(),
+                    generatedCount,
+                    "",
+                    metrics));
+
+            LOG.infof("Inference Bench: Prefill %.2f t/s, Gen %.2f t/s, TTFT %.2f ms", prefillTps, genTps,
+                    (firstTokenTime - prefillStartTime) / 1_000_000.0);
+
             emitter.complete();
         }
     }

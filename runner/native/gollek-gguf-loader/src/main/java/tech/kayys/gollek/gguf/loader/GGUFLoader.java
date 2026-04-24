@@ -87,6 +87,7 @@ public final class GGUFLoader {
 
         
         System.out.println("Loading " + nLayer + " layers: arch=" + arch + ", hidden=" + hidden + ", nHeads=" + nHeads + ", nHeadsKv=" + nHeadsKv);
+        System.out.println("headDim=" + headDim + " -> Q size=" + (nHeads * headDim) + ", K/V size=" + (nHeadsKv * headDim));
 
         List<TransformerLayerWeights> layers = new ArrayList<>(nLayer);
 
@@ -130,9 +131,20 @@ public final class GGUFLoader {
             MemorySegment packed = QKVPrepacker.prepack(wqkv, hidden, nHeads, nHeadsKv, headDim, arena);
 
             TensorData wo = findTensorLazy(model, prefix + "attn_output.weight");
+            if (i == 0) {
+                GGUFTensorInfo woInfo = model.tensors().stream()
+                    .filter(t -> t.name().equals(prefix + "attn_output.weight"))
+                    .findFirst().orElse(null);
+                if (woInfo != null) {
+                    System.out.println("wo[0] shape: " + java.util.Arrays.toString(woInfo.shape()) + 
+                        " type=" + woInfo.typeId() + " elements=" + wo.numElements());
+                }
+            }
             MemorySegment bo = findAndPrepareTensorOptional(model, prefix + "attn_output.bias", arena);
 
             MemorySegment ffnNorm = findAndPrepareTensor(model, prefix + "ffn_norm.weight", arena);
+            MemorySegment postAttnNorm = findAndPrepareTensorOptional(model, prefix + "post_attention_layernorm.weight", arena);
+            MemorySegment postFfnNorm = findAndPrepareTensorOptional(model, prefix + "post_feedforward_layernorm.weight", arena);
             
             TensorData wG = findTensorLazy(model, prefix + "ffn_gate.weight");
             MemorySegment bg = findAndPrepareTensorOptional(model, prefix + "ffn_gate.bias", arena);
@@ -150,6 +162,8 @@ public final class GGUFLoader {
                 wo,
                 bo,
                 ffnNorm,
+                postAttnNorm,
+                postFfnNorm,
                 wG,
                 bg,
                 wU,
@@ -170,7 +184,9 @@ public final class GGUFLoader {
             .orElseThrow(() -> new IllegalArgumentException("Tensor not found: " + name));
 
         MemorySegment raw = model.segment().asSlice(model.dataStart() + info.offset(), info.sizeInBytes());
-        return new TensorData(raw, info.typeId());
+        long numElements = 1;
+        for (long d : info.shape()) numElements *= d;
+        return new TensorData(raw, info.typeId(), numElements);
     }
 
 

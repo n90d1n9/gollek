@@ -46,7 +46,7 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-safetensor-text</artifactId>
+            <artifactId>gollek-model-core</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -78,7 +78,7 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-models-family</artifactId>
+            <artifactId>gollek-model-core</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

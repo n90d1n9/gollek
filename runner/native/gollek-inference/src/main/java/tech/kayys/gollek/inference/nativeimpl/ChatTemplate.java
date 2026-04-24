@@ -16,8 +16,30 @@ public interface ChatTemplate {
         if (lower.contains("qwen") || lower.contains("llama-3")) {
             return new ChatMLTemplate();
         }
+        if (lower.contains("gemma")) {
+            return new GemmaTemplate();
+        }
         // Add more templates as needed
         return new DefaultTemplate();
+    }
+}
+
+/**
+ * Gemma chat template used by Google Gemma/Gemma-2.
+ */
+class GemmaTemplate implements ChatTemplate {
+    @Override
+    public String apply(List<Message> messages) {
+        StringBuilder sb = new StringBuilder();
+        for (Message msg : messages) {
+            String role = msg.getRole() != null ? msg.getRole().name().toLowerCase() : "user";
+            if (role.equals("assistant")) role = "model";
+            sb.append("<start_of_turn>").append(role).append("\n")
+              .append(msg.getContent())
+              .append("<end_of_turn>\n");
+        }
+        sb.append("<start_of_turn>model\n");
+        return sb.toString();
     }
 }
 

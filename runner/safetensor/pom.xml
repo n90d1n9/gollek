@@ -29,7 +29,6 @@
         <module>gollek-safetensor-core</module>
 
         <!-- Domain-Specific Modules -->
-        <module>gollek-safetensor-text</module>
         <module>gollek-safetensor-audio</module>
         <module>gollek-safetensor-vision</module>
 

@@ -16,7 +16,7 @@ import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.safetensor.engine.generation.TextInferenceEngine;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
-import tech.kayys.gollek.safetensor.text.ChatTemplateFormatter;
+import tech.kayys.gollek.models.core.ChatTemplateFormatter;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.provider.ProviderConfig;

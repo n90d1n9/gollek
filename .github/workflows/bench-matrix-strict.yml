@@ -188,7 +188,7 @@ jobs:
           cat "${RUN_DIR}/gate-alert.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Send webhook alert on gate failure
-        if: always() && env.GATE_STATUS == 'FAIL' && secrets.GOLLEK_BENCH_ALERT_WEBHOOK != ''
+        if: always() && env.GATE_STATUS == 'FAIL' && env.ALERT_WEBHOOK != ''
         shell: bash
         env:
           ALERT_WEBHOOK: ${{ secrets.GOLLEK_BENCH_ALERT_WEBHOOK }}

@@ -31,6 +31,7 @@ public final class FusedFFNKernel {
             MemorySegment out,        // [hidden]
             int hidden,
             int ffnDim,
+            tech.kayys.gollek.spi.model.FFNActivationType activation,
             ExecutorService executor
     ) {
         // Step 1: Up and Gate Projection (SwiGLU) -> stores in ffnState
@@ -71,8 +72,18 @@ public final class FusedFFNKernel {
                         }
                         if (w.bu != null) sumU += w.bu.get(ValueLayout.JAVA_FLOAT, (long) f * 4L);
 
-                        float silu = sumG / (1.0f + (float) Math.exp(-sumG));
-                        float val = silu * sumU;
+                        float act;
+                        switch (activation) {
+                            case GELU -> {
+                                // GELU approximation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+                                float x3 = sumG * sumG * sumG;
+                                float inner = 0.79788456f * (sumG + 0.044715f * x3);
+                                act = 0.5f * sumG * (1.0f + (float) Math.tanh(inner));
+                            }
+                            case SILU -> act = sumG / (1.0f + (float) Math.exp(-sumG));
+                            default -> act = sumG; // Identity
+                        }
+                        float val = act * sumU;
 
                         ffnState.set(ValueLayout.JAVA_FLOAT, (long) f * 4L, val);
                     }
@@ -112,7 +123,7 @@ public final class FusedFFNKernel {
                         }
                         if (w.bd != null) sumD += w.bd.get(ValueLayout.JAVA_FLOAT, (long) h * 4L);
                         
-                        float res = residual.get(ValueLayout.JAVA_FLOAT, (long) h * 4L);
+                        float res = (residual != null) ? residual.get(ValueLayout.JAVA_FLOAT, (long) h * 4L) : 0.0f;
                         out.set(ValueLayout.JAVA_FLOAT, (long) h * 4L, res + sumD);
                     }
                 }

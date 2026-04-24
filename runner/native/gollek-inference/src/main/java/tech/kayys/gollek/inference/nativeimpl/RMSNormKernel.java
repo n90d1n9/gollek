@@ -20,7 +20,8 @@ public final class RMSNormKernel {
             MemorySegment output,
             MemorySegment weight,
             int size,
-            float eps
+            float eps,
+            boolean addOneToWeight
     ) {
         int i = 0;
 
@@ -55,6 +56,10 @@ public final class RMSNormKernel {
 
             var vw = FloatVector.fromMemorySegment(
                     SPECIES, weight, (long) i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+            
+            if (addOneToWeight) {
+                vw = vw.add(1.0f);
+            }
 
             var vy = vx.mul(vInv).mul(vw);
 
@@ -65,6 +70,7 @@ public final class RMSNormKernel {
         for (; i < size; i++) {
             float x = input.get(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES);
             float w = weight.get(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES);
+            if (addOneToWeight) w += 1.0f;
             float y = x * invRms * w;
 
             output.set(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES, y);

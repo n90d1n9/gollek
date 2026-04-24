@@ -135,6 +135,19 @@ public final class GGUFTokenizer implements Tokenizer {
             log.debugf("Inferred %d special tokens from token_type metadata (additional EOS: %s)", specialTokens.size(), additionalEosIds);
         }
 
+        // Final fallback: Ensure known Gemma control tokens are treated as special if they exist in vocab
+        if ("gemma".equalsIgnoreCase(arch) || "gemma2".equalsIgnoreCase(arch)) {
+            String[] gemmaSpecials = {"<start_of_turn>", "<end_of_turn>", "<bos>", "<eos>", "<pad>"};
+            for (String s : gemmaSpecials) {
+                if (!specialTokens.containsKey(s) && tokenToId.containsKey(s)) {
+                    int id = tokenToId.get(s);
+                    specialTokens.put(s, id);
+                    if (s.contains("eos") || s.contains("end_of_turn")) additionalEosIds.add(id);
+                    log.debugf("Forced Gemma special token: %s -> %d", s, id);
+                }
+            }
+        }
+
         // Build byte encoder (used by BPE implementation) - kept backward-compatible
         Map<Character, String> byteEncoder = createByteEncoder();
 
@@ -152,6 +165,7 @@ public final class GGUFTokenizer implements Tokenizer {
                 padId,
                 specialTokens
         );
+        System.out.println("GGUFTokenizer initialized with " + specialTokens.size() + " special tokens: " + specialTokens);
     }
 
     private static boolean isLikelyEosName(String name) {

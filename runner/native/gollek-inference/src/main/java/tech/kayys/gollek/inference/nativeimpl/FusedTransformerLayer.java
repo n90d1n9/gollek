@@ -28,10 +28,12 @@ public final class FusedTransformerLayer {
         boolean isNeox,
         float eps,
         float attnSoftCap,
+        boolean addOneToWeight,
+        tech.kayys.gollek.spi.model.FFNActivationType activation,
         ExecutorService executor
     ) {
         // 1. RMSNorm (Attention) -> buf.norm
-        RMSNormKernel.execute(x, buf.norm, w.rmsWeight, hidden, eps);
+        RMSNormKernel.execute(x, buf.norm, w.rmsWeight, hidden, eps, addOneToWeight);
         
         // 2. QKV Projection -> buf.q, buf.k, buf.v (handles QKV biases)
         PrepackedQKVKernel.computeParallel(buf.norm, w.wqkvPacked, w.bqkv, buf.q, buf.k, buf.v, hidden, numHeads, numHeadsKv, headDim, executor);
@@ -61,14 +63,44 @@ public final class FusedTransformerLayer {
         // 5. FlashAttention -> buf.attnOut
         FlashAttentionKernel.computeParallel(buf.attnOut, buf.q, kvCache, null, layerIdx, pos + 1, numHeads, headDim, attnSoftCap, executor);
 
-        // 6. Output Projection and Residual connection (handles Output bias)
-        LinearResidualKernel.computeParallel(buf.attnOut, w.wo, w.bo, x, x, hidden, hidden, executor);
+        // 6. Output Projection (handles Output bias)
+        // inDim = numHeads * headDim (attention output size), outDim = hidden
+        int attnOutDim = numHeads * headDim;
+        if (w.postAttnNormWeight != null) {
+            LinearResidualKernel.computeParallel(buf.attnOut, w.wo, w.bo, null, buf.norm, attnOutDim, hidden, executor);
+            RMSNormKernel.execute(buf.norm, buf.norm, w.postAttnNormWeight, hidden, eps, addOneToWeight);
+            addInPlace(x, buf.norm, hidden);
+        } else {
+            LinearResidualKernel.computeParallel(buf.attnOut, w.wo, w.bo, x, x, attnOutDim, hidden, executor);
+        }
 
         // 7. RMSNorm (FFN) -> buf.norm
-        RMSNormKernel.execute(x, buf.norm, w.ffnNormWeight, hidden, eps);
+        RMSNormKernel.execute(x, buf.norm, w.ffnNormWeight, hidden, eps, addOneToWeight);
 
-        // 8. FFN & Residual -> xNext (final layer output for this step, handles Gate/Up/Down biases)
+        // 8. FFN
         int ffnDim = (int) (buf.ffn.byteSize() / Float.BYTES);
-        FusedFFNKernel.computeParallel(buf.norm, w, buf.ffn, x, xNext, hidden, ffnDim, executor);
+        if (w.postFfnNormWeight != null) {
+            FusedFFNKernel.computeParallel(buf.norm, w, buf.ffn, null, buf.norm, hidden, ffnDim, activation, executor);
+            RMSNormKernel.execute(buf.norm, buf.norm, w.postFfnNormWeight, hidden, eps, addOneToWeight);
+            addInPlace(x, buf.norm, hidden);
+            MemorySegment.copy(x, 0, xNext, 0, x.byteSize()); // Ensure xNext has the result
+        } else {
+            FusedFFNKernel.computeParallel(buf.norm, w, buf.ffn, x, xNext, hidden, ffnDim, activation, executor);
+        }
+    }
+
+    private static void addInPlace(MemorySegment dest, MemorySegment src, int size) {
+        int i = 0;
+        jdk.incubator.vector.VectorSpecies<Float> SPECIES = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
+        for (; i <= size - SPECIES.length(); i += SPECIES.length()) {
+            var vd = jdk.incubator.vector.FloatVector.fromMemorySegment(SPECIES, dest, (long) i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+            var vs = jdk.incubator.vector.FloatVector.fromMemorySegment(SPECIES, src, (long) i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+            vd.add(vs).intoMemorySegment(dest, (long) i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+        }
+        for (; i < size; i++) {
+            float d = dest.get(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES);
+            float s = src.get(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES);
+            dest.set(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES, d + s);
+        }
     }
 }

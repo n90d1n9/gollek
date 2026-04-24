@@ -12,8 +12,8 @@ SNAPSHOT_REPO_URL=""
 DRY_RUN=false
 SKIP_TESTS=true
 GIT_TAG=false
-GIT_PUSH=false
-BUILD_JAR=true
+GIT_PUSH=true      # Enabled by default
+RUN_MAVEN=true
 SKIP_COMMIT=false
 FORCE=false
 
@@ -39,20 +39,19 @@ usage() {
     echo "  -v, --version <new-version>      Update project version (e.g., 0.1.0 or 1.0.1-SNAPSHOT)"
     echo "  -r, --repo <url>                 Override release repository URL"
     echo "  -s, --snapshot-repo <url>        Override snapshot repository URL"
-    echo "  -t, --tag                        Create git tag for the version"
-    echo "  -p, --push                       Push git tag to remote"
+    echo "  -t, --tag                        Create git tag (auto-enabled for release versions)"
+    echo "  --no-push                        Skip pushing commits and tags to remote"
     echo "  -f, --force                      Force actions (e.g., overwrite existing tags)"
-    echo "  --no-jar                         Skip JAR build"
+    echo "  --no-build                       Skip Maven build and deployment"
     echo "  --keep-tests                     Do not skip tests during build"
     echo "  --skip-commit                    Skip git commit after version update"
     echo "  --dry-run                        Show commands without executing them"
     echo "  -h, --help                       Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 -v 0.1.0                      # Set version to 0.1.0"
-    echo "  $0 -v 0.1.0 -t                   # Set version and create git tag"
-    echo "  $0 -v 0.1.0 -t -p                # Set version, tag, and push"
-    echo "  $0 -v 1.0.0-SNAPSHOT --dry-run   # Dry run with SNAPSHOT version"
+    echo "  $0 -v 0.1.0                      # Version, build/deploy, tag, and PUSH"
+    echo "  $0 -v 0.1.0 --no-push            # Build/deploy and tag locally only"
+    echo "  $0 -v 1.0.0-SNAPSHOT             # Version and build/deploy (no tag, but PUSHES commit)"
     echo ""
     exit 0
 }
@@ -64,9 +63,10 @@ while [[ "$#" -gt 0 ]]; do
         -r|--repo) REPO_URL="$2"; shift ;;
         -s|--snapshot-repo) SNAPSHOT_REPO_URL="$2"; shift ;;
         -t|--tag) GIT_TAG=true ;;
-        -p|--push) GIT_PUSH=true ;;
+        -p|--push) GIT_PUSH=true ;; # Keep for compat
+        --no-push) GIT_PUSH=false ;;
         -f|--force) FORCE=true ;;
-        --no-jar) BUILD_JAR=false ;;
+        --no-build|--no-jar) RUN_MAVEN=false ;;
         --keep-tests) SKIP_TESTS=false ;;
         --skip-commit) SKIP_COMMIT=true ;;
         --dry-run) DRY_RUN=true ;;
@@ -108,10 +108,15 @@ if [ -n "$NEW_VERSION" ]; then
     run_cmd "mvn versions:set -DnewVersion=\"$NEW_VERSION\" -DgenerateBackupPoms=false"
     
     # Commit version changes
+    COMMIT_SUCCESS=false
     if [ "$SKIP_COMMIT" = false ] && [ "$DRY_RUN" = false ]; then
         echo -e "${BLUE}>>> Committing version changes...${NC}"
         git add "**/pom.xml"
-        git commit -m "chore: bump version to $NEW_VERSION" || echo -e "${YELLOW}⚠ No changes to commit or not a git repo${NC}"
+        if git commit -m "chore: bump version to $NEW_VERSION"; then
+            COMMIT_SUCCESS=true
+        else
+            echo -e "${YELLOW}⚠ No changes to commit or not a git repo${NC}"
+        fi
     fi
     
     # Create git tag if requested
@@ -133,9 +138,18 @@ if [ -n "$NEW_VERSION" ]; then
             run_cmd "git tag -a \"$TAG_NAME\" -m \"Release $NEW_VERSION\""
             echo -e "${GREEN}✓ Git tag created: $TAG_NAME${NC}"
         fi
+    fi
+
+    # Push to remote if enabled
+    if [ "$GIT_PUSH" = true ] && [ "$DRY_RUN" = false ]; then
+        CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+        echo -e "${BLUE}>>> Pushing to remote (branch: $CURRENT_BRANCH)...${NC}"
         
-        # Push tag if requested
-        if [ "$GIT_PUSH" = true ]; then
+        # Push the branch/commits
+        run_cmd "git push origin $CURRENT_BRANCH"
+
+        # Push the tag if it was created
+        if [ "$GIT_TAG" = true ]; then
             echo -e "${BLUE}>>> Pushing git tag to remote...${NC}"
             if [ "$FORCE" = true ]; then
                 run_cmd "git push origin :refs/tags/\"$TAG_NAME\" || true"
@@ -143,40 +157,38 @@ if [ -n "$NEW_VERSION" ]; then
             else
                 run_cmd "git push origin \"$TAG_NAME\""
             fi
-            echo -e "${GREEN}✓ Git tag pushed: $TAG_NAME${NC}"
         fi
+        echo -e "${GREEN}✓ Pushed to remote successfully${NC}"
     fi
     
     echo -e "${GREEN}✓ Version updated to $NEW_VERSION${NC}"
     echo ""
 fi
 
-# Build Deployment Arguments
-MVN_ARGS="clean deploy"
+# Build and Deployment
+if [ "$RUN_MAVEN" = true ]; then
+    MVN_ARGS="clean install deploy"
 
-if [ "$SKIP_TESTS" = true ]; then
-    MVN_ARGS="$MVN_ARGS -DskipTests"
-fi
+    if [ "$SKIP_TESTS" = true ]; then
+        MVN_ARGS="$MVN_ARGS -DskipTests"
+    fi
 
-if [ "$BUILD_JAR" = false ]; then
-    MVN_ARGS="clean"
-    echo -e "${YELLOW}⚠ JAR build skipped (--no-jar)${NC}"
-fi
+    if [ -n "$REPO_URL" ]; then
+        MVN_ARGS="$MVN_ARGS -Ddeployment.repo.url=$REPO_URL"
+    fi
 
-if [ -n "$REPO_URL" ]; then
-    MVN_ARGS="$MVN_ARGS -Ddeployment.repo.url=$REPO_URL"
-fi
+    if [ -n "$SNAPSHOT_REPO_URL" ]; then
+        MVN_ARGS="$MVN_ARGS -Ddeployment.snapshot.repo.url=$SNAPSHOT_REPO_URL"
+    fi
 
-if [ -n "$SNAPSHOT_REPO_URL" ]; then
-    MVN_ARGS="$MVN_ARGS -Ddeployment.snapshot.repo.url=$SNAPSHOT_REPO_URL"
-fi
-
-# Execution
-echo -e "${BLUE}>>> Running deployment: mvn $MVN_ARGS${NC}"
-if [ "$DRY_RUN" = true ]; then
-    echo -e "${YELLOW}[DRY-RUN]${NC} mvn $MVN_ARGS"
+    echo -e "${BLUE}>>> Running deployment: mvn $MVN_ARGS${NC}"
+    if [ "$DRY_RUN" = true ]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} mvn $MVN_ARGS"
+    else
+        mvn $MVN_ARGS
+    fi
 else
-    mvn $MVN_ARGS
+    echo -e "${YELLOW}⚠ Maven build and deployment skipped (--no-build)${NC}"
 fi
 
 echo ""
@@ -192,8 +204,11 @@ if [ -n "$NEW_VERSION" ]; then
     if [ "$GIT_TAG" = true ]; then
         echo -e "  Git Tag:  ${GREEN}$NEW_VERSION${NC}"
     fi
-    if [ "$GIT_PUSH" = true ]; then
-        echo -e "  Pushed:   ${GREEN}Yes${NC}"
+    echo -e "  Pushed:   $( [ "$GIT_PUSH" = true ] && echo -e "${GREEN}Yes${NC}" || echo -e "${YELLOW}No${NC}" )"
+    if [ "$RUN_MAVEN" = true ]; then
+        echo -e "  Build:    ${GREEN}clean install deploy${NC}"
+    else
+        echo -e "  Build:    ${YELLOW}Skipped${NC}"
     fi
     echo ""
 fi

@@ -17,6 +17,8 @@ public final class TransformerLayerWeights {
     public final MemorySegment bo;               // [hidden] (Bias for output projection)
 
     public final MemorySegment ffnNormWeight;    // [hidden]
+    public final MemorySegment postAttnNormWeight; // [hidden] Optional for Gemma 2
+    public final MemorySegment postFfnNormWeight;  // [hidden] Optional for Gemma 2
 
     public final TensorData wG;               // [ffnDim, hidden]
     public final MemorySegment bg;               // [ffnDim] (Bias for gate projection)
@@ -32,6 +34,8 @@ public final class TransformerLayerWeights {
             TensorData wo,
             MemorySegment bo,
             MemorySegment ffnNormWeight,
+            MemorySegment postAttnNormWeight,
+            MemorySegment postFfnNormWeight,
             TensorData wG,
             MemorySegment bg,
             TensorData wU,
@@ -44,6 +48,8 @@ public final class TransformerLayerWeights {
         this.wo = wo;
         this.bo = bo;
         this.ffnNormWeight = ffnNormWeight;
+        this.postAttnNormWeight = postAttnNormWeight;
+        this.postFfnNormWeight = postFfnNormWeight;
         this.wG = wG;
         this.bg = bg;
         this.wU = wU;
@@ -52,19 +58,21 @@ public final class TransformerLayerWeights {
         this.bd = bd;
     }
 
-    public TransformerLayerWeights dequantize(java.lang.foreign.Arena arena, int hidden, int ffnDim) {
+    public TransformerLayerWeights dequantize(java.lang.foreign.Arena arena) {
         return new TransformerLayerWeights(
             rmsWeight,
             wqkvPacked,
             bqkv,
-            wo.dequantize(arena, (long) hidden * hidden),
+            wo.dequantize(arena),
             bo,
             ffnNormWeight,
-            wG.dequantize(arena, (long) ffnDim * hidden),
+            postAttnNormWeight,
+            postFfnNormWeight,
+            wG.dequantize(arena),
             bg,
-            wU.dequantize(arena, (long) ffnDim * hidden),
+            wU.dequantize(arena),
             bu,
-            wD.dequantize(arena, (long) hidden * ffnDim),
+            wD.dequantize(arena),
             bd
         );
     }

@@ -26,7 +26,7 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import tech.kayys.gollek.safetensor.models.ModelArchitectureRegistry;
+import tech.kayys.gollek.models.core.ModelArchitectureRegistry;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 
 /**

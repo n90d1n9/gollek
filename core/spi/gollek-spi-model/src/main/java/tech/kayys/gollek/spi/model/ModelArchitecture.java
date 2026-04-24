@@ -146,6 +146,11 @@ public interface ModelArchitecture {
     default String layerKeyNormWeight(int i) { return null; }
 
     // ── Architecture properties ───────────────────────────────────────────────
+    
+    /** The activation function used in the FFN (e.g. SiLU, GELU). */
+    default FFNActivationType activationType() {
+        return FFNActivationType.SILU;
+    }
 
     /** Whether this architecture uses RMSNorm (true) or LayerNorm (false). */
     default boolean usesRmsNorm() {
@@ -186,5 +191,71 @@ public interface ModelArchitecture {
      */
     default int slidingWindowSize() {
         return Integer.MAX_VALUE;
+    }
+
+    // ── Runtime inference behaviors ──────────────────────────────────────────
+
+    /**
+     * Embedding scale factor applied after token embedding lookup.
+     * Gemma models multiply embeddings by sqrt(hidden_dim).
+     * Most other architectures return 1.0 (no scaling).
+     *
+     * @param hiddenDim the model's hidden dimension
+     * @return the scale factor to multiply embeddings by
+     */
+    default float embeddingScaleFactor(int hiddenDim) {
+        return 1.0f;
+    }
+
+    /**
+     * Whether this architecture uses Neox-style RoPE (split-half rotation)
+     * or interleaved (LLaMA/GPT-J style, adjacent-pair rotation).
+     *
+     * @return true for Neox style, false for interleaved
+     */
+    default boolean usesNeoxRope() {
+        return true;
+    }
+
+    /**
+     * Default attention logit soft-capping value.
+     * Gemma-2 uses 50.0. Most architectures return 0 (disabled).
+     */
+    default float defaultAttnSoftCap() {
+        return 0.0f;
+    }
+
+    /**
+     * Default final logit soft-capping value.
+     * Gemma-2 uses 30.0. Most architectures return 0 (disabled).
+     */
+    default float defaultFinalSoftCap() {
+        return 0.0f;
+    }
+
+    /**
+     * Default RoPE frequency base for this architecture.
+     */
+    default float defaultRopeFreqBase() {
+        return 10000.0f;
+    }
+
+    /**
+     * Whether this architecture requires adding 1.0 to the RMSNorm weights.
+     * Used by Gemma models which store w-1.
+     */
+    default boolean addOneToRmsNormWeight() {
+        return false;
+    }
+
+    /**
+     * Whether the GGUF architecture string matches this family.
+     * Used for non-CDI resolution in the native inference path.
+     *
+     * @param ggufArch the architecture string from GGUF metadata (e.g. "gemma", "llama")
+     * @return true if this family handles the given arch
+     */
+    default boolean matchesGgufArch(String ggufArch) {
+        return id().equals(ggufArch) || supportedModelTypes().contains(ggufArch);
     }
 }

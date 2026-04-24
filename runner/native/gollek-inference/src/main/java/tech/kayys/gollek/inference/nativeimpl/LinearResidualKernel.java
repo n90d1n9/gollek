@@ -54,7 +54,7 @@ public final class LinearResidualKernel {
                             sum = dot(in, weight.segment(), (long) h * inDim, inDim);
                         }
                         
-                        float res = residual.get(ValueLayout.JAVA_FLOAT, (long) h * 4L);
+                        float res = (residual != null) ? residual.get(ValueLayout.JAVA_FLOAT, (long) h * 4L) : 0.0f;
                         float b = (bias != null) ? bias.get(ValueLayout.JAVA_FLOAT, (long) h * 4L) : 0.0f;
                         out.set(ValueLayout.JAVA_FLOAT, (long) h * 4L, res + b + sum);
                     }

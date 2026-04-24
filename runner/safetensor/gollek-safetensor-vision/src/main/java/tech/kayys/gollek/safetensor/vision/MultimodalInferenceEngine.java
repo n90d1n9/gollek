@@ -59,7 +59,7 @@ import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
-import tech.kayys.gollek.safetensor.models.ModelArchitectureRegistry;
+import tech.kayys.gollek.models.core.ModelArchitectureRegistry;
 import tech.kayys.gollek.safetensor.spi.EncodedInput;
 import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
@@ -170,7 +170,7 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
                         model.config().hiddenSize());
 
                 VisionEncoder.ImageEmbedding imgEmb = visionEncoder.encode(imageBytes, format,
-                        ((Map<String, AccelTensor>)(Map<?, ?>)model.weights()), visionCfg);
+                        ((Map<String, AccelTensor>) (Map<?, ?>) model.weights()), visionCfg);
 
                 // ── 2. Tokenize text prompt ───────────────────────────────────
                 String prompt = visionRegistry.buildPrompt(model.config().modelType(), textPrompt);
@@ -181,38 +181,45 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
 
                 // ── 3. Fusion ─────────────────────────────────────────────────
                 List<EncodedInput> inputs = new ArrayList<>();
-                
+
                 // Lookup text embeddings
-                AccelTensor embedTable = ((Map<String, AccelTensor>)(Map<?, ?>)model.weights()).get(arch.embedTokensWeight());
+                AccelTensor embedTable = ((Map<String, AccelTensor>) (Map<?, ?>) model.weights())
+                        .get(arch.embedTokensWeight());
                 AccelTensor textEmbeds = forwardPass.embeddingLookup(embedTable, textIds);
                 float[] textRaw = textEmbeds.toFloatArray();
                 float[][] textEmbArray = new float[textIds.length][model.config().hiddenSize()];
                 for (int i = 0; i < textIds.length; i++) {
-                    System.arraycopy(textRaw, i * model.config().hiddenSize(), textEmbArray[i], 0, model.config().hiddenSize());
+                    System.arraycopy(textRaw, i * model.config().hiddenSize(), textEmbArray[i], 0,
+                            model.config().hiddenSize());
                 }
                 textEmbeds.close();
-                
-                inputs.add(new EncodedInput(ModalityType.TEXT, textEmbArray, textIds.length, model.config().hiddenSize()));
-                
+
+                inputs.add(
+                        new EncodedInput(ModalityType.TEXT, textEmbArray, textIds.length, model.config().hiddenSize()));
+
                 // Convert Image AccelTensor to float[][] for fusion
                 float[] rawEmb = imgEmb.embeddings().toFloatArray();
                 float[][] imgEmbArray = new float[imgEmb.numPatches()][imgEmb.llmDim()];
                 for (int i = 0; i < imgEmb.numPatches(); i++) {
                     System.arraycopy(rawEmb, i * imgEmb.llmDim(), imgEmbArray[i], 0, imgEmb.llmDim());
                 }
-                inputs.add(new EncodedInput(ModalityType.IMAGE, imgEmbArray, imgEmb.numPatches(), model.config().hiddenSize()));
-                
-                tech.kayys.gollek.safetensor.spi.FusionEngine.FusionResult fusion = fusionEngine.fuse(inputs, model.config(), null);
+                inputs.add(new EncodedInput(ModalityType.IMAGE, imgEmbArray, imgEmb.numPatches(),
+                        model.config().hiddenSize()));
+
+                tech.kayys.gollek.safetensor.spi.FusionEngine.FusionResult fusion = fusionEngine.fuse(inputs,
+                        model.config(), null);
 
                 // ── 4. Prefill ────────────────────────────────────────────────
-                KVCacheManager.KVCacheSession kvSession = kvCacheManager.createSession(model.config().maxPositionEmbeddings());
-                
+                KVCacheManager.KVCacheSession kvSession = kvCacheManager
+                        .createSession(model.config().maxPositionEmbeddings());
+
                 // Convert fused embeddings to AccelTensor
                 float[] flatEmbeds = flatten(fusion.embeddings());
-                AccelTensor fusedTensor = AccelTensor.fromFloatArray(flatEmbeds, 
+                AccelTensor fusedTensor = AccelTensor.fromFloatArray(flatEmbeds,
                         new long[] { 1, fusion.totalTokens(), model.config().hiddenSize() });
-                
-                float[] logits = forwardPass.prefill(fusedTensor, textIds, ((Map<String, AccelTensor>)(Map<?, ?>)model.weights()), model.config(), arch, kvSession);
+
+                float[] logits = forwardPass.prefill(fusedTensor, textIds,
+                        ((Map<String, AccelTensor>) (Map<?, ?>) model.weights()), model.config(), arch, kvSession);
                 fusedTensor.close();
                 imgEmb.close();
 
@@ -228,7 +235,8 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
                     out.append(piece);
                     generated++;
 
-                    logits = forwardPass.decode(nextToken, startPos, ((Map<String, AccelTensor>)(Map<?, ?>)model.weights()), model.config(), arch, kvSession);
+                    logits = forwardPass.decode(nextToken, startPos,
+                            ((Map<String, AccelTensor>) (Map<?, ?>) model.weights()), model.config(), arch, kvSession);
                     nextToken = sampler.sample(logits, cfg, new int[0]);
                     startPos++;
                 }
@@ -242,7 +250,8 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
                         .inputTokens(fusion.totalTokens())
                         .outputTokens(generated)
                         .durationMs(Duration.between(t0, Instant.now()).toMillis())
-                        .finishReason(generated >= maxTokens ? InferenceResponse.FinishReason.LENGTH : InferenceResponse.FinishReason.STOP)
+                        .finishReason(generated >= maxTokens ? InferenceResponse.FinishReason.LENGTH
+                                : InferenceResponse.FinishReason.STOP)
                         .metadata("backend", "direct-multimodal")
                         .metadata("image_tokens", imgEmb.numPatches())
                         .build();
@@ -257,7 +266,6 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
-
 
     private SafetensorEngine.LoadedModel requireModel(Path path) {
         SafetensorEngine.LoadedModel m = engine.getLoadedModel(path);
@@ -288,7 +296,8 @@ public class MultimodalInferenceEngine implements SafetensorFeature {
     }
 
     private static float[] flatten(float[][] data) {
-        if (data == null || data.length == 0) return new float[0];
+        if (data == null || data.length == 0)
+            return new float[0];
         int rows = data.length;
         int cols = data[0].length;
         float[] flat = new float[rows * cols];

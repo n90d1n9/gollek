@@ -44,9 +44,7 @@ public final class NativeInferenceSession implements AutoCloseable {
         );
         
         this.layerBuffers = new ArrayList<>();
-        String arch = (String) engine.getModel().metadata().getOrDefault("general.architecture", "llama");
-        int ffnDim = ((Number) engine.getModel().metadata().getOrDefault(arch + ".feed_forward_length", 
-                    engine.getModel().metadata().get("llama.feed_forward_length"))).intValue();
+        int ffnDim = engine.getFfnDim();
         for (int i = 0; i < engine.getNLayers(); i++) {
             layerBuffers.add(new LayerBuffers(arena, engine.getHidden(), engine.getNHeadsKv(), engine.getHeadDim(), ffnDim));
         }
@@ -55,67 +53,59 @@ public final class NativeInferenceSession implements AutoCloseable {
         this.xNext = arena.allocate((long) engine.getHidden() * Float.BYTES, 64);
     }
 
-    /**
-     * Executes a single forward pass for a single token.
-     */
     public MemorySegment tick(int tokenId, ExecutorService executor) {
-        // 1. Token Embedding Lookup
         lookupEmbedding(tokenId, x);
         
-        // 2. Transformer Layers
         for (int i = 0; i < engine.getNLayers(); i++) {
             TransformerLayerWeights weights = engine.getLayers().get(i);
             LayerBuffers buffers = layerBuffers.get(i);
             
             FusedTransformerLayer.execute(
-                i, 
-                pos, 
-                x, 
-                xNext, 
-                weights, 
-                buffers, 
-                kvCache, 
-                engine.getRopeCache(),
-                engine.getHidden(),
-                engine.getNHeads(),
-                engine.getNHeadsKv(),
-                engine.getHeadDim(),
-                engine.isNeox(),
-                engine.getEps(),
-                engine.getAttnSoftCap(),
-                executor
+                i, pos, x, xNext, weights, buffers, kvCache, 
+                engine.getRopeCache(), engine.getHidden(), engine.getNHeads(),
+                engine.getNHeadsKv(), engine.getHeadDim(), engine.isNeox(),
+                engine.getEps(), engine.getAttnSoftCap(),
+                engine.getArchitecture().addOneToRmsNormWeight(),
+                engine.getArchitecture().activationType(), executor
             );
             
-            // Swap buffers for residual stream (or copy back if execute doesn't swap)
             MemorySegment.copy(xNext, 0, x, 0, x.byteSize());
         }
         
-        // 3. Final Norm and Logit Projection
-        RMSNormKernel.execute(x, xNext, engine.getOutputNorm(), engine.getHidden(), engine.getEps());
-        
-        // For simplified prototype: we return the normalized output vector.
-        // The provider will handle the sampling and logit projection.
+        RMSNormKernel.execute(x, xNext, engine.getOutputNorm(), engine.getHidden(), engine.getEps(), engine.getArchitecture().addOneToRmsNormWeight());
         pos++;
         return xNext;
     }
 
-    private void lookupEmbedding(int tokenId, MemorySegment dst) {
+    public void setPos(int pos) { this.pos = pos; }
+    public Arena getArena() { return arena; }
+    public KVCache getKvCache() { return kvCache; }
+    public List<LayerBuffers> getLayerBuffers() { return layerBuffers; }
+    public MemorySegment getX() { return x; }
+
+    public void lookupEmbedding(int tokenId, MemorySegment dst) {
         tech.kayys.gollek.gguf.loader.TensorData embd = engine.getTokenEmbeddings();
         if (embd.isQ8_0()) {
             long blocksPerRow = engine.getHidden() / 32;
-            long bytesPerRow = blocksPerRow * 34; // 34 bytes per Q8_0 block
+            long bytesPerRow = blocksPerRow * 34;
             long offset = (long) tokenId * bytesPerRow;
             tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeQ8_0(embd.segment(), offset, dst, engine.getHidden());
         } else if (embd.isF16()) {
             long offset = (long) tokenId * engine.getHidden() * 2L;
             tech.kayys.gollek.gguf.loader.GGUFDequantizer.dequantizeF16(embd.segment(), offset, dst, engine.getHidden());
         } else {
-            long offset = (long) tokenId * engine.getHidden() * Float.BYTES;
-            MemorySegment.copy(embd.segment(), offset, dst, 0, dst.byteSize());
+            MemorySegment.copy(embd.segment(), (long) tokenId * engine.getHidden() * 4L, dst, 0, (long) engine.getHidden() * 4L);
+        }
+
+        float scale = engine.getArchitecture().embeddingScaleFactor(engine.getHidden());
+        if (scale != 1.0f) {
+            for (int i = 0; i < engine.getHidden(); i++) {
+                float v = dst.get(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES);
+                dst.set(ValueLayout.JAVA_FLOAT, (long) i * Float.BYTES, v * scale);
+            }
         }
     }
 
-    public int getPos() { return pos; }
 
     @Override
     public void close() {

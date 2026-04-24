@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The high-level orchestrator for the native inference runtime.
- * Maintains the model weights and oversees the execution of the transformer layers.
  */
 public final class NativeInferenceEngine implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(NativeInferenceEngine.class);
@@ -39,13 +38,19 @@ public final class NativeInferenceEngine implements AutoCloseable {
     private final int headDim;
     private final int nLayers;
 
-    public NativeInferenceEngine(GGUFModel model) {
+    private final float attnSoftCap;
+    private final float finalSoftCap;
+    private final float eps;
+    private final tech.kayys.gollek.spi.model.ModelArchitecture architecture;
+
+    public NativeInferenceEngine(GGUFModel model, tech.kayys.gollek.spi.model.ModelArchitecture architecture) {
         this.model = model;
+        this.architecture = architecture;
         this.weightArena = Arena.ofShared();
         this.layers = GGUFLoader.loadLayers(model, weightArena);
         
         String arch = (String) model.metadata().getOrDefault("general.architecture", "llama");
-        System.out.println("Engine Config: arch=" + arch);
+        System.out.println("Engine Config: arch=" + arch + ", resolved=" + architecture.id());
 
         this.hidden = getMetaInt(arch + ".embedding_length", "llama.embedding_length");
         this.nHeads = getMetaInt(arch + ".attention.head_count", "llama.attention.head_count");
@@ -76,11 +81,13 @@ public final class NativeInferenceEngine implements AutoCloseable {
         this.nLayers = layers.size();
         
         System.out.println("Detecting RoPE style...");
-        this.isNeox = detectRopeStyle(arch, model.metadata());
+        this.isNeox = architecture.usesNeoxRope();
         
         this.tokenEmbeddings = findTensorLazy("token_embd.weight", arch + ".token_embd.weight");
+        System.out.println("tokenEmbeddings type=" + this.tokenEmbeddings.typeId() + " elements=" + this.tokenEmbeddings.numElements());
         this.outputNorm = findAndPrepareTensor("output_norm.weight", arch + ".output_norm.weight");
         this.outputWeight = findTensorLazy("output.weight", "lm_head.weight", arch + ".output.weight", "token_embd.weight");
+        System.out.println("outputWeight type=" + this.outputWeight.typeId() + " elements=" + this.outputWeight.numElements());
 
         System.out.println("Determining vocab size...");
         int vs = 0;
@@ -98,34 +105,51 @@ public final class NativeInferenceEngine implements AutoCloseable {
         }
         this.vocabSize = vs;
         
-        float defaultFreq = (arch.contains("qwen")) ? 1000000.0f : 10000.0f;
+        float defaultFreq = architecture.defaultRopeFreqBase();
         float ropeFreqBase = getMetaFloat(defaultFreq, 
             arch + ".rope.freq_base", 
             "llama.rope.freq_base", 
             "general.rope.freq_base");
         
-        this.eps = getMetaFloat(1e-5f, arch + ".attention.layer_norm_rms_epsilon", "llama.attention.layer_norm_rms_epsilon", "general.attention.layer_norm_rms_epsilon");
+        this.eps = getMetaFloat((float) architecture.rmsNormEps(), arch + ".attention.layer_norm_rms_epsilon", "llama.attention.layer_norm_rms_epsilon", "general.attention.layer_norm_rms_epsilon");
         
         System.out.println("Building RoPE cache...");
         this.ropeCache = RoPECache.build(weightArena, 4096, headDim, ropeFreqBase);
 
-        this.attnSoftCap = getMetaFloat(0.0f, arch + ".attention.logit_softcapping", "gemma2.attention.logit_softcapping");
-        this.finalSoftCap = getMetaFloat(0.0f, arch + ".logit_softcapping", "gemma2.logit_softcapping");
-
+        // Soft-capping detection
+        float aCap = getMetaFloat(architecture.defaultAttnSoftCap(), arch + ".attention.logit_softcapping", "gemma2.attention.logit_softcapping");
+        float fCap = getMetaFloat(architecture.defaultFinalSoftCap(), arch + ".logit_softcapping", "gemma2.logit_softcapping");
+        
+        this.attnSoftCap = aCap;
+        this.finalSoftCap = fCap;
         
         if (attnSoftCap > 0 || finalSoftCap > 0) {
-            LOG.info("Gemma2 Soft-capping enabled: attn={}, final={}", attnSoftCap, finalSoftCap);
+            LOG.info("Soft-capping enabled: attn={}, final={}", attnSoftCap, finalSoftCap);
         }
     }
 
-    private final float attnSoftCap;
-    private final float finalSoftCap;
-
+    public GGUFModel getModel() { return model; }
+    public List<TransformerLayerWeights> getLayers() { return layers; }
+    public int getVocabSize() { return vocabSize; }
+    public TensorData getTokenEmbeddings() { return tokenEmbeddings; }
+    public MemorySegment getOutputNorm() { return outputNorm; }
+    public TensorData getOutputWeight() { return outputWeight; }
+    public RoPECache getRopeCache() { return ropeCache; }
+    public int getHidden() { return hidden; }
+    public int getNHeads() { return nHeads; }
+    public int getNHeadsKv() { return nHeadsKv; }
+    public int getHeadDim() { return headDim; }
+    public int getNLayers() { return nLayers; }
+    public boolean isNeox() { return isNeox; }
+    public tech.kayys.gollek.spi.model.ModelArchitecture getArchitecture() { return architecture; }
     public float getAttnSoftCap() { return attnSoftCap; }
     public float getFinalSoftCap() { return finalSoftCap; }
-
-    private final float eps;
     public float getEps() { return eps; }
+
+    public int getFfnDim() {
+        if (layers.isEmpty()) return 0;
+        return (int) (layers.get(0).wG.numElements() / hidden);
+    }
 
     private TensorData findTensorLazy(String... names) {
         GGUFTensorInfo info = null;
@@ -139,7 +163,9 @@ public final class NativeInferenceEngine implements AutoCloseable {
         }
 
         MemorySegment raw = model.segment().asSlice(model.dataStart() + info.offset(), info.sizeInBytes());
-        return new TensorData(raw, info.typeId());
+        long numElements = 1;
+        for (long d : info.shape()) numElements *= d;
+        return new TensorData(raw, info.typeId(), numElements);
     }
 
     private MemorySegment findAndPrepareTensor(String... names) {
@@ -159,122 +185,43 @@ public final class NativeInferenceEngine implements AutoCloseable {
             return raw;
         }
 
-        // Dequantize to F32
         long numElements = 1;
         for (long d : info.shape()) numElements *= d;
-        MemorySegment f32 = weightArena.allocate(numElements * Float.BYTES, 64);
         
+        MemorySegment f32 = weightArena.allocate((long) numElements * Float.BYTES, 64);
         if (info.typeId() == 1) { // F16
             GGUFDequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) { // Q8_0
             GGUFDequantizer.dequantizeQ8_0(raw, f32, numElements);
         } else {
-            throw new UnsupportedOperationException("Unsupported tensor type for engine: " + info.typeId() + " (" + info.name() + ")");
+            throw new UnsupportedOperationException("Unsupported tensor type: " + info.typeId());
         }
-        
         return f32;
     }
 
-    public void execute(
-        MemorySegment inputIds, // [batch, seq]
-        int seqLen,
-        NativeInferenceSession session,
-        ExecutorService executor
-    ) {
-        // 1. Embedding lookup
-        // 2. Loop through FusedTransformerLayer.execute()
-        // 3. Final norm and projection
-        
-        // This will be fleshed out as we implement NativeInferenceSession
-    }
-
-    public int getHidden() { return hidden; }
-    public int getVocabSize() { return vocabSize; }
-    public int getNHeads() { return nHeads; }
-    public int getNHeadsKv() { return nHeadsKv; }
-    public int getHeadDim() { return headDim; }
-    public int getNLayers() { return nLayers; }
-    public List<TransformerLayerWeights> getLayers() { return layers; }
-    public TensorData getTokenEmbeddings() { return tokenEmbeddings; }
-    public MemorySegment getOutputNorm() { return outputNorm; }
-    public TensorData getOutputWeight() { return outputWeight; }
-    public RoPECache getRopeCache() { return ropeCache; }
-    public GGUFModel getModel() { return model; }
-    public boolean isNeox() { return isNeox; }
-
     private int getMetaInt(String... keys) {
-        for (String key : keys) {
-            Object val = model.metadata().get(key);
-            if (val instanceof Number n) return n.intValue();
-        }
-        throw new IllegalArgumentException("Metadata keys missing or invalid: " + java.util.Arrays.toString(keys));
-    }
-
-    private int getMetaIntOptional(String... keys) {
-        for (String key : keys) {
-            Object val = model.metadata().get(key);
-            if (val instanceof Number n) return n.intValue();
+        for (String k : keys) {
+            Object v = model.metadata().get(k);
+            if (v instanceof Number n) return n.intValue();
         }
         return 0;
     }
 
-    private float getMetaFloat(float defaultVal, String... keys) {
-        for (String key : keys) {
-            Object val = model.metadata().get(key);
-            if (val instanceof Number n) return n.floatValue();
+    private int getMetaIntOptional(String... keys) {
+        return getMetaInt(keys);
+    }
+
+    private float getMetaFloat(float defaultValue, String... keys) {
+        for (String k : keys) {
+            Object v = model.metadata().get(k);
+            if (v instanceof Number n) return n.floatValue();
         }
-        return defaultVal;
+        return defaultValue;
     }
 
-    /**
-     * Detects RoPE style from GGUF metadata.
-     * In GGML, rope_type/mode:
-     *   0 = "normal" (Neox/split-half) - used by most models including Qwen2, LLaMA, etc.
-     *   2 = GPT-NeoX explicit
-     *   -1 = none
-     * 
-     * Note: llama.cpp's "normal" rope (type 0) is actually the Neox split-half style.
-     * The interleaved (GPT-J) style is rarely used in GGUF files.
-     */
-    private boolean detectRopeStyle(String arch, java.util.Map<String, Object> metadata) {
-        // Try reading explicit rope type from metadata
-        for (String key : new String[]{arch + ".rope.type", "rope_type", arch + ".rope_type"}) {
-            Object val = metadata.get(key);
-            if (val instanceof Number n) {
-                int ropeType = n.intValue();
-                // In llama.cpp: type 0 = "normal" which is actually Neox/split-half
-                // type 2 = explicit NeoX (also split-half)
-                // type -1 = none
-                boolean neox = (ropeType == 0 || ropeType == 2);
-                LOG.debug("RoPE: type={} from key={} → isNeox={}", ropeType, key, neox);
-                return neox;
-            }
-        }
-
-        // Fallback: architecture-based heuristic
-        // Modern models (LLaMA 2/3, Gemma, Mistral, Qwen2) use Interleaved (GPT-J style) in GGUF
-        boolean neox = switch (arch) {
-            case "qwen2", "qwen", "llama", "mistral", "gemma", "phi3" -> false;
-            case "gptj" -> false;
-            default -> false; // Default to Interleaved as it's most common for GGUF
-        };
-        LOG.debug("RoPE: no metadata, arch={} → isNeox={}", arch, neox);
-        return neox;
-    }
-
-    private MemorySegment findTensor(String name) {
-        return model.tensors().stream()
-            .filter(t -> t.name().equals(name))
-            .findFirst()
-            .map(t -> model.segment().asSlice(model.dataStart() + t.offset(), t.sizeInBytes()))
-            .orElseThrow(() -> new IllegalArgumentException("Tensor not found: " + name));
-    }
 
     @Override
     public void close() {
-        if (model != null) {
-            model.close();
-        }
         weightArena.close();
     }
 }
