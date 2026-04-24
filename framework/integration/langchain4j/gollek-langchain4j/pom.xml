@@ -17,7 +17,7 @@
     <dependencies>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-ml-ml</artifactId>
+            <artifactId>gollek-ml-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

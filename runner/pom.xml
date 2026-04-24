@@ -43,7 +43,7 @@
     </dependencies>
 
     <modules>
-        <!-- <module>llamacpp</module> -->
+        <module>llamacpp</module>
         <module>native</module>
         <module>gguf</module>
         <module>litert</module>

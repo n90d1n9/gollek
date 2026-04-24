@@ -32,6 +32,7 @@ public final class FusedTransformerLayer {
         tech.kayys.gollek.spi.model.FFNActivationType activation,
         int numExperts,
         int numExpertsPerTok,
+        InferenceMetrics metrics,
         ExecutorService executor
     ) {
         // 1. RMSNorm (Attention) -> buf.norm
@@ -96,7 +97,7 @@ public final class FusedTransformerLayer {
         // 8. FFN
         int ffnDim = (int) (buf.ffn.byteSize() / Float.BYTES);
         if (numExperts > 0 && w.ffnGateInpWeight != null) {
-            FusedMoEKernel.executeParallel(buf.norm, w, buf, hidden, ffnDim, numExperts, numExpertsPerTok, activation, executor);
+            FusedMoEKernel.executeParallel(buf.norm, w, buf, hidden, ffnDim, numExperts, numExpertsPerTok, activation, metrics, executor);
             if (w.postFfnNormWeight != null) {
                 RMSNormKernel.execute(buf.ffnExpertOut, buf.ffnExpertOut, w.postFfnNormWeight, hidden, eps, addOneToWeight);
                 addInPlace(x, buf.ffnExpertOut, hidden);

@@ -1,5 +1,6 @@
 package tech.kayys.gollek.gguf.loader;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.Map;
 /**
  * Representation of a parsed GGUF model in memory.
  */
+@RegisterForReflection
 public final class GGUFModel implements AutoCloseable {
     private final int version;
     private final Map<String, Object> metadata;

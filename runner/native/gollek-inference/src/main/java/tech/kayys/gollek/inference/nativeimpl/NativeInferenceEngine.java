@@ -44,6 +44,7 @@ public final class NativeInferenceEngine implements AutoCloseable {
     private final int numExperts;
     private final int numExpertsPerTok;
     private final tech.kayys.gollek.spi.model.ModelArchitecture architecture;
+    private final InferenceMetrics metrics;
 
     public NativeInferenceEngine(GGUFModel model, tech.kayys.gollek.spi.model.ModelArchitecture architecture) {
         this.model = model;
@@ -135,6 +136,7 @@ public final class NativeInferenceEngine implements AutoCloseable {
         if (numExperts > 0) {
             LOG.info("MoE initialized: {} experts, {} per token", numExperts, numExpertsPerTok);
         }
+        this.metrics = new InferenceMetrics(numExperts);
     }
 
     public GGUFModel getModel() { return model; }
@@ -156,6 +158,7 @@ public final class NativeInferenceEngine implements AutoCloseable {
     public float getEps() { return eps; }
     public int getNumExperts() { return numExperts; }
     public int getNumExpertsPerTok() { return numExpertsPerTok; }
+    public InferenceMetrics getMetrics() { return metrics; }
 
     public int getFfnDim() {
         if (layers.isEmpty()) return 0;
@@ -204,6 +207,10 @@ public final class NativeInferenceEngine implements AutoCloseable {
             Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) { // Q8_0
             Dequantizer.dequantizeQ8_0(raw, f32, numElements);
+        } else if (info.typeId() == 2) { // Q4_0
+            Dequantizer.dequantizeQ4_0(raw, 0, f32, numElements);
+        } else if (info.typeId() == 12) { // Q4_K
+            Dequantizer.dequantizeQ4_K(raw, 0, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported tensor type: " + info.typeId());
         }

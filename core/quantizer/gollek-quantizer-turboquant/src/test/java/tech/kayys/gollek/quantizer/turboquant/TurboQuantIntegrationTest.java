@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.*;
-import tech.kayys.gollek.gguf.loader.GGUFDequantizer;
+import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
 
 /**
  * Comprehensive tests for TurboQuant multi-format quantizer.
@@ -267,7 +267,7 @@ class TurboQuantIntegrationTest {
         // GGUF
         Object ggufDequantizer = service.createDequantizer(QuantizerRegistry.QuantFormat.GGUF);
         assertNotNull(ggufDequantizer);
-        assertInstanceOf(GGUFDequantizer.class, ggufDequantizer);
+        assertInstanceOf(Dequantizer.class, ggufDequantizer);
         
         // GPTQ/AWQ return null (use their own modules)
         assertNull(service.createDequantizer(QuantizerRegistry.QuantFormat.GPTQ));
@@ -302,9 +302,9 @@ class TurboQuantIntegrationTest {
 
     @Test
     @Order(53)
-    @DisplayName("Test GGUFDequantizer initialization")
-    void testGGUFDequantizerInitialization() {
-        GGUFDequantizer dequantizer = new GGUFDequantizer();
+    @DisplayName("Test Dequantizer initialization")
+    void testDequantizerInitialization() {
+        Dequantizer dequantizer = new Dequantizer();
         assertNotNull(dequantizer);
     }
 

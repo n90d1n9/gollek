@@ -155,7 +155,7 @@ class LlamaCppMultimodalProcessorIntegrationTest {
                                 MultimodalContent.ofBase64Image(testImage, "image/jpeg"))
                         .build())
                 .map(request -> processor.process(request))
-                .collect(java.util.stream.Collectors.toList());
+                .toList();
 
         // Execute all and validate
         for (int i = 0; i < requests.size(); i++) {

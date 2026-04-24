@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.kvcache.PagedKVCacheManager;
 import tech.kayys.gollek.kvcache.KVCacheConfig;
 import tech.kayys.gollek.kvcache.KVCacheExhaustedException;
-import tech.kayys.gollek.scheduler.ContinuousBatchingScheduler.ScheduledRequest;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -54,7 +53,7 @@ class ContinuousBatchingSchedulerTest {
     void testSubmitRequest() {
         scheduler.start();
         
-        ScheduledRequest request = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest request = new ContinuousBatchingScheduler.ScheduledRequest(
             "req-1",
             "What is the capital of France?",
             100
@@ -66,7 +65,7 @@ class ContinuousBatchingSchedulerTest {
     @Test
     @DisplayName("Submit request is rejected when scheduler is not running")
     void testSubmitWhenNotRunning() {
-        ScheduledRequest request = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest request = new ContinuousBatchingScheduler.ScheduledRequest(
             "req-1",
             "What is the capital of France?",
             100
@@ -82,7 +81,7 @@ class ContinuousBatchingSchedulerTest {
         
         // Fill running slots to force queuing
         for (int i = 0; i < 8; i++) {
-            ScheduledRequest running = new ScheduledRequest(
+            ContinuousBatchingScheduler.ScheduledRequest running = new ContinuousBatchingScheduler.ScheduledRequest(
                 "running-" + i,
                 "Prompt " + i,
                 1000
@@ -91,7 +90,7 @@ class ContinuousBatchingSchedulerTest {
         }
         
         // This should go to pending queue
-        ScheduledRequest pending = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest pending = new ContinuousBatchingScheduler.ScheduledRequest(
             "pending-1",
             "Pending prompt",
             100
@@ -119,7 +118,7 @@ class ContinuousBatchingSchedulerTest {
     @Test
     @DisplayName("Scheduled request tracks lifecycle correctly")
     void testScheduledRequestLifecycle() {
-        ScheduledRequest request = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest request = new ContinuousBatchingScheduler.ScheduledRequest(
             "req-1",
             "Test prompt here",
             50
@@ -167,14 +166,14 @@ class ContinuousBatchingSchedulerTest {
     @Test
     @DisplayName("Request with priority is created correctly")
     void testPriorityRequest() {
-        ScheduledRequest highPriority = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest highPriority = new ContinuousBatchingScheduler.ScheduledRequest(
             "req-high",
             "High priority prompt",
             100,
             1  // High priority
         );
         
-        ScheduledRequest lowPriority = new ScheduledRequest(
+        ContinuousBatchingScheduler.ScheduledRequest lowPriority = new ContinuousBatchingScheduler.ScheduledRequest(
             "req-low",
             "Low priority prompt",
             100,

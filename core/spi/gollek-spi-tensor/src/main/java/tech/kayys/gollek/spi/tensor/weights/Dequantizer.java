@@ -1,12 +1,15 @@
 package tech.kayys.gollek.spi.tensor.weights;
 
 import jdk.incubator.vector.*;
+import org.jboss.logging.Logger;
 
 /**
  * Native Dequantization Engine — JDK 25 Vector API.
  * Supports GGUF/GGML quantization types.
  */
 public class Dequantizer {
+
+    private static final Logger log = Logger.getLogger(Dequantizer.class);
 
 
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
@@ -251,6 +254,7 @@ public class Dequantizer {
             default -> throw new UnsupportedOperationException(
                     "GGML type not yet implemented: " + type);
         }
+        log.debugf("Dequantized %d elements using %s", numElements, type);
     }
 
     private void dequantQ4_1(byte[] blocks, int numElements, float[] output) {
@@ -342,6 +346,82 @@ public class Dequantizer {
      */
     public static void dequantizeQ8_0(java.lang.foreign.MemorySegment raw, java.lang.foreign.MemorySegment f32, long numElements) {
         dequantizeQ8_0(raw, 0, f32, numElements);
+    }
+
+    public static void dequantizeQ4_0(java.lang.foreign.MemorySegment raw, long rawOffset, java.lang.foreign.MemorySegment f32, long numElements) {
+        final int BLOCK_SIZE = 32;
+        final int BLOCK_BYTES = 18;
+        long numBlocks = (numElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+        for (long b = 0; b < numBlocks; b++) {
+            long blockOff = rawOffset + b * BLOCK_BYTES;
+            long outBase = b * BLOCK_SIZE;
+            int elemsInBlock = (int) Math.min(BLOCK_SIZE, numElements - outBase);
+
+            short dBits = raw.get(java.lang.foreign.ValueLayout.JAVA_SHORT, blockOff);
+            float d = fp16ToFloatDirect(dBits);
+
+            for (int i = 0; i < elemsInBlock; i += 2) {
+                int packed = raw.get(java.lang.foreign.ValueLayout.JAVA_BYTE, blockOff + 2 + (i / 2)) & 0xFF;
+                float lo = (float)((packed & 0x0F) - 8) * d;
+                float hi = (float)((packed >> 4) - 8) * d;
+
+                f32.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, (outBase + i) * Float.BYTES, lo);
+                if (i + 1 < elemsInBlock) {
+                    f32.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, (outBase + i + 1) * Float.BYTES, hi);
+                }
+            }
+        }
+    }
+
+    public static void dequantizeQ4_K(java.lang.foreign.MemorySegment raw, long rawOffset, java.lang.foreign.MemorySegment f32, long numElements) {
+        final int SUPER_BLOCK_SIZE = 256;
+        final int SUPER_BLOCK_BYTES = 144;
+        final int NUM_SUB = 8;
+        final int SUB_SIZE = 32;
+
+        long numSuperBlocks = (numElements + SUPER_BLOCK_SIZE - 1) / SUPER_BLOCK_SIZE;
+
+        for (long sb = 0; sb < numSuperBlocks; sb++) {
+            long sbOff = rawOffset + sb * SUPER_BLOCK_BYTES;
+            long outBase = sb * SUPER_BLOCK_SIZE;
+
+            float d = fp16ToFloatDirect(raw.get(java.lang.foreign.ValueLayout.JAVA_SHORT, sbOff));
+            float dmin = fp16ToFloatDirect(raw.get(java.lang.foreign.ValueLayout.JAVA_SHORT, sbOff + 2));
+
+            float[] sc = new float[NUM_SUB];
+            float[] mn = new float[NUM_SUB];
+            for (int i = 0; i < 8; i++) {
+                int lo = raw.get(java.lang.foreign.ValueLayout.JAVA_BYTE, sbOff + 4 + i) & 0xFF;
+                int scLo = lo & 0x3F;
+                int mnLo = (raw.get(java.lang.foreign.ValueLayout.JAVA_BYTE, sbOff + 4 + i + 4) >> 0) & 0x3F;
+                sc[i] = d * scLo;
+                mn[i] = dmin * mnLo;
+            }
+
+            long qsOff = sbOff + 16;
+
+            for (int sub = 0; sub < NUM_SUB; sub++) {
+                long subOutBase = outBase + sub * SUB_SIZE;
+                float scale = sc[sub];
+                float minV = mn[sub];
+
+                long halfOff = qsOff + sub * 16;
+                long hiOff = qsOff + 64 + sub * 16;
+
+                for (int i = 0; i < 16 && subOutBase + i < numElements; i++) {
+                    int bLo = raw.get(java.lang.foreign.ValueLayout.JAVA_BYTE, halfOff + i) & 0xFF;
+                    int bHi = raw.get(java.lang.foreign.ValueLayout.JAVA_BYTE, hiOff + i) & 0xFF;
+                    int lo = bLo & 0xF;
+                    int hi = bHi & 0xF;
+
+                    f32.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, (subOutBase + i) * Float.BYTES, scale * lo - minV);
+                    if (subOutBase + i + 16 < numElements) {
+                        f32.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, (subOutBase + i + 16) * Float.BYTES, scale * hi - minV);
+                    }
+                }
+            }
+        }
     }
 
     private static final VectorSpecies<Byte> B8_SPECIES = VectorSpecies.of(byte.class, VectorShape.S_64_BIT);

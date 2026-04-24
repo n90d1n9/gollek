@@ -1,5 +1,6 @@
 package tech.kayys.gollek.engine.inference;
 
+import tech.kayys.gollek.prefilldecode.DisaggregatedLLMProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -33,6 +34,11 @@ public class DefaultInferenceOrchestrator implements InferenceOrchestrator {
         // Configuration (can be injected via @ConfigProperty in a future phase)
         private volatile boolean disaggregatedMode = false;
         private volatile int smallPromptThreshold = DEFAULT_SMALL_PROMPT_THRESHOLD;
+
+
+        
+        @Inject
+        DisaggregatedLLMProvider pdProvider;
 
         @Inject
         public DefaultInferenceOrchestrator(
@@ -162,10 +168,19 @@ public class DefaultInferenceOrchestrator implements InferenceOrchestrator {
                         InferenceStage stage) {
 
                 if (stage.isDisaggregated()) {
-                        LOG.debugf("Disaggregated routing for stage %s (model: %s, tokens: %d)",
-                                        stage.getDisplayName(), modelId, request.getPromptTokenCount());
-                        // Phase 4: Route PREFILL to prefill node, DECODE to decode node
-                        // For now, fall through to unified routing
+                        LOG.infof("Routing via Disaggregated PD Pipeline for stage %s (tokens: %d)",
+                                        stage.getDisplayName(), request.getPromptTokenCount());
+                        
+                        // Convert to ProviderRequest for the PD provider
+                        tech.kayys.gollek.spi.provider.ProviderRequest pr = tech.kayys.gollek.spi.provider.ProviderRequest.builder()
+                                .requestId(request.getRequestId())
+                                .model(modelId)
+                                .messages(request.getMessages())
+                                .parameters(request.getParameters())
+                                .streaming(request.isStreaming())
+                                .build();
+                        
+                        return pdProvider.infer(pr);
                 }
 
                 return router.route(modelId, request);

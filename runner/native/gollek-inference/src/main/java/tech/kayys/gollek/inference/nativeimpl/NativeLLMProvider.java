@@ -392,6 +392,7 @@ public class NativeLLMProvider implements StreamingProvider {
                                 engine.getArchitecture().activationType(),
                                 engine.getNumExperts(),
                                 engine.getNumExpertsPerTok(),
+                                engine.getMetrics(),
                                 executor);
                     }
                 }
@@ -403,6 +404,7 @@ public class NativeLLMProvider implements StreamingProvider {
             session.lookupEmbedding((int) tokens[tokens.length - 1], session.getX());
 
             long prefillEndTime = System.nanoTime();
+            engine.getMetrics().recordPrompt(prefillEndTime - prefillStartTime);
 
             long firstTokenTime = 0;
 
@@ -434,10 +436,14 @@ public class NativeLLMProvider implements StreamingProvider {
                 MemorySegment logits = localArena.allocate((long) vocabSize * Float.BYTES, 64);
 
                 for (int i = 0; i < maxNewTokens; i++) {
+                    long tokenStartTime = System.nanoTime();
                     MemorySegment hidden = session.tick(lastToken, executor);
 
                     if (i == 0)
                         firstTokenTime = System.nanoTime();
+                    
+                    long tokenEndTime = System.nanoTime();
+                    engine.getMetrics().recordToken(tokenEndTime - tokenStartTime);
 
                     // Logit Projection
                     LogitProjectionKernel.execute(hidden, engine.getOutputWeight(), logits, engine.getHidden(),
@@ -473,6 +479,18 @@ public class NativeLLMProvider implements StreamingProvider {
             metrics.put("bench.generation_tps", genTps);
             metrics.put("tokens.input", tokens.length);
             metrics.put("tokens.output", generatedCount);
+
+            if (engine.getNumExperts() > 0) {
+                Map<String, Double> expertUsage = new HashMap<>();
+                for (int j = 0; j < engine.getNumExperts(); j++) {
+                    double util = engine.getMetrics().getExpertUtilization(j);
+                    if (util > 0) {
+                        expertUsage.put("expert_" + j, util);
+                        LOG.infof("Expert %d utilization: %.2f%%", j, util * 100);
+                    }
+                }
+                metrics.put("moe.expert_utilization", expertUsage);
+            }
 
             emitter.emit(StreamingInferenceChunk.withMetadata(
                     request.getRequestId(),

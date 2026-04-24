@@ -71,6 +71,7 @@ public final class NativeInferenceSession implements AutoCloseable {
                 engine.getArchitecture().addOneToRmsNormWeight(),
                 engine.getArchitecture().activationType(),
                 engine.getNumExperts(), engine.getNumExpertsPerTok(),
+                engine.getMetrics(),
                 executor
             );
             

@@ -17,7 +17,7 @@ curl -Ls https://sh.jbang.dev | bash -s -
 ```xml
 <dependency>
     <groupId>tech.kayys.gollek</groupId>
-    <artifactId>gollek-ml-ml</artifactId>
+    <artifactId>gollek-ml-api</artifactId>
     <version>0.3.0-SNAPSHOT</version>
 </dependency>
 ```

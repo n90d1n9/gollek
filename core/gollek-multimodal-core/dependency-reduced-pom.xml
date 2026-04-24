@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <parent>
     <artifactId>gollek-core-parent</artifactId>
     <groupId>tech.kayys.gollek</groupId>
@@ -58,7 +56,7 @@
     </plugins>
   </build>
   <dependencies>
-    <!-- <dependency>
+    <dependency>
       <groupId>tech.kayys.gollek</groupId>
       <artifactId>gollek-plugin-runner-llamacpp</artifactId>
       <version>0.1.0-SNAPSHOT</version>
@@ -69,17 +67,13 @@
           <groupId>tech.kayys.gollek</groupId>
         </exclusion>
       </exclusions>
-    </dependency> -->
+    </dependency>
     <dependency>
       <groupId>tech.kayys.gollek</groupId>
       <artifactId>gollek-runner-onnx</artifactId>
       <version>0.1.0-SNAPSHOT</version>
       <scope>test</scope>
       <exclusions>
-        <exclusion>
-          <artifactId>gollek-tokenizer-core</artifactId>
-          <groupId>tech.kayys.gollek</groupId>
-        </exclusion>
         <exclusion>
           <artifactId>onnxruntime</artifactId>
           <groupId>com.microsoft.onnxruntime</groupId>

@@ -116,7 +116,13 @@
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-paged-attention</artifactId>
             <version>${project.version}</version>
-        </dependency>        <!-- Jackson for JSON -->
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-prefill-decode</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Jackson for JSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>

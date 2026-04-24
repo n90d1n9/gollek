@@ -275,6 +275,10 @@ public final class GGUFLoader {
             Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) { // Q8_0
             Dequantizer.dequantizeQ8_0(raw, f32, numElements);
+        } else if (info.typeId() == 2) { // Q4_0
+            Dequantizer.dequantizeQ4_0(raw, 0, f32, numElements);
+        } else if (info.typeId() == 12) { // Q4_K
+            Dequantizer.dequantizeQ4_K(raw, 0, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported tensor type for loader: " + info.typeId() + " (" + info.name() + ")");
         }
@@ -301,6 +305,10 @@ public final class GGUFLoader {
             Dequantizer.dequantizeF16(raw, f32, numElements);
         } else if (info.typeId() == 8) {
             Dequantizer.dequantizeQ8_0(raw, f32, numElements);
+        } else if (info.typeId() == 2) {
+            Dequantizer.dequantizeQ4_0(raw, 0, f32, numElements);
+        } else if (info.typeId() == 12) {
+            Dequantizer.dequantizeQ4_K(raw, 0, f32, numElements);
         } else {
             throw new UnsupportedOperationException("Unsupported optional tensor type: " + info.typeId());
         }

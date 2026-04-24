@@ -51,7 +51,7 @@ mvn clean install -pl framework/lib -am -DskipTests
 ```xml
 <dependency>
     <groupId>tech.kayys.gollek</groupId>
-    <artifactId>gollek-ml-ml</artifactId>
+    <artifactId>gollek-ml-api</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```

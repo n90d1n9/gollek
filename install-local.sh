@@ -5,12 +5,13 @@
 
 set -e
 
-# --- Configuration ---
+# --- Default Options ---
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_MODULE="ui/gollek-cli"
 BIN_DIR="${HOME}/.local/bin"
 GOLLEK_CLI_BIN="${BIN_DIR}/gollek"
 NATIVE_MODE=false
+BUILD_ARGS="-c"
 
 # --- Visuals ---
 RED='\033[0;31m'
@@ -22,13 +23,17 @@ NC='\033[0m' # No Color
 # --- Parse Arguments ---
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -n|--native) NATIVE_MODE=true ;;
+        -n|--native) NATIVE_MODE=true; BUILD_ARGS="$BUILD_ARGS -n" ;;
+        -t|--tests) BUILD_ARGS="$BUILD_ARGS -t" ;;
+        --skip-tests) BUILD_ARGS="$BUILD_ARGS" ;; # build.sh skips by default
         -h|--help) 
             echo "Usage: $0 [options]"
             echo ""
             echo "Options:"
-            echo "  -n, --native    Build and install as native executable (requires GraalVM)"
-            echo "  -h, --help      Show this help message"
+            echo "  -n, --native     Build and install as native executable (requires GraalVM)"
+            echo "  -t, --tests      Run tests during build"
+            echo "  --skip-tests     Skip tests during build (default)"
+            echo "  -h, --help       Show this help message"
             exit 0 
             ;;
     esac
@@ -47,18 +52,17 @@ echo -e "${BLUE}--------------------------------------------------${NC}"
 # 1. Build the project
 echo -e "${BLUE}>>> Building Gollek project...${NC}"
 if [ -f "./build.sh" ]; then
-    if [ "$NATIVE_MODE" = true ]; then
-        ./build.sh -c -n
-    else
-        ./build.sh -c
-    fi
+    ./build.sh $BUILD_ARGS
 else
     echo -e "${YELLOW}build.sh not found, running mvn directly...${NC}"
-    if [ "$NATIVE_MODE" = true ]; then
-        mvn clean install -DskipTests -Pnative
-    else
-        mvn clean install -DskipTests
+    MVN_ARGS="clean install"
+    if [[ "$BUILD_ARGS" != *"-t"* ]]; then
+        MVN_ARGS="$MVN_ARGS -DskipTests"
     fi
+    if [ "$NATIVE_MODE" = true ]; then
+        MVN_ARGS="$MVN_ARGS -Pnative"
+    fi
+    mvn $MVN_ARGS
 fi
 
 # 2. Locate Artifacts

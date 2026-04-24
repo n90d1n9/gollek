@@ -34,14 +34,15 @@
             <artifactId>gollek-plugin-kv-cache</artifactId>
             <version>${project.version}</version>
         </dependency>
+
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-engine</artifactId>
+            <artifactId>gollek-paged-attention</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-paged-attention</artifactId>
+            <artifactId>gollek-tokenizer-core</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- JAX-RS for REST endpoints -->

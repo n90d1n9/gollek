@@ -9,7 +9,7 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gollek-ml-ml</artifactId>
+    <artifactId>gollek-ml-api</artifactId>
     <name>Gollek SDK :: ML Framework</name>
     <description>PyTorch-like Java AI/ML/NLP framework — single dependency that pulls in everything</description>
 

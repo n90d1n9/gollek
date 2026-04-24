@@ -28,12 +28,30 @@ public final class FusedMoEKernel {
         int numExperts,
         int numExpertsPerTok,
         FFNActivationType activation,
+        InferenceMetrics metrics,
         ExecutorService executor
     ) {
         // 1. Router: moeLogits = x @ gateInp
-        for (int e = 0; e < numExperts; e++) {
-            float sum = dot(x, w.ffnGateInpWeight, (long) e * hidden, hidden);
-            buf.moeLogits.set(ValueLayout.JAVA_FLOAT, (long) e * 4L, sum);
+        // Parallelize routing if expert count is significant
+        int routerTasks = Math.min(numExperts, Runtime.getRuntime().availableProcessors());
+        int routerStep = (numExperts + routerTasks - 1) / routerTasks;
+        java.util.List<java.util.concurrent.Callable<Void>> rTasks = new java.util.ArrayList<>();
+        for (int s = 0; s < numExperts; s += routerStep) {
+            final int start = s;
+            final int end = Math.min(s + routerStep, numExperts);
+            rTasks.add(() -> {
+                for (int e = start; e < end; e++) {
+                    float sum = dot(x, w.ffnGateInpWeight, (long) e * hidden, hidden);
+                    buf.moeLogits.set(ValueLayout.JAVA_FLOAT, (long) e * 4L, sum);
+                }
+                return null;
+            });
+        }
+        try {
+            executor.invokeAll(rTasks);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("MoE Routing interrupted", e);
         }
 
         // 2. Softmax(moeLogits) -> moeWeights
@@ -52,8 +70,13 @@ public final class FusedMoEKernel {
         buf.ffnExpertOut.fill((byte)0);
         for (int i = 0; i < numExpertsPerTok; i++) {
             int expertIdx = topKIndices[i];
+            if (w.wGExperts[expertIdx] == null) continue; // Safety check
+
+            if (metrics != null) metrics.recordExpertActivation(expertIdx);
+
             float gateWeight = buf.moeWeights.get(ValueLayout.JAVA_FLOAT, (long) expertIdx * 4L);
-            if (weightSum > 0) gateWeight /= weightSum;
+            if (weightSum > 1e-6f) gateWeight /= weightSum;
+            else gateWeight = 1.0f / numExpertsPerTok;
             
             FusedFFNKernel.computeParallel(
                 x, 

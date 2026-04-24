@@ -44,5 +44,7 @@
         <module>gollek-ml-metrics</module>
         <module>gollek-ml-api</module>
         <module>gollek-ml-examples</module>
+        <module>gollek-ml-core</module>
+        <module>gollek-ml-pickle</module>
     </modules>
 </project>

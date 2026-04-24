@@ -26,7 +26,11 @@ package tech.kayys.gollek.plugin.optimization.fa3;
 
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.plugin.optimization.*;
+import tech.kayys.gollek.kernel.fa3.FlashAttention3Binding;
 
+import java.lang.foreign.MemorySegment;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -401,30 +405,58 @@ public class FlashAttention3Plugin implements OptimizationPlugin {
         return true;
     }
 
-    /**
-     * Initialize FA3 kernel.
-     */
     private void initializeFA3Kernel() throws OptimizationException {
-        // In production, initialize actual FA3 kernel
-        LOG.info("FA3 kernel initialized");
+        try {
+            // Attempt to load FA3 library
+            String libName = System.mapLibraryName("gollek_fa3_kernels");
+            Path libPath = Paths.get(System.getProperty("user.dir"), "native", "lib", libName);
+            boolean success = FlashAttention3Binding.initialize(libPath);
+            if (!success) {
+                LOG.warn("Native FA3 not loaded, using CPU fallback");
+                FlashAttention3Binding.initializeFallback();
+            }
+            LOG.info("FA3 kernel initialized");
+        } catch (Exception e) {
+            throw new OptimizationInitializationException(ID, "Failed to initialize FA3 binding", e);
+        }
     }
 
-    /**
-     * Apply FlashAttention-3 kernel.
-     */
     private boolean applyFlashAttention3(int numHeads, int headDim, int seqLen, int numKVHeads, OptimizationContext context) {
-        // In production, call actual FA3 kernel
-        // For now, simulate successful application
-        LOG.debugf("FA3 kernel applied: heads=%d, kv_heads=%d, dim=%d, seq=%d, tile=%d",
-            numHeads, numKVHeads, headDim, seqLen, tileSize);
-        return true;
+        try {
+            MemorySegment q = context.getParameter("q", MemorySegment.class);
+            MemorySegment k = context.getParameter("k", MemorySegment.class);
+            MemorySegment v = context.getParameter("v", MemorySegment.class);
+            MemorySegment out = context.getParameter("out", MemorySegment.class);
+            
+            if (q == null || k == null || v == null || out == null) {
+                LOG.warn("Missing tensor segments for FA3");
+                return false;
+            }
+
+            int batchSize = context.getParameter("batch_size", Integer.class, 1);
+            boolean isCausal = context.getParameter("is_causal", Boolean.class, true);
+            float scale = (float) (1.0 / Math.sqrt(headDim));
+
+            FlashAttention3Binding binding = FlashAttention3Binding.getInstance();
+            int res = binding.flashAttention3Launch(
+                    out, q, k, v, batchSize, seqLen, numHeads, numKVHeads, headDim, scale, isCausal, useTensorCores
+            );
+            
+            if (res != 0) {
+                LOG.errorf("FA3 kernel launch failed with code %d", res);
+                return false;
+            }
+
+            LOG.debugf("FA3 kernel applied: heads=%d, kv_heads=%d, dim=%d, seq=%d, tile=%d",
+                numHeads, numKVHeads, headDim, seqLen, tileSize);
+            return true;
+        } catch (Exception e) {
+            LOG.error("Failed to execute FA3 kernel", e);
+            return false;
+        }
     }
 
-    /**
-     * Shutdown FA3 kernel.
-     */
     private void shutdownFA3Kernel() {
-        // In production, shutdown FA3 kernel
         LOG.debug("FA3 kernel shutdown");
     }
 }

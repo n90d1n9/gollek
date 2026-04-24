@@ -1,47 +1,64 @@
 package tech.kayys.gollek.inference.nativeimpl;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Performance metrics for a single inference request.
- * Parity with llama.cpp timings.
+ * Tracks performance and utilization metrics for the native inference engine.
  */
-public record InferenceMetrics(
-    long loadTimeNanos,
-    long prefillTimeNanos,
-    long decodeTimeNanos,
-    long firstTokenTimeNanos,
-    int inputTokens,
-    int outputTokens
-) {
-    public double getPrefillSpeed() {
-        if (prefillTimeNanos == 0) return 0;
-        return (inputTokens * 1_000_000_000.0) / prefillTimeNanos;
+public final class InferenceMetrics {
+    private final LongAdder tokensProcessed = new LongAdder();
+    private final LongAdder totalInferenceTimeNs = new LongAdder();
+    private final LongAdder totalPromptTimeNs = new LongAdder();
+    
+    private final AtomicLongArray expertUtilization;
+    private final int numExperts;
+
+    public InferenceMetrics(int numExperts) {
+        this.numExperts = numExperts;
+        this.expertUtilization = numExperts > 0 ? new AtomicLongArray(numExperts) : null;
     }
 
-    public double getGenerationSpeed() {
-        if (decodeTimeNanos == 0) return 0;
-        return (outputTokens * 1_000_000_000.0) / decodeTimeNanos;
+    public void recordToken(long timeNs) {
+        tokensProcessed.increment();
+        totalInferenceTimeNs.add(timeNs);
     }
 
-    public double getTtftMs() {
-        return (firstTokenTimeNanos - (prefillTimeNanos > 0 ? (firstTokenTimeNanos - decodeTimeNanos) : 0)) / 1_000_000.0; 
-        // Simple TTFT delta from start of prefill
+    public void recordPrompt(long timeNs) {
+        totalPromptTimeNs.add(timeNs);
     }
 
-    public Map<String, Object> toMetadata() {
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("bench.load_ms", loadTimeNanos / 1_000_000.0);
-        meta.put("bench.prefill_ms", prefillTimeNanos / 1_000_000.0);
-        meta.put("bench.decode_ms", decodeTimeNanos / 1_000_000.0);
-        meta.put("bench.prefill_tps", getPrefillSpeed());
-        meta.put("bench.generation_tps", getGenerationSpeed());
-        meta.put("bench.ttft_ms", (firstTokenTimeTime() - startTime()) / 1_000_000.0); // I'll refine this in the provider
-        return meta;
+    public void recordExpertActivation(int expertIdx) {
+        if (expertUtilization != null && expertIdx < numExperts) {
+            expertUtilization.incrementAndGet(expertIdx);
+        }
     }
 
-    // Helper for easier calculation
-    private long startTime() { return 0; } // Placeholder for logic
-    private long firstTokenTimeTime() { return 0; }
+    public long getTokensProcessed() { return tokensProcessed.sum(); }
+    public long getTotalInferenceTimeNs() { return totalInferenceTimeNs.sum(); }
+    public long getTotalPromptTimeNs() { return totalPromptTimeNs.sum(); }
+
+    public double getTokensPerSecond() {
+        long tokens = getTokensProcessed();
+        long time = getTotalInferenceTimeNs();
+        if (time == 0) return 0;
+        return (double) tokens / (time / 1_000_000_000.0);
+    }
+
+    public double getExpertUtilization(int expertIdx) {
+        if (expertUtilization == null) return 0;
+        long activations = expertUtilization.get(expertIdx);
+        long total = tokensProcessed.sum();
+        if (total == 0) return 0;
+        return (double) activations / total;
+    }
+
+    public void reset() {
+        tokensProcessed.reset();
+        totalInferenceTimeNs.reset();
+        totalPromptTimeNs.reset();
+        if (expertUtilization != null) {
+            for (int i = 0; i < numExperts; i++) expertUtilization.set(i, 0);
+        }
+    }
 }

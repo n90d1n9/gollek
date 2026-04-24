@@ -3,6 +3,9 @@ package tech.kayys.gollek.spi.provider;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -17,6 +20,7 @@ public final class ProviderMetadata {
     private final String vendor;
     private final String homepage;
     private final String defaultModel;
+    private final Map<String, String> capabilities;
 
     @JsonCreator
     public ProviderMetadata(
@@ -26,7 +30,8 @@ public final class ProviderMetadata {
             @JsonProperty("description") String description,
             @JsonProperty("vendor") String vendor,
             @JsonProperty("homepage") String homepage,
-            @JsonProperty("defaultModel") String defaultModel) {
+            @JsonProperty("defaultModel") String defaultModel,
+            @JsonProperty("capabilities") Map<String, String> capabilities) {
         this.providerId = Objects.requireNonNull(providerId, "providerId");
         this.name = Objects.requireNonNull(name, "name");
         this.version = Objects.requireNonNull(version, "version");
@@ -34,6 +39,18 @@ public final class ProviderMetadata {
         this.vendor = vendor;
         this.homepage = homepage;
         this.defaultModel = defaultModel;
+        this.capabilities = capabilities != null ? Map.copyOf(capabilities) : Collections.emptyMap();
+    }
+
+    public ProviderMetadata(
+            String providerId,
+            String name,
+            String version,
+            String description,
+            String vendor,
+            String homepage,
+            String defaultModel) {
+        this(providerId, name, version, description, vendor, homepage, defaultModel, null);
     }
 
     // Getters
@@ -65,6 +82,10 @@ public final class ProviderMetadata {
         return homepage;
     }
 
+    public Map<String, String> getCapabilities() {
+        return capabilities;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -77,6 +98,7 @@ public final class ProviderMetadata {
         private String vendor;
         private String homepage;
         private String defaultModel;
+        private final Map<String, String> capabilities = new HashMap<>();
 
         public Builder providerId(String providerId) {
             this.providerId = providerId;
@@ -113,9 +135,14 @@ public final class ProviderMetadata {
             return this;
         }
 
+        public Builder capability(String key, String value) {
+            this.capabilities.put(key, value);
+            return this;
+        }
+
         public ProviderMetadata build() {
             return new ProviderMetadata(
-                    providerId, name, version, description, vendor, homepage, defaultModel);
+                    providerId, name, version, description, vendor, homepage, defaultModel, capabilities);
         }
     }
 

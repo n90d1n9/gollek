@@ -3,6 +3,7 @@ package tech.kayys.gollek.inference.nativeimpl;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import tech.kayys.gollek.spi.tensor.weights.Dequantizer;
+import tech.kayys.gollek.spi.tensor.weights.TensorData;
 import java.lang.foreign.ValueLayout;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,11 +26,11 @@ public final class FusedFFNKernel {
 
     public static void computeParallel(
             MemorySegment x,          // [hidden]
-            tech.kayys.gollek.spi.tensor.weights.TensorData wG,
+            TensorData wG,
             MemorySegment bg,
-            tech.kayys.gollek.spi.tensor.weights.TensorData wU,
+            TensorData wU,
             MemorySegment bu,
-            tech.kayys.gollek.spi.tensor.weights.TensorData wD,
+            TensorData wD,
             MemorySegment bd,
             MemorySegment ffnState,   // [ffnDim]
             MemorySegment residual,   // [hidden]

@@ -42,45 +42,38 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.util.stream.Collectors;
 
 /**
  * Maven dependency resolver for plugin system.
- * 
- * <p>
- * Resolves and downloads Maven dependencies for plugins, supporting:
- * </p>
- * <ul>
- * <li>Central Maven repository</li>
- * <li>Custom repositories</li>
- * <li>Local repository caching (~/.m2/repository)</li>
- * <li>Transitive dependency resolution</li>
- * <li>Version range resolution</li>
- * <li>Snapshot updates</li>
- * </ul>
- *
- * <h2>Usage</h2>
- * 
- * <pre>{@code
- * MavenDependencyResolver resolver = new MavenDependencyResolver();
- * 
- * // Resolve single dependency
- * List<File> jars = resolver.resolve("tech.kayys:gollek-spi-provider:1.0.0-SNAPSHOT");
- * 
- * // Resolve multiple dependencies
- * List<String> deps = List.of(
- *         "tech.kayys:gollek-spi-provider:1.0.0-SNAPSHOT",
- *         "tech.kayys:gollek-spi-inference:1.0.0-SNAPSHOT");
- * List<File> allJars = resolver.resolveAll(deps);
- * 
- * // Get dependency tree
- * DependencyTree tree = resolver.buildTree(deps);
- * }</pre>
- *
- * @since 2.1.0
  */
-public class MavenDependencyResolver {
-
+@RegisterForReflection(targets = {
+    org.eclipse.aether.internal.impl.DefaultRepositorySystem.class,
+    org.eclipse.aether.internal.impl.DefaultArtifactResolver.class,
+    org.eclipse.aether.internal.impl.DefaultDependencyCollector.class,
+    org.eclipse.aether.internal.impl.DefaultDeployer.class,
+    org.eclipse.aether.internal.impl.DefaultInstaller.class,
+    org.eclipse.aether.internal.impl.DefaultMetadataResolver.class,
+    org.eclipse.aether.internal.impl.DefaultRepositoryConnectorProvider.class,
+    org.eclipse.aether.internal.impl.DefaultRemoteRepositoryManager.class,
+    org.eclipse.aether.internal.impl.DefaultSyncContextFactory.class,
+    org.eclipse.aether.internal.impl.DefaultTransporterProvider.class,
+    org.eclipse.aether.internal.impl.EnhancedLocalRepositoryManagerFactory.class,
+    org.eclipse.aether.internal.impl.SimpleLocalRepositoryManagerFactory.class,
+    org.eclipse.aether.internal.impl.DefaultRepositoryEventDispatcher.class,
+    org.eclipse.aether.internal.impl.DefaultOfflineController.class,
+    org.eclipse.aether.internal.impl.DefaultLocalRepositoryProvider.class,
+    org.apache.maven.repository.internal.DefaultArtifactDescriptorReader.class,
+    org.apache.maven.repository.internal.DefaultVersionResolver.class,
+    org.apache.maven.repository.internal.DefaultVersionRangeResolver.class,
+    org.apache.maven.repository.internal.SnapshotMetadataGeneratorFactory.class,
+    org.apache.maven.repository.internal.VersionsMetadataGeneratorFactory.class
+})
+public final class MavenDependencyResolver {
+    /**
+     * Resolves and downloads Maven dependencies for plugins.
+     */
     private static final Logger LOG = Logger.getLogger(MavenDependencyResolver.class);
 
     /**
