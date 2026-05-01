@@ -12,6 +12,7 @@ package tech.kayys.gollek.safetensor.engine.generation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
@@ -54,12 +55,16 @@ import java.util.Objects;
 import java.util.Collection;
 import java.util.Collections;
 
-/**
- * Direct SafeTensor inference engine using AccelTensor + Apple Accelerate.
- * No LibTorch dependency.
- */
 @ApplicationScoped
 public class DirectInferenceEngine implements SafetensorEngine {
+
+    @Inject
+    Instance<tech.kayys.gollek.metal.MetalComputeBackend> metalBackend;
+
+    /**
+     * Direct SafeTensor inference engine using AccelTensor + Apple Accelerate.
+     * No LibTorch dependency.
+     */
 
     private static final Logger log = Logger.getLogger(DirectInferenceEngine.class);
 
@@ -204,7 +209,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
             modelsByPath.put(resolved, model);
             modelsByKey.put(key, model);
 
-            log.infof("DirectInferenceEngine: loaded [%s] — %d weights, arch=%s (Accelerate backend)",
+            log.infof("DirectInferenceEngine: loaded [%s] — %d weights, arch=%s",
                     key, weights.size(), config.modelType());
             return key;
         }
@@ -217,6 +222,15 @@ public class DirectInferenceEngine implements SafetensorEngine {
             int inputLen = 0;
 
             try {
+                if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null && !metalBackend.get().deviceName().contains("CPU")) {
+                    System.out.println("Platform: Metal");
+                    System.out.println("✓ GPU acceleration enabled (" + metalBackend.get().deviceName() + ")");
+                } else {
+                    System.out.println("Platform: Apple Silicon");
+                    System.out.println("✓ CPU acceleration enabled (Accelerate AMX)");
+                }
+                System.out.flush();
+
                 boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
                 if (verbose) { System.out.println("[DEBUG] 1: getLoadedModel"); System.out.flush(); }
                 LoadedModel model = (LoadedModel) getLoadedModel(modelPath);

@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.Arrays;
@@ -116,12 +119,12 @@ public final class GgufConverterMain {
 
             System.out.println("\n── Tensors ──");
             long totalBytes = 0;
-            for (TensorInfo t : model.tensors()) {
+            for (GGUFTensorInfo t : model.tensors()) {
                 long bytes = t.dataSize();
                 totalBytes += bytes;
                 System.out.printf("  %-50s  %-8s  %-20s  %,d bytes%n",
                         t.name(), t.type().label,
-                        java.util.Arrays.toString(t.ne()), bytes);
+                        java.util.Arrays.toString(t.shape()), bytes);
             }
             System.out.printf("%nTotal tensor data: %,.1f MB%n", totalBytes / 1e6);
         }

@@ -122,6 +122,11 @@
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-sdk-java-local</artifactId>
         </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-sdk-session</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <!-- Kernel Plugin Core for auto-detection -->
         <dependency>

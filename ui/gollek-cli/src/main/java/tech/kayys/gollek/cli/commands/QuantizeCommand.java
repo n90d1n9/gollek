@@ -7,10 +7,10 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.ParentCommand;
 import tech.kayys.gollek.cli.GollekCommand;
-import tech.kayys.gollek.cli.GollekHome;
-import tech.kayys.gollek.cli.audit.QuantAuditRecord;
+import tech.kayys.gollek.sdk.util.GollekHome;
+import tech.kayys.gollek.sdk.audit.QuantAuditRecord;
+import tech.kayys.gollek.sdk.audit.QuantAuditTrail;
 import tech.kayys.gollek.cli.audit.QuantAuditRenderer;
-import tech.kayys.gollek.cli.audit.QuantAuditTrail;
 import tech.kayys.gollek.cli.chat.ChatUIRenderer;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.plugin.kernel.KernelPlatformDetector;
@@ -24,6 +24,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import tech.kayys.gollek.sdk.model.PullProgress;
 
 /**
  * Gollek CLI command for offline model quantization.
@@ -259,7 +261,7 @@ public class QuantizeCommand implements Runnable {
         // Try SDK preparation
         try {
             System.out.println("Resolving model from repository...");
-            var resolution = sdk.prepareModel(modelId, "safetensors", false, null, progress -> {
+            var resolution = sdk.prepareModel(modelId, "safetensors", null, false, null, (Consumer<PullProgress>) progress -> {
                 System.out.printf("\r%s%s %s %d%%%s",
                         ChatUIRenderer.CYAN,
                         progress.getStatus(),

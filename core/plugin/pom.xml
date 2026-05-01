@@ -76,6 +76,7 @@
         <module>gollek-plugin-kernel-core</module>
         <module>gollek-plugin-optimization-core</module>
         <module>gollek-plugin-runner-core</module>
+        <module>gollek-plugin-runner-gguf</module>
         <module>gollek-plugin-metal</module>
     </modules>
 </project>

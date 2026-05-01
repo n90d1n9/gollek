@@ -30,6 +30,7 @@ import tech.kayys.gollek.cli.commands.MultimodalCommand;
 import tech.kayys.gollek.cli.commands.LiteRTCommand;
 import tech.kayys.gollek.cli.commands.OnnxCommand;
 import tech.kayys.gollek.cli.commands.QuantizeCommand;
+import tech.kayys.gollek.sdk.util.GollekHome;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Option;

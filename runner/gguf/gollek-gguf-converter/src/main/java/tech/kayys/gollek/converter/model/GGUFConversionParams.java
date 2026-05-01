@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.model;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.HashMap;

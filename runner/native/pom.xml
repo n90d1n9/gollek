@@ -22,9 +22,7 @@
     </properties>
     <modules>
         <module>gollek-inference</module>
-        <module>gollek-gguf-loader</module>
-        <module>gollek-gguf-tokenizer</module>
         <module>gollek-native-tensorflow</module>
-        <!-- <module>gollek-gguf-converter</module> -->
+        <module>gollek-native-onnx</module>
     </modules>
 </project>

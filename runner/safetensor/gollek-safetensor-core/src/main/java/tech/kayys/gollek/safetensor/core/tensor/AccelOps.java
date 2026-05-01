@@ -651,6 +651,47 @@ public final class AccelOps {
     }
 
     /**
+     * Per-head RMS Normalization.
+     * x: [..., numHeads, headDim], weight: [numHeads * headDim]
+     */
+    public static AccelTensor perHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne) {
+        if (weight == null) return x.contiguous();
+        x = x.contiguous();
+        long[] shape = x.shape();
+        int headDim = (int) shape[shape.length - 1];
+        int numHeads = (int) shape[shape.length - 2];
+        int outer = (int) (x.numel() / (numHeads * headDim));
+
+        AccelTensor out = AccelTensor.zeros(shape);
+        MemorySegment xSeg = x.dataSegment();
+        MemorySegment wSeg = weight.dataSegment();
+        MemorySegment oSeg = out.dataSegment();
+
+        for (int b = 0; b < outer; b++) {
+            for (int h = 0; h < numHeads; h++) {
+                long base = (long) (b * numHeads + h) * headDim;
+                long wBase = (weight.numel() == headDim) ? 0 : (long) h * headDim;
+                
+                float sumSq = 0.0f;
+                for (int i = 0; i < headDim; i++) {
+                    float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                    sumSq += val * val;
+                }
+
+                float rms = (float) (1.0 / Math.sqrt(sumSq / headDim + eps));
+                
+                for (int j = 0; j < headDim; j++) {
+                    float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + j);
+                    float weightVal = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, wBase + j);
+                    if (addOne) weightVal += 1.0f;
+                    oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + j, val * rms * weightVal);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * Vectorized Softmax with optimized reductions.
      */
     public static AccelTensor softmax(AccelTensor x, int dim) {

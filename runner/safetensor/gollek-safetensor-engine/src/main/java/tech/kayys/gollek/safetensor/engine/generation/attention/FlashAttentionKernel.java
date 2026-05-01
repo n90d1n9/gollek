@@ -67,8 +67,8 @@ public class FlashAttentionKernel {
         int layerIdx = in.layerIdx;
         int startPos = in.startPos;
         int seqLen = (int) in.x.size(1);
-        int headDim = config.resolvedMaxHeadDim();
         int numQHeads = config.numAttentionHeads();
+        int headDim = (int) in.qW.size(0) / numQHeads;
         int numKVHeads = config.resolvedNumKvHeads();
         float scale = (float) (1.0 / Math.sqrt(headDim));
 
@@ -77,19 +77,29 @@ public class FlashAttentionKernel {
         AccelTensor k = AccelOps.linear(in.x, in.kW, in.kB);
         AccelTensor v = AccelOps.linear(in.x, in.vW, in.vB);
 
-        // 2. QK-Norm (Gemma-3/4)
+        // 3. Reshape and RoPE
+        AccelTensor q4 = q.reshape(in.x.size(0), in.x.size(1), numQHeads, headDim);
+        AccelTensor k4 = k.reshape(in.x.size(0), in.x.size(1), numKVHeads, headDim);
+        q.close();
+        k.close();
+        q = q4; k = k4;
+
+        // QK-Norm (Per-head)
         if (in.qNormW != null) {
-            AccelTensor qNormed = rmsNorm(q, in.qNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
+            AccelTensor qNormed = AccelOps.perHeadRmsNorm(q, in.qNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
             q.close();
             q = qNormed;
         }
         if (in.kNormW != null) {
-            AccelTensor kNormed = rmsNorm(k, in.kNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
+            AccelTensor kNormed = AccelOps.perHeadRmsNorm(k, in.kNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
             k.close();
             k = kNormed;
         }
 
-        // 3. RoPE
+        AccelTensor v4 = v.reshape(in.x.size(0), in.x.size(1), numKVHeads, headDim);
+        v.close();
+        v = v4;
+
         RopeFrequencyCache.RopeFrequencies freqs = ropeCache.get(headDim, config.maxPositionEmbeddings(), 10000.0,
                 config.ropeScaling());
         applyRope(q, k, startPos, freqs, !in.arch.usesNeoxRope());
@@ -112,18 +122,23 @@ public class FlashAttentionKernel {
         k.close();
         v.close();
 
-        // 6. Post-Attention Norm (Gemma-2/4)
-        AccelTensor projectedIn = attnOut;
+        // Reshape back to 3D for subsequent operations
+        AccelTensor attnOut3 = attnOut.reshape(in.x.size(0), seqLen, numQHeads * headDim);
+        attnOut.close();
+        attnOut = attnOut3;
+
+        // 6. Output Projection: maps [B,T,numQHeads*headDim] → [B,T,hidden_size]
+        AccelTensor projected = AccelOps.linear(attnOut, in.oW, in.oB);
+        attnOut.close();
+
+        // 7. Post-Attention Norm (Gemma-2/4): weight is [hidden_size], must come after o_proj
         if (in.postAttnNormW != null) {
-            projectedIn = rmsNorm(attnOut, in.postAttnNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
-            attnOut.close();
+            AccelTensor normed = rmsNorm(projected, in.postAttnNormW, config.rmsNormEps(), in.arch.addOneToRmsNormWeight());
+            projected.close();
+            projected = normed;
         }
 
-        // 7. Output Projection
-        AccelTensor out = AccelOps.linear(projectedIn, in.oW, in.oB);
-        projectedIn.close();
-
-        return out;
+        return projected;
     }
 
     private AccelTensor rmsNorm(AccelTensor x, AccelTensor w, double eps, boolean addOne) {

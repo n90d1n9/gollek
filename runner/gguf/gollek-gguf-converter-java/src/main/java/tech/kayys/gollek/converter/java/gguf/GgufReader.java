@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.java.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.IOException;
 import java.lang.foreign.*;
 import java.nio.ByteOrder;
@@ -66,16 +69,16 @@ public final class GgufReader implements AutoCloseable {
         }
 
         // ── Tensor descriptors ────────────────────────────────────────
-        List<TensorInfo> infos = new ArrayList<>((int) nTensors);
+        List<GGUFTensorInfo> infos = new ArrayList<>((int) nTensors);
         for (long i = 0; i < nTensors; i++) {
             String name = readString();
             int nDims = readI32LE();
-            long[] ne = new long[nDims];
+            long[] shape = new long[nDims];
             for (int d = 0; d < nDims; d++)
-                ne[d] = readI64LE();
+                shape[d] = readI64LE();
             GgmlType type = GgmlType.fromId(readI32LE());
             long off = readI64LE();
-            infos.add(new TensorInfo(name, ne, type, off));
+            infos.add(new GGUFTensorInfo(name, shape, type, off));
         }
 
         // Store metadata end position before alignment padding
@@ -86,7 +89,7 @@ public final class GgufReader implements AutoCloseable {
         long dataStart = alignUp(pos, alignment);
 
         // ── Register tensor descriptors with corrected offsets ────────
-        for (TensorInfo info : infos) {
+        for (GGUFTensorInfo info : infos) {
             model.addTensor(info); // offsets are relative to dataStart already
         }
 
@@ -117,7 +120,7 @@ public final class GgufReader implements AutoCloseable {
             if (dataLen > Integer.MAX_VALUE) {
                 throw new IllegalStateException(
                     "Model tensor data section (" + dataLen + " bytes) exceeds 2 GB limit. " +
-                    "Use tensorData(TensorInfo) for zero-copy access instead."
+                    "Use tensorData(GGUFTensorInfo) for zero-copy access instead."
                 );
             }
 

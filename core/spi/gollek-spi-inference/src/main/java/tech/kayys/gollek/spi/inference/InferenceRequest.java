@@ -50,6 +50,9 @@ public final class InferenceRequest {
     private final String preferredProvider;
 
     @Nullable
+    private final String plugin;
+
+    @Nullable
     private final Duration timeout;
 
     private final Priority priority;
@@ -80,6 +83,7 @@ public final class InferenceRequest {
             @JsonProperty("toolChoice") Object toolChoice,
             @JsonProperty("streaming") boolean streaming,
             @JsonProperty("preferredProvider") String preferredProvider,
+            @JsonProperty("plugin") String plugin,
             @JsonProperty("timeout") Duration timeout,
             @JsonProperty("priority") Priority priority,
             @JsonProperty("cacheBypass") boolean cacheBypass,
@@ -127,6 +131,7 @@ public final class InferenceRequest {
                 : Collections.emptyMap();
         this.streaming = streaming;
         this.preferredProvider = preferredProvider;
+        this.plugin = plugin;
         this.timeout = timeout;
         this.priority = priority;
         this.cacheBypass = cacheBypass;
@@ -209,6 +214,10 @@ public final class InferenceRequest {
 
     public Optional<String> getPreferredProvider() {
         return Optional.ofNullable(preferredProvider);
+    }
+
+    public Optional<String> getPlugin() {
+        return Optional.ofNullable(plugin);
     }
 
     public Optional<Duration> getTimeout() {
@@ -305,6 +314,7 @@ public final class InferenceRequest {
                 .messages(messages)
                 .parameters(parameters)
                 .preferredProvider(preferredProvider)
+                .plugin(plugin)
                 .toolChoice(toolChoice)
                 .streaming(streaming)
                 .priority(priority)
@@ -342,6 +352,7 @@ public final class InferenceRequest {
         private final Map<String, Object> parameters = new HashMap<>();
         private boolean streaming = false;
         private String preferredProvider;
+        private String plugin;
         private Duration timeout;
         private Priority priority = Priority.NORMAL;
         private boolean cacheBypass = false;
@@ -468,6 +479,11 @@ public final class InferenceRequest {
             return this;
         }
 
+        public Builder plugin(String plugin) {
+            this.plugin = plugin;
+            return this;
+        }
+
         public Builder timeout(Duration timeout) {
             this.timeout = timeout;
             return this;
@@ -551,7 +567,7 @@ public final class InferenceRequest {
             }
             return new InferenceRequest(
                     requestId, apiKey, model, messages, parameters, tools, toolChoice, streaming,
-                    preferredProvider, timeout, priority, cacheBypass, userId, sessionId, traceId,
+                    preferredProvider, plugin, timeout, priority, cacheBypass, userId, sessionId, traceId,
                     inferenceStage, promptTokenCount, metadata, attachments);
         }
     }

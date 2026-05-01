@@ -1,5 +1,7 @@
 package tech.kayys.gollek.cli.audit;
 
+import tech.kayys.gollek.sdk.audit.QuantAuditRecord;
+import tech.kayys.gollek.sdk.audit.QuantAuditTrail;
 import tech.kayys.gollek.cli.chat.ChatUIRenderer;
 
 import java.time.Duration;

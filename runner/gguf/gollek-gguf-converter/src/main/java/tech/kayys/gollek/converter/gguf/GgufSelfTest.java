@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.List;
@@ -99,8 +102,8 @@ public final class GgufSelfTest {
             weights[i] = i * 0.01f;
         byte[] tensorBytes = floatsToBytes(weights);
 
-        long[] ne = { 8L, 4L }; // innermost first
-        src.addTensor(new TensorInfo("token_embd.weight", ne, GgmlType.F32, 0));
+        long[] shape = { 8L, 4L }; // innermost first
+        src.addTensor(new GGUFTensorInfo("token_embd.weight", shape, GgmlType.F32, 0));
         // Pad to alignment (32 bytes already aligned for 128-byte blob)
         byte[] blob = java.util.Arrays.copyOf(tensorBytes, 128);
         src.setTensorData(blob);
@@ -117,11 +120,11 @@ public final class GgufSelfTest {
                 assert_("RT tensors", dst.tensors().size() == 1);
                 assert_("RT kv count", dst.metadata().size() == 4);
 
-                TensorInfo ti = dst.tensors().get(0);
+                GGUFTensorInfo ti = dst.tensors().get(0);
                 assert_("RT tensor name", ti.name().equals("token_embd.weight"));
                 assert_("RT tensor type", ti.type() == GgmlType.F32);
-                assert_("RT tensor ne[0]", ti.ne()[0] == 8L);
-                assert_("RT tensor ne[1]", ti.ne()[1] == 4L);
+                assert_("RT tensor shape[0]", ti.shape()[0] == 8L);
+                assert_("RT tensor shape[1]", ti.shape()[1] == 4L);
             }
             pass("GGUF write/read round-trip");
         } finally {

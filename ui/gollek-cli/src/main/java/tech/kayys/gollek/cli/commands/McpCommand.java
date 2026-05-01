@@ -26,7 +26,7 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import java.util.List;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 
 @Dependent
 @Unremovable

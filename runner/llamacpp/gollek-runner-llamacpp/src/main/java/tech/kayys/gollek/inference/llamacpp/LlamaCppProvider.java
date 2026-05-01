@@ -751,8 +751,13 @@ public class LlamaCppProvider implements StreamingProvider {
             }
 
             log.debug("Initializing GGUF native backend");
-            binding.backendInit();
-            log.info("llama.cpp native library initialized");
+            if (binding != null) {
+                binding.backendInit();
+                log.info("llama.cpp native library initialized");
+            } else {
+                log.warn("GGUF native binding is not available; llama.cpp backend disabled.");
+                throw new IllegalStateException("Native binding not available");
+            }
 
             sessionManager.initialize();
 
@@ -764,8 +769,12 @@ public class LlamaCppProvider implements StreamingProvider {
             log.info("GGUF Provider initialization completed");
 
         } catch (Throwable t) {
-            log.warn("GGUF Provider failed to initialize (native library may be missing or incompatible): " + t.getMessage());
-            log.debug("Initialization error details:", t);
+            if (config.verboseLogging()) {
+                log.warn("GGUF Provider failed to initialize (native library may be missing or incompatible): " + t.getMessage());
+                log.debug("Initialization error details:", t);
+            } else {
+                log.debug("GGUF Provider failed to initialize: " + t.getMessage(), t);
+            }
             // We don't throw an exception here to allow the rest of the application to start
             // and use other providers (e.g. safetensor).
             initialized.set(false);

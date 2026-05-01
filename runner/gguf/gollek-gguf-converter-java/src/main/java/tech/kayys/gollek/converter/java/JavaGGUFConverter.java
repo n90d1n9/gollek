@@ -1,10 +1,13 @@
 package tech.kayys.gollek.converter.java;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
 import tech.kayys.gollek.converter.java.gguf.SafetensorToGgufConverter;
-import tech.kayys.gollek.converter.java.gguf.GgmlType;
+
 import tech.kayys.gollek.converter.model.ConversionProgress;
 import tech.kayys.gollek.converter.model.ConversionResult;
 import tech.kayys.gollek.converter.model.GGUFConversionParams;

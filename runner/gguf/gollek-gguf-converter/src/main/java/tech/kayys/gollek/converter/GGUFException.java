@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 /**
  * Exception thrown during GGUF conversion operations.
  * 

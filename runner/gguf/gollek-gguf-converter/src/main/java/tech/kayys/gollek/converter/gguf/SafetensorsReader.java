@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import com.google.gson.*;
 
 import java.io.IOException;

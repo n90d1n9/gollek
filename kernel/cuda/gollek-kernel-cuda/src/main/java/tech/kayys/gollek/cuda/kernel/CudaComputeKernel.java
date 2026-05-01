@@ -206,7 +206,7 @@ public class CudaComputeKernel implements ComputeKernel {
 
     @Override
     public void rmsNorm(MemorySegment output, MemorySegment input, MemorySegment weight,
-                       int hiddenSize, float eps) {
+                       int hiddenSize, float eps, boolean addOne) {
         int result = binding.rmsNorm(output, input, weight, hiddenSize, eps);
         if (result != 0) {
             throw new RuntimeException("CUDA rmsNorm failed with error code: " + result);

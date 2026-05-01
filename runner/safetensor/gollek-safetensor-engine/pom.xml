@@ -82,11 +82,6 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-model-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
             <groupId>io.smallrye.reactive</groupId>
             <artifactId>mutiny</artifactId>
         </dependency>

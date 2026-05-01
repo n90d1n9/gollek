@@ -10,9 +10,12 @@ import tech.kayys.gollek.cli.GollekCommand;
 import tech.kayys.gollek.cli.chat.*;
 import tech.kayys.gollek.spi.provider.ProviderHealth;
 import tech.kayys.gollek.spi.provider.ProviderInfo;
+import tech.kayys.gollek.sdk.model.ModelResolver;
 import tech.kayys.gollek.sdk.core.GollekSdk;
-import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.sdk.exception.SdkException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
+import tech.kayys.gollek.spi.model.ModelInfo;
+import tech.kayys.gollek.sdk.model.ModelResolution;
 
 import org.jline.console.CmdDesc;
 import org.jline.utils.AttributedString;
@@ -48,8 +51,6 @@ public class ChatCommand implements Runnable {
     GollekSdk sdk;
     @Inject
     PluginAvailabilityChecker pluginChecker;
-    @Inject
-    tech.kayys.gollek.cli.util.ModelImporter modelImporter;
 
     @Option(names = { "-m", "--model" }, description = "Model ID for repository resolution (e.g., huggingface ID)")
     public String modelId;
@@ -143,6 +144,9 @@ public class ChatCommand implements Runnable {
     @Option(names = { "--quantize-bits" }, description = "Bit width for JIT quantization (default: 4)", defaultValue = "4")
     public int quantizeBits = 4;
 
+    @Option(names = { "--plugin" }, description = "Explicit plugin/engine to use (e.g. llamacpp, java, bnb)")
+    public String pluginId;
+
     private static final String DEFAULT_CONCISE_SYSTEM_PROMPT = "Answer briefly and directly. Keep responses relevant to the question. "
             + "Prefer 1-4 short sentences unless the user asks for detail.";
 
@@ -210,7 +214,8 @@ public class ChatCommand implements Runnable {
                 }
                 // Handle --import or --copy
                 if (importModel || copyModel) {
-                    filePath = modelImporter.importModel(filePath, importModel, false);
+                    var res = sdk.importModel(filePath, importModel);
+                    filePath = java.nio.file.Paths.get(res.getLocalPath());
                     System.out.println((importModel ? "Imported" : "Copied") + " model to: " + filePath.toAbsolutePath());
                 }
                 modelPathOverride = filePath.toAbsolutePath().toString();
@@ -230,7 +235,8 @@ public class ChatCommand implements Runnable {
                 }
                 // Handle --import or --copy
                 if (importModel || copyModel) {
-                    dirPath = modelImporter.importModel(dirPath, importModel, true);
+                    var res = sdk.importModel(dirPath, importModel);
+                    dirPath = java.nio.file.Paths.get(res.getLocalPath());
                     System.out.println((importModel ? "Imported" : "Copied") + " model to: " + dirPath.toAbsolutePath());
                 }
                 modelPathOverride = dirPath.toAbsolutePath().toString();
@@ -250,7 +256,7 @@ public class ChatCommand implements Runnable {
                 }
 
                 if (parentCommand != null && parentCommand.verbose) System.out.println("[ChatCommand] forceGguf=" + forceGguf + ", quantization=" + quantization + ", modelId=" + modelId);
-                var resolution = sdk.ensureModelAvailable(modelId, forceGguf, quantization, progress -> {
+                var resolution = sdk.ensureModelAvailable(modelId, null, pluginId, forceGguf, quantization, progress -> {
                     if (!quiet)
                         System.out.print(
                                 "\rPulling/Converting: " + progress.getPercentComplete() + "% " + progress.getProgressBar(20));
@@ -266,13 +272,7 @@ public class ChatCommand implements Runnable {
 
                 // Auto-select provider for downloaded models if not forced
                 if (providerId == null) {
-                    if ("safetensors".equalsIgnoreCase(resolution.getInfo().getFormat())) {
-                        providerId = "safetensor";
-                    } else if ("litert".equalsIgnoreCase(resolution.getInfo().getFormat())) {
-                        providerId = "litert";
-                    } else {
-                        providerId = sdk.getPreferredProvider().orElse("native");
-                    }
+                    providerId = sdk.autoSelectProvider(modelId, forceGguf, quantization).orElse(null);
                 }
             }
 
@@ -377,6 +377,7 @@ public class ChatCommand implements Runnable {
                     .parameter("json_mode", jsonMode)
                     .parameter("inference_timeout_ms", inferenceTimeoutMs)
                     .maxTokens(maxTokens)
+                    .plugin(pluginId)
                     .cacheBypass(noCache);
 
             if (mirostat > 0)

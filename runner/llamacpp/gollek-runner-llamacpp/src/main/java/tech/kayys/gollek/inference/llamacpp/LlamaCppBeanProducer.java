@@ -12,7 +12,6 @@ public class LlamaCppBeanProducer {
     LlamaCppProviderConfig config;
 
     @Produces
-    @ApplicationScoped
     public LlamaCppBinding llamaCppBinding() {
         if (!config.enabled()) {
             return null;

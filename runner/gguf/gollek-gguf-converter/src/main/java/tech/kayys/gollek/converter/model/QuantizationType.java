@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.model;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 /**
  * GGUF quantization types with metadata.
  * 

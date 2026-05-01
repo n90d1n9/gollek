@@ -9,6 +9,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import tech.kayys.gollek.sdk.core.GollekSdk;
+import tech.kayys.gollek.sdk.model.ModelResolver;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.spi.context.RequestContext;
 
@@ -38,7 +39,7 @@ public class ShowCommand implements Runnable {
     @Override
     public void run() {
         try {
-            Optional<LocalModelResolver.ResolvedModel> resolvedOpt = LocalModelResolver.resolve(sdk, modelId);
+            Optional<ModelResolver.ResolvedModel> resolvedOpt = ModelResolver.resolve(sdk, modelId);
             if (resolvedOpt.isEmpty()) {
                 LocalModelIndex.refreshFromDisk();
                 Optional<LocalModelIndex.Entry> idx = LocalModelIndex.find(modelId);
@@ -58,7 +59,7 @@ public class ShowCommand implements Runnable {
                                 "path", entry.path != null ? entry.path : "",
                                 "source", entry.source != null ? entry.source : "local"))
                         .build();
-                resolvedOpt = Optional.of(new LocalModelResolver.ResolvedModel(
+                resolvedOpt = Optional.of(new ModelResolver.ResolvedModel(
                         model.getModelId(), model, entry.path != null ? Path.of(entry.path) : null, false));
             }
 
@@ -73,7 +74,7 @@ public class ShowCommand implements Runnable {
         }
     }
 
-    private void printModelDetails(LocalModelResolver.ResolvedModel resolved) {
+    private void printModelDetails(ModelResolver.ResolvedModel resolved) {
         ModelInfo model = resolved.info();
         System.out.println("Model Details");
         System.out.println("=".repeat(50));
@@ -100,7 +101,7 @@ public class ShowCommand implements Runnable {
         }
     }
 
-    private void printModelJson(LocalModelResolver.ResolvedModel resolved) throws Exception {
+    private void printModelJson(ModelResolver.ResolvedModel resolved) throws Exception {
         ModelInfo model = resolved.info();
         java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("id", model.getModelId());
@@ -116,7 +117,7 @@ public class ShowCommand implements Runnable {
         System.out.println(JSON.writeValueAsString(out));
     }
 
-    private boolean isRunnableLocally(LocalModelResolver.ResolvedModel resolved) {
+    private boolean isRunnableLocally(ModelResolver.ResolvedModel resolved) {
         ModelInfo model = resolved.info();
         String format = model.getFormat() != null ? model.getFormat().trim().toUpperCase(Locale.ROOT) : "";
         if (format.equals("GGUF") || format.equals("TORCHSCRIPT") || format.equals("ONNX")) {
@@ -127,7 +128,7 @@ public class ShowCommand implements Runnable {
         }
         Path path = resolved.localPath();
         if (path == null) {
-            path = LocalModelResolver.extractPath(model).orElse(null);
+            path = ModelResolver.extractPath(model).orElse(null);
         }
         if (path != null) {
             String normalized = path.toString().replace('\\', '/').toLowerCase(Locale.ROOT);

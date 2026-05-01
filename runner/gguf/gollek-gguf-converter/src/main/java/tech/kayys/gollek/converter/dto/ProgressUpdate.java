@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.dto;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import tech.kayys.gollek.converter.model.ConversionProgress;

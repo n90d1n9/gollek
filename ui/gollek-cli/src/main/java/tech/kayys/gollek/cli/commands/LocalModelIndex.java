@@ -11,7 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 import tech.kayys.gollek.cli.util.CLIUtils;
 import tech.kayys.gollek.cli.util.QuantSuggestionDetector;
 

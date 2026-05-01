@@ -21,6 +21,9 @@
  */
 package tech.kayys.gollek.converter;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Files;

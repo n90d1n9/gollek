@@ -164,7 +164,7 @@
             <plugin>
                 <groupId>io.smallrye</groupId>
                 <artifactId>jandex-maven-plugin</artifactId>
-                <version>3.2.7</version>
+                <version>3.1.8</version>
                 <executions>
                     <execution>
                         <id>make-index</id>
@@ -235,7 +235,7 @@
                                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
                                 <buildArg>--initialize-at-build-time=org.slf4j,io.quarkus,tech.kayys.gollek,com.fasterxml.jackson,org.jboss,org.apache.commons.logging,io.smallrye,org.yaml.snakeyaml</buildArg>
 
-                                <buildArg>--initialize-at-run-time=org.slf4j.impl.StaticLoggerBinder</buildArg>
+                                <buildArg>--initialize-at-run-time=org.slf4j.impl.StaticLoggerBinder,tech.kayys.suling,tech.kayys.gollek.metal,tech.kayys.gollek.safetensor.core.tensor.AccelOps,tech.kayys.gollek.safetensor.core.tensor.AccelTensor,tech.kayys.gollek.safetensor.audio.processing.FlacDecoder,tech.kayys.gollek.safetensor.audio.processing.AudioDecoderRegistry,tech.kayys.gollek.spi.tensor.ComputeKernelRegistry,tech.kayys.gollek.spi.tensor.CpuKernel,tech.kayys.gollek.llama,tech.kayys.gollek.inference.llamacpp</buildArg>
 
                             </buildArgs>
 

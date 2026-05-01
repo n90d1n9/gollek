@@ -21,6 +21,13 @@
 
     <dependencyManagement>
         <dependencies>
+        <!-- GGUF Core -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
             <dependency>
                 <groupId>io.quarkus.platform</groupId>
                 <artifactId>quarkus-bom</artifactId>
@@ -32,6 +39,11 @@
     </dependencyManagement>
 
     <dependencies>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Core Inference Engine -->
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
@@ -54,6 +66,7 @@
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-runner-llamacpp</artifactId>
             <version>${project.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!-- Reactive Programming -->

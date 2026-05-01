@@ -48,23 +48,56 @@ final class LlamaNativeLoader {
      * @throws RuntimeException if the library cannot be found or loaded
      */
     static SymbolLookup load(boolean verbose, Optional<String> explicitLibPath, Optional<String> explicitLibDir) {
+        if (isNativeBuildTime()) {
+            log.info("Skipping llama.cpp native library load during native-image build time");
+            return SymbolLookup.loaderLookup();
+        }
         try {
-            loadNativeLibrary(explicitLibPath, explicitLibDir, verbose);
-            SymbolLookup lookup = SymbolLookup.loaderLookup();
-            suppressNativeLogs(lookup);
-            if (!verbose) {
-                log.info("Loaded llama.cpp native library (quiet mode)");
+            Path loadedPath = loadNativeLibrary(explicitLibPath, explicitLibDir, verbose);
+            SymbolLookup loaderLookup = SymbolLookup.loaderLookup();
+            
+            if (loadedPath != null && Files.exists(loadedPath)) {
+                try {
+                    SymbolLookup libraryLookup = SymbolLookup.libraryLookup(loadedPath, Arena.global());
+                    SymbolLookup combined = name -> libraryLookup.find(name).or(() -> loaderLookup.find(name));
+                    suppressNativeLogs(combined);
+                    if (verbose) {
+                        log.infof("Loaded llama.cpp native library from: %s", loadedPath);
+                    }
+                    return combined;
+                } catch (Exception e) {
+                    if (verbose) {
+                        log.warnf("Failed to create library lookup for %s, falling back to loader lookup: %s", 
+                                loadedPath, e.getMessage());
+                    } else {
+                        log.debugf("Failed to create library lookup for %s, falling back to loader lookup: %s", 
+                                loadedPath, e.getMessage());
+                    }
+                }
             }
-            return lookup;
+            
+            suppressNativeLogs(loaderLookup);
+            if (verbose) {
+                log.info("Loaded llama.cpp native library (loader lookup mode)");
+            }
+            return loaderLookup;
         } catch (Throwable e) {
-            log.warn("Failed to load llama.cpp library: " + e.getMessage());
+            if (verbose) {
+                log.warn("Failed to load llama.cpp library: " + e.getMessage());
+            } else {
+                log.debug("Failed to load llama.cpp library: " + e.getMessage());
+            }
             throw new RuntimeException("Failed to load llama.cpp library", e);
         }
     }
 
+    private static boolean isNativeBuildTime() {
+        return "buildtime".equals(System.getProperty("org.graalvm.nativeimage.imagecode"));
+    }
+
     // ── Library discovery ─────────────────────────────────────────────────────
 
-    private static void loadNativeLibrary(Optional<String> explicitLibPath, Optional<String> explicitLibDir,
+    private static Path loadNativeLibrary(Optional<String> explicitLibPath, Optional<String> explicitLibDir,
             boolean verbose) throws Exception {
         String mappedLibName = System.mapLibraryName(LIB_BASE_NAME);
         List<String> attempts = new ArrayList<>();
@@ -80,7 +113,7 @@ final class LlamaNativeLoader {
             attempts.add("explicit path: " + candidate);
             if (Files.exists(candidate)) {
                 loadWithDependencies(candidate.getParent(), candidate.getFileName().toString(), verbose);
-                return;
+                return candidate;
             }
         }
 
@@ -91,32 +124,33 @@ final class LlamaNativeLoader {
             attempts.add("explicit dir: " + candidate);
             if (Files.exists(candidate)) {
                 loadWithDependencies(dir, mappedLibName, verbose);
-                return;
+                return candidate;
             }
         }
 
-        // 3) System.loadLibrary (java.library.path / DYLD_LIBRARY_PATH)
-        try {
-            System.loadLibrary(LIB_BASE_NAME);
-            return;
-        } catch (Throwable t) {
-            attempts.add("System.loadLibrary failed: " + t.getMessage());
-        }
-
-        // 4) Common runtime filesystem locations
+        // 3) Common runtime filesystem locations
         for (Path dir : candidateRuntimeDirs()) {
             Path candidate = dir.resolve(mappedLibName);
             attempts.add("runtime dir: " + candidate);
             if (Files.exists(candidate)) {
                 loadWithDependencies(dir, mappedLibName, verbose);
-                return;
+                return candidate;
             }
+        }
+
+        // 4) System.loadLibrary (java.library.path / DYLD_LIBRARY_PATH)
+        try {
+            System.loadLibrary(LIB_BASE_NAME);
+            // We don't have an easy path here, return null to use loaderLookup only
+            return null;
+        } catch (Throwable t) {
+            attempts.add("System.loadLibrary failed: " + t.getMessage());
         }
 
         // 5) Extract from classpath resources
         Path extracted = extractAndLoadFromResources(verbose);
         if (extracted != null) {
-            return;
+            return extracted;
         }
 
         throw new RuntimeException(
@@ -279,6 +313,13 @@ final class LlamaNativeLoader {
                 .map(Path::getParent).ifPresent(dirs::add);
         optionalEnv("GOLLEK_LLAMA_LIB_DIR").map(Path::of).map(Path::toAbsolutePath).ifPresent(dirs::add);
 
+        if (isMacOS()) {
+            Path brew = Path.of("/opt/homebrew/opt/llama.cpp/lib");
+            if (Files.exists(brew)) dirs.add(brew);
+            Path intelBrew = Path.of("/usr/local/opt/llama.cpp/lib");
+            if (Files.exists(intelBrew)) dirs.add(intelBrew);
+        }
+
         Path sourcePathLlamaLib = Path.of(System.getProperty("user.home"),
                 ".gollek", "source", "llama-cpp", "lib").toAbsolutePath();
         if (Files.exists(sourcePathLlamaLib)) dirs.add(sourcePathLlamaLib);
@@ -292,13 +333,6 @@ final class LlamaNativeLoader {
         if (Files.exists(sourcePathRoot)) dirs.add(sourcePathRoot);
 
         dirs.add(Path.of(System.getProperty("user.home"), ".gollek", "libs", "llama").toAbsolutePath());
-
-        if (isMacOS()) {
-            Path brew = Path.of("/opt/homebrew/opt/llama.cpp/lib");
-            if (Files.exists(brew)) dirs.add(brew);
-            Path intelBrew = Path.of("/usr/local/opt/llama.cpp/lib");
-            if (Files.exists(intelBrew)) dirs.add(intelBrew);
-        }
 
         dirs.add(Path.of(System.getProperty("user.home"), ".gollek", "native-libs").toAbsolutePath());
         dirs.add(Path.of(".").toAbsolutePath());

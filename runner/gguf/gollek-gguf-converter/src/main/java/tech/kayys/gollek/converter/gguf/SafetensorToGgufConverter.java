@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import com.google.gson.*;
 
 import java.io.*;
@@ -145,8 +148,8 @@ public final class SafetensorToGgufConverter {
 
         // 5. Register tensor descriptors in the model
         for (TensorPlan tp : plan) {
-            long[] ne = reverseShape(tp.shape());
-            model.addTensor(new TensorInfo(tp.ggufName(), ne, tp.targetType(), tp.ggufOffset()));
+            long[] shape = reverseShape(tp.shape());
+            model.addTensor(new GGUFTensorInfo(tp.ggufName(), shape, tp.targetType(), tp.ggufOffset()));
         }
 
         // 6. Write GGUF header + metadata + tensor-info to a temp file,

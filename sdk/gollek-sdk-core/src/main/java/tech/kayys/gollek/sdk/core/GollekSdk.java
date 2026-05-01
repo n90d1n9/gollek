@@ -22,6 +22,8 @@ import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.model.ModelFormat;
 
+import tech.kayys.gollek.sdk.model.ModelListRequest;
+import tech.kayys.gollek.sdk.model.ModelPullRequest;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -135,6 +137,22 @@ public interface GollekSdk {
 
     List<InferenceResponse> batchInference(BatchInferenceRequest batchRequest) throws SdkException;
 
+    // ==================== System Operations ====================
+
+    /**
+     * Get information about the underlying hardware and platform.
+     */
+    default tech.kayys.gollek.plugin.kernel.KernelPlatform getPlatformInfo() throws SdkException {
+        return tech.kayys.gollek.plugin.kernel.KernelPlatformDetector.detect();
+    }
+
+    /**
+     * Get the quantization service for model optimization.
+     */
+    default tech.kayys.gollek.sdk.api.QuantizationService getQuantizationService() throws SdkException {
+        throw new UnsupportedOperationException("Quantization service not supported by this SDK implementation");
+    }
+
     // ==================== Provider Operations ====================
 
     List<ProviderInfo> listAvailableProviders() throws SdkException;
@@ -146,6 +164,13 @@ public interface GollekSdk {
     Optional<String> getPreferredProvider();
 
     // ==================== Model Operations ====================
+
+    /**
+     * List models with filtering and pagination. NEW in v1.3.0.
+     */
+    default List<ModelInfo> listModels(ModelListRequest request) throws SdkException {
+        return listModels(request.offset(), request.limit());
+    }
 
     /**
      * Resolve and pull a model if necessary. NEW in v1.2.1.
@@ -164,14 +189,14 @@ public interface GollekSdk {
      * @return Model resolution
      */
     default ModelResolution prepareModel(String modelId, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
-        return prepareModel(modelId, null, forceGguf, quantization, progressCallback);
+        return prepareModel(modelId, null, null, forceGguf, quantization, progressCallback);
     }
 
     /**
      * Resolve and pull a model if necessary with explicit format and quantization.
      * NEW in v1.2.4.
      */
-    default ModelResolution prepareModel(String modelId, String format, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
+    default ModelResolution prepareModel(String modelId, String format, String plugin, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
         return new ModelResolution(modelId, null, getModelInfo(modelId).orElse(null));
     }
 
@@ -211,16 +236,16 @@ public interface GollekSdk {
      */
     default ModelResolution ensureModelAvailable(String modelId, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback)
             throws SdkException {
-        return ensureModelAvailable(modelId, null, forceGguf, quantization, progressCallback);
+        return ensureModelAvailable(modelId, null, null, forceGguf, quantization, progressCallback);
     }
 
     /**
      * Resolve, pull, and auto-select provider for a model with explicit format and quantization.
      * NEW in v1.2.4.
      */
-    default ModelResolution ensureModelAvailable(String modelId, String format, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback)
+    default ModelResolution ensureModelAvailable(String modelId, String format, String plugin, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback)
             throws SdkException {
-        ModelResolution resolution = prepareModel(modelId, format, forceGguf, quantization, progressCallback);
+        ModelResolution resolution = prepareModel(modelId, format, plugin, forceGguf, quantization, progressCallback);
         if (getPreferredProvider().isEmpty()) {
             Optional<String> autoProvider = autoSelectProvider(resolution.getModelId(), forceGguf, quantization);
             if (autoProvider.isPresent()) {
@@ -283,6 +308,13 @@ public interface GollekSdk {
     Optional<ModelInfo> getModelInfo(String modelId) throws SdkException;
 
     void pullModel(String modelSpec, Consumer<PullProgress> progressCallback) throws SdkException;
+
+    /**
+     * Pull a model with enhanced options. NEW in v1.3.0.
+     */
+    default void pullModel(ModelPullRequest request, Consumer<PullProgress> progressCallback) throws SdkException {
+        pullModel(request.modelSpec(), request.revision(), request.format(), request.force(), progressCallback);
+    }
 
     /**
      * Import a local model file or directory into the SDK's managed repository.

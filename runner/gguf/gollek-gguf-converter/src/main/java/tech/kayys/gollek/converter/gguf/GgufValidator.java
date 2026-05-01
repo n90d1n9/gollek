@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
@@ -41,31 +44,31 @@ public final class GgufValidator {
             // Check tensor offsets
             long dataStart = -1;
             Set<String> tensorNames = new HashSet<>();
-            Map<Long, TensorInfo> offsetMap = new HashMap<>();
+            Map<Long, GGUFTensorInfo> offsetMap = new HashMap<>();
 
-            for (TensorInfo ti : model.tensors()) {
+            for (GGUFTensorInfo ti : model.tensors()) {
                 // Check duplicate names
                 if (!tensorNames.add(ti.name())) {
                     errors.add("Duplicate tensor name: " + ti.name());
                 }
 
                 // Check offset alignment
-                if (ti.offset() % model.alignment() != 0) {
-                    errors.add("Tensor " + ti.name() + " offset " + ti.offset() +
+                if (ti.dataOffset() % model.alignment() != 0) {
+                    errors.add("Tensor " + ti.name() + " offset " + ti.dataOffset() +
                             " not aligned to " + model.alignment());
                 }
 
                 // Check overlapping tensors
-                TensorInfo overlapping = offsetMap.get(ti.offset());
+                GGUFTensorInfo overlapping = offsetMap.get(ti.dataOffset());
                 if (overlapping != null) {
                     errors.add("Tensor " + ti.name() + " overlaps with " +
-                            overlapping.name() + " at offset " + ti.offset());
+                            overlapping.name() + " at offset " + ti.dataOffset());
                 }
-                offsetMap.put(ti.offset(), ti);
+                offsetMap.put(ti.dataOffset(), ti);
 
                 // Track data start
-                if (dataStart < 0 || ti.offset() < dataStart) {
-                    dataStart = ti.offset();
+                if (dataStart < 0 || ti.dataOffset() < dataStart) {
+                    dataStart = ti.dataOffset();
                 }
             }
 
@@ -78,8 +81,8 @@ public final class GgufValidator {
             model.getMeta(arch + ".embedding_length").ifPresent(embLen -> {
                 long expected = embLen.asUInt32();
                 model.findTensor("token_embd.weight").ifPresent(tensor -> {
-                    if (tensor.ne().length > 0 && tensor.ne()[0] != expected) {
-                        warnings.add("token_embd.weight dim " + tensor.ne()[0] +
+                    if (tensor.shape().length > 0 && tensor.shape()[0] != expected) {
+                        warnings.add("token_embd.weight dim " + tensor.shape()[0] +
                                 " doesn't match embedding_length " + expected);
                     }
                 });

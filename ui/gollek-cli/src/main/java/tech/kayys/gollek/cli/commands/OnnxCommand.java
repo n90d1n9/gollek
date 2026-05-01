@@ -7,7 +7,7 @@ import jakarta.inject.Inject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 import tech.kayys.gollek.model.repo.hf.HuggingFaceClient;
 import tech.kayys.gollek.model.repo.kaggle.KaggleClient;
 import tech.kayys.gollek.model.download.DownloadProgressListener;

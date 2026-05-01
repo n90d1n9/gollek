@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.java.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
@@ -14,7 +17,7 @@ import java.util.stream.Collectors;
  * <li>Uses {@code model.safetensors.index.json} when present to avoid
  * scanning every shard twice.</li>
  * <li>Fixes the two-pass offset/type inconsistency: if a tensor falls back
- * to F32 during data conversion its {@link TensorInfo} is updated in-place
+ * to F32 during data conversion its {@link GGUFTensorInfo} is updated in-place
  * before writing.</li>
  * <li>Validates block alignment before quantization.</li>
  * <li>Supports tied-embedding models (lm_head = embed_tokens): skips
@@ -149,8 +152,8 @@ public final class HfToGgufConverter {
 
         // ── 5. Register tensor descriptors ──────────────────────────────
         for (TensorPlan tp : plan) {
-            long[] ne = reverseShape(tp.shape());
-            model.addTensor(new TensorInfo(tp.ggufName(), ne, tp.targetType(), tp.ggufOffset()));
+            long[] shape = reverseShape(tp.shape());
+            model.addTensor(new GGUFTensorInfo(tp.ggufName(), shape, tp.targetType(), tp.ggufOffset()));
         }
 
         // ── 6. Convert all tensor data (heap blob) ───────────────────────

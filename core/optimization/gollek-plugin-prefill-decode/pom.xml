@@ -21,6 +21,11 @@
     <dependencies>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-spi-provider</artifactId>
             <version>${project.version}</version>
         </dependency>

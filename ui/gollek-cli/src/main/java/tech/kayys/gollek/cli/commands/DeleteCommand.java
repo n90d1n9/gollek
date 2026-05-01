@@ -6,8 +6,9 @@ import jakarta.inject.Inject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 import tech.kayys.gollek.sdk.core.GollekSdk;
+import tech.kayys.gollek.sdk.model.ModelResolver;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -104,7 +105,7 @@ public class DeleteCommand implements Runnable {
         try {
             var info = sdk.getModelInfo(ref);
             if (info.isPresent()) {
-                LocalModelResolver.extractPath(info.get()).ifPresent(p -> targets.add(p.toAbsolutePath().normalize()));
+                ModelResolver.extractPath(info.get()).ifPresent(p -> targets.add(p.toAbsolutePath().normalize()));
             }
         } catch (Exception ignored) {
             // fallback local scan below

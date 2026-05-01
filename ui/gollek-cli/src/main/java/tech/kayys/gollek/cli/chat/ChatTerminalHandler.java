@@ -11,7 +11,7 @@ import org.jline.console.CmdDesc;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 
 /**
  * Manages JLine Terminal and LineReader for the chat session.

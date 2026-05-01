@@ -43,7 +43,6 @@
     </dependencies>
 
     <modules>
-        <module>llamacpp</module>
         <module>native</module>
         <module>gguf</module>
         <module>litert</module>
@@ -52,4 +51,13 @@
         <module>onnx</module>
         <module>tensorrt</module>
     </modules>
+
+    <profiles>
+        <profile>
+            <id>llamacpp</id>
+            <modules>
+                <module>llamacpp</module>
+            </modules>
+        </profile>
+    </profiles>
 </project>

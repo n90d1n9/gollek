@@ -93,7 +93,7 @@ final class LlamaHandles {
     final MethodHandle clearAdapterLora;
     final MethodHandle adapterLoraFree;
 
-    // ── Verbosity flag (set after construction) ───────────────────────────────
+    // ── Verbosity flag (read from system properties or set after construction) ────────────────
     boolean verbose = false;
 
     LlamaHandles(SymbolLookup lookup) {
@@ -245,7 +245,7 @@ final class LlamaHandles {
                     })
                     .orElseGet(() -> {
                         String msg = "Native function '" + name + "' not found.";
-                        if (required) log.warn(msg); else log.debug(msg);
+                        if (required && verbose) log.warn(msg); else log.debug(msg);
                         return null;
                     });
         } catch (Throwable t) {

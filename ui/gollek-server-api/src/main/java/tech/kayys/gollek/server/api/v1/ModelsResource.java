@@ -32,17 +32,22 @@ public class ModelsResource {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public Response listModels() {
+    public Response listModels(
+            @jakarta.ws.rs.QueryParam("runnableOnly") boolean runnableOnly,
+            @jakarta.ws.rs.QueryParam("limit") @jakarta.ws.rs.DefaultValue("50") int limit,
+            @jakarta.ws.rs.QueryParam("namespace") String namespace) {
         GollekSdk sdk = sdkProvider.getSdk();
         try {
-            List<ModelInfo> models = sdk.listModels();
-            var out = models.stream()
-                    .map(m -> java.util.Map.of(
-                            "modelId", m.getModelId(),
-                            "format", m.getFormat(),
-                            "description", m.getDescription()))
-                    .collect(Collectors.toList());
-            return Response.ok(out).build();
+            tech.kayys.gollek.sdk.model.ModelListRequest request = tech.kayys.gollek.sdk.model.ModelListRequest.builder()
+                    .runnableOnly(runnableOnly)
+                    .limit(limit)
+                    .namespace(namespace)
+                    .dedupe(true)
+                    .sort(true)
+                    .build();
+            
+            List<ModelInfo> models = sdk.listModels(request);
+            return Response.ok(models).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(java.util.Map.of("error", e.getMessage())).build();

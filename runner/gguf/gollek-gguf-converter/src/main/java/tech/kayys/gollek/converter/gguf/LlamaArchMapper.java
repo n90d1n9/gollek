@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

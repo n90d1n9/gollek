@@ -28,6 +28,11 @@
             <artifactId>gollek-spi-provider</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-sdk-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
@@ -37,6 +42,12 @@
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-model-registry</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-plugin-kernel-core</artifactId>
             <version>${project.version}</version>
         </dependency>
 

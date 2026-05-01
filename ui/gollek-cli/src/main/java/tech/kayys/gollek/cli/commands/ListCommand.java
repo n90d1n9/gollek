@@ -8,6 +8,8 @@ import picocli.CommandLine.Option;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
 
+import tech.kayys.gollek.sdk.model.ModelListRequest;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -42,19 +44,14 @@ public class ListCommand implements Runnable {
     @Override
     public void run() {
         try {
-            List<ModelInfo> models = new ArrayList<>();
-            try {
-                // sdk.listModels(0, limit) now uses LocalModelRegistry internally
-                models.addAll(sdk.listModels(0, limit));
-            } catch (Exception ignored) {
-            }
+            ModelListRequest request = ModelListRequest.builder()
+                    .limit(limit)
+                    .runnableOnly(runnableOnly)
+                    .dedupe(true)
+                    .sort(true)
+                    .build();
 
-            models = dedupeAndSort(models, limit);
-            if (runnableOnly) {
-                models = models.stream()
-                        .filter(this::isRunnableModel)
-                        .toList();
-            }
+            List<ModelInfo> models = sdk.listModels(request);
 
             if (models.isEmpty()) {
                 System.out.println("No models found.");
@@ -69,45 +66,6 @@ public class ListCommand implements Runnable {
         } catch (Exception e) {
             System.err.println("Failed to list models: " + e.getMessage());
         }
-    }
-
-    private List<ModelInfo> dedupeAndSort(List<ModelInfo> models, int max) {
-        Map<String, ModelInfo> unique = new LinkedHashMap<>();
-        for (ModelInfo model : models) {
-            if (model == null || model.getModelId() == null || model.getModelId().isBlank()) {
-                continue;
-            }
-            unique.putIfAbsent(model.getModelId(), model);
-        }
-        List<ModelInfo> filtered = filterNamespaceShadowEntries(new ArrayList<>(unique.values()));
-        List<ModelInfo> sorted = new ArrayList<>(filtered);
-        sorted.sort(Comparator.comparing(
-                (ModelInfo m) -> m.getUpdatedAt() != null ? m.getUpdatedAt() : Instant.EPOCH).reversed());
-        if (sorted.size() > max) {
-            return sorted.subList(0, max);
-        }
-        return sorted;
-    }
-
-    private List<ModelInfo> filterNamespaceShadowEntries(List<ModelInfo> models) {
-        if (models.isEmpty()) {
-            return models;
-        }
-        List<String> ids = models.stream()
-                .map(ModelInfo::getModelId)
-                .filter(id -> id != null && !id.isBlank())
-                .toList();
-
-        return models.stream()
-                .filter(model -> {
-                    String id = model.getModelId();
-                    if (id == null || id.isBlank() || id.contains("/")) {
-                        return true;
-                    }
-                    String prefix = id + "/";
-                    return ids.stream().noneMatch(other -> other != null && other.startsWith(prefix));
-                })
-                .toList();
     }
 
     private void printTable(List<ModelInfo> models) {
@@ -209,18 +167,5 @@ public class ListCommand implements Runnable {
         if (str == null)
             return "";
         return str.length() > maxLen ? str.substring(0, maxLen - 3) + "..." : str;
-    }
-
-    private boolean isRunnableModel(ModelInfo model) {
-        if (model == null || model.getFormat() == null) {
-            return false;
-        }
-        String format = model.getFormat().trim().toUpperCase(Locale.ROOT);
-        return format.equals("GGUF")
-                || format.equals("TORCHSCRIPT")
-                || format.equals("ONNX")
-                || format.equals("SAFETENSORS")
-                || format.equals("PYTORCH")
-                || format.equals("BIN");
     }
 }

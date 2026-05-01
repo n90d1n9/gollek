@@ -7,7 +7,7 @@ import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-import tech.kayys.gollek.cli.GollekHome;
+import tech.kayys.gollek.sdk.util.GollekHome;
 
 import java.io.StringReader;
 import java.nio.ByteBuffer;

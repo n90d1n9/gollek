@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;

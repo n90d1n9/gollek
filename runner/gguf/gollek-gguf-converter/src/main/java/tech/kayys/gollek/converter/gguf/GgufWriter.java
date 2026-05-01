@@ -1,5 +1,8 @@
 package tech.kayys.gollek.converter.gguf;
 
+import tech.kayys.gollek.gguf.core.*;
+
+
 import java.io.*;
 import java.lang.foreign.*;
 import java.nio.ByteOrder;
@@ -49,13 +52,13 @@ public final class GgufWriter {
             }
 
             // Tensor descriptors
-            for (TensorInfo ti : model.tensors()) {
+            for (GGUFTensorInfo ti : model.tensors()) {
                 writeString(buf, ti.name());
                 buf.writeI32LE(ti.nDims());
-                for (long d : ti.ne())
+                for (long d : ti.shape())
                     buf.writeI64LE(d);
                 buf.writeI32LE(ti.type().id);
-                buf.writeI64LE(ti.offset());
+                buf.writeI64LE(ti.dataOffset());
             }
 
             // Alignment padding before tensor data
@@ -78,7 +81,7 @@ public final class GgufWriter {
                 if (blob != null && blob.length > 0) {
                     // Write each tensor's data with per-tensor alignment padding
                     long blobOffset = 0;
-                    for (TensorInfo ti : model.tensors()) {
+                    for (GGUFTensorInfo ti : model.tensors()) {
                         long size = ti.dataSize();
                         fos.write(blob, (int) blobOffset, (int) size);
                         blobOffset += size;

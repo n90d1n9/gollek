@@ -100,6 +100,10 @@ public class MetalBinding {
     }
 
     public static boolean initialize(Path libraryPath) {
+        if (isNativeBuildTime()) {
+            LOG.info("MetalBinding: skipping initialization during native-image build time");
+            return false;
+        }
         if (instance != null)
             return instance.nativeAvailable;
         if (libraryPath == null || !Files.exists(libraryPath)) {
@@ -118,6 +122,10 @@ public class MetalBinding {
             instance = new MetalBinding(null);
             return false;
         }
+    }
+
+    private static boolean isNativeBuildTime() {
+        return "buildtime".equals(System.getProperty("org.graalvm.nativeimage.imagecode"));
     }
 
     private static Path findLibrary() {
@@ -457,7 +465,7 @@ public class MetalBinding {
             handles.put(name, Linker.nativeLinker().downcallHandle(sym.get(), descriptor));
             LOG.debugf("MetalBinding: bound %s", name);
         } else {
-            LOG.warnf("MetalBinding: symbol not found — %s", name);
+            LOG.debugf("MetalBinding: symbol not found — %s", name);
         }
     }
 

@@ -47,12 +47,12 @@ public class CpuKernel implements ComputeKernel {
 
     @Override
     public MemorySegment allocate(long bytes) {
-        return MemorySegment.ofArray(new byte[(int) bytes]);
+        return java.lang.foreign.Arena.ofAuto().allocate(bytes, 4);
     }
 
     @Override
     public void free(MemorySegment ptr) {
-        // No-op for CPU (GC handles it)
+        // No-op (GC/Arena.ofAuto handles it)
     }
 
     @Override

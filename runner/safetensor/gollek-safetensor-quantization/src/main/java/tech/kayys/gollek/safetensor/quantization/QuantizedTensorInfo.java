@@ -9,9 +9,6 @@
  */
 package tech.kayys.gollek.safetensor.quantization;
 
-import java.util.Arrays;
-import java.util.Objects;
-
 /**
  * Metadata for a quantized tensor.
  *

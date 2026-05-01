@@ -16,6 +16,13 @@
 
     <dependencyManagement>
         <dependencies>
+        <!-- GGUF Core -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
             <dependency>
                 <groupId>tech.kayys.gollek</groupId>
                 <artifactId>gollek-bom</artifactId>
@@ -27,6 +34,13 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- GGUF Core -->
+        <dependency>
+            <groupId>tech.kayys.gollek</groupId>
+            <artifactId>gollek-gguf-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        
         <!-- Gollek SPI -->
         <dependency>
             <groupId>tech.kayys.gollek</groupId>

@@ -223,5 +223,5 @@ Desktop.ini
 **/sdk/integration/jbang-templates/examples/lib*.zip
 *.dylib
 
-
+*.log
 .notes
