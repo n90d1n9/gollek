@@ -72,6 +72,7 @@ class ModelRouterServiceAdapterRoutingTest {
                 routerService.localModelRegistry = localModelRegistry;
                 routerService.formatRouter = formatRouter;
                 routerService.modelConfig = modelConfig;
+                routerService.devicePreferenceResolver = new tech.kayys.gollek.engine.context.DevicePreferenceResolver();
 
                 lenient().when(localModelRegistry.resolve(anyString())).thenReturn(Optional.empty());
                 lenient().when(formatRouter.resolveFormat(anyString())).thenReturn(Optional.empty());

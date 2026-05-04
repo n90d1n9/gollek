@@ -35,7 +35,16 @@ public class DirectForwardPass {
     @Inject
     MoeForwardPass moeForwardPass;
     @Inject
-    Instance<MetalComputeBackend> metalBackend;
+    Instance<MetalComputeBackend> metalBackendInstance;
+    
+    private MetalComputeBackend metal;
+
+    @jakarta.annotation.PostConstruct
+    void init() {
+        if (metalBackendInstance.isResolvable()) {
+            this.metal = metalBackendInstance.get();
+        }
+    }
 
     public float[] prefill(long[] inputIds, Map<String, AccelTensor> weights, ModelConfig config,
             ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache) {
@@ -57,10 +66,17 @@ public class DirectForwardPass {
     public float[] prefill(AccelTensor embeddings, long[] inputIds, Map<String, AccelTensor> weights,
             ModelConfig config, ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache) {
         long seqLen = embeddings.size(1);
-        AccelTensor hidden = embeddings;
+        if (seqLen < 1) {
+            throw new IllegalArgumentException("Invalid sequence length: " + seqLen + ". Prompt must result in at least one token.");
+        }
+        KVCacheManager.KVCacheSession.ForwardWorkspace ws = kvCache.getWorkspace();
+        ws.ensureCapacity((long) seqLen * config.hiddenSize(), config.hiddenSize(), config.intermediateSize());
 
-        // Ensure KV cache has enough space for the entire prefill sequence
-        kvCache.ensureCapacity((int) seqLen);
+        // Initial copy: embeddings -> hiddenASeg
+        java.lang.foreign.MemorySegment.copy(embeddings.dataPtr(), 0, ws.getHiddenASeg(), 0, (long) seqLen * config.hiddenSize() * 4);
+
+        java.lang.foreign.MemorySegment currentHidden = ws.getHiddenASeg();
+        java.lang.foreign.MemorySegment nextHidden = ws.getHiddenBSeg();
 
         boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
         for (int i = 0; i < config.numHiddenLayers(); i++) {
@@ -68,25 +84,22 @@ public class DirectForwardPass {
                 System.err.printf("[DEBUG] Prefill Layer %d/%d start\n", i, config.numHiddenLayers());
                 System.err.flush();
             }
-            AccelTensor nextHidden = transformerLayer(hidden, inputIds, weights, config, arch, kvCache, i, 0,
-                    (int) seqLen);
-            if (verbose) {
-                System.err.printf("[DEBUG] Prefill Layer %d/%d end\n", i, config.numHiddenLayers());
-                System.err.flush();
-            }
+            transformerLayer(currentHidden, nextHidden, inputIds, weights, config, arch, kvCache, i, 0, (int) seqLen, ws);
 
-            if (hidden != embeddings)
-                hidden.close();
-            hidden = nextHidden;
+            // Swap buffers
+            java.lang.foreign.MemorySegment temp = currentHidden;
+            currentHidden = nextHidden;
+            nextHidden = temp;
         }
-        kvCache.advance((int) seqLen);
 
+        AccelTensor hidden = AccelTensor.view(currentHidden, embeddings.shape());
+        
         AccelTensor normed;
-        if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                && !metalBackend.get().deviceName().contains("CPU")) {
-            normed = AccelTensor.zeros(hidden.shape());
-            metalBackend.get().rmsNorm(normed.dataSegment(), hidden.dataSegment(),
-                    weights.get(arch.finalNormWeight()).dataSegment(), (int) hidden.size(-1),
+        if (metal != null && metal.deviceName() != null
+                && !metal.deviceName().contains("CPU")) {
+            normed = AccelTensor.view(ws.getNormedAttnSeg(), hidden.shape());
+            metal.rmsNorm(normed.dataPtr(), hidden.dataPtr(),
+                    weights.get(arch.finalNormWeight()).dataPtr(), (int) hidden.size(-1),
                     (float) config.rmsNormEps(), arch.addOneToRmsNormWeight());
         } else {
             normed = AccelOps.rmsNorm(hidden, weights.get(arch.finalNormWeight()), config.rmsNormEps(),
@@ -96,7 +109,8 @@ public class DirectForwardPass {
             hidden.close();
 
         AccelTensor lastPos = selectLastToken(normed, (int) seqLen);
-        normed.close();
+        if (normed.dataPtr() != ws.getNormedAttnSeg())
+            normed.close();
 
         AccelTensor lmHeadW = weights.get(arch.lmHeadWeight());
         if (lmHeadW == null && config.tieWordEmbeddings()) {
@@ -146,6 +160,7 @@ public class DirectForwardPass {
             }
         }
 
+        kvCache.advance((int) seqLen);
         return result;
     }
 
@@ -162,29 +177,38 @@ public class DirectForwardPass {
                 embedded.close();
             long[] tokenIds = new long[] { tokenId };
 
-            // Ensure KV cache has space for the next generated token
-            kvCache.ensureCapacity(startPos + 1);
+            KVCacheManager.KVCacheSession.ForwardWorkspace ws = kvCache.getWorkspace();
+            ws.ensureCapacity(config.hiddenSize(), config.hiddenSize(), config.intermediateSize());
+
+            // Initial copy: hidden -> hiddenASeg
+            java.lang.foreign.MemorySegment.copy(hidden.dataPtr(), 0, ws.getHiddenASeg(), 0, config.hiddenSize() * 4);
+            hidden.close();
+
+            java.lang.foreign.MemorySegment currentHidden = ws.getHiddenASeg();
+            java.lang.foreign.MemorySegment nextHidden = ws.getHiddenBSeg();
 
             for (int i = 0; i < config.numHiddenLayers(); i++) {
-                AccelTensor nextHidden = transformerLayer(hidden, tokenIds, weights, config, arch, kvCache, i, startPos,
-                        1);
-                hidden.close();
-                hidden = nextHidden;
+                transformerLayer(currentHidden, nextHidden, tokenIds, weights, config, arch, kvCache, i, startPos, 1, ws);
+                // Swap
+                java.lang.foreign.MemorySegment temp = currentHidden;
+                currentHidden = nextHidden;
+                nextHidden = temp;
             }
-            kvCache.advance(1);
 
+            AccelTensor finalHidden = AccelTensor.view(currentHidden, new long[]{1, 1, config.hiddenSize()});
+            
             AccelTensor normed;
-            if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                    && !metalBackend.get().deviceName().contains("CPU")) {
-                normed = AccelTensor.zeros(hidden.shape());
-                metalBackend.get().rmsNorm(normed.dataSegment(), hidden.dataSegment(),
-                        weights.get(arch.finalNormWeight()).dataSegment(), (int) hidden.size(-1),
+            if (metal != null && metal.deviceName() != null
+                    && !metal.deviceName().contains("CPU")) {
+                normed = AccelTensor.view(ws.getNormedAttnSeg(), finalHidden.shape());
+                metal.rmsNorm(normed.dataPtr(), finalHidden.dataPtr(),
+                        weights.get(arch.finalNormWeight()).dataPtr(), (int) finalHidden.size(-1),
                         (float) config.rmsNormEps(), arch.addOneToRmsNormWeight());
             } else {
-                normed = AccelOps.rmsNorm(hidden, weights.get(arch.finalNormWeight()), config.rmsNormEps(),
+                normed = AccelOps.rmsNorm(finalHidden, weights.get(arch.finalNormWeight()), config.rmsNormEps(),
                         arch.addOneToRmsNormWeight());
             }
-            hidden.close();
+            finalHidden.close();
 
             AccelTensor lmHeadW = weights.get(arch.lmHeadWeight());
             if (lmHeadW == null && config.tieWordEmbeddings()) {
@@ -195,7 +219,8 @@ public class DirectForwardPass {
                         "Missing lm_head weight. Safetensor file might be incomplete or config.tie_word_embeddings is missing.");
             }
             AccelTensor logits = AccelOps.linear(normed, lmHeadW);
-            normed.close();
+            if (normed.dataPtr() != ws.getNormedAttnSeg())
+                normed.close();
 
             // Logit Soft-capping (Gemma-2)
             float finalCap = arch.defaultFinalSoftCap();
@@ -211,6 +236,7 @@ public class DirectForwardPass {
 
             float[] result = logits.toFloatArray();
             logits.close();
+            kvCache.advance(1);
             return result;
         } finally {
             if (!hidden.isClosed())
@@ -218,27 +244,30 @@ public class DirectForwardPass {
         }
     }
 
-    private AccelTensor transformerLayer(AccelTensor hidden, long[] inputIds, Map<String, AccelTensor> weights,
-            ModelConfig config, ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache, int layerIdx,
-            int startPos, int seqLen) {
-        AccelTensor residual = hidden;
-
+    private void transformerLayer(java.lang.foreign.MemorySegment hiddenIn, java.lang.foreign.MemorySegment hiddenOut, 
+            long[] inputIds, Map<String, AccelTensor> weights, ModelConfig config, 
+            ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache, int layerIdx, int startPos, int seqLen, 
+            KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
+        
+        long[] hiddenShape = new long[]{1, seqLen, config.hiddenSize()};
         boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
+        
         // Attention norm
-        AccelTensor normedAttn;
-        if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                && !metalBackend.get().deviceName().contains("CPU")) {
-            normedAttn = AccelTensor.zeros(residual.shape());
-            metalBackend.get().rmsNorm(normedAttn.dataSegment(), residual.dataSegment(),
-                    weights.get(arch.layerAttentionNormWeight(layerIdx)).dataSegment(), (int) residual.size(-1),
+        java.lang.foreign.MemorySegment normedAttnSeg = ws.getNormedAttnSeg();
+        if (metal != null && metal.deviceName() != null && !metal.deviceName().contains("CPU")) {
+            metal.rmsNorm(normedAttnSeg, hiddenIn,
+                    weights.get(arch.layerAttentionNormWeight(layerIdx)).dataPtr(), config.hiddenSize(),
                     (float) config.rmsNormEps(), arch.addOneToRmsNormWeight());
         } else {
-            normedAttn = AccelOps.rmsNorm(residual, weights.get(arch.layerAttentionNormWeight(layerIdx)),
-                    config.rmsNormEps(), arch.addOneToRmsNormWeight());
+            // Fallback (slow but stable)
+            AccelTensor in = AccelTensor.view(hiddenIn, hiddenShape);
+            AccelTensor out = AccelOps.rmsNorm(in, weights.get(arch.layerAttentionNormWeight(layerIdx)), config.rmsNormEps(), arch.addOneToRmsNormWeight());
+            java.lang.foreign.MemorySegment.copy(out.dataPtr(), 0, normedAttnSeg, 0, (long) seqLen * config.hiddenSize() * 4);
+            out.close();
         }
 
         FlashAttentionKernel.AttentionInput attnIn = new FlashAttentionKernel.AttentionInput(
-                normedAttn,
+                AccelTensor.view(normedAttnSeg, hiddenShape),
                 weights.get(arch.layerQueryWeight(layerIdx)),
                 weights.get(arch.layerKeyWeight(layerIdx)),
                 weights.get(arch.layerValueWeight(layerIdx)),
@@ -258,66 +287,48 @@ public class DirectForwardPass {
             System.err.flush();
         }
         AccelTensor attnOut = attentionKernel.compute(attnIn);
-        if (verbose) {
-            System.err.printf("[DEBUG] Layer %d Attention end\n", layerIdx);
-            System.err.flush();
-        }
-        normedAttn.close();
-
-        AccelTensor nextResidual = AccelOps.add(hidden, attnOut);
-
-        AccelTensor normedFfn;
-        AccelTensor preFfnNormW = weights.get(arch.layerPreFfnNormWeight(layerIdx));
-        if (preFfnNormW == null)
-            preFfnNormW = weights.get(arch.layerFfnNormWeight(layerIdx)); // Fallback for older Gemma
-
-        if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                && !metalBackend.get().deviceName().contains("CPU")) {
-            normedFfn = AccelTensor.zeros(nextResidual.shape());
-            metalBackend.get().rmsNorm(normedFfn.dataSegment(), nextResidual.dataSegment(), preFfnNormW.dataSegment(),
-                    (int) nextResidual.size(-1), (float) config.rmsNormEps(), arch.addOneToRmsNormWeight());
+        
+        // Residual Add: hiddenIn + attnOut -> hiddenOut (re-using hiddenOut for intermediate)
+        if (metal != null && !metal.deviceName().contains("CPU")) {
+            metal.add(hiddenIn, attnOut.dataPtr(), hiddenOut, hiddenShape);
         } else {
-            normedFfn = AccelOps.rmsNorm(nextResidual, preFfnNormW, config.rmsNormEps(), arch.addOneToRmsNormWeight());
+            AccelTensor inA = AccelTensor.view(hiddenIn, hiddenShape);
+            AccelTensor res = AccelOps.add(inA, attnOut);
+            java.lang.foreign.MemorySegment.copy(res.dataPtr(), 0, hiddenOut, 0, (long) seqLen * config.hiddenSize() * 4);
+            res.close();
         }
         attnOut.close();
-        residual = nextResidual;
 
-        AccelTensor ffnOut;
-        if (verbose) {
-            System.err.printf("[DEBUG] Layer %d FFN start\n", layerIdx);
-            System.err.flush();
-        }
-        if (config.isMoeLayer(layerIdx)) {
-            ffnOut = moeForwardPass.computeAccel(normedFfn, weights, config, layerIdx);
+        // MLP
+        AccelTensor preFfnNormW = weights.get(arch.layerPreFfnNormWeight(layerIdx));
+        if (preFfnNormW == null) preFfnNormW = weights.get(arch.layerFfnNormWeight(layerIdx));
+
+        java.lang.foreign.MemorySegment normedFfnSeg = ws.getNormedFfnSeg();
+        if (metal != null && !metal.deviceName().contains("CPU")) {
+            metal.rmsNorm(normedFfnSeg, hiddenOut, preFfnNormW.dataPtr(), config.hiddenSize(),
+                    (float) config.rmsNormEps(), arch.addOneToRmsNormWeight());
         } else {
-            AccelTensor gW = weights.get(arch.layerFfnGateWeight(layerIdx));
-            AccelTensor uW = weights.get(arch.layerFfnUpWeight(layerIdx));
-            AccelTensor dW = weights.get(arch.layerFfnDownWeight(layerIdx));
-            ffnOut = (gW == null)
-                    ? ffnNonGated(normedFfn, uW, dW)
-                    : swigluFfn(normedFfn, gW, null, uW, null, dW, null);
-        }
-        if (verbose) {
-            System.err.printf("[DEBUG] Layer %d FFN end\n", layerIdx);
-            System.err.flush();
+            AccelTensor in = AccelTensor.view(hiddenOut, hiddenShape);
+            AccelTensor out = AccelOps.rmsNorm(in, preFfnNormW, config.rmsNormEps(), arch.addOneToRmsNormWeight());
+            java.lang.foreign.MemorySegment.copy(out.dataPtr(), 0, normedFfnSeg, 0, (long) seqLen * config.hiddenSize() * 4);
+            out.close();
         }
 
-        normedFfn.close();
-
-        // Optional post-FFN norm (Gemma-2)
-        AccelTensor ffnFinal = ffnOut;
-        AccelTensor postFfnNormW = weights.get(arch.layerFfnNormWeight(layerIdx));
-        if (weights.get(arch.layerPreFfnNormWeight(layerIdx)) != null) {
-            // If we had a pre-norm, then layerFfnNormWeight is the post-norm
-            ffnFinal = AccelOps.rmsNorm(ffnOut, postFfnNormW, config.rmsNormEps(), arch.addOneToRmsNormWeight());
-            ffnOut.close();
+        AccelTensor mlpOut = swigluFfn(AccelTensor.view(normedFfnSeg, hiddenShape),
+                weights.get(arch.layerFfnGateWeight(layerIdx)), weights.get(arch.layerFfnGateBias(layerIdx)),
+                weights.get(arch.layerFfnUpWeight(layerIdx)), weights.get(arch.layerFfnUpBias(layerIdx)),
+                weights.get(arch.layerFfnDownWeight(layerIdx)), weights.get(arch.layerFfnDownBias(layerIdx)), ws);
+        
+        // Final Residual: hiddenOut (temp) + mlpOut -> hiddenOut
+        if (metal != null && !metal.deviceName().contains("CPU")) {
+            metal.add(hiddenOut, mlpOut.dataPtr(), hiddenOut, hiddenShape);
+        } else {
+            AccelTensor inA = AccelTensor.view(hiddenOut, hiddenShape);
+            AccelTensor res = AccelOps.add(inA, mlpOut);
+            java.lang.foreign.MemorySegment.copy(res.dataPtr(), 0, hiddenOut, 0, (long) seqLen * config.hiddenSize() * 4);
+            res.close();
         }
-
-        AccelTensor output = AccelOps.add(residual, ffnFinal);
-        ffnFinal.close();
-        residual.close(); // residual is nextResidual
-
-        return output;
+        mlpOut.close();
     }
 
     private void checkStability(AccelTensor t, String label) {
@@ -345,14 +356,19 @@ public class DirectForwardPass {
 
     public AccelTensor swigluFfn(AccelTensor x, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
             AccelTensor downW, AccelTensor downB) {
+        return swigluFfn(x, gateW, gateB, upW, upB, downW, downB, null);
+    }
+
+    public AccelTensor swigluFfn(AccelTensor x, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
+            AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
         AccelTensor gate = AccelOps.linear(x, gateW);
         AccelTensor up = AccelOps.linear(x, upW);
 
         AccelTensor combined;
-        if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                && !metalBackend.get().deviceName().contains("CPU")) {
-            combined = AccelTensor.zeros(gate.shape());
-            metalBackend.get().siluFfn(combined.dataSegment(), gate.dataSegment(), up.dataSegment(),
+        if (metal != null && metal.deviceName() != null
+                && !metal.deviceName().contains("CPU") && ws != null) {
+            combined = AccelTensor.view(ws.getCombinedSeg(), gate.shape());
+            metal.siluFfn(combined.dataPtr(), gate.dataPtr(), up.dataPtr(),
                     (int) gate.numel());
         } else {
             combined = AccelOps.swiglu(gate, up);
@@ -361,7 +377,8 @@ public class DirectForwardPass {
         gate.close();
         up.close();
         AccelTensor out = AccelOps.linear(combined, downW);
-        combined.close();
+        if (ws == null || combined.dataPtr() != ws.getCombinedSeg())
+            combined.close();
         return out;
     }
 
@@ -375,9 +392,10 @@ public class DirectForwardPass {
     }
 
     private AccelTensor selectLastToken(AccelTensor hidden, int seqLen) {
-        AccelTensor sliced = hidden.slice(1, seqLen - 1, seqLen);
-        long hiddenSize = sliced.size(2);
-        return sliced.contiguous().reshape(1L, hiddenSize);
+        if (seqLen < 1) return hidden; // Safety fallback
+        long hiddenSize = hidden.size(hidden.shape().length - 1);
+        long lastTokenOffset = Math.max(0L, (long) (seqLen - 1) * hiddenSize);
+        return AccelTensor.view(hidden.dataPtr().asSlice(lastTokenOffset * 4L), new long[] { 1, hiddenSize });
     }
 
     // ── Linear ────────────────────────────────────────────────────────

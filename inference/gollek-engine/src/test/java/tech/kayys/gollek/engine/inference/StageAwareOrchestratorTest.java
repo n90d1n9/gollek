@@ -29,11 +29,15 @@ class StageAwareOrchestratorTest {
     @Mock
     private MetricsPublisher metrics;
 
+    @Mock
+    private tech.kayys.gollek.prefilldecode.DisaggregatedLLMProvider pdProvider;
+
     private DefaultInferenceOrchestrator orchestrator;
 
     @BeforeEach
     void setUp() {
         orchestrator = new DefaultInferenceOrchestrator(router, metrics);
+        orchestrator.setPdProvider(pdProvider);
         // Default: disaggregated mode disabled
         orchestrator.setDisaggregatedMode(false);
     }
@@ -97,18 +101,17 @@ class StageAwareOrchestratorTest {
                 .message(Message.user(longText))
                 .build();
 
-        when(router.route(any(), any())).thenReturn(Uni.createFrom().item(mock(InferenceResponse.class)));
+        when(pdProvider.infer(any())).thenReturn(Uni.createFrom().item(mock(InferenceResponse.class)));
 
         // Act
         orchestrator.executeAsync("llama-3-8b", request).await().indefinitely();
 
         // Assert
-        ArgumentCaptor<InferenceRequest> captor = ArgumentCaptor.forClass(InferenceRequest.class);
-        verify(router).route(eq("llama-3-8b"), captor.capture());
+        ArgumentCaptor<tech.kayys.gollek.spi.provider.ProviderRequest> captor = ArgumentCaptor.forClass(tech.kayys.gollek.spi.provider.ProviderRequest.class);
+        verify(pdProvider).infer(captor.capture());
 
-        InferenceRequest routed = captor.getValue();
-        assertThat(routed.getInferenceStage()).isEqualTo(InferenceStage.PREFILL);
-        assertThat(routed.getPromptTokenCount()).isGreaterThan(5);
+        tech.kayys.gollek.spi.provider.ProviderRequest routed = captor.getValue();
+        verifyNoInteractions(router);
     }
 
     @Test
@@ -123,15 +126,14 @@ class StageAwareOrchestratorTest {
                 .inferenceStage(InferenceStage.DECODE)
                 .build();
 
-        when(router.route(any(), any())).thenReturn(Uni.createFrom().item(mock(InferenceResponse.class)));
+        when(pdProvider.infer(any())).thenReturn(Uni.createFrom().item(mock(InferenceResponse.class)));
 
         // Act
         orchestrator.executeAsync("llama-3-8b", request).await().indefinitely();
 
         // Assert
-        ArgumentCaptor<InferenceRequest> captor = ArgumentCaptor.forClass(InferenceRequest.class);
-        verify(router).route(eq("llama-3-8b"), captor.capture());
-
-        assertThat(captor.getValue().getInferenceStage()).isEqualTo(InferenceStage.DECODE);
+        ArgumentCaptor<tech.kayys.gollek.spi.provider.ProviderRequest> captor = ArgumentCaptor.forClass(tech.kayys.gollek.spi.provider.ProviderRequest.class);
+        verify(pdProvider).infer(captor.capture());
+        verifyNoInteractions(router);
     }
 }

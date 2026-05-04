@@ -252,6 +252,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 if (verbose) { System.out.println("[DEBUG] 5: tokenize"); System.out.flush(); }
                 long[] inputIds = tokenizer.encode(prompt, EncodeOptions.defaultOptions());
                 inputLen = inputIds.length;
+                if (inputLen == 0) {
+                    throw new IllegalArgumentException("Prompt resulted in zero tokens. Please provide a valid prompt.");
+                }
                 if (verbose) { System.out.printf("[DEBUG] 6: tokens=%d\n", inputLen); System.out.flush(); }
 
                 try (KVCacheManager.KVCacheSession session = kvCacheManager.createSession(cfg.maxKvCacheTokens())) {
@@ -266,7 +269,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
                     int[] freq = new int[config.vocabSize()];
                     Random rng = new Random();
-                    int next = tokenSampler.sample(logits, cfg, freq, rng);
+                    int next = tokenSampler.sample(logits, cfg, config, freq, rng);
 
                     Set<Integer> stops = new HashSet<>();
                     for (int id : tokenizer.allStopTokenIds())
@@ -299,8 +302,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             freq[next]++;
                         logits = forwardPass.decode(next, inputIds.length + step, model.weights(), config, arch,
                                 session);
-                        applyLogitSoftcap(logits, config);
-                        next = tokenSampler.sample(logits, cfg, freq, rng);
+                        next = tokenSampler.sample(logits, cfg, config, freq, rng);
                     }
                 }
 
@@ -360,13 +362,13 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (verbose) { System.out.println("[DEBUG-S] 8: prefill"); System.out.flush(); }
                         float[] logits = forwardPass.prefill(inputIds, model.weights(), config, arch, session);
                         if (verbose) { System.out.println("[DEBUG-S] 9: prefill done"); System.out.flush(); }
-                        applyLogitSoftcap(logits, config);
+                    // applyLogitSoftcap(logits, config); // Removed O(N) bottleneck
 
 
                         int[] freq = new int[config.vocabSize()];
 
                         Random rng = new Random();
-                        int next = tokenSampler.sample(logits, cfg, freq, rng);
+                        int next = tokenSampler.sample(logits, cfg, config, freq, rng);
 
                         Set<Integer> stops = new HashSet<>();
                         for (int id : tokenizer.allStopTokenIds())
@@ -414,42 +416,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             int decodeStartPos = inputIds.length + step;
                             logits = forwardPass.decode(next, decodeStartPos, model.weights(), config, arch,
                                     session);
-                            applyLogitSoftcap(logits, config);
-
-                            // Step-level diagnostics for first 20 tokens
-                            if (verbose && step < 20) {
-                                int topId = 0;
-                                float topVal = logits[0];
-                                int top2Id = 0;
-                                float top2Val = Float.NEGATIVE_INFINITY;
-                                int top3Id = 0;
-                                float top3Val = Float.NEGATIVE_INFINITY;
-                                for (int di = 1; di < logits.length; di++) {
-                                    if (logits[di] > topVal) {
-                                        top3Id = top2Id;
-                                        top3Val = top2Val;
-                                        top2Id = topId;
-                                        top2Val = topVal;
-                                        topVal = logits[di];
-                                        topId = di;
-                                    } else if (logits[di] > top2Val) {
-                                        top3Id = top2Id;
-                                        top3Val = top2Val;
-                                        top2Val = logits[di];
-                                        top2Id = di;
-                                    } else if (logits[di] > top3Val) {
-                                        top3Val = logits[di];
-                                        top3Id = di;
-                                    }
-                                }
-                                System.err.printf(
-                                        "[DIAG] step=%d tok=%d startPos=%d kvPos=%d top3=[%d(%.2f) %d(%.2f) %d(%.2f)]%n",
-                                        step, next, decodeStartPos, session.currentPos(), topId, topVal, top2Id,
-                                        top2Val, top3Id, top3Val);
-                            }
-
-
-                            next = tokenSampler.sample(logits, cfg, freq, rng);
+                            next = tokenSampler.sample(logits, cfg, config, freq, rng);
                         }
                     }
 

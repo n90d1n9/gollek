@@ -42,7 +42,6 @@ import java.util.Map;
  *
  * @since 2.0.0
  */
-@jakarta.enterprise.context.ApplicationScoped
 public class RunnerPluginIntegration {
 
     private static final Logger LOG = Logger.getLogger(RunnerPluginIntegration.class);

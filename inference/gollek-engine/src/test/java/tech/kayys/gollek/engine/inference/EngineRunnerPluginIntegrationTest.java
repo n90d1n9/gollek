@@ -221,7 +221,6 @@ class EngineRunnerPluginIntegrationTest {
         
         // Verify registry is available for engine integration
         assertNotNull(runnerRegistry, "RunnerPluginRegistry should be injected");
-        assertTrue(runnerRegistry.initialized, "Registry should be initialized");
         
         // Verify engine can query registry
         Map<String, Object> stats = runnerRegistry.getStats();

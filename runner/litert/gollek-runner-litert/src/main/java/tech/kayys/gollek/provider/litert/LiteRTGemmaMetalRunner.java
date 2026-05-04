@@ -219,7 +219,7 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
 
     /** RMS Normalization: out = x * weight / rms(x) */
     private void rmsNorm(MemorySegment out, MemorySegment x, MemorySegment weight, int dim) {
-        metal.rmsNorm(out, x, weight, dim, 1e-6f);
+        metal.rmsNorm(out, x, weight, dim, 1e-6f, true);
     }
 
     /** Matrix multiplication with auto-dequantization caching. */

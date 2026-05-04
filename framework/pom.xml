@@ -13,15 +13,43 @@
     <artifactId>gollek-framework-parent</artifactId>
     <packaging>pom</packaging>
 
-    <name>gollek-framework-root</name>
-    <description>Gollek ML Framework — PyTorch-like API in pure Java 25 with FFM + Vector API</description>
+    <name>gollek-framework-parent</name>
+    <description>Gollek ML Framework Library Parent — all tensor, nn, autograd, training modules</description>
 
     <modules>
-        <module>lib</module>
-        <module>integration/langchain4j/gollek-langchain4j</module>
+        <module>gollek-ml-tensor</module>
+        <module>gollek-ml-autograd</module>
+        <module>gollek-ml-nn</module>
+        <module>gollek-ml-cnn</module>
+        <module>gollek-ml-rnn</module>
+        <module>gollek-ml-transformer</module>
+        <module>gollek-ml-data</module>
+        <module>gollek-ml-optimize</module>
+        <module>gollek-ml-train</module>
+        <module>gollek-ml-hub</module>
+        <module>gollek-ml-nlp</module>
+        <module>gollek-ml-vision</module>
+        <module>gollek-ml-audio</module>
+        <module>gollek-ml-multimodal</module>
+        <module>gollek-ml-augment</module>
+        <module>gollek-ml-export</module>
+        <module>gollek-ml-export-onnx</module>
+        <module>gollek-ml-export-gguf</module>
+        <module>gollek-ml-export-litert</module>
+        <module>gollek-ml-safetensor</module>
+        <module>gollek-ml-gguf</module>
+        <module>gollek-ml-litert</module>
+        <module>gollek-ml-onnx</module>
+        <module>gollek-ml-models</module>
+        <module>gollek-ml-metrics</module>
+        <module>gollek-ml-api</module>
+        <module>gollek-ml-examples</module>
+        <module>gollek-ml-core</module>
+        <module>gollek-ml-pickle</module>
     </modules>
 
-    <build>
+
+     <build>
         <pluginManagement>
             <plugins>
                 <!-- Enable preview features for all framework modules (JDK 25 FFM + Vector API) -->

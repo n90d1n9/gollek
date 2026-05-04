@@ -40,6 +40,11 @@ public class DefaultInferenceOrchestrator implements InferenceOrchestrator {
         @Inject
         DisaggregatedLLMProvider pdProvider;
 
+        // For testing
+        void setPdProvider(DisaggregatedLLMProvider pdProvider) {
+                this.pdProvider = pdProvider;
+        }
+
         @Inject
         public DefaultInferenceOrchestrator(
                         ModelRouterService router,

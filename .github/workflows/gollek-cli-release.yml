@@ -295,13 +295,13 @@ jobs:
           fi
 
           mkdir -p "$WAYANG_HOME"/{config,logs,models,mcp,run}
-          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,libs,source/vendor}
+          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,libs,source/vendor,run}
 
           cat > "${GOLLEK_HOME}/config/environment" <<'ENVFILE'
           WAYANG_HOME=${WAYANG_HOME:-$HOME/.wayang}
           GOLLEK_HOME=${GOLLEK_HOME:-$WAYANG_HOME/gollek}
-          GOLLEK_CLI_LOG_FILE=${GOLLEK_CLI_LOG_FILE:-$WAYANG_HOME/logs/gollek-cli.log}
-          WAYANG_SERVICE_CMD=${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek --version}
+          GOLLEK_CLI_LOG_FILE=${GOLLEK_CLI_LOG_FILE:-$WAYANG_HOME/logs/gollek.log}
+          WAYANG_SERVICE_CMD=${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek}
           ENVFILE
 
           echo "Installed to ${INSTALL_DIR}/gollek"
@@ -328,7 +328,12 @@ jobs:
           fi
 
           mkdir -p "$WAYANG_HOME"/{config,logs,models,mcp,run}
-          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,run}
+          mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,run,libs,source/vendor}
+          if command -v gollek >/dev/null 2>&1; then
+            DEFAULT_SERVICE_CMD="$(command -v gollek)"
+          else
+            DEFAULT_SERVICE_CMD="/usr/local/bin/gollek"
+          fi
           SERVICE_FILE="$HOME/.config/systemd/user/wayang-gollek.service"
           mkdir -p "$(dirname "$SERVICE_FILE")"
 
@@ -338,14 +343,17 @@ jobs:
           After=network.target
 
           [Service]
-          Type=oneshot
-          RemainAfterExit=yes
+          Type=simple
           EnvironmentFile=-$GOLLEK_HOME/config/environment
           Environment=WAYANG_HOME=$WAYANG_HOME
           Environment=GOLLEK_HOME=$GOLLEK_HOME
-          Environment=GOLLEK_CLI_LOG_FILE=$WAYANG_HOME/logs/gollek-cli.log
-          Environment=WAYANG_SERVICE_CMD=\${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek --version}
+          Environment=GOLLEK_CLI_LOG_FILE=$WAYANG_HOME/logs/gollek.log
+          Environment=WAYANG_SERVICE_CMD=\${WAYANG_SERVICE_CMD:-$DEFAULT_SERVICE_CMD}
           ExecStart=/bin/sh -lc '\$WAYANG_SERVICE_CMD'
+          Restart=on-failure
+          RestartSec=5
+          StandardOutput=append:$WAYANG_HOME/logs/wayang-gollek-service.log
+          StandardError=append:$WAYANG_HOME/logs/wayang-gollek-service.log
           WorkingDirectory=$GOLLEK_HOME
 
           [Install]
@@ -357,7 +365,7 @@ jobs:
           echo "Installed user service template: wayang-gollek.service"
           echo "Set WAYANG_SERVICE_CMD in \$GOLLEK_HOME/config/environment, then run:"
           echo "  systemctl --user start wayang-gollek.service"
-          echo "Logs: $GOLLEK_HOME/logs/cli.log"
+          echo "Logs: $WAYANG_HOME/logs/gollek.log"
           INSTALL_SERVICE_SH
 
           cat > release/install.ps1 <<'INSTALL_PS1'
@@ -373,6 +381,23 @@ jobs:
             New-Item -ItemType Directory -Path $installDir -Force | Out-Null
           }
 
+          $wayangHome = if ($env:WAYANG_HOME) { $env:WAYANG_HOME } else { Join-Path $HOME ".wayang" }
+          $gollekHome = if ($env:GOLLEK_HOME) {
+            $env:GOLLEK_HOME
+          } elseif ((Test-Path (Join-Path $wayangHome "gollek")) -or -not (Test-Path (Join-Path $HOME ".gollek"))) {
+            Join-Path $wayangHome "gollek"
+          } else {
+            Join-Path $HOME ".gollek"
+          }
+          New-Item -ItemType Directory -Force -Path $wayangHome | Out-Null
+          foreach ($dir in @("config","logs","models","mcp","run")) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $wayangHome $dir) | Out-Null
+          }
+          New-Item -ItemType Directory -Force -Path $gollekHome | Out-Null
+          foreach ($dir in @("config","logs","models","mcp","run","libs","source\\vendor")) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $gollekHome $dir) | Out-Null
+          }
+
           Invoke-WebRequest -Uri $url -OutFile $tmpExe
           Copy-Item $tmpExe (Join-Path $installDir 'gollek.exe') -Force
 
@@ -382,6 +407,7 @@ jobs:
           }
 
           Write-Host "Installed to $installDir\\gollek.exe"
+          Write-Host "Runtime home: $gollekHome"
           INSTALL_PS1
 
           sed -i "s#__REPO__#${REPO}#g" release/install.sh release/install.ps1

@@ -72,7 +72,6 @@ import tech.kayys.gollek.spi.plugin.PluginContext;
  * @since 2.1.0
  * @version 2.0.0
  */
-@ApplicationScoped
 public class KernelPluginIntegration {
 
     private static final Logger LOG = Logger.getLogger(KernelPluginIntegration.class);

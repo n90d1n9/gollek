@@ -49,6 +49,8 @@ class RunnerPluginRegistryTest {
     @BeforeEach
     void setUp() {
         registry = new RunnerPluginRegistry();
+        // Clear any previous test state from the singleton plugin manager
+        registry.pluginManager.shutdown();
         // Manually initialize for tests (skip CDI)
         registry.initialized = true;
     }
@@ -57,7 +59,7 @@ class RunnerPluginRegistryTest {
     @DisplayName("Should create registry instance")
     void shouldCreateRegistry() {
         assertNotNull(registry);
-        assertFalse(registry.initialized);
+        assertTrue(registry.initialized);
     }
 
     @Test
@@ -292,6 +294,11 @@ class RunnerPluginRegistryTest {
 
         @Override
         public boolean isAvailable() {
+            return available;
+        }
+
+        @Override
+        public boolean isHealthy() {
             return available;
         }
 

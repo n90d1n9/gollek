@@ -19,9 +19,19 @@ import jakarta.enterprise.inject.Instance;
 public class FlashAttentionKernel {
 
     @Inject
-    Instance<MetalComputeBackend> metalBackend;
+    Instance<MetalComputeBackend> metalBackendInstance;
+    
+    private MetalComputeBackend metal;
+    
     @Inject
     RopeFrequencyCache ropeCache;
+
+    @jakarta.annotation.PostConstruct
+    void init() {
+        if (metalBackendInstance.isResolvable()) {
+            this.metal = metalBackendInstance.get();
+        }
+    }
 
     public static class AttentionInput {
         public final AccelTensor x;
@@ -110,8 +120,8 @@ public class FlashAttentionKernel {
 
         // 5. Attention
         AccelTensor attnOut;
-        if (metalBackend.isResolvable() && metalBackend.get().deviceName() != null
-                && !metalBackend.get().deviceName().contains("CPU")) {
+        if (metal != null && metal.deviceName() != null
+                && !metal.deviceName().contains("CPU")) {
             attnOut = tiledAttention(q, kvSession, layerIdx, startPos, numQHeads, headDim, scale, in.isCausal,
                     in.arch.defaultAttnSoftCap());
         } else {
@@ -155,10 +165,10 @@ public class FlashAttentionKernel {
         for (int s = 0; s < seqLen; s++) {
             int pos = startPos + s;
             for (int h = 0; h < numQHeads; h++) {
-                freqs.rotateInPlace(q.dataSegment(), ((long) s * numQHeads + h) * headDim, pos, interleaved);
+                freqs.rotateInPlace(q.dataPtr(), ((long) s * numQHeads + h) * headDim, pos, interleaved);
             }
             for (int h = 0; h < numKVHeads; h++) {
-                freqs.rotateInPlace(k.dataSegment(), ((long) s * numKVHeads + h) * headDim, pos, interleaved);
+                freqs.rotateInPlace(k.dataPtr(), ((long) s * numKVHeads + h) * headDim, pos, interleaved);
             }
         }
     }
@@ -166,8 +176,8 @@ public class FlashAttentionKernel {
     private void updateKVCache(AccelTensor k, AccelTensor v, KVCacheManager.KVCacheSession kvSession, int layerIdx,
             int startPos, int seqLen, int numHeads, int headDim) {
         BlockManager blockManager = kvSession.blockManager();
-        MemorySegment kSeg = k.dataSegment();
-        MemorySegment vSeg = v.dataSegment();
+        MemorySegment kSeg = k.dataPtr();
+        MemorySegment vSeg = v.dataPtr();
 
         int tokensPerBlock = kvSession.tokensPerBlock();
         long headStride = blockManager.getHeadStride();
@@ -211,8 +221,8 @@ public class FlashAttentionKernel {
                 clSeg.setAtIndex(ValueLayout.JAVA_INT, i, totalTokens);
 
             AccelTensor out = AccelTensor.zeros(q.shape());
-            metalBackend.get().pagedAttention(
-                    out.dataSegment(), q.dataSegment(),
+            metal.pagedAttention(
+                    out.dataPtr(), q.dataPtr(),
                     blockManager.getRawKPool(), blockManager.getRawVPool(),
                     btSeg, clSeg,
                     (int) batch, (int) seqLen, numHeads, headDim,

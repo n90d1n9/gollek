@@ -1,0 +1,22 @@
+rootProject.name = "gollek-engine-core"
+
+// The monolithic core (we will break this apart soon)
+include("gollek-common")
+include("gollek-core")
+
+// Future Submodules (commented out until we move the files)
+include("gollek-ir")
+include("gollek-compiler")
+include("gollek-runtime")
+include("gollek-training")
+include("gollek-backend-cpu")
+include("gollek-backend-cuda")
+include("gollek-backend-metal")
+include("gollek-distributed")
+include("gollek-neural-compiler")
+include("gollek-cli")
+include("gollek-model-repo-hf")
+include("gollek-model-repo-kaggle")
+include("gollek-model-repo-local")
+include("gollek-model-repo-core")
+include("gollek-model-registry")

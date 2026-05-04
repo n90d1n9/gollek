@@ -73,6 +73,10 @@ public class InferenceEngineBootstrap {
     /**
      * Bootstrap on application startup
      */
+    void onStart(@Observes StartupEvent ev) {
+        initialize();
+    }
+
     public void initialize() {
         if (!engineEnabled) {
             LOG.warn("Inference engine is disabled via configuration");

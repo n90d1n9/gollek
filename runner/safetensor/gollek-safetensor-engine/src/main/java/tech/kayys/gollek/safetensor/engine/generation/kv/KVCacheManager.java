@@ -39,6 +39,52 @@ public class KVCacheManager {
         private int numLayers;
         private int numKVHeads;
         private int headDim;
+        private ForwardWorkspace workspace;
+
+        public static class ForwardWorkspace implements AutoCloseable {
+            private java.lang.foreign.MemorySegment normedAttnSeg;
+            private java.lang.foreign.MemorySegment normedFfnSeg;
+            private java.lang.foreign.MemorySegment combinedSeg;
+            private java.lang.foreign.MemorySegment hiddenASeg;
+            private java.lang.foreign.MemorySegment hiddenBSeg;
+            private long currentCap = 0;
+
+            public void ensureCapacity(long totalElements, long hiddenSize, long intermediateSize) {
+                long needed = Math.max(hiddenSize, totalElements) * 4; // float = 4 bytes
+                // Align to 4096 for AMX/Metal safety
+                long paddedNeeded = (needed + 4095) & ~4095;
+                if (normedAttnSeg == null || currentCap < paddedNeeded) {
+                    close();
+                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+                    // Explicitly request 4096-byte alignment
+                    normedAttnSeg = arena.allocate(paddedNeeded, 4096);
+                    normedFfnSeg = arena.allocate(paddedNeeded, 4096);
+                    
+                    long combinedNeeded = Math.max(intermediateSize, totalElements * (intermediateSize / hiddenSize)) * 4;
+                    long paddedCombined = (combinedNeeded + 4095) & ~4095;
+                    combinedSeg = arena.allocate(paddedCombined, 4096);
+                    
+                    hiddenASeg = arena.allocate(paddedNeeded, 4096);
+                    hiddenBSeg = arena.allocate(paddedNeeded, 4096);
+                    currentCap = paddedNeeded;
+                }
+            }
+            
+            public java.lang.foreign.MemorySegment getNormedAttnSeg() { return normedAttnSeg; }
+            public java.lang.foreign.MemorySegment getNormedFfnSeg() { return normedFfnSeg; }
+            public java.lang.foreign.MemorySegment getCombinedSeg() { return combinedSeg; }
+            public java.lang.foreign.MemorySegment getHiddenASeg() { return hiddenASeg; }
+            public java.lang.foreign.MemorySegment getHiddenBSeg() { return hiddenBSeg; }
+
+            @Override
+            public void close() {
+                // ofAuto handles cleanup
+                normedAttnSeg = null;
+                normedFfnSeg = null;
+                combinedSeg = null;
+                currentCap = 0;
+            }
+        }
 
         public KVCacheSession(int maxSeqLen, BlockManager blockManager) {
             this.maxSeqLen = maxSeqLen;
@@ -63,14 +109,25 @@ public class KVCacheManager {
                 layout = java.lang.foreign.ValueLayout.JAVA_BYTE;
             }
 
-            // Ensure BlockManager is initialized for this model's dimensions
-            blockManager.initialize(tokensPerBlock, numKVHeads, headDim, (maxSeqLen / tokensPerBlock) * numLayers + 100);
+            // Gemma-4 128K context requires massive memory. We allocate a safe initial pool 
+            // and cap it to prevent Metal driver aborts on huge contiguous requests.
+            int safeMaxTokens = Math.min(maxSeqLen, 4096); 
+            int initialBlocks = (safeMaxTokens / tokensPerBlock) * numLayers + 64;
+            
+            blockManager.initialize(tokensPerBlock, numKVHeads, headDim, initialBlocks);
 
             for (int i = 0; i < numLayers; i++) {
                 blockTables.put(i, new java.util.ArrayList<>());
                 // Allocate first block
                 appendBlock(i);
             }
+            
+            this.workspace = new ForwardWorkspace();
+            this.workspace.ensureCapacity(config.hiddenSize(), config.hiddenSize(), config.intermediateSize());
+        }
+
+        public ForwardWorkspace getWorkspace() {
+            return workspace;
         }
 
         private void appendBlock(int layerIdx) {
@@ -168,6 +225,7 @@ public class KVCacheManager {
 
         @Override
         public void close() {
+            if (workspace != null) workspace.close();
             blockTables.values().forEach(list -> {
                 list.forEach(blockManager::freeBlock);
             });

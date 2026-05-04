@@ -50,6 +50,7 @@
         <!-- <module>torch</module> -->
         <module>onnx</module>
         <module>tensorrt</module>
+        <module>diffuser</module>
     </modules>
 
     <profiles>

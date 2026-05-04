@@ -117,6 +117,14 @@ public class AccelTensor implements AutoCloseable {
     }
 
     /**
+     * Creates a non-owning view on an existing MemorySegment.
+     * The caller is responsible for the segment's lifecycle.
+     */
+    public static AccelTensor view(MemorySegment data, long[] shape) {
+        return new AccelTensor(data, shape, contiguousStride(shape), 0, (Arena) null);
+    }
+
+    /**
      * Creates a tensor filled with ones.
      */
     public static AccelTensor ones(long... shape) {
@@ -244,7 +252,7 @@ public class AccelTensor implements AutoCloseable {
      */
     public MemorySegment dataPtr() {
         checkClosed();
-        return data.asSlice(offset * Float.BYTES);
+        return data.asSlice(offset * (long) Float.BYTES);
     }
 
     /**
@@ -522,16 +530,16 @@ public class AccelTensor implements AutoCloseable {
             long srcRow = indices[i];
             if (shape.length >= 2) {
                 // Copy row from [vocabSize, embDim]
-                long srcByteOffset = (offset + srcRow * stride[0]) * Float.BYTES;
+                long srcByteOffset = (offset + srcRow * stride[0]) * (long)Float.BYTES;
                 if (isQuantized()) {
                      // Dequantize row on-the-fly
-                     dequantizeRow(srcRow, out.dataPtr().asSlice((long) i * embDim * Float.BYTES), (int) embDim);
+                     dequantizeRow(srcRow, out.dataPtr().asSlice((long) i * embDim * (long)Float.BYTES), (int) embDim);
                 } else {
-                    long dstByteOffset = (long) i * embDim * Float.BYTES;
+                    long dstByteOffset = (long) i * embDim * (long)Float.BYTES;
                     MemorySegment.copy(
                         data, ValueLayout.JAVA_FLOAT, srcByteOffset,
                         out.data, ValueLayout.JAVA_FLOAT, dstByteOffset,
-                        (int) embDim
+                        (long) embDim * 4L
                     );
                 }
             } else {

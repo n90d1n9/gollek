@@ -42,7 +42,11 @@ public class TokenSampler {
      *         empty
      */
     public int sample(float[] logits, GenerationConfig config, int[] freq) {
-        return sample(logits, config, freq, random);
+        return sample(logits, config, null, freq);
+    }
+
+    public int sample(float[] logits, GenerationConfig config, tech.kayys.gollek.spi.model.ModelConfig modelConfig, int[] freq) {
+        return sample(logits, config, modelConfig, freq, random);
     }
 
     /**
@@ -59,7 +63,7 @@ public class TokenSampler {
      * @return the sampled token ID, or {@code -1} if {@code logits} is null or
      *         empty
      */
-    public int sample(float[] logits, GenerationConfig config, int[] freq, Random rng) {
+    public int sample(float[] logits, GenerationConfig config, tech.kayys.gollek.spi.model.ModelConfig modelConfig, int[] freq, Random rng) {
         if (logits == null || logits.length == 0) {
             System.err.println("ERROR: Empty or null logits array");
             return -1;
@@ -90,10 +94,10 @@ public class TokenSampler {
         }
 
         // Extract values
-        double temp = config.temperature();
+        float temp = (float) config.temperature();
         int topK = config.topK();
-        float topP = config.topP();
-        float minP = config.minP();
+        float topP = (float) config.topP();
+        float minP = (float) config.minP();
 
         // Apply repetition and frequency penalties (applies to both greedy and sampled
         // modes)
@@ -130,20 +134,20 @@ public class TokenSampler {
         }
 
         if (temp <= 0)
-            temp = 1.0;
+            temp = 1.0f;
 
-        // Create an index array and sort by logit value (descending).
-        // Uses Arrays.sort (introsort) instead of recursive quicksort to avoid
-        // StackOverflowError on large vocabularies (e.g. Gemma-4: 262,144 tokens).
-        Integer[] boxedIndices = new Integer[logits.length];
-        for (int i = 0; i < boxedIndices.length; i++) {
-            boxedIndices[i] = i;
-        }
-        java.util.Arrays.sort(boxedIndices, (a, b) -> Float.compare(logits[b], logits[a]));
         int[] indices = new int[logits.length];
-        for (int i = 0; i < indices.length; i++) {
-            indices[i] = boxedIndices[i];
+        for (int i = 0; i < indices.length; i++) indices[i] = i;
+
+        // O(N) QuickSelect to find the top-K elements without sorting the entire vocabulary
+        int limit = (topK > 0 && topK < logits.length) ? topK : logits.length;
+        if (limit < logits.length) {
+            quickSelect(logits, indices, 0, logits.length - 1, limit);
         }
+        
+        // Sort only the top-K elements for sampling
+        iterativeQuickSort(logits, indices, 0, limit - 1, limit);
+
 
         // Max logit is now at indices[0]
         float maxLogit = logits[indices[0]];
@@ -152,10 +156,11 @@ public class TokenSampler {
         double[] probs = new double[logits.length];
         double sum = 0;
 
-        // Only evaluate Top-K if topK is valid and < vocab_size
-        int limit = (topK > 0 && topK < logits.length) ? topK : logits.length;
+        // Apply softcapping only to the top-K candidates (huge O(N) -> O(K) optimization)
+        Double cap = modelConfig.finalLogitSoftcapping();
+        float softCap = (cap != null && cap > 0) ? cap.floatValue() : 0.0f;
 
-        // Apply Min-P limit first
+        // Apply Min-P limit
         double minProbLimit = 0.0;
         if (minP > 0.0f) {
             minProbLimit = minP * Math.exp((maxLogit - maxLogit) / temp); // which is just minP
@@ -164,7 +169,11 @@ public class TokenSampler {
         int actualElements = 0;
         for (int i = 0; i < limit; i++) {
             int idx = indices[i];
-            double p = Math.exp((logits[idx] - maxLogit) / temp);
+            float logit = logits[idx];
+            if (softCap > 0) {
+                logit = (float) (softCap * Math.tanh(logit / softCap));
+            }
+            double p = Math.exp((logit - maxLogit) / temp);
 
             if (minP > 0.0f && p < minProbLimit && actualElements > 0) {
                 // If it falls below threshold and we already have at least 1 token, stop.
@@ -207,4 +216,59 @@ public class TokenSampler {
         return indices[0];
     }
 
+    private void iterativeQuickSort(float[] values, int[] indices, int low, int high, int limit) {
+        int[] stack = new int[high - low + 1];
+        int top = -1;
+
+        stack[++top] = low;
+        stack[++top] = high;
+
+        while (top >= 0) {
+            high = stack[top--];
+            low = stack[top--];
+
+            int p = partition(values, indices, low, high);
+
+            // If we have enough sorted elements for our limit, we can skip deeper partitions
+            if (low < p - 1) {
+                stack[++top] = low;
+                stack[++top] = p - 1;
+            }
+
+            // Only proceed with the right partition if the left side didn't already satisfy the limit
+            if (p + 1 < high && p < limit) {
+                stack[++top] = p + 1;
+                stack[++top] = high;
+            }
+        }
+    }
+
+    private void quickSelect(float[] values, int[] indices, int low, int high, int k) {
+        while (low < high) {
+            int p = partition(values, indices, low, high);
+            if (p == k) return;
+            if (k < p) {
+                high = p - 1;
+            } else {
+                low = p + 1;
+            }
+        }
+    }
+
+    private int partition(float[] values, int[] indices, int low, int high) {
+        float pivot = values[indices[high]];
+        int i = (low - 1);
+        for (int j = low; j <= high - 1; j++) {
+            if (values[indices[j]] > pivot) {
+                i++;
+                int temp = indices[i];
+                indices[i] = indices[j];
+                indices[j] = temp;
+            }
+        }
+        int temp = indices[i + 1];
+        indices[i + 1] = indices[high];
+        indices[high] = temp;
+        return i + 1;
+    }
 }

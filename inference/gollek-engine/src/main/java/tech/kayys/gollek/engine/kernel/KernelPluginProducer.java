@@ -25,7 +25,9 @@
 package tech.kayys.gollek.engine.kernel;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.plugin.kernel.KernelPluginManager;
@@ -60,6 +62,9 @@ public class KernelPluginProducer {
 
     private static final Logger LOG = Logger.getLogger(KernelPluginProducer.class);
 
+    @Inject
+    Instance<tech.kayys.gollek.plugin.kernel.KernelPlugin> kernelPluginInstances;
+
     private volatile KernelPluginIntegration kernelIntegration;
     private volatile KernelPluginManager kernelPluginManager;
     private volatile boolean initialized = false;
@@ -77,6 +82,7 @@ public class KernelPluginProducer {
         try {
             // Create kernel plugin integration
             kernelIntegration = new KernelPluginIntegration();
+            kernelIntegration.kernelPluginInstances = this.kernelPluginInstances;
             kernelIntegration.initialize();
 
             // Get kernel plugin manager
@@ -141,6 +147,9 @@ public class KernelPluginProducer {
      * @return kernel plugin integration
      */
     public KernelPluginIntegration getKernelIntegration() {
+        if (!initialized) {
+            initialize();
+        }
         return kernelIntegration;
     }
 
@@ -150,6 +159,9 @@ public class KernelPluginProducer {
      * @return kernel plugin manager
      */
     public KernelPluginManager getKernelManager() {
+        if (!initialized) {
+            initialize();
+        }
         return kernelPluginManager;
     }
 

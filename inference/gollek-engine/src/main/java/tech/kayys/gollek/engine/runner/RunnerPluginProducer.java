@@ -153,6 +153,9 @@ public class RunnerPluginProducer {
      * @return runner plugin manager
      */
     public RunnerPluginManager getRunnerManager() {
+        if (!initialized) {
+            initialize();
+        }
         return runnerPluginManager;
     }
 
@@ -162,6 +165,9 @@ public class RunnerPluginProducer {
      * @return runner plugin integration
      */
     public RunnerPluginIntegration getRunnerIntegration() {
+        if (!initialized) {
+            initialize();
+        }
         return runnerIntegration;
     }
 

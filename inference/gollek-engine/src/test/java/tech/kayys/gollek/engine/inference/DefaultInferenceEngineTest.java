@@ -35,6 +35,9 @@ class DefaultInferenceEngineTest {
     private InferenceMetrics metrics;
 
     @Mock
+    private tech.kayys.gollek.engine.plugin.PluginSystemIntegrator pluginIntegrator;
+
+    @Mock
     private InferenceRequest request;
 
     @Mock
@@ -57,6 +60,7 @@ class DefaultInferenceEngineTest {
         try {
             injectField(engine, "orchestrator", orchestrator);
             injectField(engine, "metrics", metrics);
+            injectField(engine, "pluginIntegrator", pluginIntegrator);
         } catch (Exception e) {
             fail("Failed to inject mocks: " + e.getMessage());
         }
