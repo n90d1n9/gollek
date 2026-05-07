@@ -2,7 +2,6 @@ package tech.kayys.gollek.converter;
 
 import tech.kayys.gollek.gguf.core.*;
 
-
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.infrastructure.Infrastructure;
@@ -13,7 +12,7 @@ import tech.kayys.gollek.converter.model.ConversionResult;
 import tech.kayys.gollek.converter.model.GGUFConversionParams;
 import tech.kayys.gollek.converter.model.ModelMetadata;
 import tech.kayys.gollek.converter.model.QuantizationType;
-import tech.kayys.gollek.spi.model.ModelFormat;
+import tech.kayys.gollek.core.model.ModelFormat;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.lang.foreign.*;
@@ -47,8 +46,10 @@ import org.slf4j.LoggerFactory;
  * <p>
  * <b>Conversion Strategy:</b>
  * <ul>
- * <li><b>Safetensors input:</b> Uses {@link SafetensorToGgufConverter} for pure Java-based conversion</li>
- * <li><b>PyTorch/TensorFlow input:</b> Uses native GGUF bridge (gguf_bridge) via FFM</li>
+ * <li><b>Safetensors input:</b> Uses {@link SafetensorToGgufConverter} for pure
+ * Java-based conversion</li>
+ * <li><b>PyTorch/TensorFlow input:</b> Uses native GGUF bridge (gguf_bridge)
+ * via FFM</li>
  * <li><b>GGUF input:</b> Direct quantization via llama.cpp FFM bindings</li>
  * </ul>
  *
@@ -59,10 +60,8 @@ import org.slf4j.LoggerFactory;
 public class GGUFConverter {
 
     private static final Logger log = LoggerFactory.getLogger(GGUFConverter.class);
-    private static final String DEFAULT_CONVERTER_BASE =
-            System.getProperty("user.home") + "/.gollek/conversions";
-    private static final String DEFAULT_MODEL_BASE =
-            System.getProperty("user.home") + "/.gollek/models";
+    private static final String DEFAULT_CONVERTER_BASE = System.getProperty("user.home") + "/.gollek/conversions";
+    private static final String DEFAULT_MODEL_BASE = System.getProperty("user.home") + "/.gollek/models";
 
     private final AtomicLong conversionIdCounter = new AtomicLong(0);
     private final ConcurrentHashMap<Long, ConversionContext> activeConversions = new ConcurrentHashMap<>();
@@ -155,11 +154,11 @@ public class GGUFConverter {
                 log.warn("Failed to parse URI path: " + e.getMessage());
             }
         }
-        
+
         log.info("Fallback format detection for: " + modelPath);
         log.info("Is directory: " + Files.isDirectory(modelPath));
         log.info("Is regular file: " + Files.isRegularFile(modelPath));
-        
+
         if (Files.isRegularFile(modelPath)) {
             String name = modelPath.getFileName().toString().toLowerCase();
             log.info("File extension: " + name.substring(name.lastIndexOf(".")));
@@ -168,17 +167,17 @@ public class GGUFConverter {
             // Check SAFETENSORS first to avoid false positive with PYTORCH
             // (both have model.safetensors as marker, but SAFETENSORS is more specific)
             ModelFormat[] checkOrder = {
-                ModelFormat.SAFETENSORS,
-                ModelFormat.PYTORCH,
-                ModelFormat.TENSORFLOW,
-                ModelFormat.FLAX,
-                ModelFormat.GGUF,
-                ModelFormat.LITERT,
-                ModelFormat.ONNX,
-                ModelFormat.TENSORRT,
-                ModelFormat.TORCHSCRIPT,
-                ModelFormat.TENSORFLOW_SAVED_MODEL,
-                ModelFormat.UNKNOWN
+                    ModelFormat.SAFETENSORS,
+                    ModelFormat.PYTORCH,
+                    ModelFormat.TENSORFLOW,
+                    ModelFormat.FLAX,
+                    ModelFormat.GGUF,
+                    ModelFormat.LITERT,
+                    ModelFormat.ONNX,
+                    ModelFormat.TENSORRT,
+                    ModelFormat.TORCHSCRIPT,
+                    ModelFormat.TENSORFLOW_SAVED_MODEL,
+                    ModelFormat.UNKNOWN
             };
 
             for (ModelFormat format : checkOrder) {
@@ -382,7 +381,7 @@ public class GGUFConverter {
     private ConversionResult convertWithNativeBridge(
             GGUFConversionParams params,
             Consumer<ConversionProgress> progressCallback) {
-        
+
         long conversionId = conversionIdCounter.incrementAndGet();
         ConversionContext context = new ConversionContext(conversionId, params);
         activeConversions.put(conversionId, context);
@@ -916,7 +915,8 @@ public class GGUFConverter {
             resolved = base.resolve(outputPath).normalize();
         }
 
-        if (Files.isDirectory(resolved) || outputPath.toString().endsWith("/") || outputPath.toString().endsWith("\\")) {
+        if (Files.isDirectory(resolved) || outputPath.toString().endsWith("/")
+                || outputPath.toString().endsWith("\\")) {
             String name = buildOutputName(inputPath, quantization);
             resolved = resolved.resolve(name);
         } else if (!resolved.getFileName().toString().toLowerCase().endsWith(".gguf")) {

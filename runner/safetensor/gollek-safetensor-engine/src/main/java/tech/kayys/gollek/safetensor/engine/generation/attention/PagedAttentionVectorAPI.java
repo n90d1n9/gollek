@@ -3,6 +3,7 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.kv.BlockManager;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.util.List;
@@ -19,8 +20,10 @@ public class PagedAttentionVectorAPI {
      */
     public static AccelTensor compute(
             AccelTensor q,
+            ModelConfig config,
             KVCacheManager.KVCacheSession kvSession,
             int layerIdx,
+            int kvLayerIdx,
             int startPos,
             int numQHeads,
             int headDim,
@@ -33,8 +36,11 @@ public class PagedAttentionVectorAPI {
         int totalTokens = startPos + (int) seqLenQ;
         int numKVHeads = kvSession.numKVHeads();
         int tokensPerBlock = kvSession.tokensPerBlock();
-        List<Integer> blockTable = kvSession.getBlockIndices(layerIdx);
+        List<Integer> blockTable = kvSession.getBlockIndices(kvLayerIdx);
         BlockManager blockManager = kvSession.blockManager();
+        boolean quantizedInt8 = kvSession.isQuantizedInt8();
+        boolean slidingLayer = config != null && config.isSlidingAttentionLayer(layerIdx) && config.hasSlidingWindow();
+        int slidingWindow = slidingLayer ? config.slidingWindowSize() : Integer.MAX_VALUE;
 
         AccelTensor out = AccelTensor.zeros(q.shape());
 
@@ -42,7 +48,7 @@ public class PagedAttentionVectorAPI {
             for (int h = 0; h < numQHeads; h++) {
                 for (int i = 0; i < seqLenQ; i++) {
                     computePagedHeadQuery(b, h, i, q, blockTable, blockManager, out, scale, causal, tokensPerBlock,
-                            totalTokens, numKVHeads, headDim, softCap);
+                            totalTokens, numKVHeads, headDim, softCap, quantizedInt8, slidingWindow);
                 }
             }
         }
@@ -51,7 +57,8 @@ public class PagedAttentionVectorAPI {
 
     private static void computePagedHeadQuery(int b, int h, int i,
             AccelTensor q, List<Integer> blockTable, BlockManager blockManager, AccelTensor out,
-            float scale, boolean causal, int tokensPerBlock, int totalTokens, int numKVHeads, int headDim, float softCap) {
+            float scale, boolean causal, int tokensPerBlock, int totalTokens, int numKVHeads, int headDim,
+            float softCap, boolean quantizedInt8, int slidingWindow) {
 
         MemorySegment qSeg = q.dataSegment();
         MemorySegment oSeg = out.dataSegment();
@@ -82,18 +89,28 @@ public class PagedAttentionVectorAPI {
         for (int blockIdx : blockTable) {
             MemorySegment kBlock = blockManager.getKBlock(blockIdx);
             MemorySegment vBlock = blockManager.getVBlock(blockIdx);
+            MemorySegment kScaleBlock = blockManager.getKScaleBlock(blockIdx);
+            MemorySegment vScaleBlock = blockManager.getVScaleBlock(blockIdx);
             int tokensInThisBlock = Math.min(tokensPerBlock, totalTokens - currentTokCount);
 
             for (int tok = 0; tok < tokensInThisBlock; tok++) {
                 int absPos = currentTokCount + tok;
                 int seqLenQ = (int)q.size(1);
                 int startPos = totalTokens - seqLenQ;
+                int minPos = slidingWindow == Integer.MAX_VALUE ? 0 : Math.max(0, startPos + i - slidingWindow + 1);
+                if (absPos < minPos) {
+                    continue;
+                }
                 if (causal && absPos > startPos + i)
                     break;
 
                 // 1. Compute Dot Product Q_i @ K_j
                 long kvOff = ((long) kvHeadIdx * headStride + (long) tok * tokenStride) * 4;
-                float score = dotProduct(qSeg, qOff, kBlock, kvOff, headDim) * scale;
+                long kvElementOff = ((long) kvHeadIdx * headStride + (long) tok * tokenStride);
+                long scaleIndex = (long) kvHeadIdx * blockManager.getScaleStride() + tok;
+                float score = quantizedInt8
+                        ? dotProductInt8(qSeg, qOff, kBlock, kvElementOff, kScaleBlock, scaleIndex, headDim) * scale
+                        : dotProduct(qSeg, qOff, kBlock, kvOff, headDim) * scale;
                 
                 if (softCap > 0.0f) {
                     score = (float) (Math.tanh(score / softCap) * softCap);
@@ -107,7 +124,11 @@ public class PagedAttentionVectorAPI {
                 l = l * exp_prev + exp_curr;
 
                 // 3. Update Output Accumulator
-                updateAccumulator(acc, vBlock, kvOff, exp_prev, exp_curr, headDim);
+                if (quantizedInt8) {
+                    updateAccumulatorInt8(acc, vBlock, kvElementOff, vScaleBlock, scaleIndex, exp_prev, exp_curr, headDim);
+                } else {
+                    updateAccumulator(acc, vBlock, kvOff, exp_prev, exp_curr, headDim);
+                }
             }
 
             currentTokCount += tokensInThisBlock;
@@ -139,6 +160,25 @@ public class PagedAttentionVectorAPI {
             long dim) {
         for (int j = 0; j < dim; j++) {
             acc[j] = acc[j] * exp_prev + vSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (vOff / 4) + j) * exp_curr;
+        }
+    }
+
+    private static float dotProductInt8(MemorySegment q, long qOff, MemorySegment k, long kElementOff,
+            MemorySegment scaleSeg, long scaleIndex, long dim) {
+        float scale = scaleSeg == null ? 1.0f : scaleSeg.getAtIndex(ValueLayout.JAVA_FLOAT, scaleIndex);
+        float res = 0.0f;
+        for (int j = 0; j < dim; j++) {
+            res += q.getAtIndex(ValueLayout.JAVA_FLOAT, (qOff / 4) + j)
+                    * (k.getAtIndex(ValueLayout.JAVA_BYTE, kElementOff + j) * scale);
+        }
+        return res;
+    }
+
+    private static void updateAccumulatorInt8(float[] acc, MemorySegment vSeg, long vElementOff,
+            MemorySegment scaleSeg, long scaleIndex, float exp_prev, float exp_curr, long dim) {
+        float scale = scaleSeg == null ? 1.0f : scaleSeg.getAtIndex(ValueLayout.JAVA_FLOAT, scaleIndex);
+        for (int j = 0; j < dim; j++) {
+            acc[j] = acc[j] * exp_prev + (vSeg.getAtIndex(ValueLayout.JAVA_BYTE, vElementOff + j) * scale) * exp_curr;
         }
     }
 }

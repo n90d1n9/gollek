@@ -24,11 +24,7 @@
             <artifactId>gollek-tokenizer-core</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-embedding-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
+
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
             <artifactId>gollek-safetensor-tokenizer</artifactId>
@@ -68,7 +64,7 @@
         </dependency>
         <dependency>
             <groupId>tech.kayys.gollek</groupId>
-            <artifactId>gollek-plugin-metal</artifactId>
+            <artifactId>gollek-backend-metal</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -120,6 +116,10 @@
                 <version>3.13.0</version>
                 <configuration>
                     <release>25</release>
+                    <excludes>
+                        <exclude>tech/kayys/gollek/safetensor/inference/**</exclude>
+                        <exclude>tech/kayys/gollek/safetensor/engine/lifecycle/**</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>

@@ -10,11 +10,12 @@ public class DumpVocab {
         String path = "/Users/bhangun/.gollek/models/gguf/google_gemma-4-E4B-it.gguf";
         GGUFModel model = GGUFLoader.loadModel(Path.of(path));
         List<String> tokens = (List<String>) model.metadata().get("tokenizer.ggml.tokens");
-        if (tokens == null) tokens = (List<String>) model.metadata().get("tokenizer.tokens");
-        
+        if (tokens == null)
+            tokens = (List<String>) model.metadata().get("tokenizer.tokens");
+
         System.out.println("Vocab size: " + tokens.size());
         System.out.println("Chat Template: " + model.metadata().get("tokenizer.chat_template"));
-        
+
         System.out.println("Tensors (Count: " + model.tensors().size() + "):");
         for (int i = 0; i < Math.min(20, model.tensors().size()); i++) {
             GGUFTensorInfo t = model.tensors().get(i);
@@ -23,7 +24,9 @@ public class DumpVocab {
     }
 }
 
-
-/* 
-java -cp scratch:runner/native/gollek-gguf-loader/target/gollek-gguf-loader-0.1.0-SNAPSHOT.jar:runner/native/gollek-gguf-tokenizer/target/gollek-gguf-tokenizer-0.1.0-SNAPSHOT.jar DumpVocab
-*/
+/*
+ * java -cp
+ * scratch:runner/native/gollek-gguf-core/target/gollek-gguf-core-0.1.0-
+ * SNAPSHOT.jar:runner/native/gollek-gguf-core/target/gollek-gguf-core-0.1.0-
+ * SNAPSHOT.jar DumpVocab
+ */

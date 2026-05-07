@@ -40,6 +40,10 @@ import java.util.Objects;
 public final class AccelOps {
 
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+    private static final String EXPERIMENTAL_SMALL_BATCH_HALF_LINEAR_PROPERTY =
+            "gollek.safetensor.experimental_small_batch_half_linear";
+    private static final int SMALL_BATCH_HALF_LINEAR_MAX_M = Integer.getInteger(
+            "gollek.safetensor.small_half_linear_max_m", 16);
 
     private AccelOps() {} // utility class
 
@@ -86,6 +90,48 @@ public final class AccelOps {
             }
         }
         return VVEXPF;
+    }
+
+    private static volatile MethodHandle VFLT16;
+    private static MethodHandle vflt16() {
+        if (VFLT16 == null) {
+            synchronized (AccelOps.class) {
+                if (VFLT16 == null) {
+                    VFLT16 = LINKER.downcallHandle(
+                        accelerate().find("vDSP_vflt16").orElseThrow(),
+                        FunctionDescriptor.ofVoid(
+                            ValueLayout.ADDRESS,     // A
+                            ValueLayout.JAVA_LONG,   // IA
+                            ValueLayout.ADDRESS,     // C
+                            ValueLayout.JAVA_LONG,   // IC
+                            ValueLayout.JAVA_LONG    // N
+                        )
+                    );
+                }
+            }
+        }
+        return VFLT16;
+    }
+
+    private static volatile MethodHandle SDOT;
+    private static MethodHandle sdot() {
+        if (SDOT == null) {
+            synchronized (AccelOps.class) {
+                if (SDOT == null) {
+                    SDOT = LINKER.downcallHandle(
+                        accelerate().find("cblas_sdot").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_FLOAT,
+                            ValueLayout.JAVA_INT,   // N
+                            ValueLayout.ADDRESS,    // X
+                            ValueLayout.JAVA_INT,   // incX
+                            ValueLayout.ADDRESS,    // Y
+                            ValueLayout.JAVA_INT    // incY
+                        )
+                    );
+                }
+            }
+        }
+        return SDOT;
     }
 
     private static MethodHandle sgemm() {
@@ -317,19 +363,36 @@ public final class AccelOps {
      * Linear layer with optional bias: out = input @ weight^T + bias
      */
     public static AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias) {
-        // Just-in-time dequantization if weight is quantized
-        if (weight.isQuantized()) {
-            try (AccelTensor dequantizedWeight = dequantize(weight)) {
-                return linear(input, dequantizedWeight, bias);
-            }
-        }
-
         input = input.contiguous();
-        weight = weight.contiguous();
 
         long[] inputShape = input.shape();
         long K = inputShape[inputShape.length - 1];
         long M = input.numel() / K;
+
+        if (M == 1 && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
+            return linearSingleTokenHalfWeight(input, weight, bias);
+        }
+        if (useExperimentalSmallBatchHalfLinear()
+                && M > 1 && M <= SMALL_BATCH_HALF_LINEAR_MAX_M
+                && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
+            return linearSmallBatchHalfWeight(input, weight, bias, Math.toIntExact(M));
+        }
+
+        // Just-in-time dequantization if weight is quantized
+        if (weight.isQuantized()) {
+            boolean cacheDequantized = weight.shouldCacheDequantized();
+            AccelTensor dequantized = cacheDequantized ? weight.dequantize() : weight.dequantizeTransient();
+            try {
+                return linear(input, dequantized, bias);
+            } finally {
+                if (!cacheDequantized && dequantized != weight && !dequantized.isClosed()) {
+                    dequantized.close();
+                }
+            }
+        }
+
+        weight = weight.contiguous();
+
         long N = weight.shape()[0];
 
         // Output shape matches input shape except for the last dimension
@@ -342,22 +405,196 @@ public final class AccelOps {
         MemorySegment outSeg = out.dataSegment();
 
         try {
-            // void cblas_sgemm(ORDER, TRANSA, TRANSB, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc)
-            sgemm().invokeExact(CblasRowMajor, CblasNoTrans, CblasTrans, (int) M, (int) N, (int) K, 1.0f, inputSeg, (int) K, weightSeg, (int) K, 0.0f, outSeg, (int) N);
-            
+            if (M == 1) {
+                // Single-token decode is overwhelmingly matrix-vector work.
+                // Using sgemv avoids the heavier sgemm setup costs on the hot decode path.
+                sgemv().invokeExact(
+                        CblasRowMajor, CblasNoTrans,
+                        (int) N, (int) K,
+                        1.0f,
+                        weightSeg, (int) K,
+                        inputSeg, 1,
+                        0.0f,
+                        outSeg, 1);
+            } else {
+                // void cblas_sgemm(ORDER, TRANSA, TRANSB, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc)
+                sgemm().invokeExact(CblasRowMajor, CblasNoTrans, CblasTrans, (int) M, (int) N, (int) K, 1.0f, inputSeg, (int) K, weightSeg, (int) K, 0.0f, outSeg, (int) N);
+            }
+
             if (bias != null) {
-                bias = bias.contiguous();
-                MemorySegment biasSeg = bias.dataSegment();
-                int hidden = (int) bias.numel();
-                int batches = (int) (out.numel() / hidden);
-                for (int bIdx = 0; bIdx < batches; bIdx++) {
-                    vadd().invokeExact(outSeg.asSlice((long) bIdx * hidden * 4), 1L, biasSeg, 1L, outSeg.asSlice((long) bIdx * hidden * 4), 1L, (long) hidden);
-                }
+                addBiasInPlace(outSeg, out.numel(), bias);
             }
         } catch (Throwable t) {
             throw new RuntimeException("Linear/sgemm failed", t);
         }
         return out;
+    }
+
+    private static AccelTensor linearSingleTokenHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias) {
+        weight = weight.contiguous();
+
+        long[] inputShape = input.shape();
+        long kLong = inputShape[inputShape.length - 1];
+        int K = Math.toIntExact(kLong);
+        int N = Math.toIntExact(weight.shape()[0]);
+
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = N;
+        AccelTensor out = AccelTensor.zeros(outputShape);
+
+        MemorySegment inputSeg = input.dataSegment();
+        MemorySegment weightSeg = weight.dataSegment();
+        MemorySegment outSeg = out.dataSegment();
+        boolean bf16 = weight.quantType() == AccelTensor.QuantType.BF16;
+        AccelTensor contiguousBias = null;
+        MemorySegment biasSeg = null;
+        if (bias != null) {
+            contiguousBias = bias.contiguous();
+            biasSeg = contiguousBias.dataSegment();
+        }
+
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment scratch = arena.allocate((long) K * Float.BYTES);
+            long rowBaseBytes = 0L;
+            for (int row = 0; row < N; row++) {
+                float sum = biasSeg != null ? biasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, row) : 0.0f;
+                
+                if (bf16) {
+                    DequantizationKernel.dequantizeBf16(weightSeg.asSlice(rowBaseBytes), scratch, K);
+                } else {
+                    try {
+                        vflt16().invokeExact(weightSeg.asSlice(rowBaseBytes), 1L, scratch, 1L, (long)K);
+                    } catch (Throwable t) {
+                        throw new RuntimeException(t);
+                    }
+                }
+                
+                float dot = 0.0f;
+                try {
+                    dot = (float) sdot().invokeExact(K, inputSeg, 1, scratch, 1);
+                } catch (Throwable t) {
+                    throw new RuntimeException(t);
+                }
+                outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, row, sum + dot);
+                rowBaseBytes += K * 2L;
+            }
+        } finally {
+            if (contiguousBias != null && contiguousBias != bias && !contiguousBias.isClosed()) {
+                contiguousBias.close();
+            }
+        }
+
+        return out;
+    }
+
+    private static AccelTensor linearSmallBatchHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias, int rows) {
+        weight = weight.contiguous();
+
+        long[] inputShape = input.shape();
+        int K = Math.toIntExact(inputShape[inputShape.length - 1]);
+        int N = Math.toIntExact(weight.shape()[0]);
+
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = N;
+        AccelTensor out = AccelTensor.zeros(outputShape);
+
+        MemorySegment inputSeg = input.dataSegment();
+        MemorySegment weightSeg = weight.dataSegment();
+        MemorySegment outSeg = out.dataSegment();
+        boolean bf16 = weight.quantType() == AccelTensor.QuantType.BF16;
+        AccelTensor contiguousBias = null;
+        MemorySegment biasSeg = null;
+        if (bias != null) {
+            contiguousBias = bias.contiguous();
+            biasSeg = contiguousBias.dataSegment();
+        }
+
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment scratch = arena.allocate((long) K * Float.BYTES);
+            long rowBaseBytes = 0L;
+            for (int outCol = 0; outCol < N; outCol++) {
+                if (bf16) {
+                    DequantizationKernel.dequantizeBf16(weightSeg.asSlice(rowBaseBytes), scratch, K);
+                } else {
+                    try {
+                        vflt16().invokeExact(weightSeg.asSlice(rowBaseBytes), 1L, scratch, 1L, (long)K);
+                    } catch (Throwable t) {
+                        throw new RuntimeException(t);
+                    }
+                }
+
+                float biasVal = biasSeg != null ? biasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol) : 0.0f;
+
+                for (int row = 0; row < rows; row++) {
+                    float dot = 0.0f;
+                    try {
+                        dot = (float) sdot().invokeExact(K, inputSeg.asSlice((long) row * K * Float.BYTES), 1, scratch, 1);
+                    } catch (Throwable t) {
+                        throw new RuntimeException(t);
+                    }
+                    outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (long) row * N + outCol, biasVal + dot);
+                }
+                rowBaseBytes += K * 2L;
+            }
+        } finally {
+            if (contiguousBias != null && contiguousBias != bias && !contiguousBias.isClosed()) {
+                contiguousBias.close();
+            }
+        }
+
+        return out;
+    }
+
+    private static boolean useExperimentalSmallBatchHalfLinear() {
+        return Boolean.getBoolean(EXPERIMENTAL_SMALL_BATCH_HALF_LINEAR_PROPERTY);
+    }
+
+    private static float decodeHalf(short raw, boolean bf16) {
+        if (bf16) {
+            return Float.intBitsToFloat((raw & 0xFFFF) << 16);
+        }
+        return float16ToFloat32(raw);
+    }
+
+    private static float float16ToFloat32(short half) {
+        int h = half & 0xFFFF;
+        int sign = (h >> 15) & 0x1;
+        int exponent = (h >> 10) & 0x1F;
+        int mantissa = h & 0x3FF;
+
+        int f32;
+        if (exponent == 0) {
+            if (mantissa == 0) {
+                f32 = sign << 31;
+            } else {
+                exponent = 1;
+                while ((mantissa & 0x400) == 0) {
+                    mantissa <<= 1;
+                    exponent--;
+                }
+                mantissa &= ~0x400;
+                f32 = (sign << 31) | ((exponent + 112) << 23) | (mantissa << 13);
+            }
+        } else if (exponent == 31) {
+            f32 = (sign << 31) | (0xFF << 23) | (mantissa << 13);
+        } else {
+            f32 = (sign << 31) | ((exponent + 112) << 23) | (mantissa << 13);
+        }
+        return Float.intBitsToFloat(f32);
+    }
+
+    private static void addBiasInPlace(MemorySegment outSeg, long outNumel, AccelTensor bias) throws Throwable {
+        AccelTensor contiguousBias = bias.contiguous();
+        MemorySegment biasSeg = contiguousBias.dataSegment();
+        int hidden = (int) contiguousBias.numel();
+        int batches = (int) (outNumel / hidden);
+        for (int bIdx = 0; bIdx < batches; bIdx++) {
+            vadd().invokeExact(
+                    outSeg.asSlice((long) bIdx * hidden * Float.BYTES), 1L,
+                    biasSeg, 1L,
+                    outSeg.asSlice((long) bIdx * hidden * Float.BYTES), 1L,
+                    (long) hidden);
+        }
     }
 
     private static AccelTensor matmul2D(AccelTensor a, AccelTensor b) {
@@ -964,6 +1201,11 @@ public final class AccelOps {
     }
 
     private static AccelTensor dequantize(AccelTensor qWeight) {
+        AccelTensor cached = qWeight.dequantize();
+        if (cached != qWeight) {
+            return cached;
+        }
+
         long[] shape = qWeight.shape();
         AccelTensor f32 = AccelTensor.zeros(shape);
         
@@ -1109,4 +1351,3 @@ public final class AccelOps {
         return out;
     }
 }
-

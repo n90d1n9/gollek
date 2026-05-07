@@ -196,7 +196,7 @@ public class pytorch_comparison_v02 {
             System.out.println("    # Process batch\n");
 
             System.out.println("Gollek:");
-            System.out.println("  import tech.kayys.gollek.ml.data.*;");
+            System.out.println("  import tech.kayys.gollek.train.data.*;");
             System.out.println("  DataLoader loader = new DataLoader(");
             System.out.println("    dataset, 32, true);");
             System.out.println("  for (Batch batch : loader) {");

@@ -1,172 +1,265 @@
-[![Logo][gollek-logo]][gollek-logo]
+# Gollek Core — Module Guide
 
-<!-- Badges -->
-[![Build Status](https://github.com/bhangun/gollek/actions/workflows/ci.yml/badge.svg)](https://github.com/bhangun/gollek/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/bhangun/gollek)](https://goreportcard.com/report/github.com/bhangun/gollek)
-[![GitHub release](https://img.shields.io/github/v/tag/bhangun/gollek?label=release)](https://github.com/bhangun/gollek/releases)
-[![License](https://img.shields.io/github/license/bhangun/gollek)](LICENSE)
-[![Docker Pulls](https://img.shields.io/docker/pulls/bhangun/gollek)](https://hub.docker.com/r/bhangun/gollek)
+This directory contains the core building blocks for Gollek. Each module has a focused scope and clear dependency direction.
+
+## Module Structure
+
+### **gollek-spi** (Interfaces & Contracts)
+**Purpose**: Public APIs, interfaces, and value objects that other modules depend on
+
+**Key Principle**: Only interfaces, DTOs, and exceptions. No implementations.
+
+---
+
+### **gollek-core** (Core Domain Logic)
+**Purpose**: Core business logic, domain models, and base implementations
+
+**Key Principle**: Domain logic, no framework-specific code (Jakarta, Quarkus, etc.)
+
+---
+
+### **gollek-model-repo-core** (Model Repository Layer)
+**Purpose**: Model discovery, loading, and repository management
 
 
+**Key Principle**: Focus on model metadata, discovery, and artifact management. No inference execution logic.
 
-### ARCHITECTURE GOLLEK INFERENCE SERVER
+---
 
-![Error Codes Doc Check](https://github.com/bhangun/gollek/actions/workflows/error-codes.yml/badge.svg)
+### **gollek-provider-core** (Provider SPI)
+**Purpose**: Service Provider Interface for pluggable model runners
 
+**Key Principle**: Clean separation between model repository (metadata) and provider (execution)
 
-See more for complete documentation: [https://gollek-ai.github.io]
+---
 
+### **gollek-engine** (Inference Engine Implementation)
+**Purpose**: Concrete implementations of inference pipeline and orchestration
 
-### ✅ What This Architecture Delivers
+**Key Principle**: Framework-specific implementations (Jakarta CDI, Quarkus), orchestration logic
 
-1. **True Plugin System**
-   - First-class plugin abstraction (not just CDI beans)
-   - Hot-reload capability with compatibility checks
-   - Versioned plugin contracts
-   - Phase-bound execution model
+---
 
-2. **Multi-Format Model Support**
-   - GGUF (llama.cpp)
-   - ONNX Runtime (CPU/CUDA/TensorRT)
-   - Triton Inference Server
-   - Cloud APIs (OpenAI, Anthropic, Google, Ollama)
-   - Extensible provider registry
+### **gollek-infrastructure** (Infrastructure & Integration)
+**Purpose**: Framework integration, REST resources, persistence
 
-3. **Shared Runtime (Platform + Portable)**
-   - Same kernel for core platform and standalone agents
-   - Modular dependencies via Maven profiles
-   - GraalVM native image ready
-   - Minimal footprint for portable agents
+**Key Principle**: All infrastructure concerns - HTTP, persistence, monitoring, plugin loading
 
-4. **Production-Grade Reliability**
-   - Circuit breakers and bulkheads
-   - Intelligent fallback strategies
-   - Warm model pools with eviction
-   - Request-scoped error handling
-   - Comprehensive audit trail
+---
 
-5. **Multi-Tenancy & Security (Optional)**
-   - Tenant-scoped resource quotas (enterprise)
-   - Isolated model pools (enterprise)
-   - Secure credential management (Vault)
-   - Row-level security
+## Capability Map (Quick)
 
-6. **Enterprise Observability**
-   - OpenTelemetry distributed tracing
-   - Prometheus metrics
-   - Structured audit logging
-   - Kafka event streaming
+* **API Contracts**: `core/gollek-spi/`
+* **Domain + Policy**: `core/gollek-core/`
+* **Engine Orchestration**: `core/gollek-engine/`
+* **Model Registry & Artifacts**: `core/gollek-model-repo-core/`
+* **Provider SPI**: `core/gollek-provider-core/`
+* **Infrastructure**: `core/gollek-infrastructure/`
+* **Plugin API**: `core/gollek-spi/`
 
-7. **Error Handling Integration**
-   - Standardized `ErrorPayload` schema
-   - Audit events for all failures
-   - gollek error-as-input compatibility
-   - Human-in-the-loop escalation support
+## Error Codes
 
-### Multi-Tenancy Defaults
-
-Gollek runs in **single-tenant mode by default**. In this mode, tenant is resolved from API key and the runtime uses API key `community` when no key is provided.
-
-To enable multi-tenancy (enterprise mode), add the `tenant-gollek-ext` module or explicitly set the config flag.
-
-**Enable via dependency**
-```xml
-<dependency>
-  <groupId>tech.kayys.wayang</groupId>
-  <artifactId>tenant-gollek-ext</artifactId>
-  <version>${project.version}</version>
-</dependency>
-```
-
-**Enable via config**
-```
-wayang.multitenancy.enabled=true
-```
-
-When enabled, the API enforces API key authentication (`X-API-Key` or `Authorization: ApiKey <key>`) and tenant-aware features (quotas, routing preferences, and audit tags) are activated.
-
-### Local Paths
-
-Gollek stores models, caches, and native libraries under `~/.gollek/` by default.
-Set `GOLLEK_HOME` to override this root for local deployments.
-
-### Error Code Docs
-
-Regenerate `docs/error-codes.md` from source:
+Generate docs for the centralized error codes:
 
 ```bash
 ./scripts/generate-error-codes.sh
 ```
 
-Or via Make:
+## Dependency Flow
 
-```bash
-make error-codes
+The modules should depend on each other in this order (no circular dependencies):
+
+```mermaid
+graph TD
+    A[gollek-spi] 
+    C[gollek-core]
+    D[gollek-model-repo-core]
+    E[gollek-provider-core]
+    F[gollek-engine]
+    G[gollek-infrastructure]
+
+    %% Tier 1: Base Contracts
+    C --> A
+    
+    %% Tier 2: Domain Logic & SPIs
+    D --> C
+    E --> C
+    E --> B
+
+    %% Tier 3: Core Implementation (Engine)
+    F --> D
+    F --> E
+    F --> C
+    F --> B
+
+    %% Tier 4: Infrastructure & Integration
+    G --> F
+    G --> A
+    
+    style A fill:#e1f5ff,stroke:#0077c8,stroke-width:2px
+    style B fill:#e1f5ff,stroke:#0077c8,stroke-width:2px
+    style C fill:#fff4e1,stroke:#d99e00,stroke-width:2px
+    style D fill:#fff4e1,stroke:#d99e00,stroke-width:2px
+    style E fill:#fff4e1,stroke:#d99e00,stroke-width:2px
+    style F fill:#ffe1e1,stroke:#c80000,stroke-width:2px
+    style G fill:#f0e1ff,stroke:#6f00c8,stroke-width:2px
 ```
 
-### BOM Usage
+**Legend**:
+- **Blue** (gollek-spi): **Contracts & APIs** - Stable interfaces, minimal dependencies
+- **Yellow** (gollek-core, model-repo, provider-core): **Domain Layer** - Business logic & SPI definitions
+- **Red** (gollek-engine): **Application Layer** - Orchestration, reliability patterns, implementation
+- **Purple** (gollek-infrastructure): **Infrastructure Layer** - Framework integration (Quarkus/REST), adapters
 
-`inference-gollek` now publishes `tech.kayys.gollek:gollek-bom` for centralized dependency version management.
+---
 
-```xml
-<dependencyManagement>
-  <dependencies>
-    <dependency>
-      <groupId>tech.kayys.gollek</groupId>
-      <artifactId>gollek-bom</artifactId>
-      <version>1.0.0-SNAPSHOT</version>
-      <type>pom</type>
-      <scope>import</scope>
-    </dependency>
-  </dependencies>
-</dependencyManagement>
+---
+
+## Best Practices
+
+### 1. **Single Responsibility Principle**
+- Each module should have ONE clear purpose
+- If you can't describe a module's purpose in one sentence, it's doing too much
+
+### 2. **Acyclic Dependencies**
+- Never allow circular dependencies between modules
+- Use interfaces in lower-level modules to break cycles
+
+### 3. **Stable Dependencies Principle**
+- Depend on modules that change less frequently
+- `gollek-spi` should be the most stable (rarely changes)
+- `gollek-infrastructure` can change frequently
+
+### 4. **Interface Segregation**
+- Put interfaces in the module that defines the abstraction
+- Put implementations in the module that provides the functionality
+
+### 5. **Naming Conventions**
+- **Interfaces**: Use descriptive nouns (`ModelRepository`, `InferenceEngine`)
+- **Implementations**: Prefix with implementation strategy (`Default`, `Cached`, `Enhanced`)
+- **Abstract Classes**: Prefix with `Abstract` (`AbstractPlugin`)
+- **DTOs**: Suffix based on purpose (`Request`, `Response`, `Metadata`)
+
+---
+
+
+
+# Walkthrough: Multimodal/Omni Inference Support for Golek Core
+
+## Summary
+
+Added comprehensive multimodal and omni-model inference support to `pkg/core/` in the gollek Go workflow engine. This introduces first-class content types for text, image, audio, video, file, and embedding modalities, plus a provider SPI for inference engine integration.
+
+## Changes Made
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| [inference.go](gollek/pkg/core/inference.go) | Core inference types: `ContentPart`, `Message`, `InferenceRequest`, `InferenceResponse`, `InferenceChunk`, `InferenceEngine` interface |
+| [provider.go](gollek/pkg/core/provider.go) | Provider SPI: `InferenceProvider`, `ProviderCapabilities`, `ProviderHealth`, `InferenceProviderRegistry` |
+| [inference_test.go](gollek/pkg/core/inference_test.go) | 21 tests for inference domain types |
+| [provider_test.go](gollek/pkg/core/provider_test.go) | 12 tests for provider SPI types |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| [domain.go](gollek/pkg/core/domain.go) | Added `NodeTypeInference` and `PluginTypeInference` constants |
+
+## Architecture
+
+## Changes Made
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| [inference.go](gollek/pkg/core/inference.go) | Core inference types: [ContentPart](gollek/pkg/core/inference.go#71-79), [Message](gollek/pkg/core/inference.go#192-198), [InferenceRequest](gollek/pkg/core/inference.go#269-282), [InferenceResponse](gollek/pkg/core/inference.go#383-394), [InferenceChunk](gollek/pkg/core/inference.go#430-437), [InferenceEngine](gollek/pkg/core/inference.go#449-465) interface |
+| [provider.go](gollek/pkg/core/provider.go) | Provider SPI: [InferenceProvider](gollek/pkg/core/provider.go#19-49), [ProviderCapabilities](gollek/pkg/core/provider.go#58-91), [ProviderHealth](gollek/pkg/core/provider.go#162-168), [InferenceProviderRegistry](gollek/pkg/core/provider.go#238-264) |
+| [inference_test.go](gollek/pkg/core/inference_test.go) | 21 tests for inference domain types |
+| [provider_test.go](gollek/pkg/core/provider_test.go) | 12 tests for provider SPI types |
+| [batching.go](gollek/pkg/core/batching.go) | Batching Domain: [BatchStrategy](gollek/pkg/core/batching.go#18-19), [InferenceStage](gollek/pkg/core/batching.go#43-44), [BatchConfig](gollek/pkg/core/batching.go#76-100), [BatchRequest](gollek/pkg/core/batching.go#149-156), [BatchScheduler](gollek/pkg/core/batching.go#246-273) |
+| [batching_test.go](gollek/pkg/core/batching_test.go) | 15 tests for batching configurations and stage routing |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| [domain.go](gollek/pkg/core/domain.go) | Added `NodeTypeInference` and `PluginTypeInference` constants |
+| [inference.go](gollek/pkg/core/inference.go) | Added [Stage](gollek/pkg/core/batching.go#43-44)/`PromptTokenCount` to [InferenceRequest](gollek/pkg/core/inference.go#269-282), added [InferBatch()](gollek/pkg/core/inference.go#453-455) method |
+| [provider.go](gollek/pkg/core/provider.go) | Added [Batching](gollek/pkg/core/batching_test.go#264-276) flag and `MaxBatchSize` to [ProviderCapabilities](gollek/pkg/core/provider.go#58-91) |
+
+## Architecture
+
+### Multimodal Pipeline
+
+```mermaid
+graph TD
+    A["InferenceEngine"] --> B["InferenceProviderRegistry"]
+    B --> C["InferenceProvider (Cloud)"]
+    B --> D["InferenceProvider (Local)"]
+    
+    F["InferenceRequest"] --> A
+    F --> G["Message[]"]
+    G --> H["ContentPart[]"]
+    H --> H1["Text"]
+    H --> H2["Image/Audio/Video/File"]
+    
+    A --> I["InferenceResponse"]
+    I --> J["ContentPart[]"]
+    I --> K["ToolCall[]"]
 ```
 
-Then consume Gollek modules without specifying versions:
+### Batching & Disaggregation Scheduler
 
-```xml
-<dependency>
-  <groupId>tech.kayys.gollek</groupId>
-  <artifactId>gollek-sdk-java-remote</artifactId>
-</dependency>
-```
+```mermaid
+graph TD
+    R1["Request A (1600 tokens)"] --> S["BatchScheduler"]
+    R2["Request B (32 tokens)"] --> S
+    R3["Request C (1024 tokens)"] --> S
 
-### CI Notes
+    S -- "Stage: PREFILL (Compute-Bound)" --> B1["BatchRequest (A, C)"]
+    S -- "Stage: COMBINED (Fast Path)" --> B2["BatchRequest (B)"]
 
-In CI, the `gollek-spi` module runs doc generation during `generate-resources`.
-The Maven profile `ci-error-codes` is activated when `CI=true`.
-
-```bash
-make ci
+    B1 --> E["InferenceEngine.InferBatch()"]
+    B2 --> E
 ```
 
 
-# update tag to current commit
 
-Add all changes
-```bash
-git add <EVERYTHING>
+## Architecture
 
-git commit -m "<COMMIT MESSAGE>"
-git push origin main
+### Multimodal Pipeline
+
+```mermaid
+graph TD
+    A["InferenceEngine"] --> B["InferenceProviderRegistry"]
+    B --> C["InferenceProvider (Cloud)"]
+    B --> D["InferenceProvider (Local)"]
+    
+    F["InferenceRequest"] --> A
+    F --> G["Message[]"]
+    G --> H["ContentPart[]"]
+    H --> H1["Text"]
+    H --> H2["Image/Audio/Video/File"]
+    
+    A --> I["InferenceResponse"]
+    I --> J["ContentPart[]"]
+    I --> K["ToolCall[]"]
 ```
 
-And then update tag
-```bash
-git tag -f test-latest
-git push origin :refs/tags/test-latest
-git push origin test-latest
+### Batching & Disaggregation Scheduler
+
+```mermaid
+graph TD
+    R1["Request A (1600 tokens)"] --> S["BatchScheduler"]
+    R2["Request B (32 tokens)"] --> S
+    R3["Request C (1024 tokens)"] --> S
+
+    S -- "Stage: PREFILL (Compute-Bound)" --> B1["BatchRequest (A, C)"]
+    S -- "Stage: COMBINED (Fast Path)" --> B2["BatchRequest (B)"]
+
+    B1 --> E["InferenceEngine.InferBatch()"]
+    B2 --> E
 ```
-then watch
-```bash
-gh run list -R bhangun/gollek --workflow "Gollek CLI Release" --limit 5
-gh run watch -R bhangun/gollek --exit-status
-gh release view test-latest -R bhangun/gollek
-
- gh run view  -R gollek-ai/gollek-ai.github.io --log-failed  
-
-
-```
-
-
-[gollek-logo]: https://github.com/bhangun/repo-assets/blob/master/gollek03%404x.png

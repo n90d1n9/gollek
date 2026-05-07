@@ -2,8 +2,7 @@ package tech.kayys.gollek.converter.model;
 
 import tech.kayys.gollek.gguf.core.*;
 
-
-import tech.kayys.gollek.spi.model.ModelFormat;
+import tech.kayys.gollek.core.model.ModelFormat;
 import java.util.Locale;
 
 /**

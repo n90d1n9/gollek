@@ -19,12 +19,11 @@ import jakarta.enterprise.context.ApplicationScoped;
  */
 @ApplicationScoped
 public class KVCacheManager {
-
     @jakarta.inject.Inject
     BlockManager globalBlockManager;
 
     public KVCacheSession createSession(int maxSeqLen) {
-        return new KVCacheSession(maxSeqLen, globalBlockManager);
+        return new KVCacheSession(maxSeqLen, new BlockManager());
     }
 
     public static class KVCacheSession implements AutoCloseable {
@@ -40,6 +39,8 @@ public class KVCacheManager {
         private int numKVHeads;
         private int headDim;
         private ForwardWorkspace workspace;
+        private tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization kvQuantization =
+                tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.NONE;
 
         public static class ForwardWorkspace implements AutoCloseable {
             private java.lang.foreign.MemorySegment normedAttnSeg;
@@ -96,25 +97,19 @@ public class KVCacheManager {
             this.numKVHeads = config.resolvedNumKvHeads();
             this.headDim = config.resolvedMaxHeadDim();
             this.tokensPerBlock = 16; // Default block size
+            this.kvQuantization = genConfig.kvCacheQuant();
 
-            // Select layout based on quantization preference
-            java.lang.foreign.ValueLayout layout = java.lang.foreign.ValueLayout.JAVA_FLOAT;
-            if (genConfig
-                    .kvCacheQuant() == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT8) {
-                layout = java.lang.foreign.ValueLayout.JAVA_BYTE;
-            } else if (genConfig
-                    .kvCacheQuant() == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.TURBO) {
-                // TurboQuant uses complex packing, for now we treat as byte and handle logic in
-                // kernels
-                layout = java.lang.foreign.ValueLayout.JAVA_BYTE;
-            }
+            BlockManager.KvStorageType storageType =
+                    kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT8
+                            ? BlockManager.KvStorageType.INT8
+                            : BlockManager.KvStorageType.FP32;
 
             // Gemma-4 128K context requires massive memory. We allocate a safe initial pool 
             // and cap it to prevent Metal driver aborts on huge contiguous requests.
             int safeMaxTokens = Math.min(maxSeqLen, 4096); 
             int initialBlocks = (safeMaxTokens / tokensPerBlock) * numLayers + 64;
             
-            blockManager.initialize(tokensPerBlock, numKVHeads, headDim, initialBlocks);
+            blockManager.initialize(tokensPerBlock, numKVHeads, headDim, initialBlocks, storageType);
 
             for (int i = 0; i < numLayers; i++) {
                 blockTables.put(i, new java.util.ArrayList<>());
@@ -131,8 +126,8 @@ public class KVCacheManager {
         }
 
         private void appendBlock(int layerIdx) {
-            int block = blockManager.allocateBlock();
-            if (block != -1) {
+            Integer block = blockManager.allocateBlock();
+            if (block != null) {
                 blockTables.get(layerIdx).add(block);
             } else {
                 throw new RuntimeException("KVCache: Out of physical blocks!");
@@ -208,11 +203,14 @@ public class KVCacheManager {
 
         public int getBlockForToken(int layerIdx, int tokenIdx) {
             List<Integer> table = blockTables.get(layerIdx);
-            int blockIdxInTable = tokenIdx / tokensPerBlock;
-            if (blockIdxInTable < table.size()) {
-                return table.get(blockIdxInTable);
+            if (table == null || tokenIdx < 0) {
+                return -1;
             }
-            return -1;
+            int blockIdxInTable = tokenIdx / tokensPerBlock;
+            while (blockIdxInTable >= table.size()) {
+                appendBlock(layerIdx);
+            }
+            return table.get(blockIdxInTable);
         }
 
         public List<Integer> getBlockIndices(int layerIdx) {
@@ -223,6 +221,14 @@ public class KVCacheManager {
             return blockManager;
         }
 
+        public tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization kvQuantization() {
+            return kvQuantization;
+        }
+
+        public boolean isQuantizedInt8() {
+            return kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT8;
+        }
+
         @Override
         public void close() {
             if (workspace != null) workspace.close();
@@ -230,6 +236,7 @@ public class KVCacheManager {
                 list.forEach(blockManager::freeBlock);
             });
             blockTables.clear();
+            blockManager.close();
         }
 
         // Legacy compatibility - will be replaced by PagedAttention

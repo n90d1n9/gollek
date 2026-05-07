@@ -40,7 +40,7 @@ jbang examples/jbang/common/hello_gollek.java
 
 # Via Maven
 cd framework/lib/gollek-ml-examples
-mvn exec:java -Dexec.mainClass=tech.kayys.gollek.ml.examples.SimpleFFNExample
+mvn exec:java -Dexec.mainClass=tech.kayys.gollek.train.examples.SimpleFFNExample
 ```
 
 Expected output:

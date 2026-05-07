@@ -1,0 +1,6 @@
+label=safetensor-6f469a-20260506-182236
+generated_at_utc=2026-05-06T11:25:33Z
+model=6f469a
+
+case_id                    mode     prompt_kind    quantize   status   duration_s   speed_tps  chunks   answer
+-------------------------- -------- -------------- ---------- -------- ------------ ---------- -------- ------

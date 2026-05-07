@@ -20,8 +20,6 @@ import tech.kayys.gollek.spi.model.MultimodalResponse;
 import tech.kayys.gollek.spi.plugin.GollekPlugin;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
-import tech.kayys.gollek.spi.model.ModelFormat;
-
 import tech.kayys.gollek.sdk.model.ModelListRequest;
 import tech.kayys.gollek.sdk.model.ModelPullRequest;
 import java.util.List;
@@ -175,28 +173,41 @@ public interface GollekSdk {
     /**
      * Resolve and pull a model if necessary. NEW in v1.2.1.
      */
-    default ModelResolution prepareModel(String modelId, boolean forceGguf, Consumer<PullProgress> progressCallback) throws SdkException {
+    default ModelResolution prepareModel(String modelId, boolean forceGguf, Consumer<PullProgress> progressCallback)
+            throws SdkException {
         return prepareModel(modelId, forceGguf, "Q4_K_M", progressCallback);
     }
 
     /**
      * Resolve and pull a model if necessary with quantization control.
      * 
-     * @param modelId Model identifier
-     * @param forceGguf Force GGUF format
-     * @param quantization Quantization type (Q4_0, Q4_K_M, Q5_0, Q5_K_M, Q6_K, Q8_0, F16, F32)
+     * @param modelId          Model identifier
+     * @param forceGguf        Force GGUF format
+     * @param quantization     Quantization type (Q4_0, Q4_K_M, Q5_0, Q5_K_M, Q6_K,
+     *                         Q8_0, F16, F32)
      * @param progressCallback Progress callback
      * @return Model resolution
      */
-    default ModelResolution prepareModel(String modelId, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
-        return prepareModel(modelId, null, null, forceGguf, quantization, progressCallback);
+    default ModelResolution prepareModel(String modelId, boolean forceGguf, String quantization,
+            Consumer<PullProgress> progressCallback) throws SdkException {
+        return prepareModel(modelId, null, null, forceGguf, quantization, java.util.List.of(), progressCallback);
     }
 
     /**
      * Resolve and pull a model if necessary with explicit format and quantization.
      * NEW in v1.2.4.
      */
-    default ModelResolution prepareModel(String modelId, String format, String plugin, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
+    default ModelResolution prepareModel(String modelId, String format, String plugin, boolean forceGguf,
+            String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
+        return prepareModel(modelId, format, plugin, forceGguf, quantization, java.util.List.of(), progressCallback);
+    }
+
+    /**
+     * Resolve and pull a model if necessary with explicit fallback candidates.
+     */
+    default ModelResolution prepareModel(String modelId, String format, String plugin, boolean forceGguf,
+            String quantization, java.util.List<String> fallbackModelIds, Consumer<PullProgress> progressCallback)
+            throws SdkException {
         return new ModelResolution(modelId, null, getModelInfo(modelId).orElse(null));
     }
 
@@ -204,7 +215,8 @@ public interface GollekSdk {
      * Explicitly convert a model (checkpoint/tensor) to GGUF format.
      * NEW in v1.2.3.
      */
-    default ModelResolution convertToGguf(ModelResolution source, String quantization, Consumer<PullProgress> progressCallback) throws SdkException {
+    default ModelResolution convertToGguf(ModelResolution source, String quantization,
+            Consumer<PullProgress> progressCallback) throws SdkException {
         throw new UnsupportedOperationException("GGUF conversion not supported by this SDK implementation.");
     }
 
@@ -217,39 +229,61 @@ public interface GollekSdk {
     }
 
     /**
-     * Automatically select a provider for a model based on its format with quantization.
+     * Automatically select a provider for a model based on its format with
+     * quantization.
      */
-    default Optional<String> autoSelectProvider(String modelId, boolean forceGguf, String quantization) throws SdkException {
+    default Optional<String> autoSelectProvider(String modelId, boolean forceGguf, String quantization)
+            throws SdkException {
         return Optional.empty();
     }
 
     /**
      * Resolve, pull, and auto-select provider for a model. NEW in v1.2.1.
      */
-    default ModelResolution ensureModelAvailable(String modelId, boolean forceGguf, Consumer<PullProgress> progressCallback)
+    default ModelResolution ensureModelAvailable(String modelId, boolean forceGguf,
+            Consumer<PullProgress> progressCallback)
             throws SdkException {
         return ensureModelAvailable(modelId, forceGguf, "Q4_K_M", progressCallback);
     }
 
     /**
-     * Resolve, pull, and auto-select provider for a model with quantization control.
+     * Resolve, pull, and auto-select provider for a model with quantization
+     * control.
      */
-    default ModelResolution ensureModelAvailable(String modelId, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback)
+    default ModelResolution ensureModelAvailable(String modelId, boolean forceGguf, String quantization,
+            Consumer<PullProgress> progressCallback)
             throws SdkException {
-        return ensureModelAvailable(modelId, null, null, forceGguf, quantization, progressCallback);
+        return ensureModelAvailable(modelId, null, null, forceGguf, quantization, java.util.List.of(), progressCallback);
     }
 
     /**
-     * Resolve, pull, and auto-select provider for a model with explicit format and quantization.
+     * Resolve, pull, and auto-select provider for a model with explicit format and
+     * quantization.
      * NEW in v1.2.4.
      */
-    default ModelResolution ensureModelAvailable(String modelId, String format, String plugin, boolean forceGguf, String quantization, Consumer<PullProgress> progressCallback)
+    default ModelResolution ensureModelAvailable(String modelId, String format, String plugin, boolean forceGguf,
+            String quantization, Consumer<PullProgress> progressCallback)
             throws SdkException {
-        ModelResolution resolution = prepareModel(modelId, format, plugin, forceGguf, quantization, progressCallback);
+        return ensureModelAvailable(modelId, format, plugin, forceGguf, quantization, java.util.List.of(), progressCallback);
+    }
+
+    /**
+     * Resolve, pull, and auto-select provider for a model with explicit fallback
+     * candidates.
+     */
+    default ModelResolution ensureModelAvailable(String modelId, String format, String plugin, boolean forceGguf,
+            String quantization, java.util.List<String> fallbackModelIds, Consumer<PullProgress> progressCallback)
+            throws SdkException {
+        ModelResolution resolution = prepareModel(modelId, format, plugin, forceGguf, quantization, fallbackModelIds, progressCallback);
         if (getPreferredProvider().isEmpty()) {
-            Optional<String> autoProvider = autoSelectProvider(resolution.getModelId(), forceGguf, quantization);
-            if (autoProvider.isPresent()) {
-                setPreferredProvider(autoProvider.get());
+            String resolvedProvider = resolution.getProviderId();
+            if (resolvedProvider != null && !resolvedProvider.isBlank()) {
+                setPreferredProvider(resolvedProvider);
+            } else {
+                Optional<String> autoProvider = autoSelectProvider(resolution.getModelId(), forceGguf, quantization);
+                if (autoProvider.isPresent()) {
+                    setPreferredProvider(autoProvider.get());
+                }
             }
         }
         return resolution;
@@ -259,10 +293,10 @@ public interface GollekSdk {
      * Get quantization suggestion for a model based on its size.
      * NEW in v1.2.5.
      */
-    default Optional<tech.kayys.gollek.sdk.util.QuantSuggestionDetector.QuantSuggestion> suggestQuantization(String modelId) throws SdkException {
-        return getModelInfo(modelId).flatMap(info -> 
-            tech.kayys.gollek.sdk.util.QuantSuggestionDetector.detect(info.getModelId(), info.getSizeBytes())
-        );
+    default Optional<tech.kayys.gollek.sdk.util.QuantSuggestionDetector.QuantSuggestion> suggestQuantization(
+            String modelId) throws SdkException {
+        return getModelInfo(modelId).flatMap(info -> tech.kayys.gollek.sdk.util.QuantSuggestionDetector
+                .detect(info.getModelId(), info.getSizeBytes()));
     }
 
     /**
@@ -299,9 +333,9 @@ public interface GollekSdk {
      *
      * @param format GGUF, SAFETENSORS, etc. {@code null} = all formats.
      */
-    default List<ModelInfo> listModelsByFormat(ModelFormat format) throws SdkException {
+    default List<ModelInfo> listModelsByFormat(String format) throws SdkException {
         return listModels().stream()
-                .filter(m -> format == null || format.name().equalsIgnoreCase(m.getFormat()))
+                .filter(m -> format == null || format.equalsIgnoreCase(m.getFormat()))
                 .toList();
     }
 
@@ -327,25 +361,28 @@ public interface GollekSdk {
     /**
      * Pull a model with explicit revision and force options. NEW in v1.2.2.
      * 
-     * @param modelSpec model name or hf:RepoId
-     * @param revision branch, tag or commit hash (null for default)
-     * @param force force re-download even if files exist
+     * @param modelSpec        model name or hf:RepoId
+     * @param revision         branch, tag or commit hash (null for default)
+     * @param force            force re-download even if files exist
      * @param progressCallback progress updates
      */
-    default void pullModel(String modelSpec, String revision, boolean force, Consumer<PullProgress> progressCallback) throws SdkException {
+    default void pullModel(String modelSpec, String revision, boolean force, Consumer<PullProgress> progressCallback)
+            throws SdkException {
         pullModel(modelSpec, revision, null, force, progressCallback);
     }
 
     /**
      * Pull a model with explicit format, revision and force options. NEW in v1.2.4.
      */
-    default void pullModel(String modelSpec, String revision, String format, boolean force, Consumer<PullProgress> progressCallback) throws SdkException {
-        // Default implementation for backward compatibility or implementations that don't support revision/force yet.
+    default void pullModel(String modelSpec, String revision, String format, boolean force,
+            Consumer<PullProgress> progressCallback) throws SdkException {
+        // Default implementation for backward compatibility or implementations that
+        // don't support revision/force yet.
         if (revision == null && format == null && !force) {
             pullModel(modelSpec, progressCallback);
         } else {
-            throw new SdkException("SDK_ERR_NOT_SUPPORTED", 
-                "This SDK implementation does not support explicit revision, format or force pull.");
+            throw new SdkException("SDK_ERR_NOT_SUPPORTED",
+                    "This SDK implementation does not support explicit revision, format or force pull.");
         }
     }
 
@@ -425,16 +462,18 @@ public interface GollekSdk {
     // ==================== Multimodal Operations (v0.1.5) ====================
 
     /**
-     * Process a multimodal request (image captioning, VQA, classification, embedding).
+     * Process a multimodal request (image captioning, VQA, classification,
+     * embedding).
      * Routes to the appropriate multimodal processor based on model and task type.
      *
-     * @param request the multimodal request containing inputs and task specification
+     * @param request the multimodal request containing inputs and task
+     *                specification
      * @return multimodal response with outputs
      * @throws SdkException if processing fails
      */
     default MultimodalResponse processMultimodal(MultimodalRequest request) throws SdkException {
         throw new UnsupportedOperationException(
                 "Multimodal processing is not supported by this SDK implementation. "
-                + "Ensure gollek-multimodal-core is on the classpath.");
+                        + "Ensure gollek-multimodal-core is on the classpath.");
     }
 }

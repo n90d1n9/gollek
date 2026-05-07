@@ -2099,115 +2099,115 @@
     "used_count": 0,
     "last_scanned": 1777843460.277055
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/config/MetalRunnerMode.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/config/MetalRunnerMode.java": {
     "classname": "MetalRunnerMode",
     "mtime": 1776688471.441973,
     "used_count": 38,
     "last_scanned": 1777843460.346835
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/optimization/MetalOptimizationManager.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/optimization/MetalOptimizationManager.java": {
     "classname": "MetalOptimizationManager",
     "mtime": 1777390875.0338888,
     "used_count": 0,
     "last_scanned": 1777843460.4182599
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/runner/MetalRunner.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/runner/MetalRunner.java": {
     "classname": "MetalRunner",
     "mtime": 1777392778.7588885,
     "used_count": 44,
     "last_scanned": 1777843460.4900322
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/runner/MetalWeightOffloadingRunner.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/runner/MetalWeightOffloadingRunner.java": {
     "classname": "MetalWeightOffloadingRunner",
     "mtime": 1777392785.725425,
     "used_count": 1,
     "last_scanned": 1777843460.560531
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalBinding.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalBinding.java": {
     "classname": "MetalBinding",
     "mtime": 1777602924.6390262,
     "used_count": 46,
     "last_scanned": 1777843460.630667
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalCpuFallback.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalCpuFallback.java": {
     "classname": "MetalCpuFallback",
     "mtime": 1777392086.8289478,
     "used_count": 4,
     "last_scanned": 1777843460.702726
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalFlashAttentionCpuFallback.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalFlashAttentionCpuFallback.java": {
     "classname": "MetalFlashAttentionCpuFallback",
     "mtime": 1776688471.445015,
     "used_count": 1,
     "last_scanned": 1777843460.771413
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalFlashAttentionBinding.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalFlashAttentionBinding.java": {
     "classname": "MetalFlashAttentionBinding",
     "mtime": 1776688471.445425,
     "used_count": 15,
     "last_scanned": 1777843460.839454
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalLibraryDiscovery.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/binding/MetalLibraryDiscovery.java": {
     "classname": "MetalLibraryDiscovery",
     "mtime": 1776688471.4457695,
     "used_count": 1,
     "last_scanned": 1777843460.907647
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalCommandQueueManager.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalCommandQueueManager.java": {
     "classname": "MetalCommandQueueManager",
     "mtime": 1776688471.4462402,
     "used_count": 6,
     "last_scanned": 1777843460.973989
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalAccelerator.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalAccelerator.java": {
     "classname": "MetalAccelerator",
     "mtime": 1776688471.4466014,
     "used_count": 0,
     "last_scanned": 1777843461.047564
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalMemoryPool.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/accelerator/MetalMemoryPool.java": {
     "classname": "MetalMemoryPool",
     "mtime": 1777158142.8415055,
     "used_count": 6,
     "last_scanned": 1777843461.1199129
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/detection/SelectionPolicyMetalPatch.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/detection/SelectionPolicyMetalPatch.java": {
     "classname": "SelectionPolicyMetalPatch",
     "mtime": 1776688471.4475021,
     "used_count": 0,
     "last_scanned": 1777843461.1913972
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/detection/MetalCapabilities.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/detection/MetalCapabilities.java": {
     "classname": "MetalCapabilities",
     "mtime": 1776688471.44791,
     "used_count": 19,
     "last_scanned": 1777843461.264195
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/detection/AppleSiliconDetector.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/detection/AppleSiliconDetector.java": {
     "classname": "AppleSiliconDetector",
     "mtime": 1776688471.4482002,
     "used_count": 12,
     "last_scanned": 1777843461.3377779
   },
-  "backend/metal/gollek-kernel-metal/src/main/java/tech/kayys/gollek/metal/kernel/MetalComputeKernel.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/metal/kernel/MetalComputeKernel.java": {
     "classname": "MetalComputeKernel",
     "mtime": 1777392746.284302,
     "used_count": 0,
     "last_scanned": 1777843461.411553
   },
-  "backend/metal/gollek-kernel-metal/src/test/java/tech/kayys/gollek/metal/MetalGpuSmokeTest.java": {
+  "backend/metal/gollek-backend-metal/src/test/java/tech/kayys/gollek/metal/MetalGpuSmokeTest.java": {
     "classname": "MetalGpuSmokeTest",
     "mtime": 1776688471.4416454,
     "used_count": 0,
     "last_scanned": 1777843461.4818518
   },
-  "backend/metal/gollek-kernel-metal/src/test/java/tech/kayys/gollek/metal/config/MetalRunnerModeTest.java": {
+  "backend/metal/gollek-backend-metal/src/test/java/tech/kayys/gollek/metal/config/MetalRunnerModeTest.java": {
     "classname": "MetalRunnerModeTest",
     "mtime": 1776688471.4414175,
     "used_count": 0,
     "last_scanned": 1777843461.554241
   },
-  "backend/metal/gollek-plugin-kernel-metal/src/main/java/tech/kayys/gollek/plugin/kernel/metal/MetalKernelPlugin.java": {
+  "backend/metal/gollek-backend-metal/src/main/java/tech/kayys/gollek/plugin/kernel/metal/MetalKernelPlugin.java": {
     "classname": "MetalKernelPlugin",
     "mtime": 1776688471.440619,
     "used_count": 0,
@@ -4385,133 +4385,133 @@
     "used_count": 26,
     "last_scanned": 1777843487.642242
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/quant/Dequantizer.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/quant/Dequantizer.java": {
     "classname": "Dequantizer",
     "mtime": 1777465040.145064,
     "used_count": 74,
     "last_scanned": 1777843487.7147698
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/tokenizer/BPETokenizer.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/tokenizer/BPETokenizer.java": {
     "classname": "BPETokenizer",
     "mtime": 1777464075.9926162,
     "used_count": 1,
     "last_scanned": 1777843487.788168
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/writer/GGUFWriter.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/writer/GGUFWriter.java": {
     "classname": "GGUFWriter",
     "mtime": 1777499483.7499905,
     "used_count": 0,
     "last_scanned": 1777843487.859505
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/sampler/Sampler.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/sampler/Sampler.java": {
     "classname": "Sampler",
     "mtime": 1777462969.9617026,
     "used_count": 1,
     "last_scanned": 1777843487.929728
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFFile.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFFile.java": {
     "classname": "GGUFFile",
     "mtime": 1777464884.2099404,
     "used_count": 9,
     "last_scanned": 1777843488.003853
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/QKVPrepacker.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/QKVPrepacker.java": {
     "classname": "QKVPrepacker",
     "mtime": 1776688470.6876254,
     "used_count": 1,
     "last_scanned": 1777843488.076125
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFReader.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFReader.java": {
     "classname": "GGUFReader",
     "mtime": 1777158142.674298,
     "used_count": 5,
     "last_scanned": 1777843488.1710851
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFTensorInfo.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFTensorInfo.java": {
     "classname": "GGUFTensorInfo",
     "mtime": 1777049704.7300522,
     "used_count": 83,
     "last_scanned": 1777843488.243145
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFModel.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFModel.java": {
     "classname": "GGUFModel",
     "mtime": 1777049937.9868095,
     "used_count": 35,
     "last_scanned": 1777843488.315171
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFLoader.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFLoader.java": {
     "classname": "GGUFLoader",
     "mtime": 1777158142.6749902,
     "used_count": 19,
     "last_scanned": 1777843488.3883588
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GenerationParams.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GenerationParams.java": {
     "classname": "GenerationParams",
     "mtime": 1776688470.6908293,
     "used_count": 1,
     "last_scanned": 1777843488.461461
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/GGUFParser.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/GGUFParser.java": {
     "classname": "GGUFParser",
     "mtime": 1777212215.5243397,
     "used_count": 2,
     "last_scanned": 1777843488.53296
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/model/ModelConfig.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/model/ModelConfig.java": {
     "classname": "ModelConfig",
     "mtime": 1777462922.0081713,
     "used_count": 154,
     "last_scanned": 1777843488.606598
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/model/LlamaWeights.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/model/LlamaWeights.java": {
     "classname": "LlamaWeights",
     "mtime": 1777464978.652194,
     "used_count": 2,
     "last_scanned": 1777843488.679133
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/model/LlamaForward.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/model/LlamaForward.java": {
     "classname": "LlamaForward",
     "mtime": 1777464978.6487882,
     "used_count": 0,
     "last_scanned": 1777843488.750124
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/inference/KVCache.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/inference/KVCache.java": {
     "classname": "KVCache",
     "mtime": 1777462959.275537,
     "used_count": 64,
     "last_scanned": 1777843488.817058
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/tensor/GGUFVectorOps.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/tensor/GGUFVectorOps.java": {
     "classname": "GGUFVectorOps",
     "mtime": 1777465773.0899067,
     "used_count": 25,
     "last_scanned": 1777843488.888322
   },
-  "runner/gguf/gollek-gguf-loader/src/main/java/tech/kayys/gollek/gguf/loader/gguf/GGUFLoader.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/loader/gguf/GGUFLoader.java": {
     "classname": "GGUFLoader",
     "mtime": 1777498297.733063,
     "used_count": 19,
     "last_scanned": 1777843488.954526
   },
-  "runner/gguf/gollek-gguf-tokenizer/src/main/java/tech/kayys/gollek/gguf/tokenizer/ToolCallParser.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/tokenizer/ToolCallParser.java": {
     "classname": "ToolCallParser",
     "mtime": 1776688470.6830456,
     "used_count": 0,
     "last_scanned": 1777843489.021467
   },
-  "runner/gguf/gollek-gguf-tokenizer/src/main/java/tech/kayys/gollek/gguf/tokenizer/GGUFTokenizer.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/tokenizer/GGUFTokenizer.java": {
     "classname": "GGUFTokenizer",
     "mtime": 1777017259.027462,
     "used_count": 15,
     "last_scanned": 1777843489.0906408
   },
-  "runner/gguf/gollek-gguf-tokenizer/src/main/java/tech/kayys/gollek/gguf/tokenizer/GGUFChatTemplateService.java": {
+  "runner/gguf/gollek-gguf-core/src/main/java/tech/kayys/gollek/gguf/tokenizer/GGUFChatTemplateService.java": {
     "classname": "GGUFChatTemplateService",
     "mtime": 1776688470.6841404,
     "used_count": 21,
     "last_scanned": 1777843489.161675
   },
-  "runner/gguf/gollek-gguf-tokenizer/src/test/java/tech/kayys/gollek/gguf/tokenizer/GGUFTokenizerDetectionTest.java": {
+  "runner/gguf/gollek-gguf-core/src/test/java/tech/kayys/gollek/gguf/tokenizer/GGUFTokenizerDetectionTest.java": {
     "classname": "GGUFTokenizerDetectionTest",
     "mtime": 1776688470.6811264,
     "used_count": 0,

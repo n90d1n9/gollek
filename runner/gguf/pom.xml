@@ -21,8 +21,8 @@
     </properties>
     <modules>
         <module>gollek-gguf-core</module>
-        <module>gollek-gguf-loader</module>
-        <module>gollek-gguf-tokenizer</module>
+        <module>gollek-gguf-core</module>
+        <module>gollek-gguf-core</module>
         <module>gollek-gguf-converter</module>
         <module>gollek-gguf-converter-java</module>
     </modules>

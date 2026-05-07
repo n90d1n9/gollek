@@ -1,0 +1,61 @@
+[
+  {
+    "name" : "picocli.CommandLine$AutoHelpMixin",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "helpRequested" },
+      { "name" : "versionRequested" }
+    ]
+  },
+  {
+    "name" : "tech.kayys.gollek.cli.NewGollekCLI",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true
+  },
+  {
+    "name" : "tech.kayys.gollek.cli.NewGollekCLI$ChatCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "maxTokens" },
+      { "name" : "model" },
+      { "name" : "noStream" },
+      { "name" : "provider" },
+      { "name" : "systemPrompt" },
+      { "name" : "temperature" }
+    ]
+  },
+  {
+    "name" : "tech.kayys.gollek.cli.NewGollekCLI$ListCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "json" }
+    ]
+  },
+  {
+    "name" : "tech.kayys.gollek.cli.NewGollekCLI$RunCommand",
+    "allDeclaredConstructors" : true,
+    "allPublicConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allPublicMethods" : true,
+    "fields" : [
+      { "name" : "maxTokens" },
+      { "name" : "model" },
+      { "name" : "prompt" },
+      { "name" : "provider" },
+      { "name" : "stream" },
+      { "name" : "systemPrompt" },
+      { "name" : "temperature" }
+    ]
+  }
+]

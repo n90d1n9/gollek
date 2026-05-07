@@ -11,6 +11,7 @@ package tech.kayys.gollek.safetensor.quantization;
 
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -26,6 +27,10 @@ import tech.kayys.gollek.safetensor.quantization.quantizer.AWQQuantizerAdapter;
 import tech.kayys.gollek.safetensor.quantization.quantizer.GPTQQuantizerAdapter;
 
 import java.io.IOException;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -105,9 +110,18 @@ public class QuantizationEngine {
             String message) {
     }
 
+    public record InferenceQuantizationResult(
+            Map<String, AccelTensor> weights,
+            String cacheState,
+            Path cachePath,
+            int cacheHits,
+            int quantizedFresh) {
+    }
+
     private final Map<String, Quantizer> quantizers = new ConcurrentHashMap<>();
-    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    private volatile ExecutorService executor;
     private final Map<Path, QuantResult> resultsCache = new ConcurrentHashMap<>();
+    private static final int INFERENCE_CACHE_VERSION = 1;
 
     @Inject
     SafetensorShardLoader loader;
@@ -161,7 +175,7 @@ public class QuantizationEngine {
             } catch (Exception e) {
                 em.fail(e);
             }
-        }).runSubscriptionOn(executor);
+        }).runSubscriptionOn(executor());
     }
 
     /**
@@ -250,7 +264,20 @@ public class QuantizationEngine {
                 em.emit(QuantResult.failure(e.getMessage(), config));
                 em.fail(e);
             }
-        }).runSubscriptionOn(executor);
+        }).runSubscriptionOn(executor());
+    }
+
+    private ExecutorService executor() {
+        ExecutorService current = executor;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            if (executor == null) {
+                executor = Executors.newVirtualThreadPerTaskExecutor();
+            }
+            return executor;
+        }
     }
 
     /**
@@ -400,6 +427,95 @@ public class QuantizationEngine {
     }
 
     /**
+     * Quantize eligible inference weights in memory.
+     * Keeps small/vector tensors in their original form to reduce breakage risk.
+     */
+    public Map<String, AccelTensor> quantizeWeightsForInference(Map<String, AccelTensor> weights, QuantStrategy strategy) {
+        return quantizeWeightsForInferenceDetailed(null, weights, strategy).weights();
+    }
+
+    public Map<String, AccelTensor> quantizeWeightsForInference(Path modelPath, Map<String, AccelTensor> weights, QuantStrategy strategy) {
+        return quantizeWeightsForInferenceDetailed(modelPath, weights, strategy).weights();
+    }
+
+    public InferenceQuantizationResult quantizeWeightsForInferenceDetailed(Path modelPath, Map<String, AccelTensor> weights, QuantStrategy strategy) {
+        QuantStrategy effectiveStrategy = normalizeInferenceStrategy(strategy);
+        if (effectiveStrategy == QuantStrategy.NONE) {
+            return new InferenceQuantizationResult(weights, "off", null, 0, 0);
+        }
+
+        Quantizer quantizer = getQuantizer(effectiveStrategy);
+        if (quantizer == null) {
+            log.warnf("No quantizer registered for strategy %s; using original weights", effectiveStrategy);
+            return new InferenceQuantizationResult(weights, "unsupported", null, 0, 0);
+        }
+
+        QuantConfig config = createDefaultConfig(effectiveStrategy);
+        Map<String, AccelTensor> quantized = new HashMap<>(weights.size() * 2);
+        Path cachePath = inferenceCachePath(modelPath, effectiveStrategy);
+        Map<String, CachedTensor> cachedTensors = loadInferenceCache(cachePath, effectiveStrategy);
+        int cacheHits = 0;
+        int quantizedFresh = 0;
+
+        for (Map.Entry<String, AccelTensor> entry : weights.entrySet()) {
+            String name = entry.getKey();
+            AccelTensor source = entry.getValue();
+
+            if (!shouldQuantizeForInference(name, source)) {
+                quantized.put(name, source);
+                continue;
+            }
+
+            CachedTensor cached = cachedTensors.get(name);
+            if (cached != null) {
+                try {
+                    quantized.put(name, cached.toTensor());
+                    source.close();
+                    cacheHits++;
+                    continue;
+                } catch (Exception e) {
+                    log.warnf(e, "Failed to hydrate cached quantized tensor for %s; falling back to live quantization", name);
+                }
+            }
+
+            try {
+                AccelTensor materialized = materializeForQuantization(source);
+                AccelTensor candidate = quantizer.quantizeTensor(materialized, config);
+                if (!isUsableQuantizedTensor(candidate)) {
+                    log.warnf("Quantizer %s produced unsupported tensor for %s; keeping original weight",
+                            effectiveStrategy, name);
+                    if (candidate != null && candidate != source && candidate != materialized) {
+                        candidate.close();
+                    }
+                    quantized.put(name, source);
+                    continue;
+                }
+
+                quantized.put(name, candidate);
+                quantizedFresh++;
+                if (materialized != source) {
+                    materialized.close();
+                }
+                source.close();
+            } catch (Exception e) {
+                log.warnf(e, "Failed to quantize %s with strategy %s; keeping original weight", name, effectiveStrategy);
+                quantized.put(name, source);
+            }
+        }
+
+        if (cachePath != null && quantizedFresh > 0) {
+            persistInferenceCache(cachePath, effectiveStrategy, quantized);
+        }
+
+        if (cacheHits > 0) {
+            log.infof("Loaded %d quantized tensors from inference cache (%s)", cacheHits, effectiveStrategy);
+        }
+        log.infof("Prepared %d inference weights with strategy %s", quantized.size(), effectiveStrategy);
+        String cacheState = cacheHits > 0 ? "warm" : (quantizedFresh > 0 ? "cold" : "bypass");
+        return new InferenceQuantizationResult(quantized, cacheState, cachePath, cacheHits, quantizedFresh);
+    }
+
+    /**
      * Clear the results cache.
      */
     public void clearCache() {
@@ -413,6 +529,200 @@ public class QuantizationEngine {
 
     private Quantizer getQuantizer(QuantStrategy strategy) {
         return quantizers.get(strategy.name().toLowerCase());
+    }
+
+    private QuantStrategy normalizeInferenceStrategy(QuantStrategy strategy) {
+        if (strategy == null) {
+            return QuantStrategy.NONE;
+        }
+
+        return switch (strategy) {
+            case TURBO -> {
+                log.warn("TurboQuant direct inference is not wired yet; using BNB-compatible NF4 path");
+                yield QuantStrategy.BNB;
+            }
+            case GPTQ -> {
+                log.warn("GPTQ direct inference path is not complete yet; using INT4-compatible path");
+                yield QuantStrategy.INT4;
+            }
+            default -> strategy;
+        };
+    }
+
+    private boolean shouldQuantizeForInference(String name, AccelTensor tensor) {
+        return tensor != null
+                && (name.endsWith(".weight") || name.endsWith(".qweight"))
+                && tensor.rank() == 2
+                && tensor.numel() >= 4096
+                && !name.contains("embed_tokens")
+                && !name.contains("lm_head")
+                && !name.contains("position_embedding")
+                && !name.contains("vision_tower");
+    }
+
+    private Path inferenceCachePath(Path modelPath, QuantStrategy strategy) {
+        if (modelPath == null || strategy == null || strategy == QuantStrategy.NONE) {
+            return null;
+        }
+        try {
+            String gollekHome = System.getProperty("gollek.home",
+                    Path.of(System.getProperty("user.home"), ".gollek").toString());
+            Path cacheDir = ensureInferenceCacheDirectory(Path.of(gollekHome, "cache", "direct-quant"));
+            Path normalized = modelPath.toAbsolutePath().normalize();
+            long lastModified = Files.exists(normalized) ? Files.getLastModifiedTime(normalized).toMillis() : 0L;
+            long size = Files.isRegularFile(normalized) ? Files.size(normalized) : 0L;
+            String cacheName = Integer.toHexString((normalized.toString() + "|" + strategy.name() + "|" + lastModified + "|" + size).hashCode());
+            return cacheDir.resolve(cacheName + ".dqcache");
+        } catch (IOException e) {
+            log.warnf(e, "Failed to prepare inference cache path for %s", modelPath);
+            return null;
+        }
+    }
+
+    private Path ensureInferenceCacheDirectory(Path preferred) throws IOException {
+        try {
+            Files.createDirectories(preferred);
+            return preferred;
+        } catch (IOException preferredFailure) {
+            Path fallback = Path.of(System.getProperty("java.io.tmpdir"), "gollek-direct-quant");
+            Files.createDirectories(fallback);
+            log.warnf(preferredFailure, "Falling back to temp inference cache directory: %s", fallback);
+            return fallback;
+        }
+    }
+
+    private Map<String, CachedTensor> loadInferenceCache(Path cachePath, QuantStrategy strategy) {
+        if (cachePath == null || !Files.isRegularFile(cachePath)) {
+            return Collections.emptyMap();
+        }
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(Files.newInputStream(cachePath)))) {
+            int version = in.readInt();
+            if (version != INFERENCE_CACHE_VERSION) {
+                log.warnf("Ignoring inference cache with unsupported version %d at %s", version, cachePath);
+                return Collections.emptyMap();
+            }
+            String strategyName = in.readUTF();
+            if (!strategy.name().equals(strategyName)) {
+                return Collections.emptyMap();
+            }
+            int count = in.readInt();
+            Map<String, CachedTensor> cached = new HashMap<>(count * 2);
+            for (int i = 0; i < count; i++) {
+                String name = in.readUTF();
+                int rank = in.readInt();
+                long[] shape = new long[rank];
+                for (int j = 0; j < rank; j++) {
+                    shape[j] = in.readLong();
+                }
+                int quantOrdinal = in.readInt();
+                int groupSize = in.readInt();
+                int dataLength = in.readInt();
+                byte[] data = in.readNBytes(dataLength);
+                int scalesLength = in.readInt();
+                float[] scales = new float[scalesLength];
+                for (int j = 0; j < scalesLength; j++) {
+                    scales[j] = in.readFloat();
+                }
+                int zerosLength = in.readInt();
+                float[] zeros = new float[zerosLength];
+                for (int j = 0; j < zerosLength; j++) {
+                    zeros[j] = in.readFloat();
+                }
+                cached.put(name, new CachedTensor(shape,
+                        AccelTensor.QuantType.values()[quantOrdinal],
+                        groupSize, data, scales, zeros));
+            }
+            log.infof("Loaded inference quant cache: %s (%d tensors)", cachePath, count);
+            return cached;
+        } catch (Exception e) {
+            log.warnf(e, "Failed to load inference quant cache from %s", cachePath);
+            return Collections.emptyMap();
+        }
+    }
+
+    private void persistInferenceCache(Path cachePath, QuantStrategy strategy, Map<String, AccelTensor> weights) {
+        if (cachePath == null) {
+            return;
+        }
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(cachePath)))) {
+            List<Map.Entry<String, AccelTensor>> entries = weights.entrySet().stream()
+                    .filter(e -> isPersistableQuantizedTensor(e.getValue()))
+                    .sorted(Map.Entry.comparingByKey())
+                    .toList();
+            out.writeInt(INFERENCE_CACHE_VERSION);
+            out.writeUTF(strategy.name());
+            out.writeInt(entries.size());
+            for (Map.Entry<String, AccelTensor> entry : entries) {
+                AccelTensor tensor = entry.getValue();
+                out.writeUTF(entry.getKey());
+                out.writeInt(tensor.rank());
+                for (long dim : tensor.shape()) {
+                    out.writeLong(dim);
+                }
+                out.writeInt(tensor.quantType().ordinal());
+                out.writeInt(tensor.groupSize());
+                byte[] data = tensor.dataSegment().toArray(java.lang.foreign.ValueLayout.JAVA_BYTE);
+                out.writeInt(data.length);
+                out.write(data);
+                float[] scales = tensor.scales() != null
+                        ? tensor.scales().toArray(java.lang.foreign.ValueLayout.JAVA_FLOAT)
+                        : new float[0];
+                out.writeInt(scales.length);
+                for (float scale : scales) {
+                    out.writeFloat(scale);
+                }
+                float[] zeros = tensor.zeros() != null
+                        ? tensor.zeros().toArray(java.lang.foreign.ValueLayout.JAVA_FLOAT)
+                        : new float[0];
+                out.writeInt(zeros.length);
+                for (float zero : zeros) {
+                    out.writeFloat(zero);
+                }
+            }
+            log.infof("Saved inference quant cache: %s (%d tensors)", cachePath, entries.size());
+        } catch (Exception e) {
+            log.warnf(e, "Failed to persist inference quant cache to %s", cachePath);
+        }
+    }
+
+    private boolean isPersistableQuantizedTensor(AccelTensor tensor) {
+        return tensor != null
+                && tensor.quantType() == AccelTensor.QuantType.INT4
+                && tensor.scales() != null;
+    }
+
+    private record CachedTensor(long[] shape, AccelTensor.QuantType quantType, int groupSize, byte[] data, float[] scales, float[] zeros) {
+        private AccelTensor toTensor() {
+            AccelTensor tensor = AccelTensor.fromByteArray(data, shape);
+            java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+            java.lang.foreign.MemorySegment scaleSeg = scales.length == 0
+                    ? null
+                    : arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_FLOAT, scales);
+            java.lang.foreign.MemorySegment zeroSeg = zeros.length == 0
+                    ? null
+                    : arena.allocateFrom(java.lang.foreign.ValueLayout.JAVA_FLOAT, zeros);
+            return tensor.withQuantization(quantType, scaleSeg, zeroSeg, groupSize);
+        }
+    }
+
+    private AccelTensor materializeForQuantization(AccelTensor tensor) {
+        if (tensor.quantType() == AccelTensor.QuantType.F32) {
+            return tensor;
+        }
+        return tensor.dequantize();
+    }
+
+    private boolean isUsableQuantizedTensor(AccelTensor tensor) {
+        if (tensor == null) {
+            return false;
+        }
+
+        return switch (tensor.quantType()) {
+            case F32, F16, BF16 -> true;
+            case INT4 -> tensor.scales() != null;
+            case INT8 -> tensor.scales() != null;
+            case FP8 -> false;
+        };
     }
 
     private void validateModelPath(Path modelPath) {
@@ -475,8 +785,13 @@ public class QuantizationEngine {
     /**
      * Shutdown the engine and release resources.
      */
+    @PreDestroy
     public void shutdown() {
-        executor.shutdown();
+        ExecutorService current = executor;
+        if (current != null) {
+            current.shutdownNow();
+            executor = null;
+        }
         clearCache();
         log.info("Quantization engine shutdown complete");
     }

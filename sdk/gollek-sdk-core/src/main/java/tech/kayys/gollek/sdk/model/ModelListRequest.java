@@ -1,20 +1,16 @@
 package tech.kayys.gollek.sdk.model;
 
-import java.util.Optional;
-import tech.kayys.gollek.spi.model.ModelFormat;
-
 /**
  * Request object for listing models with filtering and pagination.
  */
 public record ModelListRequest(
-    int offset,
-    int limit,
-    boolean runnableOnly,
-    ModelFormat format,
-    String namespace,
-    boolean dedupe,
-    boolean sort
-) {
+        int offset,
+        int limit,
+        boolean runnableOnly,
+        String format,
+        String namespace,
+        boolean dedupe,
+        boolean sort) {
     public static Builder builder() {
         return new Builder();
     }
@@ -23,7 +19,7 @@ public record ModelListRequest(
         private int offset = 0;
         private int limit = 50;
         private boolean runnableOnly = false;
-        private ModelFormat format;
+        private String format;
         private String namespace;
         private boolean dedupe = true;
         private boolean sort = true;
@@ -43,7 +39,7 @@ public record ModelListRequest(
             return this;
         }
 
-        public Builder format(ModelFormat format) {
+        public Builder format(String format) {
             this.format = format;
             return this;
         }

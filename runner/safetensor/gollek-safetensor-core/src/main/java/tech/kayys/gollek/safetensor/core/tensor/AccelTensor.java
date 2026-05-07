@@ -60,6 +60,8 @@ public class AccelTensor implements AutoCloseable {
     private MemorySegment scales = null;
     private MemorySegment zeros = null;
     private int groupSize = -1; // -1 means per-channel (no groups)
+    private volatile AccelTensor cachedDequantized = null;
+    private static final long MAX_CACHED_DEQUANTIZED_BYTES = 32L * 1024L * 1024L;
 
     /**
      * Dequantizes this tensor back to Float32 if it is quantized.
@@ -67,15 +69,62 @@ public class AccelTensor implements AutoCloseable {
      * @return a new contiguous F32 tensor, or this tensor if it is already F32
      */
     public AccelTensor dequantize() {
+        return dequantizeInternal(shouldCacheDequantized());
+    }
+
+    /**
+     * Dequantizes this tensor without storing the expanded F32 tensor on the source weight.
+     */
+    public AccelTensor dequantizeTransient() {
+        return dequantizeInternal(false);
+    }
+
+    /**
+     * Large matrix weights should not pin a second full-size F32 copy in direct memory.
+     */
+    public boolean shouldCacheDequantized() {
+        return numel() * Float.BYTES <= MAX_CACHED_DEQUANTIZED_BYTES;
+    }
+
+    private AccelTensor dequantizeInternal(boolean cacheResult) {
         if (quantType == QuantType.F32) return this;
-        
-        // This is a slow fallback that uses the metadata.
-        // Optimized kernels should use direct dequantization (e.g. BnB).
-        float[] f32 = new float[(int) numel()];
-        for (int i = 0; i < f32.length; i++) {
-            f32[i] = getFlat(i); // getFlat handles quantization based on type/scales/zeros
+
+        if (cacheResult) {
+            AccelTensor cached = cachedDequantized;
+            if (cached != null && !cached.isClosed()) {
+                return cached;
+            }
         }
-        return AccelTensor.fromFloatArray(f32, shape);
+
+        synchronized (this) {
+            if (cacheResult) {
+                AccelTensor cached = cachedDequantized;
+                if (cached != null && !cached.isClosed()) {
+                    return cached;
+                }
+            }
+
+            AccelTensor expanded = AccelTensor.zeros(shape);
+            switch (quantType) {
+                case INT8 -> DequantizationKernel.dequantizeInt8(
+                        dataSegment(), expanded.dataSegment(), scales(), numel());
+                case INT4 -> DequantizationKernel.dequantizeInt4(
+                        dataSegment(), expanded.dataSegment(), scales(), zeros(), numel(), groupSize());
+                case F16 -> DequantizationKernel.dequantizeF16(
+                        dataSegment(), expanded.dataSegment(), numel());
+                case BF16 -> DequantizationKernel.dequantizeBf16(
+                        dataSegment(), expanded.dataSegment(), numel());
+                default -> {
+                    expanded.close();
+                    throw new UnsupportedOperationException("Unsupported quantization type: " + quantType);
+                }
+            }
+            if (cacheResult) {
+                cachedDequantized = expanded;
+                return cachedDequantized;
+            }
+            return expanded;
+        }
     }
 
     // ── Private constructors ──────────────────────────────────────────
@@ -537,9 +586,9 @@ public class AccelTensor implements AutoCloseable {
                 } else {
                     long dstByteOffset = (long) i * embDim * (long)Float.BYTES;
                     MemorySegment.copy(
-                        data, ValueLayout.JAVA_FLOAT, srcByteOffset,
-                        out.data, ValueLayout.JAVA_FLOAT, dstByteOffset,
-                        (long) embDim * 4L
+                        data, srcByteOffset,
+                        out.data, dstByteOffset,
+                        (long) embDim * Float.BYTES
                     );
                 }
             } else {
@@ -585,6 +634,14 @@ public class AccelTensor implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
+            AccelTensor cached = cachedDequantized;
+            cachedDequantized = null;
+            if (cached != null && !cached.isClosed()) {
+                try {
+                    cached.close();
+                } catch (Exception ignored) {
+                }
+            }
             if (arena != null) {
                 try {
                     arena.close();

@@ -16,6 +16,7 @@ import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.safetensor.engine.generation.TextInferenceEngine;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
+import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
 import tech.kayys.gollek.models.core.ChatTemplateFormatter;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
@@ -40,6 +41,8 @@ public class DirectSafetensorBackend {
 
     private static final Logger log = Logger.getLogger(DirectSafetensorBackend.class);
     private static final String PROVIDER_ID = "safetensor-direct";
+    private static final String FORCE_CPU_FORWARD_PROPERTY = "gollek.safetensor.force_cpu_forward";
+    private static final String VERBOSE_PROPERTY = "gollek.verbose";
 
     @Inject
     DirectInferenceEngine engine;
@@ -66,57 +69,46 @@ public class DirectSafetensorBackend {
     }
 
     public Uni<InferenceResponse> infer(ProviderRequest request) {
-        // For non-streaming, collect everything from the stream until end
-        return Multi.createFrom().publisher(streamToPublisher(request))
-                .collect().asList()
-                .map(chunks -> {
-                    long startTimeLocal = System.currentTimeMillis();
-                    StringBuilder fullText = new StringBuilder();
-                    int totalInputTokens = 0;
-                    int totalOutputTokens = 0;
-                    long totalDurationMs = 0;
-                    String finalRequestId = null;
-                    java.util.Map<String, Object> finalMetadata = new java.util.HashMap<>();
-                    for (ProviderResponse r : chunks) {
-                        if (finalRequestId == null)
-                            finalRequestId = r.getRequestId();
-                        
-                        String delta = r.getContent();
-                        String modality = (String) r.getMetadata().get("modality");
-                        
-                        if ("AUDIO".equals(modality)) {
-                            finalMetadata.put("audio", delta);
-                        } else if ("IMAGE".equals(modality)) {
-                            finalMetadata.put("image", delta);
-                        } else if (delta != null) {
-                            fullText.append(delta);
-                        }
-
-                        // Propagate other metadata
-                        finalMetadata.putAll(r.getMetadata());
-
-                        // Pick metrics from chunks (usually the last chunk has total, but we'll sum or
-                        // max them)
-                        totalInputTokens = Math.max(totalInputTokens, r.getPromptTokens());
-                        totalOutputTokens = Math.max(totalOutputTokens, r.getCompletionTokens());
-                        totalDurationMs = Math.max(totalDurationMs, r.getDurationMs());
-                    }
-
-                    if (totalOutputTokens == 0 && fullText.length() > 0) {
-                        totalOutputTokens = fullText.length() / 4; // fallback estimate
-                    }
-
-                    return InferenceResponse.builder()
-                            .requestId(finalRequestId != null ? finalRequestId : "chatcmpl-" + request.getRequestId())
+        try {
+            PreparedRequest prepared = prepareRequest(request);
+            if (prepared.isAudioModel()) {
+                long synthStart = System.currentTimeMillis();
+                int promptTokens = prepared.prompt().length() / 4;
+                java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+                appendQuantizationMetadata(metadata, prepared.loadedModel());
+                metadata.put("audio", java.util.Base64.getEncoder().encodeToString(new byte[0]));
+                return speechT5Engine.synthesize(prepared.ttsPrompt(), "alloy", prepared.modelPath(), prepared.audioConfig())
+                        .map(bytes -> InferenceResponse.builder()
+                                .requestId(request.getRequestId())
+                                .model(request.getModel())
+                                .content("")
+                                .tokensUsed(promptTokens + (bytes.length / 1024))
+                                .inputTokens(promptTokens)
+                                .outputTokens(bytes.length / 1024)
+                                .durationMs(System.currentTimeMillis() - synthStart)
+                                .metadata(metadata)
+                                .metadata("audio", java.util.Base64.getEncoder().encodeToString(bytes))
+                                .metadata("modality", "AUDIO")
+                                .build());
+            }
+            return textEngine.generate(prepared.prompt(), prepared.modelPath(), prepared.genCfg())
+                    .map(infResp -> {
+                        InferenceResponse.Builder builder = InferenceResponse.builder()
+                            .requestId(infResp.getRequestId())
                             .model(request.getModel())
-                            .content(fullText.toString())
-                            .tokensUsed(totalInputTokens + totalOutputTokens)
-                            .inputTokens(totalInputTokens)
-                            .outputTokens(totalOutputTokens)
-                            .durationMs(totalDurationMs > 0 ? totalDurationMs : (System.currentTimeMillis() - startTimeLocal))
-                            .metadata(finalMetadata)
-                            .build();
-                });
+                            .content(infResp.getContent())
+                            .tokensUsed(infResp.getTokensUsed())
+                            .inputTokens(infResp.getInputTokens())
+                            .outputTokens(infResp.getOutputTokens())
+                            .durationMs(infResp.getDurationMs())
+                            .finishReason(infResp.getFinishReason())
+                            .metadata(infResp.getMetadata());
+                        appendQuantizationMetadata(builder, prepared.loadedModel());
+                        return builder.build();
+                    });
+        } catch (Exception e) {
+            return Uni.createFrom().failure(e);
+        }
     }
 
     public Multi<StreamingInferenceChunk> inferStream(ProviderRequest request) {
@@ -140,94 +132,13 @@ public class DirectSafetensorBackend {
     }
 
     private Flow.Publisher<ProviderResponse> streamToPublisher(ProviderRequest request) {
-        // Resolve model path: prefer explicit model_path parameter/metadata over model ID
-        // (model ID may be a HuggingFace hub name like "openai/whisper-large-v3-turbo")
-        Path modelPath = resolveModelPathFromRequest(request);
         try {
-            // Load the model zero-copy into native memory Arena
-
-            String loadedKey = engine.loadModel(modelPath);
-
-            // Resolve model type for chat template selection
-            var loadedModel = engine.getLoadedModel(modelPath);
-            String modelType = (loadedModel != null && loadedModel.config() != null)
-                    ? loadedModel.config().modelType()
-                    : "";
-            String arch = (loadedModel != null && loadedModel.config() != null)
-                    ? loadedModel.config().primaryArchitecture()
-                    : "";
-            
-            boolean isAudioModel = ("speecht5".equals(modelType) || "whisper".equals(modelType) 
-                    || modelPath.toString().contains("speecht5")
-                    || (arch != null && (arch.toLowerCase().contains("speecht5") || arch.toLowerCase().contains("whisper"))));
-            
-            System.err.println("[DEBUG-ROUTING] modelPath: " + modelPath);
-            System.err.println("[DEBUG-ROUTING] loadedModel null? " + (loadedModel == null));
-            System.err.println("[DEBUG-ROUTING] config null? " + (loadedModel != null && loadedModel.config() == null));
-            System.err.println("[DEBUG-ROUTING] modelType: '" + modelType + "'");
-            System.err.println("[DEBUG-ROUTING] arch: '" + arch + "'");
-            System.err.println("[DEBUG-ROUTING] isAudioModel: " + isAudioModel);
-
-
-            // Build messages list — inject a default system message if none provided
-            List<tech.kayys.gollek.spi.Message> rawMessages = new ArrayList<>(request.getMessages());
-            boolean hasSystem = rawMessages.stream()
-                    .anyMatch(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.SYSTEM);
-            if (!hasSystem) {
-                String defaultSystem = modelType.toLowerCase().contains("qwen")
-                    ? "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
-                    : "You are a helpful assistant.";
-                rawMessages.add(0, tech.kayys.gollek.spi.Message.system(defaultSystem));
-            }
-
-            // Apply the chat template — use Object bridge to bypass cross-module generic
-            // type identity check
-            @SuppressWarnings("unchecked")
-            String prompt = ChatTemplateFormatter.format((java.util.List) (Object) rawMessages, modelType);
-            System.err.println("FORMATTED PROMPT: " + prompt.replace("\n", "\\n"));
-
-            int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 256;
-
-            String kvQuantStr = request.getParameter("kv_cache_quant", String.class).orElse("none");
-            GenerationConfig.KvCacheQuantization kvQuant = GenerationConfig.KvCacheQuantization.NONE;
-            try {
-                kvQuant = GenerationConfig.KvCacheQuantization.valueOf(kvQuantStr.toUpperCase());
-            } catch (Exception ignored) {}
-
-            GenerationConfig genCfg = GenerationConfig.builder()
-                    .maxNewTokens(maxTokens)
-                    .temperature((float) request.getTemperature())
-                    .topP((float) request.getTopP())
-                    .repetitionPenalty((float) request.getRepeatPenalty())
-                    .kvCacheQuant(kvQuant)
-                    .build();
-
-            if (isAudioModel) {
-                String ttsPrompt = rawMessages.stream()
-                        .filter(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.USER)
-                        .map(tech.kayys.gollek.spi.Message::getContent)
-                        .reduce((first, second) -> second)
-                        .orElse(prompt);
-                
-                String outputFormat = request.getParameter("output_format", String.class).orElse("wav");
-                tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format format = 
-                    tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format.WAV;
-                try {
-                    format = tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format.valueOf(outputFormat.toUpperCase());
-                } catch (Exception e) {
-                    // Fallback to WAV or FLAC based on logic
-                }
-
-                tech.kayys.gollek.safetensor.audio.model.AudioConfig audioCfg = 
-                        tech.kayys.gollek.safetensor.audio.model.AudioConfig.builder()
-                        .temperature((float)request.getTemperature())
-                        .format(format)
-                        .build();
-
+            PreparedRequest prepared = prepareRequest(request);
+            if (prepared.isAudioModel()) {
                 long synthStart = System.currentTimeMillis();
-                int promptTokens = prompt.length() / 4; // fallback estimate if we don't want to re-tokenize
+                int promptTokens = prepared.prompt().length() / 4;
                 return Multi.createFrom().publisher(
-                        speechT5Engine.synthesize(ttsPrompt, "alloy", modelPath, audioCfg)
+                        speechT5Engine.synthesize(prepared.ttsPrompt(), "alloy", prepared.modelPath(), prepared.audioConfig())
                             .map(bytes -> {
                                 long durationMs = System.currentTimeMillis() - synthStart;
                                 String b64 = java.util.Base64.getEncoder().encodeToString(bytes);
@@ -247,7 +158,7 @@ public class DirectSafetensorBackend {
             }
 
             // Generate response lazily
-            return textEngine.generateStream(prompt, modelPath, genCfg)
+            return textEngine.generateStream(prepared.prompt(), prepared.modelPath(), prepared.genCfg())
                     .map(infResp -> ProviderResponse.builder()
                             .requestId(infResp.getRequestId())
                             .content(infResp.getContent())
@@ -265,10 +176,175 @@ public class DirectSafetensorBackend {
             System.err.println("FATAL in streamToPublisher [" + e.getClass().getSimpleName() + "]: " + msg);
             e.printStackTrace(System.err);
             log.errorf(e, "Direct inference failed for model %s (resolved path: %s)",
-                    request.getModel(), modelPath);
+                    request.getModel(), resolveModelPathFromRequest(request));
             throw new ProviderException("Direct inference failed for model "
                     + request.getModel() + " [" + e.getClass().getSimpleName() + "]: " + msg, e);
         }
+    }
+
+    private PreparedRequest prepareRequest(ProviderRequest request) {
+        Path modelPath = resolveModelPathFromRequest(request);
+        QuantizationEngine.QuantStrategy quantStrategy = parseQuantStrategy(request);
+        engine.loadModel(modelPath, null, quantStrategy);
+
+        var loadedModel = (DirectInferenceEngine.LoadedModel) engine.getLoadedModel(modelPath);
+        String modelType = (loadedModel != null && loadedModel.config() != null)
+                ? loadedModel.config().modelType()
+                : "";
+        String arch = (loadedModel != null && loadedModel.config() != null)
+                ? loadedModel.config().primaryArchitecture()
+                : "";
+
+        boolean isAudioModel = ("speecht5".equals(modelType) || "whisper".equals(modelType)
+                || modelPath.toString().contains("speecht5")
+                || (arch != null && (arch.toLowerCase().contains("speecht5") || arch.toLowerCase().contains("whisper"))));
+        boolean verbose = Boolean.getBoolean(VERBOSE_PROPERTY);
+
+        configureForwardPlatform(modelType, arch);
+
+        if (verbose) {
+            System.err.println("[DEBUG-ROUTING] modelPath: " + modelPath);
+            System.err.println("[DEBUG-ROUTING] loadedModel null? " + (loadedModel == null));
+            System.err.println("[DEBUG-ROUTING] config null? " + (loadedModel != null && loadedModel.config() == null));
+            System.err.println("[DEBUG-ROUTING] modelType: '" + modelType + "'");
+            System.err.println("[DEBUG-ROUTING] arch: '" + arch + "'");
+            System.err.println("[DEBUG-ROUTING] isAudioModel: " + isAudioModel);
+        }
+
+        List<tech.kayys.gollek.spi.Message> rawMessages = new ArrayList<>(request.getMessages());
+        boolean hasSystem = rawMessages.stream()
+                .anyMatch(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.SYSTEM);
+        boolean injectDefaultSystem = !hasSystem
+                && !requiresCpuForward(modelType, arch)
+                && !shouldSkipDefaultSystemPrompt(modelType, arch);
+        if (injectDefaultSystem) {
+            String defaultSystem = modelType.toLowerCase().contains("qwen")
+                    ? "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
+                    : "You are a helpful assistant.";
+            rawMessages.add(0, tech.kayys.gollek.spi.Message.system(defaultSystem));
+        }
+
+        @SuppressWarnings("unchecked")
+        String prompt = ChatTemplateFormatter.format((java.util.List) (Object) rawMessages, modelType);
+        if (verbose) {
+            System.err.println("FORMATTED PROMPT: " + prompt.replace("\n", "\\n"));
+        }
+
+        int maxTokens = request.getMaxTokens() > 0 ? request.getMaxTokens() : 256;
+        int topK = request.getTopK();
+        float topP = (float) request.getTopP();
+        float temperature = (float) request.getTemperature();
+        float minP = request.getParameter("min_p", Number.class)
+                .map(Number::floatValue)
+                .orElse(0.0f);
+        long seed = request.getParameter("seed", Number.class)
+                .map(Number::longValue)
+                .orElse(-1L);
+        String kvQuantStr = request.getParameter("kv_cache_quant", String.class).orElse("none");
+        GenerationConfig.KvCacheQuantization kvQuant = normalizeKvQuantization(kvQuantStr);
+
+        GenerationConfig genCfg = GenerationConfig.builder()
+                .maxNewTokens(maxTokens)
+                .strategy(resolveSamplingStrategy(temperature, topK, topP))
+                .temperature(temperature)
+                .topK(topK)
+                .topP(topP)
+                .minP(minP)
+                .repetitionPenalty((float) request.getRepeatPenalty())
+                .kvCacheQuant(kvQuant)
+                .seed(seed)
+                .build();
+
+        String ttsPrompt = rawMessages.stream()
+                .filter(m -> m.getRole() == tech.kayys.gollek.spi.Message.Role.USER)
+                .map(tech.kayys.gollek.spi.Message::getContent)
+                .reduce((first, second) -> second)
+                .orElse(prompt);
+
+        String outputFormat = request.getParameter("output_format", String.class).orElse("wav");
+        tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format format =
+                tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format.WAV;
+        try {
+            format = tech.kayys.gollek.safetensor.audio.model.AudioConfig.Format.valueOf(outputFormat.toUpperCase());
+        } catch (Exception ignored) {
+        }
+
+        tech.kayys.gollek.safetensor.audio.model.AudioConfig audioCfg =
+                tech.kayys.gollek.safetensor.audio.model.AudioConfig.builder()
+                        .temperature((float) request.getTemperature())
+                        .format(format)
+                        .build();
+
+        return new PreparedRequest(modelPath, prompt, genCfg, isAudioModel, ttsPrompt, audioCfg, loadedModel);
+    }
+
+    private GenerationConfig.KvCacheQuantization normalizeKvQuantization(String raw) {
+        if (raw == null || raw.isBlank() || "none".equalsIgnoreCase(raw)) {
+            return GenerationConfig.KvCacheQuantization.NONE;
+        }
+        String normalized = raw.trim().toUpperCase();
+        if ("INT8".equals(normalized)) {
+            return GenerationConfig.KvCacheQuantization.INT8;
+        }
+        if ("INT4".equals(normalized) || "TURBO".equals(normalized)) {
+            log.warnf("KV cache quantization '%s' is not fully wired in the direct safetensor runtime yet; using NONE", raw);
+            return GenerationConfig.KvCacheQuantization.NONE;
+        }
+        return GenerationConfig.KvCacheQuantization.NONE;
+    }
+
+    private GenerationConfig.SamplingStrategy resolveSamplingStrategy(float temperature, int topK, float topP) {
+        if (temperature < 1.0e-4f || topK == 1) {
+            return GenerationConfig.SamplingStrategy.GREEDY;
+        }
+        boolean hasTopK = topK > 0;
+        boolean hasTopP = topP > 0.0f && topP < 1.0f;
+        if (hasTopK && hasTopP) {
+            return GenerationConfig.SamplingStrategy.TOP_K_TOP_P;
+        }
+        if (hasTopP) {
+            return GenerationConfig.SamplingStrategy.TOP_P;
+        }
+        if (hasTopK) {
+            return GenerationConfig.SamplingStrategy.TOP_K;
+        }
+        return GenerationConfig.SamplingStrategy.GREEDY;
+    }
+
+    private void appendQuantizationMetadata(InferenceResponse.Builder builder, DirectInferenceEngine.LoadedModel loadedModel) {
+        if (loadedModel == null || !loadedModel.isQuantized()) {
+            return;
+        }
+        if (loadedModel.getQuantCacheState() != null) {
+            builder.metadata("quant_cache_state", loadedModel.getQuantCacheState());
+        }
+        if (loadedModel.getQuantCachePath() != null) {
+            builder.metadata("quant_cache_path", loadedModel.getQuantCachePath().toString());
+        }
+        builder.metadata("quant_strategy", loadedModel.getQuantStrategy().name().toLowerCase());
+    }
+
+    private void appendQuantizationMetadata(java.util.Map<String, Object> metadata, DirectInferenceEngine.LoadedModel loadedModel) {
+        if (loadedModel == null || !loadedModel.isQuantized()) {
+            return;
+        }
+        if (loadedModel.getQuantCacheState() != null) {
+            metadata.put("quant_cache_state", loadedModel.getQuantCacheState());
+        }
+        if (loadedModel.getQuantCachePath() != null) {
+            metadata.put("quant_cache_path", loadedModel.getQuantCachePath().toString());
+        }
+        metadata.put("quant_strategy", loadedModel.getQuantStrategy().name().toLowerCase());
+    }
+
+    private record PreparedRequest(
+            Path modelPath,
+            String prompt,
+            GenerationConfig genCfg,
+            boolean isAudioModel,
+            String ttsPrompt,
+            tech.kayys.gollek.safetensor.audio.model.AudioConfig audioConfig,
+            DirectInferenceEngine.LoadedModel loadedModel) {
     }
 
     /**
@@ -328,4 +404,44 @@ public class DirectSafetensorBackend {
         log.warnf("Model path not found at %s, using as-is: %s", resolved, modelId);
         return asPath;
     }
+
+    private QuantizationEngine.QuantStrategy parseQuantStrategy(ProviderRequest request) {
+        String raw = request.getParameter("quantize_strategy", String.class).orElse("none");
+        if (raw == null || raw.isBlank()) {
+            return QuantizationEngine.QuantStrategy.NONE;
+        }
+
+        try {
+            return QuantizationEngine.QuantStrategy.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            log.warnf("Unknown quantize_strategy '%s'; falling back to NONE", raw);
+            return QuantizationEngine.QuantStrategy.NONE;
+        }
+    }
+
+    private void configureForwardPlatform(String modelType, String arch) {
+        if (Boolean.getBoolean("gollek.safetensor.allow_metal_gemma4")) {
+            System.clearProperty(FORCE_CPU_FORWARD_PROPERTY);
+            System.err.println("⚠ Safetensor forward path: allowing Metal for Gemma4 experimental validation");
+            return;
+        }
+        if (requiresCpuForward(modelType, arch)) {
+            System.setProperty(FORCE_CPU_FORWARD_PROPERTY, "true");
+            System.err.println("⚠ Safetensor forward path: forcing CPU for " + arch + " to avoid incorrect Metal zero-logit output");
+            return;
+        }
+
+        System.clearProperty(FORCE_CPU_FORWARD_PROPERTY);
+    }
+
+    private boolean requiresCpuForward(String modelType, String arch) {
+        return false;
+    }
+
+    private boolean shouldSkipDefaultSystemPrompt(String modelType, String arch) {
+        String mt = modelType == null ? "" : modelType.toLowerCase();
+        String architecture = arch == null ? "" : arch.toLowerCase();
+        return mt.startsWith("gemma4") || architecture.contains("gemma4");
+    }
+
 }

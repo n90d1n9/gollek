@@ -1,7 +1,5 @@
 package tech.kayys.gollek.sdk.config;
 
-import tech.kayys.gollek.spi.model.ModelFormat;
-
 import java.time.Duration;
 import java.util.Optional;
 
@@ -16,7 +14,7 @@ public final class SdkConfig {
     private final String preferredProvider;
     private final boolean enableMetrics;
     private final RetryConfig retryConfig;
-    private final ModelFormat modelFormat; // v0.1.4
+    private final String modelFormat; // v0.1.4
     private final String ggufBasePath; // v0.1.4
     private final String safetensorsBasePath; // v0.1.4
     private final String baseUrl; // v0.1.4
@@ -65,7 +63,7 @@ public final class SdkConfig {
     // ── v0.1.4 accessors ──────────────────────────────────────────────────
 
     /** Explicit model format hint — skip magic-byte detection when set. */
-    public Optional<ModelFormat> getModelFormat() {
+    public Optional<String> getModelFormat() {
         return Optional.ofNullable(modelFormat);
     }
 
@@ -99,7 +97,7 @@ public final class SdkConfig {
         private String preferredProvider;
         private boolean enableMetrics;
         private RetryConfig retryConfig = RetryConfig.builder().build();
-        private ModelFormat modelFormat; // v0.1.4
+        private String modelFormat; // v0.1.4
         private String ggufBasePath; // v0.1.4
         private String safetensorsBasePath; // v0.1.4
         private String baseUrl; // v0.1.4
@@ -151,7 +149,7 @@ public final class SdkConfig {
         }
 
         /** Hint the format so the SDK can skip filesystem detection. */
-        public Builder modelFormat(ModelFormat v) {
+        public Builder modelFormat(String v) {
             this.modelFormat = v;
             return this;
         }

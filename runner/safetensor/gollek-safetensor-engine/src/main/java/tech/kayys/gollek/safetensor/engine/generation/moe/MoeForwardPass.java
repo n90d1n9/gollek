@@ -142,7 +142,7 @@ public class MoeForwardPass {
             log.warnf("Expert %d weights not found for layer %d", expertIdx, layerIdx);
             return hidden;
         }
-        return forwardPass.swigluFfn(hidden, gateW, null, upW, null, downW, null);
+        return forwardPass.swigluFfn(hidden, null, gateW, null, upW, null, downW, null);
     }
 
     private float[] runExpertOnToken(float[] tokenHidden, Map<String, AccelTensor> weights,

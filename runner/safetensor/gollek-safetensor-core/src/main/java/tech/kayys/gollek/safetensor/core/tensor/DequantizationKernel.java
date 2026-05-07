@@ -79,14 +79,26 @@ public class DequantizationKernel {
         }
     }
 
+    private static final VectorSpecies<Short> S_SPECIES = ShortVector.SPECIES_128;
+
     /**
      * Dequantize BF16 weights to Float32.
      */
     public static void dequantizeBf16(MemorySegment src, MemorySegment dst, long numel) {
-        for (long i = 0; i < numel; i++) {
+        long i = 0;
+        long unrolledBound = numel - (numel % S_SPECIES.length());
+        for (; i < unrolledBound; i += S_SPECIES.length()) {
+            ShortVector sv = ShortVector.fromMemorySegment(S_SPECIES, src, i * 2, ByteOrder.nativeOrder());
+            // Zero-extend short to int, shift left 16 to form float32
+            IntVector iv = (IntVector) sv.castShape(IntVector.SPECIES_256, 0);
+            iv = iv.and(0xFFFF).lanewise(VectorOperators.LSHL, 16);
+            FloatVector fv = iv.reinterpretAsFloats();
+            fv.intoMemorySegment(dst, i * 4, ByteOrder.nativeOrder());
+        }
+
+        for (; i < numel; i++) {
             short raw = src.getAtIndex(ValueLayout.JAVA_SHORT, i);
-            int floatBits = (raw & 0xFFFF) << 16;
-            dst.setAtIndex(ValueLayout.JAVA_FLOAT, i, Float.intBitsToFloat(floatBits));
+            dst.setAtIndex(ValueLayout.JAVA_FLOAT, i, Float.intBitsToFloat((raw & 0xFFFF) << 16));
         }
     }
 

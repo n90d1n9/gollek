@@ -45,7 +45,10 @@ public final class ModelResolver {
         if (requestedId.length() == 6 && allModels != null) {
             final List<ModelInfo> models = allModels;
             Optional<ModelInfo> byShortId = models.stream()
-                    .filter(m -> requestedId.equalsIgnoreCase(tech.kayys.gollek.spi.model.ModelUtils.generateShortId(m.getModelId())))
+                    .filter(m -> requestedId.equalsIgnoreCase(m.getShortId())
+                            || requestedId.equalsIgnoreCase(stringMetadata(m, "shortId"))
+                            || requestedId.equalsIgnoreCase(stringMetadata(m, "manifestId"))
+                            || requestedId.equalsIgnoreCase(tech.kayys.gollek.spi.model.ModelUtils.generateShortId(m.getModelId())))
                     .findFirst();
             if (byShortId.isPresent()) {
                 ModelInfo mi = byShortId.get();
@@ -188,5 +191,13 @@ public final class ModelResolver {
                 .requestContext(RequestContext.of("community", "community"))
                 .metadata(Map.of("path", file.toAbsolutePath().toString()))
                 .build();
+    }
+
+    private static String stringMetadata(ModelInfo model, String key) {
+        if (model == null || model.getMetadata() == null || key == null) {
+            return null;
+        }
+        Object value = model.getMetadata().get(key);
+        return value != null ? value.toString() : null;
     }
 }

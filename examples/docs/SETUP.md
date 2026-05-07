@@ -75,7 +75,7 @@ cd gollek/framework/lib/gollek-ml-examples/
 mvn clean compile
 
 # Run an example
-mvn exec:java -Dexec.mainClass=tech.kayys.gollek.ml.examples.SimpleFFNExample
+mvn exec:java -Dexec.mainClass=tech.kayys.gollek.train.examples.SimpleFFNExample
 ```
 
 ---

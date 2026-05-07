@@ -33,7 +33,7 @@ import tech.kayys.gollek.safetensor.spi.SafetensorFeature;
 import tech.kayys.gollek.spi.exception.ProviderException;
 
 import tech.kayys.gollek.spi.inference.InferenceResponse;
-import tech.kayys.gollek.spi.model.ModelFormat;
+import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.spi.observability.AdapterMetricTagResolver;
 import tech.kayys.gollek.spi.observability.AdapterMetricsRecorder;
 import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
@@ -140,7 +140,7 @@ public class SafetensorProvider implements StreamingProvider {
                 .toolCalling(false)
                 .structuredOutputs(false)
                 .supportedFormats(Set.of(ModelFormat.SAFETENSORS))
-                .supportedDevices(Set.of(tech.kayys.gollek.spi.model.DeviceType.CPU))
+                .supportedDevices(Set.of(tech.kayys.gollek.core.tensor.DeviceType.CPU))
                 .features(Set.copyOf(features))
                 .build();
     }
@@ -187,8 +187,8 @@ public class SafetensorProvider implements StreamingProvider {
         String modelRef = modelId;
         if (request != null) {
             modelRef = request.getParameter("model_path", String.class)
-                .or(() -> Optional.ofNullable((String) request.getMetadata().get("model_path")))
-                .orElse(modelId);
+                    .or(() -> Optional.ofNullable((String) request.getMetadata().get("model_path")))
+                    .orElse(modelId);
         }
         Path modelPath = resolveModelPath(modelRef);
         if (modelPath == null)

@@ -11,10 +11,10 @@
 //   - Performance comparison (Native CPU vs. Native Metal)
 //
 // DEPENDENCIES:
-//   cd gollek/plugins/kernel/metal/gollek-kernel-metal && mvn clean install -DskipTests
+//   cd gollek/plugins/kernel/metal/gollek-backend-metal && mvn clean install -DskipTests
 //
 //REPOS mavencentral,mylocal=file:///Users/bhangun/.m2/repository
-//DEPS tech.kayys.gollek:gollek-kernel-metal:0.1.0-SNAPSHOT
+//DEPS tech.kayys.gollek:gollek-backend-metal:0.1.0-SNAPSHOT
 //DEPS org.slf4j:slf4j-simple:2.0.12
 //JAVA_OPTIONS --enable-native-access=ALL-UNNAMED
 //JAVA 21+
@@ -45,7 +45,8 @@ public class LiteRTMetalBridgeExample {
         System.out.println("Searching for Metal bridge: " + libPath);
         if (!java.nio.file.Files.exists(libPath)) {
             System.err.println("❌ Error: Native Metal bridge not found.");
-            System.err.println("   Please run: make -C gollek/plugins/kernel/metal/gollek-kernel-metal/src/main/cpp/metal install");
+            System.err.println(
+                    "   Please run: make -C gollek/plugins/kernel/metal/gollek-backend-metal/src/main/cpp/metal install");
             System.exit(1);
         }
 
@@ -85,8 +86,10 @@ public class LiteRTMetalBridgeExample {
             MemorySegment C = arena.allocate(sizeC, 64);
 
             // Fill with random data
-            for (int i = 0; i < M * K; i++) A.setAtIndex(ValueLayout.JAVA_FLOAT, i, (float) Math.random());
-            for (int i = 0; i < K * N; i++) B.setAtIndex(ValueLayout.JAVA_FLOAT, i, (float) Math.random());
+            for (int i = 0; i < M * K; i++)
+                A.setAtIndex(ValueLayout.JAVA_FLOAT, i, (float) Math.random());
+            for (int i = 0; i < K * N; i++)
+                B.setAtIndex(ValueLayout.JAVA_FLOAT, i, (float) Math.random());
 
             System.out.print("Warmup... ");
             binding.matmul(C, A, B, M, K, N, 1.0f, 0.0f);
@@ -100,7 +103,7 @@ public class LiteRTMetalBridgeExample {
             }
             long t1 = System.nanoTime();
             double avgMs = (t1 - t0) / (iterations * 1_000_000.0);
-            
+
             // Calculate TFLOPS: (2 * M * N * K) / (time_in_seconds * 10^12)
             double tflops = (2.0 * M * N * K) / (avgMs / 1000.0) / 1e12;
 

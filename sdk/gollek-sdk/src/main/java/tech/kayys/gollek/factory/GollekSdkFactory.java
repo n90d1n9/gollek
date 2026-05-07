@@ -4,8 +4,6 @@ import tech.kayys.gollek.sdk.config.SdkConfig;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.sdk.core.GollekSdkProvider;
 import tech.kayys.gollek.sdk.exception.SdkException;
-import tech.kayys.gollek.spi.model.ModelFormat;
-
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.Objects;
@@ -71,7 +69,7 @@ public class GollekSdkFactory {
     public static GollekSdk createForGguf() throws SdkException {
         return createLocalSdk(SdkConfig.builder()
                 .preferredProvider("gguf")
-                .modelFormat(ModelFormat.GGUF)
+                .modelFormat("GGUF")
                 .build());
     }
 
@@ -84,7 +82,7 @@ public class GollekSdkFactory {
     public static GollekSdk createForGguf(String ggufBasePath) throws SdkException {
         return createLocalSdk(SdkConfig.builder()
                 .preferredProvider("gguf")
-                .modelFormat(ModelFormat.GGUF)
+                .modelFormat("GGUF")
                 .ggufBasePath(ggufBasePath)
                 .build());
     }
@@ -97,7 +95,7 @@ public class GollekSdkFactory {
     public static GollekSdk createForSafeTensors() throws SdkException {
         return createLocalSdk(SdkConfig.builder()
                 .preferredProvider("safetensor")
-                .modelFormat(ModelFormat.SAFETENSORS)
+                .modelFormat("SAFETENSORS")
                 .build());
     }
 
@@ -110,7 +108,7 @@ public class GollekSdkFactory {
     public static GollekSdk createForSafeTensors(String safetensorsBasePath) throws SdkException {
         return createLocalSdk(SdkConfig.builder()
                 .preferredProvider("safetensor")
-                .modelFormat(ModelFormat.SAFETENSORS)
+                .modelFormat("SAFETENSORS")
                 .safetensorsBasePath(safetensorsBasePath)
                 .build());
     }
@@ -219,7 +217,7 @@ public class GollekSdkFactory {
         private Duration connectTimeout = Duration.ofSeconds(30);
         private int maxRetries = 3;
         private boolean enableMetrics = false;
-        private ModelFormat modelFormat; // v0.1.4
+        private String modelFormat; // v0.1.4
         private String ggufBasePath; // v0.1.4
         private String safetensorsBasePath; // v0.1.4
 
@@ -261,6 +259,11 @@ public class GollekSdkFactory {
 
         public Builder enableMetrics(boolean enableMetrics) {
             this.enableMetrics = enableMetrics;
+            return this;
+        }
+
+        public Builder modelFormat(String modelFormat) {
+            this.modelFormat = modelFormat;
             return this;
         }
 
@@ -313,3 +316,7 @@ public class GollekSdkFactory {
         }
     }
 }
+        public Builder modelFormat(String modelFormat) {
+            this.modelFormat = modelFormat;
+            return this;
+        }

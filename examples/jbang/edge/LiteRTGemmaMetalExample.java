@@ -12,7 +12,7 @@
 //REPOS mavencentral,mylocal=file:///Users/bhangun/.m2/repository
 //DEPS tech.kayys.gollek:gollek-sdk-litert:0.1.0-SNAPSHOT
 //DEPS tech.kayys.gollek:gollek-runner-litert:0.1.0-SNAPSHOT
-//DEPS tech.kayys.gollek:gollek-kernel-metal:0.1.0-SNAPSHOT
+//DEPS tech.kayys.gollek:gollek-backend-metal:0.1.0-SNAPSHOT
 //DEPS org.slf4j:slf4j-simple:2.0.12
 //JAVA_OPTIONS --enable-native-access=ALL-UNNAMED
 //JAVA 21+
@@ -47,7 +47,8 @@ public class LiteRTGemmaMetalExample {
         }
 
         if (modelPathStr == null) {
-            modelPathStr = System.getProperty("user.home") + "/.gollek/models/litert/litert-community/gemma-4-E2B-it-litert-lm/gemma-4-E2B-it_qualcomm_qcs8275.litertlm";
+            modelPathStr = System.getProperty("user.home")
+                    + "/.gollek/models/litert/litert-community/gemma-4-E2B-it-litert-lm/gemma-4-E2B-it_qualcomm_qcs8275.litertlm";
         }
 
         Path modelPath = Paths.get(modelPathStr);
@@ -75,16 +76,17 @@ public class LiteRTGemmaMetalExample {
                 while (true) {
                     System.out.print("\nYOU > ");
                     String prompt = scanner.nextLine();
-                    if ("exit".equalsIgnoreCase(prompt) || "quit".equalsIgnoreCase(prompt)) break;
+                    if ("exit".equalsIgnoreCase(prompt) || "quit".equalsIgnoreCase(prompt))
+                        break;
 
                     System.out.print("GEMMA > ");
                     long t0 = System.currentTimeMillis();
-                    
+
                     runner.generate(prompt, token -> {
                         System.out.print(token);
                         System.out.flush();
                     });
-                    
+
                     long elapsed = System.currentTimeMillis() - t0;
                     System.out.println("\n\n[Inference Time: " + elapsed + "ms]");
                 }
