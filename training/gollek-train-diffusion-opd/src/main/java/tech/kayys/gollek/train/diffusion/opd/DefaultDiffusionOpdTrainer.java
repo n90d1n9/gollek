@@ -157,7 +157,7 @@ public final class DefaultDiffusionOpdTrainer implements DiffusionOpdSession {
                                     transitionMeanAdapter.stepVariance(tIndex));
                             double baseStepLossValue = stepLoss.item();
                             double weightedStepLossValue = baseStepLossValue * resolvedTeacher.lossWeight();
-                            optimizationStep.update(stepLoss.mul(resolvedTeacher.lossWeight()));
+                            optimizationStep.update(stepLoss.mul((float) resolvedTeacher.lossWeight()));
                             totalLoss += weightedStepLossValue;
                             roundLossSum += weightedStepLossValue;
                             lossCount++;

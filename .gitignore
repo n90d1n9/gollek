@@ -10,6 +10,9 @@ target/
 build/
 **/build/
 
+.gradle-sandbox/
+.gradle-worker/
+
 # The generated Quarkus application runner JAR structure (inside target/)
 # This ensures that the final packaged application (which includes lib/) is ignored.
 quarkus-app/
