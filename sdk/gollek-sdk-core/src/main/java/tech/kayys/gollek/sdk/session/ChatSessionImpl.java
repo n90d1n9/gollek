@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class ChatSessionImpl implements ChatSession {
 
-    private final String sessionId;
+    private volatile String sessionId;
+    private final boolean sessionEnabled;
     private final GollekSdk sdk;
     private final List<Message> history = new ArrayList<>();
     
@@ -35,15 +36,24 @@ public class ChatSessionImpl implements ChatSession {
     private final Map<String, int[]> perProviderStats = new HashMap<>();
 
     public ChatSessionImpl(GollekSdk sdk, String modelId, String providerId) {
+        this(sdk, modelId, providerId, true);
+    }
+
+    public ChatSessionImpl(GollekSdk sdk, String modelId, String providerId, boolean sessionEnabled) {
         this.sdk = sdk;
         this.modelId = modelId;
         this.providerId = providerId;
-        this.sessionId = UUID.randomUUID().toString();
+        this.sessionEnabled = sessionEnabled;
+        this.sessionId = nextSessionId();
     }
 
     @Override
     public String getSessionId() {
         return sessionId;
+    }
+
+    public boolean isSessionEnabled() {
+        return sessionEnabled;
     }
 
     @Override
@@ -101,6 +111,11 @@ public class ChatSessionImpl implements ChatSession {
         synchronized (history) {
             history.clear();
         }
+        if (sessionEnabled) {
+            // Reset starts a fresh conversation scope so backend state is not
+            // accidentally associated with a logically new chat.
+            sessionId = nextSessionId();
+        }
     }
 
     @Override
@@ -115,6 +130,7 @@ public class ChatSessionImpl implements ChatSession {
     @Override
     public InferenceResponse send(InferenceRequest request) throws SdkException {
         long start = System.currentTimeMillis();
+        boolean usedSessionHistory = requestUsesSessionHistory(request);
         try {
             InferenceRequest enriched = enrichRequest(request);
             InferenceResponse response = sdk.createCompletion(enriched);
@@ -134,7 +150,9 @@ public class ChatSessionImpl implements ChatSession {
                 }
             }
 
-            addMessage(Message.user(getLastUserPrompt(enriched)));
+            if (!usedSessionHistory) {
+                addMessage(Message.user(getLastUserPrompt(enriched)));
+            }
             addMessage(Message.assistant(content));
             
             return response.toBuilder().content(content).build();
@@ -142,6 +160,40 @@ public class ChatSessionImpl implements ChatSession {
             totalErrors.incrementAndGet();
             throw e;
         }
+    }
+
+    public InferenceRequest prepareRequest(InferenceRequest request) {
+        return enrichRequest(request);
+    }
+
+    public void recordExternalAssistantResponse(String content, int tokens, long durationMs) {
+        recordExternalAssistantResponse(content, tokens, durationMs, false);
+    }
+
+    public void recordExternalAssistantResponse(String content, int tokens, long durationMs, boolean replaceLastAssistant) {
+        if (replaceLastAssistant) {
+            synchronized (history) {
+                if (!history.isEmpty() && history.get(history.size() - 1).getRole() == Message.Role.ASSISTANT) {
+                    history.set(history.size() - 1, Message.assistant(content != null ? content : ""));
+                } else {
+                    history.add(Message.assistant(content != null ? content : ""));
+                }
+            }
+        } else {
+            addMessage(Message.assistant(content != null ? content : ""));
+        }
+        recordStats(tokens, durationMs, false);
+    }
+
+    public boolean hasTrailingAssistantMessage() {
+        synchronized (history) {
+            return !history.isEmpty() && history.get(history.size() - 1).getRole() == Message.Role.ASSISTANT;
+        }
+    }
+
+    public void recordExternalError(long durationMs) {
+        totalErrors.incrementAndGet();
+        recordStats(0, durationMs, true);
     }
 
     private String requestContinuation() throws SdkException {
@@ -191,6 +243,7 @@ public class ChatSessionImpl implements ChatSession {
 
     @Override
     public Multi<StreamingInferenceChunk> stream(InferenceRequest request) throws SdkException {
+        boolean usedSessionHistory = requestUsesSessionHistory(request);
         InferenceRequest enriched = enrichRequest(request);
         long start = System.currentTimeMillis();
         
@@ -229,7 +282,9 @@ public class ChatSessionImpl implements ChatSession {
                     // Note: Auto-continue for streaming is more complex to implement here 
                     // as we return Multi. For now, we only handle it in synchronous send().
                     
-                    addMessage(Message.user(getLastUserPrompt(enriched)));
+                    if (!usedSessionHistory) {
+                        addMessage(Message.user(getLastUserPrompt(enriched)));
+                    }
                     addMessage(Message.assistant(content));
                 });
     }
@@ -274,6 +329,9 @@ public class ChatSessionImpl implements ChatSession {
         InferenceRequest.Builder builder = request.toBuilder();
         if (request.getModel() == null) builder.model(modelId);
         if (request.getPreferredProvider().isEmpty()) builder.preferredProvider(providerId);
+        if (request.getMessages().isEmpty()) {
+            builder.messages(getHistory());
+        }
         
         // Apply default parameters
         for (Map.Entry<String, Object> entry : defaultParameters.entrySet()) {
@@ -282,12 +340,32 @@ public class ChatSessionImpl implements ChatSession {
             }
         }
 
-        // Add session ID to parameters
+        String effectiveSessionId = request.getSessionId()
+                .filter(id -> !id.isBlank())
+                .orElse(sessionEnabled ? sessionId : null);
+        if (effectiveSessionId != null && !effectiveSessionId.isBlank()) {
+            builder.sessionId(effectiveSessionId);
+        }
+
+        // Keep the legacy parameter in sync for code paths that still inspect it.
         Map<String, Object> params = new HashMap<>(request.getParameters());
-        params.put("session_id", sessionId);
+        if (effectiveSessionId != null && !effectiveSessionId.isBlank()) {
+            params.put("session_id", effectiveSessionId);
+        } else {
+            params.remove("session_id");
+        }
+        params.put("chat_session_enabled", sessionEnabled);
         builder.parameters(params);
         
         return builder.build();
+    }
+
+    private static String nextSessionId() {
+        return UUID.randomUUID().toString();
+    }
+
+    private boolean requestUsesSessionHistory(InferenceRequest request) {
+        return request.getMessages().isEmpty() || request.getMessages().equals(getHistory());
     }
 
     private String getLastUserPrompt(InferenceRequest request) {

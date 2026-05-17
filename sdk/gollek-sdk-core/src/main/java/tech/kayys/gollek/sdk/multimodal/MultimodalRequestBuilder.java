@@ -1,9 +1,9 @@
 package tech.kayys.gollek.sdk.multimodal;
 
 import tech.kayys.gollek.spi.model.ModalityType;
-import tech.kayys.gollek.multimodal.model.MultimodalContent;
-import tech.kayys.gollek.multimodal.model.MultimodalRequest;
-import tech.kayys.gollek.multimodal.model.MultimodalResponse;
+import tech.kayys.gollek.sdk.multimodal.MultimodalContent;
+import tech.kayys.gollek.sdk.multimodal.MultimodalRequest;
+import tech.kayys.gollek.sdk.multimodal.MultimodalResponse;
 
 import java.util.Base64;
 import java.util.List;

@@ -316,7 +316,3 @@ public class GollekSdkFactory {
         }
     }
 }
-        public Builder modelFormat(String modelFormat) {
-            this.modelFormat = modelFormat;
-            return this;
-        }

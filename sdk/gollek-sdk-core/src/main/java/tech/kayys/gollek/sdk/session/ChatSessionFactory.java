@@ -14,6 +14,10 @@ public class ChatSessionFactory {
     GollekSdk sdk;
 
     public ChatSession createSession(String modelId, String providerId) {
-        return new ChatSessionImpl(sdk, modelId, providerId);
+        return createSession(modelId, providerId, true);
+    }
+
+    public ChatSession createSession(String modelId, String providerId, boolean enableSession) {
+        return new ChatSessionImpl(sdk, modelId, providerId, enableSession);
     }
 }

@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Resolves Gollek runtime home with Wayang-first defaults and legacy fallback.
+ * Resolves Gollek runtime home with Gollek-first defaults.
  * Centralized in SDK for consistency across CLI, Server, and other clients.
  */
 public final class GollekHome {
@@ -25,16 +25,16 @@ public final class GollekHome {
         }
 
         String userHome = System.getProperty("user.home");
+        Path gollekHome = Paths.get(userHome, ".gollek");
         String wayangHome = firstNonBlank(System.getProperty(WAYANG_HOME_PROP), System.getenv("WAYANG_HOME"));
-        Path preferred = hasText(wayangHome)
+        Path legacyWayangHome = hasText(wayangHome)
                 ? Paths.get(wayangHome, "gollek")
                 : Paths.get(userHome, ".wayang", "gollek");
 
-        Path legacy = Paths.get(userHome, ".gollek");
-        if (Files.isDirectory(preferred) || !Files.isDirectory(legacy)) {
-            return preferred.toAbsolutePath().normalize();
+        if (Files.isDirectory(gollekHome) || !Files.isDirectory(legacyWayangHome)) {
+            return gollekHome.toAbsolutePath().normalize();
         }
-        return legacy.toAbsolutePath().normalize();
+        return legacyWayangHome.toAbsolutePath().normalize();
     }
 
     public static Path path(String... parts) {

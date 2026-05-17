@@ -1,4 +1,4 @@
-package tech.kayys.gollek.multimodal.model;
+package tech.kayys.gollek.sdk.multimodal;
 
 import java.util.Map;
 
@@ -20,28 +20,37 @@ public class MultimodalResponse {
      *
      * @return request ID, or {@code null} if not set
      */
-    public String getRequestId() { return requestId; }
+    public String getRequestId() {
+        return requestId;
+    }
 
     /**
      * Returns the array of generated output content items.
      *
      * @return non-null array of outputs (may be empty)
      */
-    public MultimodalContent[] getOutputs() { return outputs; }
+    public MultimodalContent[] getOutputs() {
+        return outputs;
+    }
 
     /**
-     * Returns provider-specific metadata about the inference (e.g. token counts, latency).
+     * Returns provider-specific metadata about the inference (e.g. token counts,
+     * latency).
      *
      * @return metadata map, or {@code null}
      */
-    public Map<String, Object> getMetadata() { return metadata; }
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
 
     /**
      * Creates a new builder for {@link MultimodalResponse}.
      *
      * @return a new {@link Builder}
      */
-    public static Builder builder() { return new Builder(); }
+    public static Builder builder() {
+        return new Builder();
+    }
 
     /**
      * Builder for {@link MultimodalResponse}.
@@ -50,7 +59,10 @@ public class MultimodalResponse {
         private final MultimodalResponse response = new MultimodalResponse();
 
         /** @param requestId the originating request identifier */
-        public Builder requestId(String requestId) { response.requestId = requestId; return this; }
+        public Builder requestId(String requestId) {
+            response.requestId = requestId;
+            return this;
+        }
 
         /** @param outputs generated content items; {@code null} is treated as empty */
         public Builder outputs(MultimodalContent... outputs) {
@@ -59,13 +71,18 @@ public class MultimodalResponse {
         }
 
         /** @param metadata provider-specific inference metadata */
-        public Builder metadata(Map<String, Object> metadata) { response.metadata = metadata; return this; }
+        public Builder metadata(Map<String, Object> metadata) {
+            response.metadata = metadata;
+            return this;
+        }
 
         /**
          * Builds the {@link MultimodalResponse}.
          *
          * @return a configured {@link MultimodalResponse}
          */
-        public MultimodalResponse build() { return response; }
+        public MultimodalResponse build() {
+            return response;
+        }
     }
 }

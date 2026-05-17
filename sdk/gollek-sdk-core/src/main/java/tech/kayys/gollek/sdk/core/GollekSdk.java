@@ -3,6 +3,7 @@ package tech.kayys.gollek.sdk.core;
 import io.smallrye.mutiny.Multi;
 import tech.kayys.gollek.spi.provider.ProviderInfo;
 import tech.kayys.gollek.sdk.exception.SdkException;
+import tech.kayys.gollek.sdk.feature.GollekFeatureKit;
 import tech.kayys.gollek.sdk.mcp.McpRegistryManager;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.sdk.model.ModelResolution;
@@ -475,5 +476,14 @@ public interface GollekSdk {
         throw new UnsupportedOperationException(
                 "Multimodal processing is not supported by this SDK implementation. "
                         + "Ensure gollek-multimodal-core is on the classpath.");
+    }
+
+    /**
+     * ML Kit-style feature entrypoint for face recognition, natural language, and
+     * document scanning.
+     */
+    default GollekFeatureKit featureKit() throws SdkException {
+        throw new UnsupportedOperationException(
+                "Feature kit is not supported by this SDK implementation.");
     }
 }

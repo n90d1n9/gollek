@@ -68,6 +68,22 @@ InferenceResponse response = sdk.createCompletion(request);
 System.out.println("Response: " + response.getContent());
 ```
 
+### ML Kit-Style Feature APIs
+
+`gollek-sdk-core` now provides a high-level feature surface for:
+
+- face recognition
+- natural language
+- document scanning
+
+Entry point:
+
+```java
+import tech.kayys.gollek.sdk.feature.GollekFeatureKit;
+
+GollekFeatureKit featureKit = sdk.featureKit();
+```
+
 ### API Key Note
 
 Multi-tenancy is resolved on the backend using your API key. For community/standalone deployments, use the API key `"community"`.

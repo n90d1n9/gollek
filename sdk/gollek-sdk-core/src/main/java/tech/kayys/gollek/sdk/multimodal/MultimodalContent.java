@@ -1,4 +1,4 @@
-package tech.kayys.gollek.multimodal.model;
+package tech.kayys.gollek.sdk.multimodal;
 
 import tech.kayys.gollek.spi.model.ModalityType;
 
@@ -6,15 +6,20 @@ import java.util.Base64;
 import java.util.Map;
 
 /**
- * Represents a single piece of multimodal content — text, image, audio, document,
- * or a pre-computed embedding — that can be included in a {@link MultimodalRequest}.
+ * Represents a single piece of multimodal content — text, image, audio,
+ * document,
+ * or a pre-computed embedding — that can be included in a
+ * {@link MultimodalRequest}.
  *
- * <p>Use the static factory methods for the most common cases, or {@link #builder(ModalityType)}
+ * <p>
+ * Use the static factory methods for the most common cases, or
+ * {@link #builder(ModalityType)}
  * for full control:
+ * 
  * <pre>{@code
- * MultimodalContent text  = MultimodalContent.ofText("Describe this image");
+ * MultimodalContent text = MultimodalContent.ofText("Describe this image");
  * MultimodalContent image = MultimodalContent.ofBase64Image(imageBytes, "image/jpeg");
- * MultimodalContent doc   = MultimodalContent.ofDocument(pdfBytes, "pdf", "application/pdf");
+ * MultimodalContent doc = MultimodalContent.ofDocument(pdfBytes, "pdf", "application/pdf");
  * }</pre>
  *
  * @see MultimodalRequest
@@ -56,7 +61,8 @@ public final class MultimodalContent {
      * Creates an image content item from raw bytes, Base64-encoded internally.
      *
      * @param bytes    raw image bytes
-     * @param mimeType MIME type of the image (e.g. {@code "image/jpeg"}, {@code "image/png"})
+     * @param mimeType MIME type of the image (e.g. {@code "image/jpeg"},
+     *                 {@code "image/png"})
      * @return a {@link ModalityType#IMAGE} content item
      */
     public static MultimodalContent ofBase64Image(byte[] bytes, String mimeType) {
@@ -79,7 +85,8 @@ public final class MultimodalContent {
      * Creates a document content item from raw bytes, Base64-encoded internally.
      *
      * @param bytes    raw document bytes
-     * @param format   document format identifier (e.g. {@code "pdf"}, {@code "docx"})
+     * @param format   document format identifier (e.g. {@code "pdf"},
+     *                 {@code "docx"})
      * @param mimeType MIME type of the document (e.g. {@code "application/pdf"})
      * @return a {@link ModalityType#DOCUMENT} content item
      */
@@ -135,7 +142,8 @@ public final class MultimodalContent {
     }
 
     /**
-     * Returns the URI pointing to the content resource, or {@code null} if not applicable.
+     * Returns the URI pointing to the content resource, or {@code null} if not
+     * applicable.
      *
      * @return URI string, or {@code null}
      */
@@ -188,25 +196,46 @@ public final class MultimodalContent {
         }
 
         /** @param text plain text value */
-        public Builder text(String text) { this.text = text; return this; }
+        public Builder text(String text) {
+            this.text = text;
+            return this;
+        }
 
         /** @param base64Data Base64-encoded binary payload */
-        public Builder base64Data(String base64Data) { this.base64Data = base64Data; return this; }
+        public Builder base64Data(String base64Data) {
+            this.base64Data = base64Data;
+            return this;
+        }
 
         /** @param mimeType MIME type of the binary content */
-        public Builder mimeType(String mimeType) { this.mimeType = mimeType; return this; }
+        public Builder mimeType(String mimeType) {
+            this.mimeType = mimeType;
+            return this;
+        }
 
         /** @param uri URI pointing to the content resource */
-        public Builder uri(String uri) { this.uri = uri; return this; }
+        public Builder uri(String uri) {
+            this.uri = uri;
+            return this;
+        }
 
         /** @param documentFormat format identifier, e.g. {@code "pdf"} */
-        public Builder documentFormat(String documentFormat) { this.documentFormat = documentFormat; return this; }
+        public Builder documentFormat(String documentFormat) {
+            this.documentFormat = documentFormat;
+            return this;
+        }
 
         /** @param embedding pre-computed dense vector */
-        public Builder embedding(float[] embedding) { this.embedding = embedding; return this; }
+        public Builder embedding(float[] embedding) {
+            this.embedding = embedding;
+            return this;
+        }
 
         /** @param metadata arbitrary key-value pairs */
-        public Builder metadata(Map<String, Object> metadata) { this.metadata = metadata; return this; }
+        public Builder metadata(Map<String, Object> metadata) {
+            this.metadata = metadata;
+            return this;
+        }
 
         /**
          * Builds the {@link MultimodalContent} instance.
