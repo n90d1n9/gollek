@@ -73,7 +73,7 @@ public final class ChatTemplateFormatter {
     }
 
     private static String formatGemma(List<Message> messages) {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder("<bos>");
         for (var m : messages) {
             String roleName = m.getRole() == Message.Role.SYSTEM ? "user" : m.getRole().name().toLowerCase(Locale.ROOT);
             sb.append("<start_of_turn>").append(roleName).append("\n");
@@ -84,7 +84,9 @@ public final class ChatTemplateFormatter {
     }
 
     private static String formatGemma4(List<Message> messages) {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder("<bos>");
+        String start = "<|turn>";
+        String end = "<turn|>";
         String firstUserPrefix = "";
         int startIdx = 0;
         if (!messages.isEmpty() && messages.get(0).getRole() == Message.Role.SYSTEM) {
@@ -98,23 +100,35 @@ public final class ChatTemplateFormatter {
         boolean firstRendered = true;
         for (int i = startIdx; i < messages.size(); i++) {
             var m = messages.get(i);
-            String roleName = switch (m.getRole()) {
-                case ASSISTANT -> "model";
-                default -> m.getRole().name().toLowerCase(Locale.ROOT);
-            };
-            sb.append("<|turn>").append(roleName).append("\n");
+            String roleName = m.getRole() == Message.Role.ASSISTANT
+                    ? "model"
+                    : m.getRole().name().toLowerCase(Locale.ROOT);
+            sb.append(start).append(roleName).append("\n");
             if (firstRendered && !firstUserPrefix.isEmpty() && m.getRole() == Message.Role.USER) {
                 sb.append(firstUserPrefix);
             }
-            sb.append(m.getContent().trim()).append("<turn|>\n");
+            sb.append(m.getContent().trim()).append(end).append("\n");
             firstRendered = false;
         }
-        sb.append("<|turn>").append("model").append("\n");
+        sb.append(start).append("model\n");
         return sb.toString();
     }
 
     private static String formatQwen(List<Message> messages) {
-        return formatChatML(messages);
+        var sb = new StringBuilder();
+        boolean hasInitialSystem = !messages.isEmpty() && messages.get(0).getRole() == Message.Role.SYSTEM;
+        if (!hasInitialSystem) {
+            sb.append("<|im_start|>system\n");
+            sb.append("You are Qwen, created by Alibaba Cloud. You are a helpful assistant.");
+            sb.append("<|im_end|>\n");
+        }
+        for (var m : messages) {
+            String roleName = m.getRole().name().toLowerCase(Locale.ROOT);
+            sb.append("<|im_start|>").append(roleName).append("\n");
+            sb.append(m.getContent()).append("<|im_end|>\n");
+        }
+        sb.append("<|im_start|>assistant\n");
+        return sb.toString();
     }
 
     private static String formatChatML(List<Message> messages) {
@@ -136,6 +150,17 @@ public final class ChatTemplateFormatter {
     }
 
     private static String normalise(String s) {
-        return s.trim().toLowerCase(Locale.ROOT);
+        String normalized = s.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return normalized;
+        }
+        String compact = normalized.replace("-", "").replace("_", "");
+        if (compact.startsWith("gemma4")) {
+            return normalized.contains("text") ? "gemma4_text" : "gemma4";
+        }
+        if (compact.startsWith("gemma3")) {
+            return normalized.contains("text") ? "gemma3_text" : "gemma3";
+        }
+        return normalized;
     }
 }

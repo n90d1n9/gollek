@@ -28,7 +28,7 @@ public class SafetensorsCommand implements Runnable {
     String path;
 
     @Option(names = {
-            "--model" }, description = "Model ID under ~/.wayang/gollek/models/libtorchscript (legacy: ~/.gollek/models/libtorchscript)")
+            "--model" }, description = "Model ID under ~/.gollek/models/libtorchscript")
     String modelId;
 
     @Option(names = { "--limit" }, description = "Maximum tensors to print", defaultValue = "30")

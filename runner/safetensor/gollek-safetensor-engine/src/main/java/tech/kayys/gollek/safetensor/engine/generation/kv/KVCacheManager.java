@@ -5,6 +5,7 @@
  */
 package tech.kayys.gollek.safetensor.engine.generation.kv;
 
+import tech.kayys.gollek.safetensor.engine.generation.attention.FlashAttentionKernel;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import java.util.Map;
@@ -39,40 +40,62 @@ public class KVCacheManager {
         private int numKVHeads;
         private int headDim;
         private ForwardWorkspace workspace;
+        private final Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates =
+                new java.util.concurrent.ConcurrentHashMap<>();
         private tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization kvQuantization =
                 tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.NONE;
 
         public static class ForwardWorkspace implements AutoCloseable {
             private java.lang.foreign.MemorySegment normedAttnSeg;
             private java.lang.foreign.MemorySegment normedFfnSeg;
+            private java.lang.foreign.MemorySegment gateSeg;
+            private java.lang.foreign.MemorySegment upSeg;
             private java.lang.foreign.MemorySegment combinedSeg;
             private java.lang.foreign.MemorySegment hiddenASeg;
             private java.lang.foreign.MemorySegment hiddenBSeg;
-            private long currentCap = 0;
+            private long hiddenCap = 0;
+            private long combinedCap = 0;
+            private long projectionCap = 0;
 
             public void ensureCapacity(long totalElements, long hiddenSize, long intermediateSize) {
                 long needed = Math.max(hiddenSize, totalElements) * 4; // float = 4 bytes
                 // Align to 4096 for AMX/Metal safety
                 long paddedNeeded = (needed + 4095) & ~4095;
-                if (normedAttnSeg == null || currentCap < paddedNeeded) {
+                // FFN scratch is one row of length intermediateSize per logical token (totalElements / hiddenSize).
+                // Do not use totalElements * (intermediateSize / hiddenSize): integer division groups first and
+                // undersizes e.g. when intermediate is not a multiple of hidden (Gemma 4 E2B).
+                long tokenSlots = hiddenSize <= 0 ? 0L : totalElements / hiddenSize;
+                long combinedElements = Math.max(intermediateSize, tokenSlots * intermediateSize);
+                long combinedNeeded = combinedElements * 4L;
+                long paddedCombined = (combinedNeeded + 4095) & ~4095;
+                if (normedAttnSeg == null || hiddenCap < paddedNeeded || combinedCap < paddedCombined) {
                     close();
                     java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
                     // Explicitly request 4096-byte alignment
                     normedAttnSeg = arena.allocate(paddedNeeded, 4096);
                     normedFfnSeg = arena.allocate(paddedNeeded, 4096);
-                    
-                    long combinedNeeded = Math.max(intermediateSize, totalElements * (intermediateSize / hiddenSize)) * 4;
-                    long paddedCombined = (combinedNeeded + 4095) & ~4095;
                     combinedSeg = arena.allocate(paddedCombined, 4096);
-                    
                     hiddenASeg = arena.allocate(paddedNeeded, 4096);
                     hiddenBSeg = arena.allocate(paddedNeeded, 4096);
-                    currentCap = paddedNeeded;
+                    hiddenCap = paddedNeeded;
+                    combinedCap = paddedCombined;
+                }
+            }
+
+            public void ensureProjectionScratchCapacity(long requiredBytes) {
+                long padded = (requiredBytes + 4095) & ~4095;
+                if (gateSeg == null || projectionCap < padded) {
+                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+                    gateSeg = arena.allocate(padded, 4096);
+                    upSeg = arena.allocate(padded, 4096);
+                    projectionCap = padded;
                 }
             }
             
             public java.lang.foreign.MemorySegment getNormedAttnSeg() { return normedAttnSeg; }
             public java.lang.foreign.MemorySegment getNormedFfnSeg() { return normedFfnSeg; }
+            public java.lang.foreign.MemorySegment getGateSeg() { return gateSeg; }
+            public java.lang.foreign.MemorySegment getUpSeg() { return upSeg; }
             public java.lang.foreign.MemorySegment getCombinedSeg() { return combinedSeg; }
             public java.lang.foreign.MemorySegment getHiddenASeg() { return hiddenASeg; }
             public java.lang.foreign.MemorySegment getHiddenBSeg() { return hiddenBSeg; }
@@ -82,8 +105,14 @@ public class KVCacheManager {
                 // ofAuto handles cleanup
                 normedAttnSeg = null;
                 normedFfnSeg = null;
+                gateSeg = null;
+                upSeg = null;
                 combinedSeg = null;
-                currentCap = 0;
+                hiddenASeg = null;
+                hiddenBSeg = null;
+                hiddenCap = 0;
+                combinedCap = 0;
+                projectionCap = 0;
             }
         }
 
@@ -94,15 +123,17 @@ public class KVCacheManager {
 
         public void allocate(ModelConfig config, tech.kayys.gollek.safetensor.generation.GenerationConfig genConfig) {
             this.numLayers = config.numHiddenLayers();
-            this.numKVHeads = config.resolvedNumKvHeads();
+            this.numKVHeads = config.resolvedMaxKvHeads();
             this.headDim = config.resolvedMaxHeadDim();
             this.tokensPerBlock = 16; // Default block size
             this.kvQuantization = genConfig.kvCacheQuant();
 
             BlockManager.KvStorageType storageType =
-                    kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT8
-                            ? BlockManager.KvStorageType.INT8
-                            : BlockManager.KvStorageType.FP32;
+                    switch (kvQuantization) {
+                        case INT8 -> BlockManager.KvStorageType.INT8;
+                        case INT4, TURBO -> BlockManager.KvStorageType.INT4;
+                        case NONE -> BlockManager.KvStorageType.FP32;
+                    };
 
             // Gemma-4 128K context requires massive memory. We allocate a safe initial pool 
             // and cap it to prevent Metal driver aborts on huge contiguous requests.
@@ -221,6 +252,19 @@ public class KVCacheManager {
             return blockManager;
         }
 
+        public Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates() {
+            return sharedKvStates;
+        }
+
+        public void clearSharedKvStates() {
+            for (FlashAttentionKernel.SharedKvState state : sharedKvStates.values()) {
+                if (state != null) {
+                    state.close();
+                }
+            }
+            sharedKvStates.clear();
+        }
+
         public tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization kvQuantization() {
             return kvQuantization;
         }
@@ -229,9 +273,19 @@ public class KVCacheManager {
             return kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT8;
         }
 
+        public boolean isQuantizedInt4() {
+            return kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.INT4
+                    || kvQuantization == tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.TURBO;
+        }
+
+        public boolean isQuantized() {
+            return kvQuantization != tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.NONE;
+        }
+
         @Override
         public void close() {
             if (workspace != null) workspace.close();
+            clearSharedKvStates();
             blockTables.values().forEach(list -> {
                 list.forEach(blockManager::freeBlock);
             });

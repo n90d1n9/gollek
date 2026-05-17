@@ -1,7 +1,8 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import java.util.Arrays;
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Huber Loss (Smooth L1) — quadratic for small errors, linear for large errors.
@@ -40,6 +41,9 @@ public final class HuberLoss {
      * @param delta threshold between quadratic and linear regions (default 1.0)
      */
     public HuberLoss(float delta) {
+        if (!Float.isFinite(delta) || delta <= 0.0f) {
+            throw new IllegalArgumentException("delta must be finite and positive, got: " + delta);
+        }
         this.delta = delta;
     }
 
@@ -51,6 +55,23 @@ public final class HuberLoss {
      * @return scalar mean Huber loss
      */
     public GradTensor forward(GradTensor pred, GradTensor target) {
+        return compute(pred, target);
+    }
+
+    /**
+     * Computes the mean Huber loss and attaches the gradient to predictions.
+     *
+     * @param pred   predictions (any shape)
+     * @param target ground-truth values (same shape)
+     * @return scalar mean Huber loss
+     */
+    public GradTensor compute(GradTensor pred, GradTensor target) {
+        if (!Arrays.equals(pred.shape(), target.shape())) {
+            throw new IllegalArgumentException(
+                    "predictions and targets shapes must match, got: " + Arrays.toString(pred.shape())
+                            + " vs " + Arrays.toString(target.shape()));
+        }
+
         float[] p = pred.data(), t = target.data();
         float[] losses = new float[p.length];
         for (int i = 0; i < p.length; i++) {
@@ -59,6 +80,36 @@ public final class HuberLoss {
                     ? 0.5f * diff * diff
                     : delta * (diff - 0.5f * delta);
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / p.length);
+        float total = 0.0f;
+        for (float loss : losses) {
+            total += loss;
+        }
+
+        GradTensor out = GradTensor.scalar(total / p.length);
+        if (pred.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("HuberLoss") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float scale = upstream.item() / p.length;
+                    float[] grad = new float[p.length];
+                    for (int i = 0; i < p.length; i++) {
+                        float diff = p[i] - t[i];
+                        float absDiff = Math.abs(diff);
+                        if (absDiff <= delta) {
+                            grad[i] = diff * scale;
+                        } else {
+                            grad[i] = (diff > 0 ? delta : -delta) * scale;
+                        }
+                    }
+                    pred.backward(GradTensor.of(grad, pred.shape()));
+                }
+            });
+        }
+        return out;
+    }
+
+    public float delta() {
+        return delta;
     }
 }

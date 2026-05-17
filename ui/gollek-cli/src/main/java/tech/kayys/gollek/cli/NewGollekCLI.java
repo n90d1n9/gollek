@@ -170,6 +170,7 @@ public class NewGollekCLI implements Callable<Integer> {
         parameters.put("top_p", 0.9d);
         parameters.put("top_k", 40);
         parameters.put("repeat_penalty", 1.1d);
+        parameters.put("repetition_penalty", 1.1d);
         if (model.blobPath() != null && !model.blobPath().isBlank()) {
             parameters.put("model_path", model.blobPath());
         }

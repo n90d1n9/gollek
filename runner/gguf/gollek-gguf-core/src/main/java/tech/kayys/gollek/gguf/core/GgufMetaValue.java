@@ -137,10 +137,22 @@ public sealed interface GgufMetaValue
                 ints.stream().<GgufMetaValue>map(Int32Val::new).toList());
     }
 
+    public static GgufMetaValue ofUInt32Array(List<Integer> ints) {
+        return new ArrayVal(
+                GgufMetaType.UINT32,
+                ints.stream().<GgufMetaValue>map(i -> new UInt32Val(Integer.toUnsignedLong(i))).toList());
+    }
+
     public static GgufMetaValue ofFloat32Array(List<Float> floats) {
         return new ArrayVal(
                 GgufMetaType.FLOAT32,
                 floats.stream().<GgufMetaValue>map(Float32Val::new).toList());
+    }
+
+    public static GgufMetaValue ofBoolArray(List<Boolean> bools) {
+        return new ArrayVal(
+                GgufMetaType.BOOL,
+                bools.stream().<GgufMetaValue>map(BoolVal::new).toList());
     }
 
     // ── Typed accessors (throw on mismatch) ───────────────────────────────

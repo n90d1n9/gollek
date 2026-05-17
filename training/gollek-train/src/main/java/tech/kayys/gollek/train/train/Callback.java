@@ -2,6 +2,10 @@ package tech.kayys.gollek.ml.train;
 
 import java.io.Closeable;
 
+import tech.kayys.gollek.trainer.api.TrainerSession;
+import tech.kayys.gollek.trainer.api.TrainingListener;
+import tech.kayys.gollek.trainer.api.TrainingSummary;
+
 /**
  * Callback interface for training events.
  *
@@ -24,7 +28,7 @@ import java.io.Closeable;
  * @author Gollek Team
  * @version 0.1.0
  */
-public interface Callback extends Closeable {
+public interface Callback extends Closeable, TrainingListener {
 
     /**
      * Called when training starts.
@@ -106,6 +110,69 @@ public interface Callback extends Closeable {
      * @param trainer trainer instance
      */
     default void onTrainingEnd(Trainer trainer) {
+    }
+
+    @Override
+    default void onTrainingStart(TrainerSession session) {
+        if (session instanceof Trainer trainer) {
+            onTrainingStart(trainer);
+        }
+    }
+
+    @Override
+    default void onEpochStart(TrainerSession session, int epoch) {
+        if (session instanceof Trainer trainer) {
+            onEpochStart(trainer, epoch);
+        }
+    }
+
+    @Override
+    default void onEpochEnd(TrainerSession session, int epoch, double trainLoss) {
+        if (session instanceof Trainer trainer) {
+            onEpochEnd(trainer, epoch, trainLoss);
+        }
+    }
+
+    @Override
+    default void onValidationEnd(TrainerSession session, int epoch, double valLoss) {
+        if (session instanceof Trainer trainer) {
+            onValidationEnd(trainer, epoch, valLoss);
+        }
+    }
+
+    @Override
+    default void onBatchStart(TrainerSession session, int step) {
+        if (session instanceof Trainer trainer) {
+            onBatchStart(trainer, step);
+        }
+    }
+
+    @Override
+    default void onBatchEnd(TrainerSession session, int step, double loss) {
+        if (session instanceof Trainer trainer) {
+            onBatchEnd(trainer, step, loss);
+        }
+    }
+
+    @Override
+    default void onEarlyStopping(TrainerSession session, int epoch) {
+        if (session instanceof Trainer trainer) {
+            onEarlyStopping(trainer, epoch);
+        }
+    }
+
+    @Override
+    default void onTrainingError(TrainerSession session, Exception error) {
+        if (session instanceof Trainer trainer) {
+            onTrainingError(trainer, error);
+        }
+    }
+
+    @Override
+    default void onTrainingEnd(TrainerSession session, TrainingSummary summary) {
+        if (session instanceof Trainer trainer) {
+            onTrainingEnd(trainer);
+        }
     }
 
     @Override

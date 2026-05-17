@@ -3,6 +3,9 @@ package tech.kayys.gollek.ml.nn.loss;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.Function;
 
+import java.util.Arrays;
+import java.util.Objects;
+
 /**
  * Binary Cross-Entropy (BCE) Loss with Logits for binary classification.
  * <p>
@@ -94,6 +97,19 @@ import tech.kayys.gollek.ml.autograd.Function;
  * </ul>
  */
 public class BCEWithLogitsLoss {
+    private final float[] positiveWeights;
+
+    public BCEWithLogitsLoss() {
+        this.positiveWeights = null;
+    }
+
+    public BCEWithLogitsLoss(float positiveWeight) {
+        this(new float[] { positiveWeight });
+    }
+
+    public BCEWithLogitsLoss(float[] positiveWeights) {
+        this.positiveWeights = validatePositiveWeights(positiveWeights);
+    }
 
     /**
      * Compute Binary Cross-Entropy loss with logits.
@@ -118,20 +134,20 @@ public class BCEWithLogitsLoss {
         float[] lData = logits.data();
         float[] tData = targets.data();
         int n = lData.length;
+        if (n == 0) {
+            throw new IllegalArgumentException("logits must contain at least one element");
+        }
+        requirePositiveWeightShape(lShape);
 
         // Validate target values
-        for (float t : tData) {
-            if (t != 0.0f && t != 1.0f) {
-                // Allow small floating point errors
-                if (Math.abs(t - 0.0f) > 1e-6 && Math.abs(t - 1.0f) > 1e-6) {
-                    throw new IllegalArgumentException(
-                        "targets must contain only 0.0 or 1.0, got: " + t);
-                }
-            }
+        float[] sanitizedTargets = new float[n];
+        for (int i = 0; i < n; i++) {
+            sanitizedTargets[i] = requireBinaryTarget(tData[i]);
         }
 
         float totalLoss = 0;
         float[] sigmoidData = new float[n];
+        float[] elementWeights = new float[n];
 
         // Compute sigmoid and BCE
         for (int i = 0; i < n; i++) {
@@ -148,16 +164,12 @@ public class BCEWithLogitsLoss {
             }
             sigmoidData[i] = sigmoid;
 
-            // BCE: -[y*log(σ) + (1-y)*log(1-σ)]
-            float y = tData[i];
-            float epsilon = 1e-8f;
-            if (y > 0.5f) {
-                // Target is 1
-                totalLoss -= (float) Math.log(sigmoid + epsilon);
-            } else {
-                // Target is 0
-                totalLoss -= (float) Math.log(1.0f - sigmoid + epsilon);
-            }
+            float y = sanitizedTargets[i];
+            float positiveWeight = positiveWeightFor(i, lShape);
+            elementWeights[i] = y > 0.5f ? positiveWeight : 1.0f;
+            totalLoss += y > 0.5f
+                    ? positiveWeight * softplus(-logit)
+                    : softplus(logit);
         }
 
         float meanLoss = totalLoss / n;
@@ -173,7 +185,7 @@ public class BCEWithLogitsLoss {
 
                     // Gradient: (σ(x) - y)
                     for (int i = 0; i < n; i++) {
-                        grad[i] = (sigmoidData[i] - tData[i]) * scale;
+                        grad[i] = (sigmoidData[i] - sanitizedTargets[i]) * elementWeights[i] * scale;
                     }
 
                     logits.backward(GradTensor.of(grad, logits.shape()));
@@ -183,8 +195,77 @@ public class BCEWithLogitsLoss {
         return out;
     }
 
+    private float positiveWeightFor(int elementIndex, long[] logitsShape) {
+        if (positiveWeights == null) {
+            return 1.0f;
+        }
+        if (positiveWeights.length == 1) {
+            return positiveWeights[0];
+        }
+        return positiveWeights[positiveWeightLabelIndex(elementIndex, logitsShape)];
+    }
+
+    private void requirePositiveWeightShape(long[] logitsShape) {
+        if (positiveWeights == null || positiveWeights.length == 1) {
+            return;
+        }
+        int labelDimension = logitsShape.length == 0 ? 1 : (int) logitsShape[logitsShape.length - 1];
+        if (positiveWeights.length != labelDimension) {
+            throw new IllegalArgumentException(
+                    "positiveWeights length " + positiveWeights.length
+                            + " must be 1 or match logits label dimension " + labelDimension);
+        }
+    }
+
+    private static int positiveWeightLabelIndex(int elementIndex, long[] shape) {
+        if (shape.length == 0) {
+            return 0;
+        }
+        int lastDimension = (int) shape[shape.length - 1];
+        if (lastDimension <= 0) {
+            return 0;
+        }
+        return elementIndex % lastDimension;
+    }
+
+    private static float softplus(float value) {
+        if (value > 20.0f) {
+            return value;
+        }
+        if (value < -20.0f) {
+            return (float) Math.exp(value);
+        }
+        return (float) Math.log1p(Math.exp(value));
+    }
+
+    private static float requireBinaryTarget(float target) {
+        if (Math.abs(target) <= 1e-6f) {
+            return 0.0f;
+        }
+        if (Math.abs(target - 1.0f) <= 1e-6f) {
+            return 1.0f;
+        }
+        throw new IllegalArgumentException("targets must contain only 0.0 or 1.0, got: " + target);
+    }
+
+    private static float[] validatePositiveWeights(float[] weights) {
+        Objects.requireNonNull(weights, "positiveWeights must not be null");
+        if (weights.length == 0) {
+            throw new IllegalArgumentException("positiveWeights must contain at least one value");
+        }
+        float[] copy = weights.clone();
+        for (float weight : copy) {
+            if (!Float.isFinite(weight) || weight <= 0.0f) {
+                throw new IllegalArgumentException("positiveWeights must be finite and positive, got: " + weight);
+            }
+        }
+        return copy;
+    }
+
     @Override
     public String toString() {
-        return "BCEWithLogitsLoss()";
+        return positiveWeights == null
+                ? "BCEWithLogitsLoss()"
+                : "BCEWithLogitsLoss(positiveWeights=" + Arrays.toString(positiveWeights) + ")";
     }
 }

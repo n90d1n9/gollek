@@ -1,134 +1,95 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
-// Gollek SDK Data Augmentation Example
+// Legacy file name retained for compatibility during module migration.
+// This script provides a lightweight augmentation flow that runs today.
 //
-// Demonstrates data augmentation pipeline with:
-// - Multiple augmentation transforms
-// - Composing augmentations
-// - Training vs inference modes
-//
-// Prerequisites:
-//   - Java 25+
-//   - JBang: curl -Ls https://sh.jbang.dev | bash -s -
-//   - All SDK modules built
-//
-// Usage:
-//   jbang gollek-sdk-augment-example.java
-//
-// DEPS tech.kayys.gollek:gollek-sdk-augment:0.1.0-SNAPSHOT
-// DEPS tech.kayys.gollek:gollek-sdk-vision:0.1.0-SNAPSHOT
-// JAVA 25+
+//JAVA 25+
+//REPOS local,mavencentral
+//DEPS tech.kayys.gollek:gollek-sdk-autograd:0.1.0-SNAPSHOT
+//COMPILE_OPTIONS --add-modules jdk.incubator.vector
+//RUNTIME_OPTIONS --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
 
-import tech.kayys.gollek.sdk.augment.*;
+import java.util.Locale;
+import java.util.Random;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 
-import java.util.Random;
-
-public class gollek_sdk_augment_example {
+class GollekSdkAugmentExample {
 
     public static void main(String[] args) {
-        System.out.println("╔══════════════════════════════════════════════════════════╗");
-        System.out.println("║     Gollek SDK Data Augmentation Example                 ║");
-        System.out.println("╚══════════════════════════════════════════════════════════╝");
-        System.out.println();
+        Locale.setDefault(Locale.US);
+        Random random = new Random(42);
 
-        // 1. Create individual augmentations
-        System.out.println("1. Creating individual augmentations...");
+        System.out.println("==============================================");
+        System.out.println(" Gollek Augment Example (Compatibility Entry)");
+        System.out.println("==============================================");
 
-        Augmentation flip = Augmentation.RandomHorizontalFlip.create();
-        Augmentation crop = Augmentation.RandomCrop.of(224);
-        Augmentation color = Augmentation.ColorJitter.of(0.2, 0.2, 0.2);
-        Augmentation erase = Augmentation.RandomErasing.of(0.25);
-        Augmentation rotate = Augmentation.RandomRotation.of(15.0);
-        Augmentation grayscale = Augmentation.RandomGrayscale.of(0.1);
-        Augmentation blur = Augmentation.GaussianBlur.of(5, 1.0);
+        GradTensor image = GradTensor.randn(3, 4, 4);
+        GradTensor flipped = horizontalFlip(image);
+        GradTensor noised = addGaussianNoise(flipped, 0.10f, random);
 
-        System.out.println("   ✓ RandomHorizontalFlip (p=0.5)");
-        System.out.println("   ✓ RandomCrop (size=224)");
-        System.out.println("   ✓ ColorJitter (brightness=0.2, contrast=0.2, saturation=0.2)");
-        System.out.println("   ✓ RandomErasing (p=0.25)");
-        System.out.println("   ✓ RandomRotation (max_angle=15°)");
-        System.out.println("   ✓ RandomGrayscale (p=0.1)");
-        System.out.println("   ✓ GaussianBlur (kernel=5, sigma=1.0)");
-        System.out.println();
+        System.out.println("Input shape: [3,4,4]");
+        System.out.println("Channel-0 before:");
+        printChannel(image, 0);
+        System.out.println("Channel-0 after flip+noise:");
+        printChannel(noised, 0);
+    }
 
-        // 2. Create augmentation pipeline
-        System.out.println("2. Creating augmentation pipeline...");
+    private static GradTensor horizontalFlip(GradTensor chw) {
+        long[] shape = chw.shape();
+        if (shape.length != 3) {
+            throw new IllegalArgumentException("Expected CHW tensor with 3 dimensions.");
+        }
+        int c = (int) shape[0];
+        int h = (int) shape[1];
+        int w = (int) shape[2];
 
-        AugmentationPipeline trainAugment = new AugmentationPipeline(
-            flip,
-            crop,
-            color,
-            erase
-        );
+        float[] src = chw.data();
+        float[] dst = new float[src.length];
 
-        System.out.println("   ✓ Training pipeline:");
-        System.out.println("     - RandomHorizontalFlip");
-        System.out.println("     - RandomCrop");
-        System.out.println("     - ColorJitter");
-        System.out.println("     - RandomErasing");
-        System.out.println();
+        for (int ch = 0; ch < c; ch++) {
+            for (int row = 0; row < h; row++) {
+                for (int col = 0; col < w; col++) {
+                    int srcIdx = index(ch, row, col, h, w);
+                    int dstIdx = index(ch, row, w - 1 - col, h, w);
+                    dst[dstIdx] = src[srcIdx];
+                }
+            }
+        }
+        return GradTensor.of(dst, shape);
+    }
 
-        // 3. Create inference pipeline (minimal augmentations)
-        System.out.println("3. Creating inference pipeline...");
+    private static GradTensor addGaussianNoise(GradTensor chw, float sigma, Random random) {
+        float[] src = chw.data();
+        float[] dst = new float[src.length];
+        for (int i = 0; i < src.length; i++) {
+            float noise = (float) (random.nextGaussian() * sigma);
+            dst[i] = src[i] + noise;
+        }
+        return GradTensor.of(dst, chw.shape());
+    }
 
-        AugmentationPipeline inferAugment = new AugmentationPipeline(
-            Augmentation.RandomHorizontalFlip.of(0.0)  // No flip during inference
-        );
+    private static int index(int c, int h, int w, int height, int width) {
+        return c * height * width + h * width + w;
+    }
 
-        System.out.println("   ✓ Inference pipeline:");
-        System.out.println("     - No augmentations (deterministic)");
-        System.out.println();
+    private static void printChannel(GradTensor chw, int channel) {
+        long[] shape = chw.shape();
+        int c = (int) shape[0];
+        int h = (int) shape[1];
+        int w = (int) shape[2];
+        if (channel < 0 || channel >= c) {
+            throw new IllegalArgumentException("Invalid channel index: " + channel);
+        }
 
-        // 4. Apply augmentations
-        System.out.println("4. Applying augmentations to sample data...");
-
-        Random rng = new Random(42);
-        GradTensor input = GradTensor.randn(3, 256, 256);  // Simulated image
-
-        System.out.println("   ✓ Input shape: " + java.util.Arrays.toString(input.shape()));
-
-        GradTensor trainOutput = trainAugment.apply(input);
-        System.out.println("   ✓ Training output shape: " + java.util.Arrays.toString(trainOutput.shape()));
-
-        GradTensor inferOutput = inferAugment.apply(input);
-        System.out.println("   ✓ Inference output shape: " + java.util.Arrays.toString(inferOutput.shape()));
-        System.out.println();
-
-        // 5. Show augmentation effects
-        System.out.println("5. Augmentation statistics...");
-        System.out.println("   Training pipeline:");
-        System.out.println("     - " + trainAugment.size() + " transforms");
-        System.out.println("     - Stochastic (random)");
-        System.out.println("     - Improves generalization");
-        System.out.println();
-        System.out.println("   Inference pipeline:");
-        System.out.println("     - " + inferAugment.size() + " transforms");
-        System.out.println("     - Deterministic");
-        System.out.println("     - Consistent predictions");
-        System.out.println();
-
-        // 6. Common augmentation recipes
-        System.out.println("6. Common augmentation recipes...");
-
-        System.out.println("   a) ImageNet training:");
-        System.out.println("      RandomResizedCrop(224) → RandomHorizontalFlip() → ColorJitter() → Normalize()");
-
-        System.out.println("   b) CIFAR-10 training:");
-        System.out.println("      RandomCrop(32, padding=4) → RandomHorizontalFlip() → Normalize()");
-
-        System.out.println("   c) Medical imaging:");
-        System.out.println("      RandomRotation(15) → RandomVerticalFlip() → Normalize()");
-
-        System.out.println("   d) Satellite imagery:");
-        System.out.println("      RandomRotation(360) → RandomHorizontalFlip() → RandomVerticalFlip()");
-        System.out.println();
-
-        System.out.println("╔══════════════════════════════════════════════════════════╗");
-        System.out.println("║  Data Augmentation example complete!                     ║");
-        System.out.println("╚══════════════════════════════════════════════════════════╝");
-        System.out.println();
-        System.out.println("Tip: Use different pipelines for training vs inference!");
-        System.out.println("  - Training: Heavy augmentation for generalization");
-        System.out.println("  - Inference: Minimal/No augmentation for consistency");
+        float[] data = chw.data();
+        for (int row = 0; row < h; row++) {
+            StringBuilder line = new StringBuilder();
+            for (int col = 0; col < w; col++) {
+                if (col > 0) {
+                    line.append(" ");
+                }
+                line.append(String.format("% .4f", data[index(channel, row, col, h, w)]));
+            }
+            System.out.println("  " + line);
+        }
     }
 }

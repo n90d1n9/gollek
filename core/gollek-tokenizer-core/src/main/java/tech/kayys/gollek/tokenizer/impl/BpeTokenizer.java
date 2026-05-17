@@ -157,6 +157,11 @@ public final class BpeTokenizer implements Tokenizer {
     }
 
     private List<Long> encodeParallel(String text) {
+        if (sentencePieceLikeWhitespace) {
+            // SentencePiece-style BPE expects whole-text processing with ▁ markers,
+            // not GPT-2 regex segmentation.
+            return bpeEncode(text);
+        }
         List<String> segments = new ArrayList<>();
         Matcher matcher = GPT2_REGEX.matcher(text);
         while (matcher.find()) {
@@ -187,8 +192,13 @@ public final class BpeTokenizer implements Tokenizer {
     private List<Long> bpeEncode(String word) {
         if (word.isEmpty()) return List.of();
 
-        if (rawUtf8Vocab && sentencePieceLikeWhitespace && word.indexOf(' ') >= 0) {
-            word = word.replace(' ', '\u2581');
+        if (rawUtf8Vocab && sentencePieceLikeWhitespace) {
+            if (word.indexOf(' ') >= 0) {
+                word = word.replace(' ', '\u2581');
+            }
+            if (!word.isEmpty() && word.charAt(0) != '\u2581') {
+                word = '\u2581' + word;
+            }
         }
 
         // Initial tokens from raw bytes
@@ -306,6 +316,21 @@ public final class BpeTokenizer implements Tokenizer {
 
     private void decodeToStream(String text, java.io.ByteArrayOutputStream baos) {
         if (text == null || text.isEmpty()) return;
+
+        // HF byte_fallback token form, e.g. "<0xE8>"
+        if (text.length() == 6
+                && text.charAt(0) == '<'
+                && text.charAt(1) == '0'
+                && text.charAt(2) == 'x'
+                && text.charAt(5) == '>') {
+            try {
+                int b = Integer.parseInt(text.substring(3, 5), 16);
+                baos.write(b);
+                return;
+            } catch (NumberFormatException ignored) {
+                // fall through to standard decoding
+            }
+        }
         
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);

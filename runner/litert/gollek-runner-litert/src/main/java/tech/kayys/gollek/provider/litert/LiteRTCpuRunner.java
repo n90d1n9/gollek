@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import static java.lang.foreign.ValueLayout.*;
 
@@ -89,17 +90,20 @@ public class LiteRTCpuRunner implements AutoCloseable {
                         "Model file not found: " + modelPath);
             }
 
-            // Check for LLM / specialized model formats
+            // Check for LLM / specialized model formats. If we recognize an LLM,
+            // do not fall back into the generic LiteRT loader on runner failure:
+            // that path is unsafe for Gemma LiteRT artifacts.
+            LiteRTContainerParser.ContainerInfo containerInfo = null;
             try {
-                LiteRTContainerParser.ContainerInfo containerInfo = LiteRTContainerParser.parse(modelPath);
-                if (containerInfo.isLlmModel()) {
-                    handleLlmModel(modelPath, containerInfo);
-                    return;
-                }
+                containerInfo = LiteRTContainerParser.parse(modelPath);
             } catch (InferenceException ie) {
                 throw ie;
             } catch (Exception e) {
                 log.warn("Container check failed, proceeding with standard path: {}", e.getMessage());
+            }
+            if (containerInfo != null && containerInfo.isLlmModel()) {
+                handleLlmModel(modelPath, containerInfo);
+                return;
             }
 
             // ===== LiteRT 2.0 CompiledModel Pipeline =====
@@ -338,20 +342,36 @@ public class LiteRTCpuRunner implements AutoCloseable {
             log.info("Detected .litertlm container, delegating to LiteRTInferenceRunner for potential Native Metal fallback");
         }
 
+        Path runtimeModelPath = modelPath;
+        try {
+            String fileName = modelPath.getFileName() != null
+                    ? modelPath.getFileName().toString().toLowerCase()
+                    : "";
+            if (!Boolean.getBoolean("gollek.litert.prefer_native_litertlm")) {
+                runtimeModelPath = LiteRTContainerParser.findBestModelFile(modelPath).orElse(modelPath);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to normalize LiteRT LLM model path {}: {}", modelPath, e.getMessage());
+        }
+        if (!runtimeModelPath.equals(modelPath)) {
+            log.info("Using runnable LiteRT model file {} instead of {}",
+                    runtimeModelPath.getFileName(), modelPath.getFileName());
+        }
+
         // .task, .litertlm or standalone .tflite LLM
         log.info("Detected LLM model, initializing LiteRTInferenceRunner");
-        this.tokenizer = LiteRTTokenizer.create(modelPath);
-        this.llmRunner = new LiteRTInferenceRunner(bindings, modelPath, tokenizer, useGpu, numThreads);
+        boolean officialJvmLiteRtLmPath = containerInfo.format() == LiteRTContainerParser.ContainerFormat.LITERTLM
+                && LiteRTLmJvmBridge.enabled()
+                && LiteRTLmJvmBridge.available();
+        this.tokenizer = officialJvmLiteRtLmPath ? null : LiteRTTokenizer.create(runtimeModelPath);
+        this.llmRunner = new LiteRTInferenceRunner(bindings, runtimeModelPath, tokenizer, useGpu, numThreads);
         this.llmRunner.initialize();
         this.initialized = true;
     }
 
     private InferenceResponse runLlmInference(InferenceRequest request, long start) {
         StringBuilder result = new StringBuilder();
-        String prompt = request.getPrompt();
-        if (prompt == null) prompt = "";
-
-        llmRunner.generate(prompt, result::append);
+        llmRunner.generate(request, result::append);
 
         long latencyMs = System.currentTimeMillis() - start;
         totalInferences.incrementAndGet();
@@ -364,6 +384,22 @@ public class LiteRTCpuRunner implements AutoCloseable {
                 .content(result.toString())
                 .metadata(Map.of("runner", "litert-llm"))
                 .build();
+    }
+
+    public void stream(InferenceRequest request, Consumer<String> tokenConsumer) {
+        if (!initialized) {
+            throw new InferenceException(ErrorCode.RUNTIME_INVALID_STATE, "Runner not initialized");
+        }
+
+        if (llmRunner != null) {
+            llmRunner.generate(request, tokenConsumer);
+            return;
+        }
+
+        InferenceResponse response = infer(request);
+        if (response.getContent() != null && !response.getContent().isEmpty()) {
+            tokenConsumer.accept(response.getContent());
+        }
     }
 
     // ===== Internal: Accelerator Resolution =====

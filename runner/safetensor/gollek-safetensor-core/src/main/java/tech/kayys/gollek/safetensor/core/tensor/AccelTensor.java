@@ -61,7 +61,11 @@ public class AccelTensor implements AutoCloseable {
     private MemorySegment zeros = null;
     private int groupSize = -1; // -1 means per-channel (no groups)
     private volatile AccelTensor cachedDequantized = null;
-    private static final long MAX_CACHED_DEQUANTIZED_BYTES = 32L * 1024L * 1024L;
+    private volatile AccelTensor cachedF16 = null;
+    private volatile AccelTensor cachedF16Transposed2d = null;
+    private static final long DEFAULT_MAX_CACHED_DEQUANTIZED_BYTES = 32L * 1024L * 1024L;
+    private static final String MAX_CACHED_DEQUANTIZED_BYTES_PROPERTY =
+            "gollek.safetensor.max_cached_dequantized_bytes";
 
     /**
      * Dequantizes this tensor back to Float32 if it is quantized.
@@ -70,6 +74,13 @@ public class AccelTensor implements AutoCloseable {
      */
     public AccelTensor dequantize() {
         return dequantizeInternal(shouldCacheDequantized());
+    }
+
+    /**
+     * Dequantizes this tensor while allowing a caller-specific cache ceiling.
+     */
+    public AccelTensor dequantizeCachedUpTo(long maxCachedBytes) {
+        return dequantizeInternal(maxCachedBytes > 0L && dequantizedByteSize() <= maxCachedBytes);
     }
 
     /**
@@ -83,7 +94,110 @@ public class AccelTensor implements AutoCloseable {
      * Large matrix weights should not pin a second full-size F32 copy in direct memory.
      */
     public boolean shouldCacheDequantized() {
-        return numel() * Float.BYTES <= MAX_CACHED_DEQUANTIZED_BYTES;
+        return dequantizedByteSize() <= maxCachedDequantizedBytes();
+    }
+
+    public long dequantizedByteSize() {
+        return numel() * (long) Float.BYTES;
+    }
+
+    public long halfStorageByteSize() {
+        return numel() * 2L;
+    }
+
+    /**
+     * Returns an IEEE F16 view/copy of this weight suitable for Metal MPS mixed
+     * matmul. BF16 source weights are transcoded once and cached on the tensor.
+     */
+    public AccelTensor toF16CachedUpTo(long maxCachedBytes) {
+        if (quantType == QuantType.F16) {
+            return this;
+        }
+        if (quantType != QuantType.BF16) {
+            return null;
+        }
+        if (maxCachedBytes <= 0L || halfStorageByteSize() > maxCachedBytes) {
+            return null;
+        }
+
+        AccelTensor cached = cachedF16;
+        if (cached != null && !cached.isClosed()) {
+            return cached;
+        }
+
+        synchronized (this) {
+            cached = cachedF16;
+            if (cached != null && !cached.isClosed()) {
+                return cached;
+            }
+            Arena f16Arena = Arena.ofAuto();
+            long size = halfStorageByteSize();
+            long paddedSize = (size + 4095L) & ~4095L;
+            MemorySegment f16Seg = f16Arena.allocate(paddedSize + 4096L, 4096L);
+            DequantizationKernel.transcodeBf16ToF16(dataSegment(), f16Seg, numel());
+            cachedF16 = new AccelTensor(f16Seg, shape, contiguousStride(shape), 0, f16Arena)
+                    .withQuantization(QuantType.F16, null, null, -1);
+            return cachedF16;
+        }
+    }
+
+    /**
+     * Returns a cached transposed IEEE F16 copy for decode-time Metal matvec.
+     * Source 2-D weights are stored as [out, in]; this produces [in, out] so
+     * adjacent GPU lanes read contiguous half values while computing one token.
+     */
+    public AccelTensor toF16Transposed2dCachedUpTo(long maxCachedBytes) {
+        if (shape.length != 2) {
+            return null;
+        }
+        if (quantType != QuantType.F16 && quantType != QuantType.BF16) {
+            return null;
+        }
+        if (maxCachedBytes <= 0L || halfStorageByteSize() > maxCachedBytes) {
+            return null;
+        }
+
+        AccelTensor cached = cachedF16Transposed2d;
+        if (cached != null && !cached.isClosed()) {
+            return cached;
+        }
+
+        synchronized (this) {
+            cached = cachedF16Transposed2d;
+            if (cached != null && !cached.isClosed()) {
+                return cached;
+            }
+
+            long rows = shape[0];
+            long cols = shape[1];
+            long size = halfStorageByteSize();
+            long paddedSize = (size + 4095L) & ~4095L;
+            Arena f16Arena = Arena.ofAuto();
+            MemorySegment dst = f16Arena.allocate(paddedSize + 4096L, 4096L);
+            MemorySegment src = dataPtr();
+            for (long r = 0; r < rows; r++) {
+                long srcRow = r * cols;
+                for (long c = 0; c < cols; c++) {
+                    short raw = src.getAtIndex(ValueLayout.JAVA_SHORT, srcRow + c);
+                    short half = quantType == QuantType.BF16
+                            ? DequantizationKernel.bf16ToFloat16Value(raw)
+                            : raw;
+                    dst.setAtIndex(ValueLayout.JAVA_SHORT, c * rows + r, half);
+                }
+            }
+            cachedF16Transposed2d = new AccelTensor(
+                    dst,
+                    new long[] { cols, rows },
+                    contiguousStride(new long[] { cols, rows }),
+                    0,
+                    f16Arena)
+                    .withQuantization(QuantType.F16, null, null, -1);
+            return cachedF16Transposed2d;
+        }
+    }
+
+    private static long maxCachedDequantizedBytes() {
+        return Long.getLong(MAX_CACHED_DEQUANTIZED_BYTES_PROPERTY, DEFAULT_MAX_CACHED_DEQUANTIZED_BYTES);
     }
 
     private AccelTensor dequantizeInternal(boolean cacheResult) {
@@ -639,6 +753,14 @@ public class AccelTensor implements AutoCloseable {
             if (cached != null && !cached.isClosed()) {
                 try {
                     cached.close();
+                } catch (Exception ignored) {
+                }
+            }
+            AccelTensor f16 = cachedF16;
+            cachedF16 = null;
+            if (f16 != null && !f16.isClosed()) {
+                try {
+                    f16.close();
                 } catch (Exception ignored) {
                 }
             }

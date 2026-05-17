@@ -2,6 +2,10 @@ package tech.kayys.gollek.provider.litert;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -10,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,13 +49,15 @@ public class LiteRTTokenizer implements AutoCloseable {
     public static final int EOS_TOKEN_ID = 1;
     public static final int UNK_TOKEN_ID = 3;
 
-    // Token constants for Gemma chat template
-    private static final String START_OF_TURN = "<start_of_turn>";
-    private static final String END_OF_TURN = "<end_of_turn>";
+    // Token constants for Gemma 4 chat template
+    private static final String USER_TURN = "<|turn>user";
+    private static final String MODEL_TURN = "<|turn>model";
+    private static final String END_OF_TURN = "<turn|>";
 
     private final Map<String, Integer> vocab = new HashMap<>();
     private final Map<Integer, String> reverseVocab = new HashMap<>();
     private final Map<String, Integer> specialTokens = new HashMap<>();
+    private tech.kayys.gollek.tokenizer.spi.Tokenizer coreTokenizer;
     private int vocabSize = 0;
     private boolean initialized = false;
     private TokenizerType type = TokenizerType.BYTE_FALLBACK;
@@ -67,12 +74,17 @@ public class LiteRTTokenizer implements AutoCloseable {
     public static LiteRTTokenizer create(Path modelPath) {
         LiteRTTokenizer tokenizer = new LiteRTTokenizer();
         try {
-            // Try loading tokenizer.json first (most reliable)
-            Path modelDir = Files.isDirectory(modelPath) ? modelPath : modelPath.getParent();
+            Path tokenizerSource = normalizeTokenizerSource(modelPath);
+
+            // Prefer a real HuggingFace tokenizer.json when a companion model
+            // exists. Gemma 4 checkpoints expose a BPE tokenizer here, and
+            // forcing the embedded `spm_vocab_model` through SentencePiece
+            // yields incorrect prompt/response tokenization.
+            Path modelDir = Files.isDirectory(tokenizerSource) ? tokenizerSource : tokenizerSource.getParent();
             if (modelDir != null) {
                 Path tokenizerJson = modelDir.resolve("tokenizer.json");
                 if (Files.exists(tokenizerJson)) {
-                    tokenizer.loadFromTokenizerJson(tokenizerJson);
+                    tokenizer.loadWithCoreTokenizer(tokenizerJson);
                     return tokenizer;
                 }
 
@@ -84,18 +96,18 @@ public class LiteRTTokenizer implements AutoCloseable {
                 }
             }
 
-            // Fallback: look for tokenizer in the safetensors variant of the same model
-            // e.g., litert model at ~/.gollek/models/litert/google/gemma-4-E2B-it-litert-lm/
-            //        may have tokenizer at ~/.gollek/models/safetensors/google/gemma-4-E2B-it/
-            Optional<Path> safetensorTokenizer = findSafetensorTokenizer(modelPath);
-            if (safetensorTokenizer.isPresent()) {
-                tokenizer.loadFromTokenizerJson(safetensorTokenizer.get());
+            // Search companion blob/safetensor trees for tokenizer.json before
+            // falling back to the embedded LiteRT metadata buffer.
+            Optional<Path> companionTokenizer = findCompanionTokenizerJson(tokenizerSource);
+            if (companionTokenizer.isPresent()) {
+                tokenizer.loadWithCoreTokenizer(companionTokenizer.get());
                 return tokenizer;
             }
 
-            // Try extracting SPM from .task file
-            if (Files.isRegularFile(modelPath)) {
-                Optional<byte[]> spmData = LiteRTContainerParser.extractSpmVocab(modelPath);
+            // Only fall back to the embedded SentencePiece model when no real
+            // tokenizer.json or tokenizer.model is available.
+            if (Files.isRegularFile(tokenizerSource)) {
+                Optional<byte[]> spmData = LiteRTContainerParser.extractSpmVocab(tokenizerSource);
                 if (spmData.isPresent() && spmData.get().length > 0) {
                     tokenizer.loadFromSpmBytes(spmData.get());
                     return tokenizer;
@@ -114,12 +126,24 @@ public class LiteRTTokenizer implements AutoCloseable {
         return tokenizer;
     }
 
+    private static Path normalizeTokenizerSource(Path modelPath) {
+        try {
+            return LiteRTContainerParser.findBestModelFile(modelPath).orElse(modelPath);
+        } catch (Exception e) {
+            return modelPath;
+        }
+    }
+
     /**
      * Encode text to token IDs.
      */
     public int[] encode(String text) {
         if (!initialized) {
             initByteFallback();
+        }
+
+        if (coreTokenizer != null) {
+            return toIntArray(coreTokenizer.encode(text, EncodeOptions.defaultOptions()));
         }
 
         if (type == TokenizerType.BYTE_FALLBACK) {
@@ -133,6 +157,12 @@ public class LiteRTTokenizer implements AutoCloseable {
      * Encode text with BOS token prepended.
      */
     public int[] encodeWithBos(String text) {
+        if (coreTokenizer != null) {
+            EncodeOptions options = EncodeOptions.builder()
+                    .addBos(true)
+                    .build();
+            return toIntArray(coreTokenizer.encode(text, options));
+        }
         int[] tokens = encode(text);
         int[] result = new int[tokens.length + 1];
         result[0] = BOS_TOKEN_ID;
@@ -144,17 +174,67 @@ public class LiteRTTokenizer implements AutoCloseable {
      * Format a chat-style prompt using Gemma's template.
      */
     public int[] encodeChatPrompt(String userMessage) {
-        // Gemma chat format:
-        // <start_of_turn>user\n{message}<end_of_turn>\n<start_of_turn>model\n
-        String formatted = START_OF_TURN + "user\n" + userMessage + END_OF_TURN +
-                "\n" + START_OF_TURN + "model\n";
+        // Gemma 4 chat format:
+        // <bos><|turn>user\n{message}<turn|>\n<|turn>model\n
+        String formatted = USER_TURN + "\n" + userMessage + END_OF_TURN +
+                "\n" + MODEL_TURN + "\n";
         return encodeWithBos(formatted);
+    }
+
+    /**
+     * Format a full conversation using Gemma 4's turn-based template.
+     */
+    public int[] encodeChatPrompt(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return encodeChatPrompt("");
+        }
+
+        StringBuilder formatted = new StringBuilder();
+        String firstUserPrefix = "";
+        int startIdx = 0;
+
+        Message first = messages.get(0);
+        if (first.getRole() == Message.Role.SYSTEM && first.getContent() != null) {
+            firstUserPrefix = first.getContent().trim();
+            if (!firstUserPrefix.isEmpty()) {
+                firstUserPrefix += "\n\n";
+            }
+            startIdx = 1;
+        }
+
+        boolean firstRendered = true;
+        for (int i = startIdx; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            String content = message.getContent();
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+
+            String roleName = switch (message.getRole()) {
+                case ASSISTANT -> "model";
+                case SYSTEM, USER -> "user";
+                default -> "user";
+            };
+
+            formatted.append("<|turn>").append(roleName).append("\n");
+            if (firstRendered && !firstUserPrefix.isEmpty() && message.getRole() == Message.Role.USER) {
+                formatted.append(firstUserPrefix);
+            }
+            formatted.append(content.trim()).append("<turn|>\n");
+            firstRendered = false;
+        }
+
+        formatted.append("<|turn>model\n");
+        return encodeWithBos(formatted.toString());
     }
 
     /**
      * Decode token IDs to text.
      */
     public String decode(int[] tokenIds) {
+        if (coreTokenizer != null) {
+            return coreTokenizer.decode(toLongArray(tokenIds), DecodeOptions.defaultOptions());
+        }
         if (type == TokenizerType.BYTE_FALLBACK) {
             return decodeByteFallback(tokenIds);
         }
@@ -168,6 +248,12 @@ public class LiteRTTokenizer implements AutoCloseable {
         if (tokenId == BOS_TOKEN_ID || tokenId == EOS_TOKEN_ID || tokenId == PAD_TOKEN_ID) {
             return "";
         }
+        if (coreTokenizer != null) {
+            DecodeOptions options = DecodeOptions.builder()
+                    .skipSpecialTokens(false)
+                    .build();
+            return coreTokenizer.decode(new long[]{tokenId}, options);
+        }
         String piece = reverseVocab.get(tokenId);
         if (piece == null) {
             return "";
@@ -180,13 +266,43 @@ public class LiteRTTokenizer implements AutoCloseable {
      * Check if a token is an end-of-sequence token.
      */
     public boolean isEosToken(int tokenId) {
+        if (coreTokenizer != null) {
+            return tokenId == coreTokenizer.eosTokenId();
+        }
         return tokenId == EOS_TOKEN_ID;
+    }
+
+    /**
+     * End-of-turn and EOS markers should not be surfaced as user-visible text.
+     */
+    public boolean isTerminalToken(int tokenId) {
+        if (coreTokenizer != null) {
+            if (tokenId == coreTokenizer.eosTokenId()) {
+                return true;
+            }
+            int[] stopTokenIds = coreTokenizer.allStopTokenIds();
+            for (int stopTokenId : stopTokenIds) {
+                if (tokenId == stopTokenId) {
+                    return true;
+                }
+            }
+        }
+        if (isEosToken(tokenId)) {
+            return true;
+        }
+        String piece = decodeToken(tokenId).trim();
+        return "<turn|>".equals(piece)
+                || "<end_of_turn>".equals(piece)
+                || "<eos>".equals(piece);
     }
 
     /**
      * Get vocabulary size.
      */
     public int getVocabSize() {
+        if (coreTokenizer != null) {
+            return coreTokenizer.vocabSize();
+        }
         return vocabSize;
     }
 
@@ -194,7 +310,7 @@ public class LiteRTTokenizer implements AutoCloseable {
      * Check if tokenizer is initialized with a real vocabulary (not byte fallback).
      */
     public boolean hasVocabulary() {
-        return type != TokenizerType.BYTE_FALLBACK;
+        return coreTokenizer != null || type != TokenizerType.BYTE_FALLBACK;
     }
 
     @Override
@@ -202,7 +318,19 @@ public class LiteRTTokenizer implements AutoCloseable {
         vocab.clear();
         reverseVocab.clear();
         specialTokens.clear();
+        coreTokenizer = null;
         initialized = false;
+    }
+
+    private void loadWithCoreTokenizer(Path tokenizerPath) throws IOException {
+        coreTokenizer = TokenizerFactory.load(tokenizerPath, null);
+        specialTokens.clear();
+        specialTokens.putAll(coreTokenizer.specialTokens());
+        vocabSize = coreTokenizer.vocabSize();
+        type = TokenizerType.HF_JSON;
+        initialized = true;
+        log.info("Loaded tokenizer via tokenizer-core from {} (vocab size: {})",
+                tokenizerPath, vocabSize);
     }
 
     // ===== Internal: SPM Protobuf parsing =====
@@ -511,65 +639,75 @@ public class LiteRTTokenizer implements AutoCloseable {
      * E.g., LiteRT model: ~/.gollek/models/litert/litert-community/gemma-4-E2B-it-litert-lm/
      *       Safetensor:    ~/.gollek/models/safetensors/google/gemma-4-E2B-it/
      */
-    private static Optional<Path> findSafetensorTokenizer(Path modelPath) {
+    private static Optional<Path> findCompanionTokenizerJson(Path modelPath) {
         try {
-            Path modelsRoot = Path.of(System.getProperty("user.home"), ".gollek", "models", "safetensors");
-            if (!Files.isDirectory(modelsRoot)) {
-                return Optional.empty();
-            }
-
             // Extract model name hint from the path
             String fileName = modelPath.getFileName().toString();
             Path parentDir = Files.isDirectory(modelPath) ? modelPath : modelPath.getParent();
             String dirName = parentDir != null ? parentDir.getFileName().toString() : fileName;
+            String fileHint = fileName.toLowerCase()
+                    .replaceAll("(_qualcomm_[^.]+)?\\.(litertlm|task|tflite|tfl)$", "")
+                    .replace("-web", "")
+                    .replace("-litert-lm", "")
+                    .replace("-litert", "");
+            String dirHint = dirName.toLowerCase()
+                    .replace("-litert-lm", "")
+                    .replace("-litert", "")
+                    .replace("litert-community/", "");
+            List<String> searchHints = new ArrayList<>();
+            if (!fileHint.isBlank()) {
+                searchHints.add(fileHint);
+            }
+            if (!dirHint.isBlank() && !dirHint.equals(fileHint)) {
+                searchHints.add(dirHint);
+            }
 
-            // Try to find matching safetensor model directories
-            // Strategy: walk the safetensors dir and look for tokenizer.json
-            // that matches the model name pattern
-            try (var orgDirs = Files.list(modelsRoot)) {
-                List<Path> candidates = orgDirs
-                        .filter(Files::isDirectory)
-                        .flatMap(org -> {
-                            try {
-                                return Files.list(org);
-                            } catch (IOException e) {
-                                return java.util.stream.Stream.empty();
-                            }
-                        })
-                        .filter(Files::isDirectory)
-                        .filter(d -> {
-                            String dn = d.getFileName().toString().toLowerCase();
-                            String search = dirName.toLowerCase()
-                                    .replace("-litert-lm", "")
-                                    .replace("-litert", "")
-                                    .replace("litert-community/", "");
-                            // Fuzzy match: "gemma-4-e2b-it" should match
-                            return dn.contains(search) || search.contains(dn);
-                        })
-                        .toList();
-
-                for (Path candidate : candidates) {
-                    Path tokenizer = candidate.resolve("tokenizer.json");
-                    if (Files.exists(tokenizer)) {
-                        log.info("Found tokenizer.json in safetensor model: {}", candidate);
-                        return Optional.of(tokenizer);
+            List<Path> roots = Arrays.asList(
+                    Path.of(System.getProperty("user.home"), ".gollek", "models", "blobs"),
+                    Path.of(System.getProperty("user.home"), ".gollek", "models", "safetensors"));
+            for (Path modelsRoot : roots) {
+                if (!Files.isDirectory(modelsRoot)) {
+                    continue;
+                }
+                try (var stream = Files.walk(modelsRoot, 4)) {
+                    Optional<Path> tokenizer = stream
+                            .filter(Files::isRegularFile)
+                            .filter(p -> p.getFileName().toString().equals("tokenizer.json"))
+                            .filter(p -> {
+                                String pathLower = p.toString().toLowerCase();
+                                for (String hint : searchHints) {
+                                    if (!hint.isBlank() && pathLower.contains(hint)) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            })
+                            .findFirst();
+                    if (tokenizer.isPresent()) {
+                        log.info("Found companion tokenizer.json at {}", tokenizer.get());
+                        return tokenizer;
                     }
                 }
             }
-
-            // Direct known path for Gemma models
-            Path gemmaTokenizer = modelsRoot
-                    .resolve("google")
-                    .resolve("gemma-4-E2B-it")
-                    .resolve("tokenizer.json");
-            if (Files.exists(gemmaTokenizer)) {
-                log.info("Found Gemma tokenizer at: {}", gemmaTokenizer);
-                return Optional.of(gemmaTokenizer);
-            }
-
         } catch (Exception e) {
-            log.debug("Failed to search for safetensor tokenizer: {}", e.getMessage());
+            log.debug("Failed to search for companion tokenizer.json: {}", e.getMessage());
         }
         return Optional.empty();
+    }
+
+    private static int[] toIntArray(long[] values) {
+        int[] out = new int[values.length];
+        for (int i = 0; i < values.length; i++) {
+            out[i] = (int) values[i];
+        }
+        return out;
+    }
+
+    private static long[] toLongArray(int[] values) {
+        long[] out = new long[values.length];
+        for (int i = 0; i < values.length; i++) {
+            out[i] = values[i];
+        }
+        return out;
     }
 }

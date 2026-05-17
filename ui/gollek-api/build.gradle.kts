@@ -2,11 +2,13 @@ plugins {
     java
 }
 
+val quarkusVersion = rootProject.extra["quarkusVersion"] as String
+
 dependencies {
     implementation(project(":core:gollek-tensor"))
     implementation(project(":core:gollek-ir"))
     implementation(project(":core:gollek-core"))
-    implementation(platform("io.quarkus.platform:quarkus-bom:3.15.1"))
+    implementation(platform("io.quarkus.platform:quarkus-bom:$quarkusVersion"))
     implementation("io.quarkus:quarkus-resteasy-reactive")
     implementation("io.quarkus:quarkus-resteasy-reactive-jackson")
     implementation("io.quarkus:quarkus-smallrye-openapi")

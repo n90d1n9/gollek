@@ -2,6 +2,9 @@ package tech.kayys.gollek.converter.gguf;
 
 import tech.kayys.gollek.gguf.core.*;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +48,7 @@ public final class GemmaArchMapper {
             HfConfigParser.TokenizerData tok,
             String version) {
 
-        String arch = "gemma";
+        String arch = archFor(cfg);
 
         // ── General ──────────────────────────────────────────────────────
         model.addMeta("general.architecture",  GgufMetaValue.ofString(arch));
@@ -62,29 +65,83 @@ public final class GemmaArchMapper {
                 GgufMetaValue.ofUInt32(cfg.hiddenSize()));
         model.addMeta(pfx + "block_count",
                 GgufMetaValue.ofUInt32(cfg.numHiddenLayers()));
-        model.addMeta(pfx + "feed_forward_length",
-                GgufMetaValue.ofUInt32(cfg.intermediateSize()));
+        if (isGemma4(cfg) && gemma4UseDoubleWideMlp(cfg)) {
+            model.addMeta(pfx + "feed_forward_length",
+                    GgufMetaValue.ofUInt32Array(gemma4FeedForwardLengths(cfg)));
+        } else {
+            model.addMeta(pfx + "feed_forward_length",
+                    GgufMetaValue.ofUInt32(cfg.intermediateSize()));
+        }
         model.addMeta(pfx + "attention.head_count",
                 GgufMetaValue.ofUInt32(cfg.numAttentionHeads()));
-        model.addMeta(pfx + "attention.head_count_kv",
-                GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+        if (isGemma4(cfg)) {
+            List<Integer> kvHeads = gemma4KvHeadCounts(cfg);
+            if (!kvHeads.isEmpty()) {
+                model.addMeta(pfx + "attention.head_count_kv",
+                        GgufMetaValue.ofUInt32Array(kvHeads));
+            } else {
+                model.addMeta(pfx + "attention.head_count_kv",
+                        GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+            }
+        } else {
+            model.addMeta(pfx + "attention.head_count_kv",
+                    GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+        }
         model.addMeta(pfx + "attention.layer_norm_rms_epsilon",
                 GgufMetaValue.ofFloat32(cfg.rmsNormEps()));
         model.addMeta(pfx + "rope.freq_base",
-                GgufMetaValue.ofFloat32(cfg.ropeTheta()));
+                GgufMetaValue.ofFloat32(isGemma4(cfg)
+                        ? gemma4RopeTheta(cfg, "full_attention", 1_000_000.0f)
+                        : cfg.ropeTheta()));
         model.addMeta(pfx + "vocab_size",
                 GgufMetaValue.ofUInt32(cfg.vocabSize()));
 
         // head_dim from config override, fallback to hidden_size / num_attention_heads
         int headDim = cfg.headDim() > 0 ? cfg.headDim() : (cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads()));
+        int globalHeadDim = isGemma4(cfg) ? gemma4GlobalHeadDim(cfg, headDim) : headDim;
         model.addMeta(pfx + "rope.dimension_count",
-                GgufMetaValue.ofUInt32(headDim));
+                GgufMetaValue.ofUInt32(globalHeadDim));
 
         // Gemma-specific: key and value lengths
         model.addMeta(pfx + "attention.key_length",
-                GgufMetaValue.ofUInt32(headDim));
+                GgufMetaValue.ofUInt32(globalHeadDim));
         model.addMeta(pfx + "attention.value_length",
-                GgufMetaValue.ofUInt32(headDim));
+                GgufMetaValue.ofUInt32(globalHeadDim));
+
+        if (isGemma4(cfg)) {
+            model.addMeta(pfx + "attention.key_length_swa",
+                    GgufMetaValue.ofUInt32(headDim));
+            model.addMeta(pfx + "attention.value_length_swa",
+                    GgufMetaValue.ofUInt32(headDim));
+            model.addMeta(pfx + "rope.dimension_count_swa",
+                    GgufMetaValue.ofUInt32(headDim));
+            model.addMeta(pfx + "rope.freq_base_swa",
+                    GgufMetaValue.ofFloat32(gemma4RopeTheta(cfg, "sliding_attention", cfg.ropeTheta())));
+
+            int sharedKvLayers = getTextInt(cfg, "num_kv_shared_layers", 0);
+            if (sharedKvLayers > 0) {
+                model.addMeta(pfx + "attention.shared_kv_layers",
+                        GgufMetaValue.ofUInt32(sharedKvLayers));
+            }
+
+            int perLayerEmb = getTextInt(cfg, "hidden_size_per_layer_input", 0);
+            if (perLayerEmb > 0) {
+                model.addMeta(pfx + "embedding_length_per_layer_input",
+                        GgufMetaValue.ofUInt32(perLayerEmb));
+            }
+
+            List<Boolean> swaPattern = gemma4SwaPattern(cfg);
+            if (!swaPattern.isEmpty()) {
+                model.addMeta(pfx + "attention.sliding_window_pattern",
+                        GgufMetaValue.ofBoolArray(swaPattern));
+            }
+
+            float finalLogitSoftcap = getTextFloat(cfg, "final_logit_softcapping", 0f);
+            if (finalLogitSoftcap > 0f) {
+                model.addMeta(pfx + "final_logit_softcapping",
+                        GgufMetaValue.ofFloat32(finalLogitSoftcap));
+            }
+        }
 
         // attention bias flag
         if (cfg.attentionBias()) {
@@ -93,7 +150,7 @@ public final class GemmaArchMapper {
         }
 
         // partial rotary factor
-        if (cfg.partialRotaryFactor() > 0f && cfg.partialRotaryFactor() < 1f) {
+        if (!isGemma4(cfg) && cfg.partialRotaryFactor() > 0f && cfg.partialRotaryFactor() < 1f) {
             model.addMeta(pfx + "rope.dimension_count",
                     GgufMetaValue.ofUInt32(
                             (int) (headDim * cfg.partialRotaryFactor())));
@@ -114,10 +171,16 @@ public final class GemmaArchMapper {
         // ── Tokenizer ─────────────────────────────────────────────────────
         if (tok != null) {
             model.addMeta("tokenizer.ggml.model",
-                    GgufMetaValue.ofString(mapTokenizerModel(tok.tokenizerModel())));
+                    GgufMetaValue.ofString(isGemma4(cfg)
+                            ? "gemma4"
+                            : mapTokenizerModel(tok.tokenizerModel())));
             if (!tok.vocab().isEmpty()) {
                 model.addMeta("tokenizer.ggml.tokens",
                         GgufMetaValue.ofStringArray(tok.vocab()));
+            }
+            if (!tok.merges().isEmpty()) {
+                model.addMeta("tokenizer.ggml.merges",
+                        GgufMetaValue.ofStringArray(tok.merges()));
             }
             if (!tok.scores().isEmpty()) {
                 model.addMeta("tokenizer.ggml.scores",
@@ -133,7 +196,140 @@ public final class GemmaArchMapper {
                     GgufMetaValue.ofUInt32(tok.eosId()));
             model.addMeta("tokenizer.ggml.padding_token_id",
                     GgufMetaValue.ofUInt32(0));
+            if (isGemma4(cfg)) {
+                model.addMeta("tokenizer.ggml.add_space_prefix",
+                        GgufMetaValue.ofBool(false));
+                model.addMeta("tokenizer.ggml.add_bos_token",
+                        GgufMetaValue.ofBool(true));
+            }
         }
+    }
+
+    private static String archFor(HfConfigParser.ModelConfig cfg) {
+        return isGemma4(cfg) ? "gemma4" : "gemma";
+    }
+
+    public static boolean isGemma4(HfConfigParser.ModelConfig cfg) {
+        String modelType = cfg.modelType() == null ? "" : cfg.modelType().toLowerCase();
+        if (modelType.contains("gemma4") || modelType.contains("gemma_4")) {
+            return true;
+        }
+        JsonObject raw = cfg.raw();
+        if (raw == null) {
+            return false;
+        }
+        if (raw.has("architectures") && raw.get("architectures").isJsonArray()) {
+            for (JsonElement element : raw.getAsJsonArray("architectures")) {
+                if (element.getAsString().toLowerCase().contains("gemma4")) {
+                    return true;
+                }
+            }
+        }
+        return textConfig(cfg).has("global_head_dim");
+    }
+
+    private static JsonObject textConfig(HfConfigParser.ModelConfig cfg) {
+        JsonObject raw = cfg.raw();
+        if (raw != null && raw.has("text_config") && raw.get("text_config").isJsonObject()) {
+            return raw.getAsJsonObject("text_config");
+        }
+        return raw == null ? new JsonObject() : raw;
+    }
+
+    private static int getTextInt(HfConfigParser.ModelConfig cfg, String key, int fallback) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has(key) || text.get(key).isJsonNull()) {
+            return fallback;
+        }
+        try {
+            return text.get(key).getAsInt();
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static float getTextFloat(HfConfigParser.ModelConfig cfg, String key, float fallback) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has(key) || text.get(key).isJsonNull()) {
+            return fallback;
+        }
+        try {
+            return text.get(key).getAsFloat();
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean getTextBool(HfConfigParser.ModelConfig cfg, String key, boolean fallback) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has(key) || text.get(key).isJsonNull()) {
+            return fallback;
+        }
+        try {
+            return text.get(key).getAsBoolean();
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static float gemma4RopeTheta(HfConfigParser.ModelConfig cfg, String section, float fallback) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has("rope_parameters") || !text.get("rope_parameters").isJsonObject()) {
+            return fallback;
+        }
+        JsonObject params = text.getAsJsonObject("rope_parameters");
+        if (!params.has(section) || !params.get(section).isJsonObject()) {
+            return fallback;
+        }
+        JsonObject sectionObj = params.getAsJsonObject(section);
+        if (!sectionObj.has("rope_theta") || sectionObj.get("rope_theta").isJsonNull()) {
+            return fallback;
+        }
+        return sectionObj.get("rope_theta").getAsFloat();
+    }
+
+    private static int gemma4GlobalHeadDim(HfConfigParser.ModelConfig cfg, int fallback) {
+        return getTextInt(cfg, "global_head_dim", fallback);
+    }
+
+    private static boolean gemma4UseDoubleWideMlp(HfConfigParser.ModelConfig cfg) {
+        return getTextBool(cfg, "use_double_wide_mlp", false);
+    }
+
+    private static List<Integer> gemma4FeedForwardLengths(HfConfigParser.ModelConfig cfg) {
+        int firstWide = cfg.numHiddenLayers() - getTextInt(cfg, "num_kv_shared_layers", 0);
+        List<Integer> values = new ArrayList<>(cfg.numHiddenLayers());
+        for (int i = 0; i < cfg.numHiddenLayers(); i++) {
+            values.add(i < firstWide ? cfg.intermediateSize() : cfg.intermediateSize() * 2);
+        }
+        return values;
+    }
+
+    private static List<Boolean> gemma4SwaPattern(HfConfigParser.ModelConfig cfg) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has("layer_types") || !text.get("layer_types").isJsonArray()) {
+            return List.of();
+        }
+        JsonArray layerTypes = text.getAsJsonArray("layer_types");
+        List<Boolean> pattern = new ArrayList<>(layerTypes.size());
+        for (JsonElement element : layerTypes) {
+            pattern.add("sliding_attention".equals(element.getAsString()));
+        }
+        return pattern;
+    }
+
+    private static List<Integer> gemma4KvHeadCounts(HfConfigParser.ModelConfig cfg) {
+        List<Boolean> pattern = gemma4SwaPattern(cfg);
+        if (pattern.isEmpty()) {
+            return List.of();
+        }
+        int swaKvHeads = getTextInt(cfg, "num_key_value_heads", cfg.numKeyValueHeads());
+        int fullKvHeads = getTextInt(cfg, "num_global_key_value_heads", swaKvHeads);
+        List<Integer> values = new ArrayList<>(pattern.size());
+        for (boolean isSwa : pattern) {
+            values.add(isSwa ? swaKvHeads : fullKvHeads);
+        }
+        return values;
     }
 
     private static void applyRopeScaling(GgufModel model,
@@ -259,8 +455,7 @@ public final class GemmaArchMapper {
                  "backbone.embeddings.weight",
                  "tok_embeddings.weight" -> "token_embd.weight";
             
-            // Per-layer embedding (Gemma 4) - SKIP: Not supported by llama.cpp, too large (4.48 GB)
-            case "model.language_model.embed_tokens_per_layer.weight" -> null; // Skip
+            case "model.language_model.embed_tokens_per_layer.weight" -> "per_layer_token_embd.weight";
 
             // Norm after all layers
             case "model.norm.weight",
@@ -283,9 +478,8 @@ public final class GemmaArchMapper {
                  "embed_out.weight" -> "output.weight";
             case "lm_head.bias" -> "output.bias";
             
-            // Gemma 4 specific: per-layer projection - SKIP: Not standard GGUF
-            case "model.language_model.per_layer_model_projection.weight" -> null; // Skip
-            case "model.language_model.per_layer_projection_norm.weight" -> null; // Skip
+            case "model.language_model.per_layer_model_projection.weight" -> "per_layer_model_proj.weight";
+            case "model.language_model.per_layer_projection_norm.weight" -> "per_layer_proj_norm.weight";
 
             // Token type embeddings (BERT-style)
             case "embeddings.token_type_embeddings.weight" -> "token_types.weight";
@@ -362,22 +556,23 @@ public final class GemmaArchMapper {
             case "input_layernorm.weight"                   -> pfx + "attn_norm.weight";
             case "input_layernorm.bias"                     -> pfx + "attn_norm.bias";
 
-            case "post_attention_layernorm.weight"          -> pfx + "ffn_norm.weight";
+            case "post_attention_layernorm.weight"          -> pfx + "post_attention_norm.weight";
             case "post_attention_layernorm.bias"            -> pfx + "ffn_norm.bias";
 
-            // Pre-layer norm (Gemma 2/4)
-            case "pre_feedforward_layernorm.weight"         -> pfx + "ffn_pre_norm.weight";
-            case "post_feedforward_layernorm.weight"        -> pfx + "ffn_post_norm.weight";
+            case "pre_feedforward_layernorm.weight"         -> pfx + "ffn_norm.weight";
+            case "post_feedforward_layernorm.weight"        -> pfx + "post_ffw_norm.weight";
+            case "pre_feedforward_layernorm_2.weight"       -> pfx + "pre_ffw_norm_2.weight";
+            case "post_feedforward_layernorm_1.weight"      -> pfx + "post_ffw_norm_1.weight";
+            case "post_feedforward_layernorm_2.weight"      -> pfx + "post_ffw_norm_2.weight";
 
             // ── Gemma 2/4: Q and K normalization ──────────────────────────
             case "self_attn.q_norm.weight"                  -> pfx + "attn_q_norm.weight";
             case "self_attn.k_norm.weight"                  -> pfx + "attn_k_norm.weight";
 
-            // ── Gemma 4: Per-layer input gating - SKIP: Not supported by llama.cpp
-            case "per_layer_input_gate.weight"              -> null; // Skip
-            case "per_layer_projection.weight"              -> null; // Skip
-            case "post_per_layer_input_norm.weight"         -> null; // Skip
-            case "layer_scalar"                             -> null; // Skip
+            case "per_layer_input_gate.weight"              -> pfx + "inp_gate.weight";
+            case "per_layer_projection.weight"              -> pfx + "proj.weight";
+            case "post_per_layer_input_norm.weight"         -> pfx + "post_norm.weight";
+            case "layer_scalar"                             -> pfx + "layer_output_scale.weight";
 
             // ── Embedding norm (some models add it per layer) ─────────────
             case "norm.weight"                              -> pfx + "layer_out_norm.weight";

@@ -115,7 +115,7 @@ public class OnnxCommand implements Runnable {
         @Parameters(index = "0", description = "Model spec (e.g. hf:user/repo, kaggle:user/repo)")
         String modelSpec;
 
-        @Option(names = {"--dir"}, description = "Output directory (default: ~/.wayang/gollek/models/onnx; legacy: ~/.gollek/models/onnx)")
+        @Option(names = {"--dir"}, description = "Output directory (default: ~/.gollek/models/onnx)")
         String outputDir;
 
         @Override

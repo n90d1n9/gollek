@@ -19,8 +19,7 @@ import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.engine.generation.attention.FlashAttentionKernel;
 import tech.kayys.gollek.safetensor.engine.generation.moe.MoeForwardPass;
-import tech.kayys.gollek.metal.MetalComputeBackend;
-import jakarta.enterprise.inject.Instance;
+import tech.kayys.gollek.metal.binding.MetalBinding;
 
 import java.util.Map;
 import java.util.List;
@@ -36,21 +35,118 @@ public class DirectForwardPass {
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final String FORCE_CPU_FORWARD_PROPERTY = "gollek.safetensor.force_cpu_forward";
     private static final String EXPERIMENTAL_METAL_LINEAR_PROPERTY = "gollek.safetensor.experimental_metal_linear";
+    private static final String DISABLE_EXPERIMENTAL_METAL_LINEAR_PROPERTY =
+            "gollek.safetensor.disable_experimental_metal_linear";
+    private static final String EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.experimental_metal_bf16_linear";
+    private static final String DISABLE_EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.disable_experimental_metal_bf16_linear";
+    private static final String PREFER_NATIVE_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.prefer_native_metal_bf16_linear";
+    private static final String METAL_F16_WEIGHT_CACHE_MAX_BYTES_PROPERTY =
+            "gollek.safetensor.metal_f16_weight_cache_max_bytes";
+    private static final long DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;
+    private static final long METAL_F16_WEIGHT_CACHE_MAX_BYTES = Long.getLong(
+            METAL_F16_WEIGHT_CACHE_MAX_BYTES_PROPERTY,
+            DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES);
+    private static final String LOGITS_LARGE_HALF_CACHE_MAX_BYTES_PROPERTY =
+            "gollek.safetensor.logits_large_half_cache_max_bytes";
+    private static final long DEFAULT_LOGITS_LARGE_HALF_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;
+    private static final long LOGITS_LARGE_HALF_CACHE_MAX_BYTES = Long.getLong(
+            LOGITS_LARGE_HALF_CACHE_MAX_BYTES_PROPERTY,
+            DEFAULT_LOGITS_LARGE_HALF_CACHE_MAX_BYTES);
+    private static final String FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES_PROPERTY =
+            "gollek.safetensor.ffn_down_large_half_cache_total_max_bytes";
+    private static final long DEFAULT_FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES = 1536L * 1024L * 1024L;
+    private static final long FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES = Long.getLong(
+            FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES_PROPERTY,
+            DEFAULT_FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES);
+    private static final String FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES_PROPERTY =
+            "gollek.safetensor.ffn_down_large_half_cache_per_tensor_max_bytes";
+    private static final long DEFAULT_FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES = 64L * 1024L * 1024L;
+    private static final long FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES = Long.getLong(
+            FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES_PROPERTY,
+            DEFAULT_FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES);
+    private static final boolean EXPERIMENTAL_METAL_LINEAR_ENABLED =
+            resolveExperimentalMetalLinearEnabled();
+    /** When true, Gemma 4 text keeps elementwise ops on CPU even if Metal is available. Default: false (use Metal). */
+    private static final String DISABLE_METAL_GEMMA4_ELEMENTWISE_PROPERTY =
+            "gollek.safetensor.disable_metal_gemma4_elementwise";
+    private static final String METAL_ELEMENTWISE_MIN_SEQ_PROPERTY =
+            "gollek.safetensor.metal_elementwise_min_seq";
+    private static final String DISABLE_GEMMA4_PER_LAYER_INPUT_PROPERTY =
+            "gollek.safetensor.disable_gemma4_per_layer_input";
+    private static final String DISABLE_GEMMA4_LAYER_SCALAR_PROPERTY =
+            "gollek.safetensor.disable_gemma4_layer_scalar";
+    private static final String ENABLE_GEMMA4_LAYER_SCALAR_PROPERTY =
+            "gollek.safetensor.enable_gemma4_layer_scalar";
+    private static final String ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY =
+            "gollek.safetensor.allow_gemma4_fused_half_ffn";
+    private static final String DISABLE_METAL_FUSED_FFN_PROPERTY =
+            "gollek.safetensor.disable_metal_fused_ffn";
+    private static final String ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY =
+            "gollek.safetensor.enable_metal_geglu_fused_ffn";
+    private static final String REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY =
+            "gollek.safetensor.reuse_ffn_projection_workspace";
+    private static final String ENABLE_METAL_HALF_LINEAR_PAIR_PROPERTY =
+            "gollek.safetensor.enable_metal_half_linear_pair";
+    private static final String DISABLE_METAL_HALF_LINEAR_PAIR_PROPERTY =
+            "gollek.safetensor.disable_metal_half_linear_pair";
+    private static final String ENABLE_METAL_HALF_MATVEC_PROPERTY =
+            "gollek.safetensor.enable_metal_half_matvec";
+    private static final String DISABLE_METAL_HALF_MATVEC_PROPERTY =
+            "gollek.safetensor.disable_metal_half_matvec";
+    private static final String AUTO_METAL_HALF_MATVEC_PROPERTY =
+            "gollek.safetensor.auto_metal_half_matvec";
+    private static final boolean AUTO_METAL_HALF_MATVEC_ENABLED =
+            resolveAutoMetalHalfMatvecEnabled();
+    private static final String ENABLE_METAL_HALF_MATVEC_PAIR_PROPERTY =
+            "gollek.safetensor.enable_metal_half_matvec_pair";
+    private static final String DISABLE_METAL_HALF_MATVEC_PAIR_PROPERTY =
+            "gollek.safetensor.disable_metal_half_matvec_pair";
+    private static final boolean DISABLE_METAL_HALF_MATVEC_ENABLED =
+            Boolean.getBoolean(DISABLE_METAL_HALF_MATVEC_PROPERTY);
+    private static final boolean DISABLE_METAL_HALF_MATVEC_PAIR_ENABLED =
+            Boolean.getBoolean(DISABLE_METAL_HALF_MATVEC_PAIR_PROPERTY);
+    private static final String ENABLE_METAL_HALF_MATVEC_VALUE =
+            System.getProperty(ENABLE_METAL_HALF_MATVEC_PROPERTY);
+    private static final String ENABLE_METAL_HALF_MATVEC_PAIR_VALUE =
+            System.getProperty(ENABLE_METAL_HALF_MATVEC_PAIR_PROPERTY);
+    private static final String METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY =
+            "gollek.safetensor.metal_half_matvec_max_output";
+    private static final int DEFAULT_METAL_HALF_MATVEC_MAX_OUTPUT = 24576;
+    private static final String ENABLE_METAL_POST_FFN_NORM_PROPERTY =
+            "gollek.safetensor.enable_metal_post_ffn_norm";
+    private static final String DISABLE_METAL_POST_FFN_NORM_PROPERTY =
+            "gollek.safetensor.disable_metal_post_ffn_norm";
+    private static final boolean METAL_HALF_LINEAR_PAIR_ENABLED =
+            resolveMetalHalfLinearPairEnabled();
+    private static final String VERBOSE_TOKENS_PROPERTY = "gollek.verbose";
+    private static final String VERBOSE_LAYERS_PROPERTY = "gollek.verbose.layers";
     private static final float GELU_INNER_SCALE = 0.79788456f;
     private static final float GELU_CUBIC_COEFF = 0.044715f;
     @Inject
     FlashAttentionKernel attentionKernel;
     @Inject
     MoeForwardPass moeForwardPass;
-    @Inject
-    Instance<MetalComputeBackend> metalBackendInstance;
     
-    private MetalComputeBackend metal;
+    private MetalBinding metalBinding;
+    private boolean metalReady;
 
     @jakarta.annotation.PostConstruct
     void init() {
-        if (metalBackendInstance.isResolvable()) {
-            this.metal = metalBackendInstance.get();
+        try {
+            MetalBinding.initialize();
+            this.metalBinding = MetalBinding.getInstance();
+            this.metalBinding.init();
+            String deviceName = this.metalBinding.deviceName();
+            this.metalReady = this.metalBinding.isNativeAvailable()
+                    && deviceName != null
+                    && !deviceName.contains("CPU");
+        } catch (Exception e) {
+            MetalBinding.initializeFallback();
+            this.metalBinding = MetalBinding.getInstance();
+            this.metalReady = false;
         }
     }
 
@@ -80,7 +176,7 @@ public class DirectForwardPass {
         if (embedTable == null)
             throw new IllegalStateException("Missing embed tokens weight: " + arch.embedTokensWeight());
         AccelTensor embedded = embeddingLookup(embedTable, inputIds);
-        float scale = arch.embeddingScaleFactor((int) embedded.size(-1));
+        float scale = resolveEmbeddingScale(arch, config, (int) embedded.size(-1));
         AccelTensor hidden = scale != 1.0f ? AccelOps.mulScalar(embedded, scale) : embedded;
         AccelTensor[] perLayerInputs = buildPerLayerInputs(inputIds, hidden, weights, config, arch);
         try {
@@ -96,6 +192,7 @@ public class DirectForwardPass {
     public AccelTensor prefillLogitsTensor(AccelTensor embeddings, long[] inputIds, AccelTensor[] perLayerInputs,
             Map<String, AccelTensor> weights, ModelConfig config, ModelArchitecture arch,
             KVCacheManager.KVCacheSession kvCache) {
+        int startPos = kvCache.currentPos();
         long seqLen = embeddings.size(1);
         if (seqLen < 1) {
             throw new IllegalArgumentException("Invalid sequence length: " + seqLen + ". Prompt must result in at least one token.");
@@ -109,14 +206,21 @@ public class DirectForwardPass {
         java.lang.foreign.MemorySegment currentHidden = ws.getHiddenASeg();
         java.lang.foreign.MemorySegment nextHidden = ws.getHiddenBSeg();
 
-        boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
+        boolean verboseTokens = Boolean.getBoolean(VERBOSE_TOKENS_PROPERTY);
+        Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates = null;
+        if (config.resolvedNumKvSharedLayers() > 0) {
+            if (startPos == 0) {
+                kvCache.clearSharedKvStates();
+            }
+            sharedKvStates = kvCache.sharedKvStates();
+        }
         for (int i = 0; i < config.numHiddenLayers(); i++) {
-            if (verbose) {
+            if (verboseTokens) {
                 System.err.printf("[DEBUG] Prefill Layer %d/%d start\n", i, config.numHiddenLayers());
                 System.err.flush();
             }
             transformerLayer(currentHidden, nextHidden, inputIds, perLayerInputs != null ? perLayerInputs[i] : null,
-                    weights, config, arch, kvCache, i, 0, (int) seqLen, ws);
+                    weights, config, arch, kvCache, i, startPos, (int) seqLen, ws, sharedKvStates);
 
             // Swap buffers
             java.lang.foreign.MemorySegment temp = currentHidden;
@@ -127,7 +231,7 @@ public class DirectForwardPass {
         AccelTensor hidden = AccelTensor.view(currentHidden, embeddings.shape());
         
         AccelTensor normed;
-        if (canUseMetal()) {
+        if (canUseMetalElementwise(config, (int) seqLen)) {
             normed = AccelTensor.view(ws.getNormedAttnSeg(), hidden.shape());
             rmsNormRowsMetal(normed.dataPtr(), hidden.dataPtr(),
                     weights.get(arch.finalNormWeight()).dataPtr(), (int) seqLen, config.hiddenSize(),
@@ -139,10 +243,6 @@ public class DirectForwardPass {
         if (hidden != embeddings)
             hidden.close();
 
-        AccelTensor lastPos = selectLastToken(normed, (int) seqLen);
-        if (normed.dataPtr() != ws.getNormedAttnSeg())
-            normed.close();
-
         AccelTensor lmHeadW = weights.get(arch.lmHeadWeight());
         if (lmHeadW == null && config.tieWordEmbeddings()) {
             lmHeadW = weights.get(arch.embedTokensWeight()); // weight tying
@@ -151,10 +251,14 @@ public class DirectForwardPass {
             throw new IllegalStateException(
                     "Missing lm_head weight. Safetensor file might be incomplete or config.tie_word_embeddings is missing.");
         }
+        if (verboseTokens && seqLen > 1) {
+            debugSequencePositionLogits(normed, lmHeadW, (int) seqLen);
+        }
+        AccelTensor lastPos = selectLastToken(normed, (int) seqLen);
         long tLogits0 = System.nanoTime();
-        AccelTensor logits = linear(lastPos, lmHeadW, null);
+        AccelTensor logits = linear(lastPos, lmHeadW, null, "logits", config);
         DirectInferenceEngine.recordLogitsProjectionNanos(System.nanoTime() - tLogits0);
-        lastPos.close();
+        lastPos.closeWithParent();
         kvCache.advance((int) seqLen);
         return logits;
     }
@@ -178,7 +282,7 @@ public class DirectForwardPass {
         if (embedTable == null)
             throw new IllegalStateException("Missing embed tokens weight.");
         AccelTensor embedded = embeddingLookup(embedTable, new long[] { tokenId });
-        float scale = arch.embeddingScaleFactor((int) embedded.size(-1));
+        float scale = resolveEmbeddingScale(arch, config, (int) embedded.size(-1));
         AccelTensor hidden = scale != 1.0f ? AccelOps.mulScalar(embedded, scale) : embedded;
         AccelTensor[] perLayerInputs = buildPerLayerInputs(new long[] { tokenId }, hidden, weights, config, arch);
         try {
@@ -196,9 +300,13 @@ public class DirectForwardPass {
             java.lang.foreign.MemorySegment currentHidden = ws.getHiddenASeg();
             java.lang.foreign.MemorySegment nextHidden = ws.getHiddenBSeg();
 
+            Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates = null;
+            if (config.resolvedNumKvSharedLayers() > 0) {
+                sharedKvStates = kvCache.sharedKvStates();
+            }
             for (int i = 0; i < config.numHiddenLayers(); i++) {
                 transformerLayer(currentHidden, nextHidden, tokenIds, perLayerInputs != null ? perLayerInputs[i] : null,
-                        weights, config, arch, kvCache, i, startPos, 1, ws);
+                        weights, config, arch, kvCache, i, startPos, 1, ws, sharedKvStates);
                 // Swap
                 java.lang.foreign.MemorySegment temp = currentHidden;
                 currentHidden = nextHidden;
@@ -208,7 +316,7 @@ public class DirectForwardPass {
             AccelTensor finalHidden = AccelTensor.view(currentHidden, new long[]{1, 1, config.hiddenSize()});
             
             AccelTensor normed;
-            if (canUseMetal()) {
+            if (canUseMetalElementwise(config, 1)) {
                 normed = AccelTensor.view(ws.getNormedAttnSeg(), finalHidden.shape());
                 rmsNormRowsMetal(normed.dataPtr(), finalHidden.dataPtr(),
                         weights.get(arch.finalNormWeight()).dataPtr(), 1, config.hiddenSize(),
@@ -228,7 +336,7 @@ public class DirectForwardPass {
                         "Missing lm_head weight. Safetensor file might be incomplete or config.tie_word_embeddings is missing.");
             }
             long tLogits0 = System.nanoTime();
-            AccelTensor logits = linear(normed, lmHeadW, null);
+            AccelTensor logits = linear(normed, lmHeadW, null, "logits", config);
             DirectInferenceEngine.recordLogitsProjectionNanos(System.nanoTime() - tLogits0);
             if (normed.dataPtr() != ws.getNormedAttnSeg())
                 normed.close();
@@ -253,8 +361,7 @@ public class DirectForwardPass {
     }
 
     private void logPrefillDiagnostics(float[] result, ModelConfig config) {
-        boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
-        if (!verbose || config.numAttentionHeads() <= 0) {
+        if (!Boolean.getBoolean(VERBOSE_TOKENS_PROPERTY) || config.numAttentionHeads() <= 0) {
             return;
         }
 
@@ -287,14 +394,16 @@ public class DirectForwardPass {
     private void transformerLayer(java.lang.foreign.MemorySegment hiddenIn, java.lang.foreign.MemorySegment hiddenOut, 
             long[] inputIds, AccelTensor perLayerInput, Map<String, AccelTensor> weights, ModelConfig config, 
             ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache, int layerIdx, int startPos, int seqLen, 
-            KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
+            KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+            Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates) {
         
         long[] hiddenShape = new long[]{1, seqLen, config.hiddenSize()};
-        boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
+        boolean verboseLayers = Boolean.getBoolean(VERBOSE_LAYERS_PROPERTY);
+        boolean useMetalElementwise = canUseMetalElementwise(config, seqLen);
         
         // Attention norm
         java.lang.foreign.MemorySegment normedAttnSeg = ws.getNormedAttnSeg();
-        if (canUseMetal()) {
+        if (useMetalElementwise) {
             rmsNormRowsMetal(normedAttnSeg, hiddenIn,
                     weights.get(arch.layerAttentionNormWeight(layerIdx)).dataPtr(), seqLen, config.hiddenSize(),
                     (float) config.rmsNormEps(), useAddOneRmsNorm(arch, config));
@@ -320,33 +429,38 @@ public class DirectForwardPass {
                 /* isCausal= */ true,
                 weights.get(arch.layerQueryNormWeight(layerIdx)),
                 weights.get(arch.layerKeyNormWeight(layerIdx)),
-                weights.get(arch.layerPostAttnNormWeight(layerIdx)));
+                weights.get(arch.layerPostAttnNormWeight(layerIdx)),
+                sharedKvStates);
 
-        if (verbose) {
+        if (verboseLayers) {
             System.err.printf("[DEBUG] Layer %d Attention start\n", layerIdx);
             System.err.flush();
         }
         long tAttention0 = System.nanoTime();
         AccelTensor attnOut = attentionKernel.compute(attnIn);
         DirectInferenceEngine.recordAttentionNanos(System.nanoTime() - tAttention0);
-        if (verbose) {
+        if (verboseLayers) {
             logTensorStats(attnOut, "layer " + layerIdx + " attnOut");
         }
 
         // First residual add after attention.
-        residualAdd(hiddenIn, attnOut, hiddenOut, hiddenShape, seqLen, config.hiddenSize());
+        residualAdd(hiddenIn, attnOut, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useMetalElementwise);
         attnOut.close();
-        if (verbose) {
+        if (verboseLayers) {
             logSegmentStats(hiddenOut, hiddenShape, "layer " + layerIdx + " postAttnResidual");
         }
 
-        // MLP input norm.
+        // MLP input norm. Standard decoder-only blocks use post_attention_layernorm
+        // before the FFN only; Gemma-style blocks may also expose a separate
+        // post_feedforward_layernorm that is applied after the FFN output.
         AccelTensor preFfnNormW = weights.get(arch.layerPreFfnNormWeight(layerIdx));
-        AccelTensor postFfnNormW = weights.get(arch.layerFfnNormWeight(layerIdx));
-        if (preFfnNormW == null) preFfnNormW = postFfnNormW;
+        if (preFfnNormW == null) {
+            preFfnNormW = weights.get(arch.layerFfnNormWeight(layerIdx));
+        }
+        AccelTensor postFfnNormW = weights.get(arch.layerPostFfnNormWeight(layerIdx));
 
         java.lang.foreign.MemorySegment normedFfnSeg = ws.getNormedFfnSeg();
-        if (canUseMetal()) {
+        if (useMetalElementwise) {
             rmsNormRowsMetal(normedFfnSeg, hiddenOut, preFfnNormW.dataPtr(), seqLen, config.hiddenSize(),
                     (float) config.rmsNormEps(), useAddOneRmsNorm(arch, config));
         } else {
@@ -357,40 +471,46 @@ public class DirectForwardPass {
         }
 
         long tFfn0 = System.nanoTime();
-        AccelTensor mlpOut = swigluFfn(AccelTensor.view(normedFfnSeg, hiddenShape), arch,
+        AccelTensor mlpOut = swigluFfn(AccelTensor.view(normedFfnSeg, hiddenShape), arch, config,
                 weights.get(arch.layerFfnGateWeight(layerIdx)), weights.get(arch.layerFfnGateBias(layerIdx)),
                 weights.get(arch.layerFfnUpWeight(layerIdx)), weights.get(arch.layerFfnUpBias(layerIdx)),
                 weights.get(arch.layerFfnDownWeight(layerIdx)), weights.get(arch.layerFfnDownBias(layerIdx)), ws);
         DirectInferenceEngine.recordFfnNanos(System.nanoTime() - tFfn0);
-        if (verbose) {
+        if (verboseLayers) {
             logTensorStats(mlpOut, "layer " + layerIdx + " mlpOut");
         }
 
         // Post-FFN norm before the second residual add.
         AccelTensor mlpNormed;
         if (postFfnNormW != null) {
-            mlpNormed = AccelOps.rmsNorm(mlpOut, postFfnNormW, config.rmsNormEps(), useAddOneRmsNorm(arch, config));
+            if (useMetalElementwise && shouldUseMetalPostFfnNorm(config)) {
+                rmsNormRowsMetal(normedFfnSeg, mlpOut.dataPtr(), postFfnNormW.dataPtr(), seqLen, config.hiddenSize(),
+                        (float) config.rmsNormEps(), useAddOneRmsNorm(arch, config));
+                mlpNormed = AccelTensor.view(normedFfnSeg, hiddenShape);
+            } else {
+                mlpNormed = AccelOps.rmsNorm(mlpOut, postFfnNormW, config.rmsNormEps(), useAddOneRmsNorm(arch, config));
+            }
             mlpOut.close();
         } else {
             mlpNormed = mlpOut;
         }
 
         AccelTensor layerScalar = weights.get(arch.layerScalarWeight(layerIdx));
-        residualAdd(hiddenOut, mlpNormed, hiddenOut, hiddenShape, seqLen, config.hiddenSize());
+        residualAdd(hiddenOut, mlpNormed, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useMetalElementwise);
         mlpNormed.close();
-        if (verbose) {
+        if (verboseLayers) {
             logSegmentStats(hiddenOut, hiddenShape, "layer " + layerIdx + " postFfnResidual");
         }
 
         applyPerLayerResidual(hiddenOut, hiddenShape, seqLen, config, arch, weights, layerIdx, perLayerInput);
-        if (layerScalar != null) {
+        if (layerScalar != null && shouldApplyLayerScalar(config)) {
             float outputScale = readScalarValue(layerScalar);
             scaleSegmentInPlace(hiddenOut, hiddenShape, seqLen, config.hiddenSize(), outputScale);
         }
-        if (verbose && perLayerInput != null) {
+        if (verboseLayers && perLayerInput != null) {
             logSegmentStats(hiddenOut, hiddenShape, "layer " + layerIdx + " postPle");
         }
-        if (verbose && layerScalar != null) {
+        if (verboseLayers && layerScalar != null) {
             float skipScale = readScalarValue(layerScalar);
             System.err.printf("[DEBUG] layer %d layerScalar=%f%n", layerIdx, skipScale);
         }
@@ -440,41 +560,106 @@ public class DirectForwardPass {
         System.err.flush();
     }
 
-    AccelTensor ffnNonGated(AccelTensor x, AccelTensor upW, AccelTensor downW) {
-        AccelTensor up = AccelOps.linear(x, upW);
+    AccelTensor ffnNonGated(AccelTensor x, ModelConfig config, AccelTensor upW, AccelTensor downW) {
+        AccelTensor up = linear(x, upW, null, "ffn_up_nongated", config);
         AccelTensor act = AccelOps.silu(up);
         up.close();
-        AccelTensor out = AccelOps.linear(act, downW);
+        AccelTensor out = ffnDownLinear(act, downW, null, config, "ffn_down_nongated");
         act.close();
         return out;
     }
 
-    public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
+    public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
             AccelTensor downW, AccelTensor downB) {
-        return swigluFfn(x, arch, gateW, gateB, upW, upB, downW, downB, null);
+        return swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, null);
     }
 
-    public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
+    public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
             AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
-        AccelTensor gate = linear(x, gateW, gateB);
-        AccelTensor up = linear(x, upW, upB);
+        AccelTensor metalFused = tryMetalFusedGatedFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB);
+        if (metalFused != null) {
+            return metalFused;
+        }
+
+        AccelTensor combinedBuffer = null;
+        if (ws != null && gateW != null && upW != null
+                && gateW.shape().length == 2
+                && upW.shape().length == 2
+                && gateW.shape()[0] == upW.shape()[0]) {
+            ws.ensureCapacity(x.numel(), x.size(-1), gateW.shape()[0]);
+            long requiredCombinedBytes = x.size(0) * x.size(1) * gateW.shape()[0] * Float.BYTES;
+            if (ws.getCombinedSeg() != null && ws.getCombinedSeg().byteSize() >= requiredCombinedBytes) {
+                combinedBuffer = AccelTensor.view(ws.getCombinedSeg(), new long[] { x.size(0), x.size(1), gateW.shape()[0] });
+            }
+        }
+        boolean preferSeparateMetalHalf = shouldPreferSeparateMetalHalfFfn(x, gateW, upW);
+        boolean allowFusedHalfFfn = !isGemma4Text(config)
+                || Boolean.getBoolean(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY);
+        AccelTensor fusedCombined = (preferSeparateMetalHalf || !allowFusedHalfFfn)
+                ? null
+                : tryFusedGatedHalfFfn(x, gateW, gateB, upW, upB,
+                        arch.activationType() == FFNActivationType.GELU, combinedBuffer);
+        if (fusedCombined != null) {
+            AccelTensor out = ffnDownLinear(fusedCombined, downW, downB, config, "ffn_down");
+            if (ws == null || fusedCombined.dataPtr() != ws.getCombinedSeg()) {
+                fusedCombined.close();
+            }
+            return out;
+        }
+
+        LinearPair pairedGateUp = tryMetalHalfLinearPair(x, config, gateW, gateB, upW, upB);
+        AccelTensor gate;
+        AccelTensor up;
+        if (pairedGateUp != null) {
+            gate = pairedGateUp.first();
+            up = pairedGateUp.second();
+        } else {
+            long[] gateShape = new long[] { x.size(0), x.size(1), gateW.shape()[0] };
+            boolean reuseFfnProjectionWorkspace = canReuseFfnProjectionWorkspace();
+            if (reuseFfnProjectionWorkspace && ws != null) {
+                ws.ensureProjectionScratchCapacity(elementCount(gateShape) * Float.BYTES);
+            }
+            AccelTensor gateBuffer = reuseFfnProjectionWorkspace
+                    ? reusableWorkspaceView(ws == null ? null : ws.getGateSeg(), gateShape)
+                    : null;
+            AccelTensor upBuffer = reuseFfnProjectionWorkspace
+                    ? reusableWorkspaceView(ws == null ? null : ws.getUpSeg(), gateShape)
+                    : null;
+            gate = linear(x, gateW, gateB, "ffn_gate", config, gateBuffer);
+            up = linear(x, upW, upB, "ffn_up", config, upBuffer);
+        }
 
         AccelTensor combined;
         if (arch.activationType() == FFNActivationType.GELU) {
             if (ws != null) {
                 combined = AccelTensor.view(ws.getCombinedSeg(), gate.shape());
-                fusedGeglu(combined, gate, up);
+                if (canUseMetalElementwise(config, (int) x.size(1))) {
+                    try {
+                        int rc = metalBinding.geluFfn(combined.dataPtr(), gate.dataPtr(), up.dataPtr(),
+                                (int) gate.numel());
+                        if (rc != 0) {
+                            throw new IllegalStateException("Metal geluFfn failed with code " + rc);
+                        }
+                    } catch (IllegalStateException | UnsupportedOperationException e) {
+                        fusedGeglu(combined, gate, up);
+                    }
+                } else {
+                    fusedGeglu(combined, gate, up);
+                }
             } else {
                 AccelTensor activated = AccelOps.gelu(gate);
                 gate.close();
                 combined = AccelOps.mul(activated, up);
                 activated.close();
             }
-        } else if (canUseMetal() && ws != null) {
+        } else if (canUseMetalElementwise(config, (int) x.size(1)) && ws != null) {
             combined = AccelTensor.view(ws.getCombinedSeg(), gate.shape());
             try {
-                metal.siluFfn(combined.dataPtr(), gate.dataPtr(), up.dataPtr(),
+                int rc = metalBinding.siluFfn(combined.dataPtr(), gate.dataPtr(), up.dataPtr(),
                         (int) gate.numel());
+                if (rc != 0) {
+                    throw new IllegalStateException("Metal siluFfn failed with code " + rc);
+                }
             } catch (IllegalStateException | UnsupportedOperationException e) {
                 combined = AccelOps.swiglu(gate, up);
             }
@@ -484,10 +669,327 @@ public class DirectForwardPass {
 
         if (!gate.isClosed()) gate.close();
         up.close();
-        AccelTensor out = linear(combined, downW, downB);
-        if (ws == null || combined.dataPtr() != ws.getCombinedSeg())
+        AccelTensor out = ffnDownLinear(combined, downW, downB, config, "ffn_down");
+        if (ws == null || combined.dataPtr() != ws.getCombinedSeg()) {
             combined.close();
+        }
         return out;
+    }
+
+    private AccelTensor tryMetalFusedGatedFfn(AccelTensor input,
+                                               ModelArchitecture arch,
+                                               ModelConfig config,
+                                               AccelTensor gateW,
+                                               AccelTensor gateB,
+                                               AccelTensor upW,
+                                               AccelTensor upB,
+                                               AccelTensor downW,
+                                               AccelTensor downB) {
+        boolean siluActivation = arch.activationType() == FFNActivationType.SILU;
+        boolean geluActivation = arch.activationType() == FFNActivationType.GELU;
+        if (Boolean.getBoolean(DISABLE_METAL_FUSED_FFN_PROPERTY)
+                || (!siluActivation && !geluActivation)
+                || (geluActivation && !Boolean.getBoolean(ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY))
+                || (isGemma4Text(config) && !Boolean.getBoolean(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY))
+                || gateB != null
+                || upB != null
+                || downB != null
+                || !canUseExperimentalMetalLinear()
+                || metalBinding == null
+                || (siluActivation && !metalBinding.supportsSwigluFfnHalf())
+                || (geluActivation && !metalBinding.supportsGegluFfnHalf())
+                || !canUseMetalHalfLinearCandidate(input, gateW)
+                || !canUseMetalHalfLinearCandidate(input, upW)
+                || !canUseMetalHalfWeight(downW)) {
+            return null;
+        }
+
+        long[] gateShape = gateW.shape();
+        long[] upShape = upW.shape();
+        long[] downShape = downW.shape();
+        if (gateShape.length != 2
+                || upShape.length != 2
+                || downShape.length != 2
+                || gateShape[0] != upShape[0]
+                || gateShape[1] != upShape[1]
+                || downShape[1] != gateShape[0]) {
+            return null;
+        }
+
+        long[] inputShape = input.shape();
+        long inputDim = inputShape[inputShape.length - 1];
+        long rows = input.numel() / Math.max(1L, inputDim);
+        if (rows != 1L) {
+            return null;
+        }
+
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(gateW)
+                && shouldUseNativeMetalBf16Linear(upW)
+                && shouldUseNativeMetalBf16Linear(downW);
+        AccelTensor metalGateW = toMetalHalfWeight(gateW, nativeBf16Weights);
+        AccelTensor metalUpW = toMetalHalfWeight(upW, nativeBf16Weights);
+        AccelTensor metalDownW = toMetalHalfWeight(downW, nativeBf16Weights);
+        if (metalGateW == null || metalUpW == null || metalDownW == null) {
+            return null;
+        }
+
+        long t0 = System.nanoTime();
+        AccelTensor contiguousInput = input.contiguous();
+        long intermediateDim = metalGateW.shape()[0];
+        long outputDim = metalDownW.shape()[0];
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = outputDim;
+        AccelTensor out = AccelTensor.zeros(outputShape);
+
+        try {
+            int rc;
+            if (siluActivation) {
+                rc = metalBinding.swigluFfnHalf(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(rows),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim),
+                        nativeBf16Weights);
+            } else {
+                rc = metalBinding.gegluFfnHalf(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(rows),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim),
+                        nativeBf16Weights);
+            }
+            if (rc != 0) {
+                throw new IllegalStateException("Metal fused gated FFN failed with code " + rc);
+            }
+            DirectInferenceEngine.recordLinearNanos(
+                    siluActivation ? "ffn_fused_metal" : "ffn_geglu_fused_metal",
+                    System.nanoTime() - t0);
+            return out;
+        } catch (RuntimeException e) {
+            out.close();
+            log.debugf("Falling back from fused Metal gated FFN: %s", e.getMessage());
+            return null;
+        } finally {
+            if (contiguousInput != input && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+        }
+    }
+
+    private boolean canUseMetalHalfWeight(AccelTensor weight) {
+        if (weight == null || weight.shape().length != 2 || !weight.isContiguous()) {
+            return false;
+        }
+        AccelTensor.QuantType quantType = weight.quantType();
+        return quantType == AccelTensor.QuantType.F16
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear());
+    }
+
+    private AccelTensor toMetalHalfWeight(AccelTensor weight, boolean nativeBf16) {
+        if (weight == null) {
+            return null;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.F16) {
+            return weight;
+        }
+        if (nativeBf16 && weight.quantType() == AccelTensor.QuantType.BF16) {
+            return weight;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear()) {
+            return weight.toF16CachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES);
+        }
+        return null;
+    }
+
+    private boolean shouldPreferSeparateMetalHalfFfn(AccelTensor input, AccelTensor gateW, AccelTensor upW) {
+        return canUseMetalHalfLinearCandidate(input, gateW)
+                && canUseMetalHalfLinearCandidate(input, upW);
+    }
+
+    private LinearPair tryMetalHalfLinearPair(AccelTensor input,
+                                              ModelConfig config,
+                                              AccelTensor firstWeight,
+                                              AccelTensor firstBias,
+                                              AccelTensor secondWeight,
+                                              AccelTensor secondBias) {
+        if (!shouldUseMetalHalfLinearPair(config)) {
+            return null;
+        }
+        if (!canUseMetalHalfLinearCandidate(input, firstWeight)
+                || !canUseMetalHalfLinearCandidate(input, secondWeight)
+                || !metalBinding.supportsMatmulTransposedRightHalfPair()) {
+            return null;
+        }
+        if (firstWeight.shape()[0] != secondWeight.shape()[0]
+                || firstWeight.shape()[1] != secondWeight.shape()[1]) {
+            return null;
+        }
+
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(firstWeight)
+                && shouldUseNativeMetalBf16Linear(secondWeight);
+        AccelTensor metalFirstWeight = toMetalHalfWeight(firstWeight, nativeBf16Weights);
+        AccelTensor metalSecondWeight = toMetalHalfWeight(secondWeight, nativeBf16Weights);
+        if (metalFirstWeight == null || metalSecondWeight == null
+                || metalFirstWeight.quantType() != metalSecondWeight.quantType()
+                || (metalFirstWeight.quantType() != AccelTensor.QuantType.F16
+                        && metalFirstWeight.quantType() != AccelTensor.QuantType.BF16)) {
+            return null;
+        }
+
+        long t0 = System.nanoTime();
+        long[] inputShape = input.shape();
+        AccelTensor contiguousInput = input.contiguous();
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = metalFirstWeight.shape()[0];
+        AccelTensor first = AccelTensor.zeros(outputShape);
+        AccelTensor second = AccelTensor.zeros(outputShape);
+
+        try {
+            long k = inputShape[inputShape.length - 1];
+            long rows = input.numel() / Math.max(1L, k);
+            int m = Math.toIntExact(rows);
+            int kk = Math.toIntExact(k);
+            int n = Math.toIntExact(metalFirstWeight.shape()[0]);
+            int rc = -2;
+            if (m == 1
+                    && !nativeBf16Weights
+                    && shouldUseMetalHalfMatvecPair(config, n)
+                    && metalBinding.supportsMatvecTransposedRightHalfPair()) {
+                rc = metalBinding.matvecTransposedRightHalfPair(
+                        first.dataPtr(),
+                        second.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalFirstWeight.dataPtr(),
+                        metalSecondWeight.dataPtr(),
+                        kk, n);
+            }
+            if (rc != 0) {
+                rc = metalBinding.matmulTransposedRightHalfPair(
+                        first.dataPtr(),
+                        second.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalFirstWeight.dataPtr(),
+                        metalSecondWeight.dataPtr(),
+                        m, kk, n,
+                        1.0f, 0.0f,
+                        nativeBf16Weights);
+            }
+            if (rc != 0) {
+                throw new IllegalStateException("Metal matmulTransposedRightHalfPair failed with code " + rc);
+            }
+            AccelTensor firstOut = addBiasIfNeeded(first, firstBias);
+            AccelTensor secondOut = addBiasIfNeeded(second, secondBias);
+            DirectInferenceEngine.recordLinearNanos("ffn_gate_up_pair", System.nanoTime() - t0);
+            return new LinearPair(firstOut, secondOut);
+        } catch (RuntimeException e) {
+            first.close();
+            second.close();
+            log.debugf("Falling back from Metal half linear pair to separate linears: %s", e.getMessage());
+            return null;
+        } finally {
+            if (contiguousInput != input && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+        }
+    }
+
+    private static boolean resolveMetalHalfLinearPairEnabled() {
+        if (Boolean.getBoolean(DISABLE_METAL_HALF_LINEAR_PAIR_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_HALF_LINEAR_PAIR_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return true;
+    }
+
+    private static boolean resolveAutoMetalHalfMatvecEnabled() {
+        String explicit = System.getProperty(AUTO_METAL_HALF_MATVEC_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return true;
+    }
+
+    private boolean shouldUseMetalHalfLinearPair(ModelConfig config) {
+        if (!METAL_HALF_LINEAR_PAIR_ENABLED) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_HALF_LINEAR_PAIR_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return !isGemma4Text(config) && !hasGemma4StylePerLayerInputs(config);
+    }
+
+    private AccelTensor addBiasIfNeeded(AccelTensor tensor, AccelTensor bias) {
+        if (bias == null) {
+            return tensor;
+        }
+        AccelTensor biased = AccelOps.add(tensor, bias);
+        tensor.close();
+        return biased;
+    }
+
+    private record LinearPair(AccelTensor first, AccelTensor second) {
+    }
+
+    private AccelTensor tryFusedGatedHalfFfn(AccelTensor x,
+                                             AccelTensor gateW,
+                                             AccelTensor gateB,
+                                             AccelTensor upW,
+                                             AccelTensor upB,
+                                             boolean geluActivation,
+                                             AccelTensor outputBuffer) {
+        if (gateW == null || upW == null || gateW.shape().length != 2 || upW.shape().length != 2) {
+            return null;
+        }
+        if (gateW.shape()[0] != upW.shape()[0]) {
+            return null;
+        }
+        long[] outputShape = new long[] { x.size(0), x.size(1), gateW.shape()[0] };
+        AccelTensor buffer = outputBuffer;
+        if (buffer != null) {
+            long[] bufferShape = buffer.shape();
+            if (bufferShape.length != outputShape.length) {
+                buffer = null;
+            } else {
+                for (int i = 0; i < outputShape.length; i++) {
+                    if (bufferShape[i] != outputShape[i]) {
+                        buffer = null;
+                        break;
+                    }
+                }
+            }
+        }
+        long t0 = System.nanoTime();
+        AccelTensor combined = invokeFusedGatedHalfLinear(
+                x, gateW, gateB, upW, upB, geluActivation, buffer);
+        if (combined != null) {
+            DirectInferenceEngine.recordLinearNanos("ffn_gate_up_fused", System.nanoTime() - t0);
+        }
+        return combined;
+    }
+
+    private AccelTensor invokeFusedGatedHalfLinear(AccelTensor x,
+                                                   AccelTensor gateW,
+                                                   AccelTensor gateB,
+                                                   AccelTensor upW,
+                                                   AccelTensor upB,
+                                                   boolean geluActivation,
+                                                   AccelTensor outputBuffer) {
+        return AccelOps.fusedGatedHalfLinear(x, gateW, gateB, upW, upB, geluActivation, outputBuffer);
     }
 
     /**
@@ -500,56 +1002,13 @@ public class DirectForwardPass {
         java.lang.foreign.MemorySegment upSeg = up.dataPtr();
         long n = gate.numel();
 
-        long i = 0;
-        long upperBound = FLOAT_SPECIES.loopBound(n);
-        FloatVector half = FloatVector.broadcast(FLOAT_SPECIES, 0.5f);
-        FloatVector one = FloatVector.broadcast(FLOAT_SPECIES, 1.0f);
-        FloatVector innerScale = FloatVector.broadcast(FLOAT_SPECIES, GELU_INNER_SCALE);
-        FloatVector cubicCoeff = FloatVector.broadcast(FLOAT_SPECIES, GELU_CUBIC_COEFF);
-
-        for (; i < upperBound; i += FLOAT_SPECIES.length()) {
-            FloatVector g = FloatVector.fromMemorySegment(
-                    FLOAT_SPECIES, gateSeg, i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
-            FloatVector u = FloatVector.fromMemorySegment(
-                    FLOAT_SPECIES, upSeg, i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
-            FloatVector g2 = g.mul(g);
-            FloatVector g3 = g2.mul(g);
-            FloatVector inner = g.add(g3.mul(cubicCoeff)).mul(innerScale);
-            FloatVector gelu = g.mul(half).mul(one.add(tanhApprox(inner)));
-            gelu.mul(u).intoMemorySegment(outSeg, i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
-        }
-
-        for (; i < n; i++) {
+        for (long i = 0; i < n; i++) {
             float g = gateSeg.getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i);
             float u = upSeg.getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i);
             float inner = GELU_INNER_SCALE * (g + GELU_CUBIC_COEFF * g * g * g);
             float gelu = 0.5f * g * (1.0f + (float) Math.tanh(inner));
             outSeg.setAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i, gelu * u);
         }
-    }
-
-    private static FloatVector tanhApprox(FloatVector x) {
-        FloatVector expNeg2x = expApprox(x.mul(-2.0f));
-        return FloatVector.broadcast(FLOAT_SPECIES, 2.0f)
-                .div(FloatVector.broadcast(FLOAT_SPECIES, 1.0f).add(expNeg2x))
-                .sub(FloatVector.broadcast(FLOAT_SPECIES, 1.0f));
-    }
-
-    private static FloatVector expApprox(FloatVector x) {
-        FloatVector clamped = x.max(-20.0f).min(20.0f);
-        FloatVector x2 = clamped.mul(clamped);
-        FloatVector x3 = x2.mul(clamped);
-        FloatVector x4 = x3.mul(clamped);
-        FloatVector x5 = x4.mul(clamped);
-        FloatVector x6 = x5.mul(clamped);
-
-        return FloatVector.broadcast(FLOAT_SPECIES, 1.0f)
-                .add(clamped)
-                .add(x2.mul(1.0f / 2.0f))
-                .add(x3.mul(1.0f / 6.0f))
-                .add(x4.mul(1.0f / 24.0f))
-                .add(x5.mul(1.0f / 120.0f))
-                .add(x6.mul(1.0f / 720.0f));
     }
 
     // ── Embedding ─────────────────────────────────────────────────────
@@ -564,34 +1023,449 @@ public class DirectForwardPass {
     private AccelTensor selectLastToken(AccelTensor hidden, int seqLen) {
         if (seqLen < 1) return hidden; // Safety fallback
         long hiddenSize = hidden.size(hidden.shape().length - 1);
-        long lastTokenOffset = Math.max(0L, (long) (seqLen - 1) * hiddenSize);
-        return AccelTensor.view(hidden.dataPtr().asSlice(lastTokenOffset * 4L), new long[] { 1, hiddenSize });
+        return hidden.slice(1, seqLen - 1L, seqLen).reshape(1L, hiddenSize);
+    }
+
+    private AccelTensor selectTokenAt(AccelTensor hidden, int tokenIndex) {
+        long hiddenSize = hidden.size(hidden.shape().length - 1);
+        long clamped = Math.max(0L, tokenIndex);
+        return hidden.slice(1, clamped, clamped + 1L).reshape(1L, hiddenSize);
+    }
+
+    private void debugSequencePositionLogits(AccelTensor hidden, AccelTensor lmHeadW, int seqLen) {
+        AccelTensor first = selectTokenAt(hidden, 0);
+        AccelTensor last = selectTokenAt(hidden, seqLen - 1);
+        AccelTensor firstLogits = null;
+        AccelTensor lastLogits = null;
+        try {
+            firstLogits = linear(first, lmHeadW, null);
+            lastLogits = linear(last, lmHeadW, null);
+            int firstTop = topIndex(firstLogits.toFloatArray());
+            int lastTop = topIndex(lastLogits.toFloatArray());
+            System.err.printf("[DEBUG] Positional logits: firstTokenTop=%d lastTokenTop=%d%n", firstTop, lastTop);
+            System.err.flush();
+        } finally {
+            if (firstLogits != null) {
+                firstLogits.close();
+            }
+            if (lastLogits != null) {
+                lastLogits.close();
+            }
+            first.close();
+            last.close();
+        }
+    }
+
+    private int topIndex(float[] logits) {
+        int best = -1;
+        float bestVal = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < logits.length; i++) {
+            if (logits[i] > bestVal) {
+                bestVal = logits[i];
+                best = i;
+            }
+        }
+        return best;
     }
 
     // ── Linear ────────────────────────────────────────────────────────
 
     private AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias) {
-        if (weight.isQuantized()) {
+        return linear(input, weight, bias, null);
+    }
+
+    private AccelTensor ffnDownLinear(AccelTensor input,
+                                      AccelTensor weight,
+                                      AccelTensor bias,
+                                      ModelConfig config,
+                                      String profileKey) {
+        if (canUseExperimentalMetalLinear()) {
+            return linear(input, weight, bias, profileKey, config);
+        }
+        AccelTensor cached = tryCachedFfnDownHalfLinear(input, weight, bias, config, profileKey);
+        if (cached != null) {
+            return cached;
+        }
+        return linear(input, weight, bias, profileKey, config);
+    }
+
+    private AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias, String profileKey) {
+        return linear(input, weight, bias, profileKey, null);
+    }
+
+    private AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias, String profileKey,
+                               ModelConfig config) {
+        return linear(input, weight, bias, profileKey, config, null);
+    }
+
+    private AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias, String profileKey,
+                               ModelConfig config, AccelTensor outputBuffer) {
+        long t0 = profileKey != null ? System.nanoTime() : 0L;
+        if (weight.isQuantized()
+                && weight.quantType() != AccelTensor.QuantType.BF16
+                && weight.quantType() != AccelTensor.QuantType.F16) {
             AccelTensor dequantized = weight.dequantize();
             try {
-                return linear(input, dequantized, bias);
+                return linear(input, dequantized, bias, profileKey, config, outputBuffer);
             } finally {
                 if (dequantized != weight && !dequantized.isClosed()) {
                     dequantized.close();
                 }
             }
         }
+        AccelTensor metalHalf = tryMetalHalfLinear(input, weight, bias, config, outputBuffer);
+        if (metalHalf != null) {
+            if (profileKey != null) {
+                DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
+            }
+            return metalHalf;
+        }
+        AccelTensor metalFloat = tryMetalFloatLinear(input, weight, bias);
+        if (metalFloat != null) {
+            if (profileKey != null) {
+                DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
+            }
+            return metalFloat;
+        }
+        AccelTensor cachedLargeHalf = tryCachedLargeHalfLinear(input, weight, bias, profileKey);
+        if (cachedLargeHalf != null) {
+            if (profileKey != null) {
+                DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
+            }
+            return cachedLargeHalf;
+        }
         AccelTensor mm = AccelOps.linear(input, weight);
         if (bias != null) {
             AccelTensor out = AccelOps.add(mm, bias);
             mm.close();
+            if (profileKey != null) {
+                DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
+            }
             return out;
+        }
+        if (profileKey != null) {
+            DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
         }
         return mm;
     }
 
+    private AccelTensor tryCachedFfnDownHalfLinear(AccelTensor input,
+                                                   AccelTensor weight,
+                                                   AccelTensor bias,
+                                                   ModelConfig config,
+                                                   String profileKey) {
+        if (!"ffn_down".equals(profileKey) && !"ffn_down_nongated".equals(profileKey)) {
+            return null;
+        }
+        if (!isSingleTokenHalfLinearCandidate(input, weight)) {
+            return null;
+        }
+        long perTensorMaxBytes = FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES;
+        if (perTensorMaxBytes <= 0L || weight.dequantizedByteSize() > perTensorMaxBytes) {
+            return null;
+        }
+        long totalMaxBytes = FFN_DOWN_LARGE_HALF_CACHE_TOTAL_MAX_BYTES;
+        if (totalMaxBytes <= 0L) {
+            return null;
+        }
+        long estimatedModelBytes = multiplySaturating(weight.dequantizedByteSize(), config.numHiddenLayers());
+        if (estimatedModelBytes > totalMaxBytes) {
+            return null;
+        }
+        AccelTensor dequantized = weight.dequantizeCachedUpTo(perTensorMaxBytes);
+        if (dequantized == weight) {
+            return null;
+        }
+        return linear(input, dequantized, bias, profileKey);
+    }
+
+    private AccelTensor tryCachedLargeHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias, String profileKey) {
+        if (!"logits".equals(profileKey)) {
+            return null;
+        }
+        if (!isSingleTokenHalfLinearCandidate(input, weight)) {
+            return null;
+        }
+        long maxBytes = LOGITS_LARGE_HALF_CACHE_MAX_BYTES;
+        if (maxBytes <= 0L || weight.dequantizedByteSize() > maxBytes) {
+            return null;
+        }
+        AccelTensor dequantized = weight.dequantizeCachedUpTo(maxBytes);
+        if (dequantized == weight) {
+            return null;
+        }
+        return linear(input, dequantized, bias, profileKey);
+    }
+
+    private boolean isSingleTokenHalfLinearCandidate(AccelTensor input, AccelTensor weight) {
+        if (weight.quantType() != AccelTensor.QuantType.BF16
+                && weight.quantType() != AccelTensor.QuantType.F16) {
+            return false;
+        }
+        long[] inputShape = input.shape();
+        if (inputShape.length < 1) {
+            return false;
+        }
+        long k = inputShape[inputShape.length - 1];
+        long rows = input.numel() / Math.max(1L, k);
+        return rows == 1L;
+    }
+
+    private long multiplySaturating(long left, long right) {
+        try {
+            return Math.multiplyExact(left, right);
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
     private boolean canUseExperimentalMetalLinear() {
-        return canUseMetal() && Boolean.getBoolean(EXPERIMENTAL_METAL_LINEAR_PROPERTY);
+        return canUseMetal() && EXPERIMENTAL_METAL_LINEAR_ENABLED;
+    }
+
+    private static boolean resolveExperimentalMetalLinearEnabled() {
+        if (Boolean.getBoolean(DISABLE_EXPERIMENTAL_METAL_LINEAR_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(EXPERIMENTAL_METAL_LINEAR_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        // Default ON for Apple Silicon safetensor text path to avoid accidental CPU-only runs.
+        return true;
+    }
+
+    private static boolean allowMetalBf16Linear() {
+        if (Boolean.getBoolean(DISABLE_EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return true;
+    }
+
+    private static boolean preferNativeMetalBf16Linear() {
+        return Boolean.getBoolean(PREFER_NATIVE_METAL_BF16_LINEAR_PROPERTY);
+    }
+
+    private static boolean shouldUseNativeMetalBf16Linear(AccelTensor weight) {
+        return preferNativeMetalBf16Linear()
+                && allowMetalBf16Linear()
+                && weight != null
+                && weight.quantType() == AccelTensor.QuantType.BF16;
+    }
+
+    private boolean canUseMetalHalfLinearCandidate(AccelTensor input, AccelTensor weight) {
+        if (!canUseExperimentalMetalLinear()) {
+            return false;
+        }
+        if (input == null || input.quantType() != AccelTensor.QuantType.F32) {
+            return false;
+        }
+        if (weight == null) {
+            return false;
+        }
+        AccelTensor.QuantType quantType = weight.quantType();
+        if (quantType != AccelTensor.QuantType.F16
+                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear())) {
+            return false;
+        }
+        if (!weight.isContiguous()) {
+            return false;
+        }
+        long[] inputShape = input.shape();
+        if (inputShape.length < 2 || weight.shape().length != 2) {
+            return false;
+        }
+        long rows = input.numel() / Math.max(1L, inputShape[inputShape.length - 1]);
+        if (rows <= 0L) {
+            return false;
+        }
+        long batchProduct = 1L;
+        for (int i = 0; i < inputShape.length - 2; i++) {
+            batchProduct *= inputShape[i];
+        }
+        return batchProduct == 1L;
+    }
+
+    private boolean canUseMetalFloatLinearCandidate(AccelTensor input, AccelTensor weight) {
+        if (!canUseExperimentalMetalLinear()) {
+            return false;
+        }
+        if (input == null || weight == null) {
+            return false;
+        }
+        if (input.quantType() != AccelTensor.QuantType.F32 || weight.quantType() != AccelTensor.QuantType.F32) {
+            return false;
+        }
+        if (!weight.isContiguous()) {
+            return false;
+        }
+        long[] inputShape = input.shape();
+        if (inputShape.length < 2 || weight.shape().length != 2) {
+            return false;
+        }
+        long rows = input.numel() / Math.max(1L, inputShape[inputShape.length - 1]);
+        if (rows <= 0L) {
+            return false;
+        }
+        long batchProduct = 1L;
+        for (int i = 0; i < inputShape.length - 2; i++) {
+            batchProduct *= inputShape[i];
+        }
+        return batchProduct == 1L;
+    }
+
+    private AccelTensor tryMetalHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias,
+                                           ModelConfig config) {
+        return tryMetalHalfLinear(input, weight, bias, config, null);
+    }
+
+    private AccelTensor tryMetalHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias,
+                                           ModelConfig config, AccelTensor outputBuffer) {
+        if (!canUseMetalHalfLinearCandidate(input, weight)) {
+            return null;
+        }
+        boolean nativeBf16Weight = shouldUseNativeMetalBf16Linear(weight);
+        AccelTensor metalWeight = toMetalHalfWeight(weight, nativeBf16Weight);
+        if (metalWeight == null) {
+            return null;
+        }
+        long[] inputShape = input.shape();
+        AccelTensor contiguousInput = input.contiguous();
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = metalWeight.shape()[0];
+        AccelTensor out = reusableOutputTensor(outputBuffer, outputShape);
+
+        try {
+            long k = inputShape[inputShape.length - 1];
+            long rows = input.numel() / Math.max(1L, k);
+            int m = Math.toIntExact(rows);
+            int kk = Math.toIntExact(k);
+            int n = Math.toIntExact(metalWeight.shape()[0]);
+            int rc = -2;
+            if (m == 1
+                    && !nativeBf16Weight
+                    && shouldUseMetalHalfMatvec(config, n)
+                    && metalBinding.supportsMatvecTransposedRightHalf()) {
+                rc = metalBinding.matvecTransposedRightHalf(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalWeight.dataPtr(),
+                        kk, n);
+            }
+            if (rc != 0) {
+                rc = metalBinding.matmulTransposedRightHalf(
+                    out.dataPtr(),
+                    contiguousInput.dataPtr(),
+                    metalWeight.dataPtr(),
+                    m, kk, n,
+                    1.0f, 0.0f,
+                    nativeBf16Weight);
+            }
+            if (rc != 0) {
+                throw new IllegalStateException("Metal matmulTransposedRightHalf failed with code " + rc);
+            }
+            if (bias == null) {
+                return out;
+            }
+            AccelTensor biased = AccelOps.add(out, bias);
+            out.close();
+            return biased;
+        } catch (RuntimeException e) {
+            out.close();
+            log.debugf("Falling back from Metal half linear to AccelOps: %s", e.getMessage());
+            return null;
+        } finally {
+            if (contiguousInput != input && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+        }
+    }
+
+    private AccelTensor reusableWorkspaceView(java.lang.foreign.MemorySegment segment, long[] shape) {
+        long requiredBytes = elementCount(shape) * Float.BYTES;
+        if (segment == null || segment.byteSize() < requiredBytes) {
+            return null;
+        }
+        return AccelTensor.view(segment, shape);
+    }
+
+    private AccelTensor reusableOutputTensor(AccelTensor outputBuffer, long[] outputShape) {
+        if (outputBuffer != null
+                && !outputBuffer.isClosed()
+                && sameShape(outputBuffer.shape(), outputShape)) {
+            return outputBuffer;
+        }
+        return AccelTensor.zeros(outputShape);
+    }
+
+    private static boolean canReuseFfnProjectionWorkspace() {
+        return Boolean.getBoolean(REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY);
+    }
+
+    private static boolean sameShape(long[] left, long[] right) {
+        if (left.length != right.length) {
+            return false;
+        }
+        for (int i = 0; i < left.length; i++) {
+            if (left[i] != right[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static long elementCount(long[] shape) {
+        long count = 1L;
+        for (long dim : shape) {
+            count = Math.multiplyExact(count, dim);
+        }
+        return count;
+    }
+
+    private AccelTensor tryMetalFloatLinear(AccelTensor input, AccelTensor weight, AccelTensor bias) {
+        if (!canUseMetalFloatLinearCandidate(input, weight)) {
+            return null;
+        }
+        long[] inputShape = input.shape();
+        AccelTensor contiguousInput = input.contiguous();
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = weight.shape()[0];
+        AccelTensor out = AccelTensor.zeros(outputShape);
+
+        try {
+            long k = inputShape[inputShape.length - 1];
+            long rows = input.numel() / Math.max(1L, k);
+            int m = Math.toIntExact(rows);
+            int kk = Math.toIntExact(k);
+            int n = Math.toIntExact(weight.shape()[0]);
+            int rc = metalBinding.matmulTransposedRight(
+                    out.dataPtr(),
+                    contiguousInput.dataPtr(),
+                    weight.dataPtr(),
+                    m, kk, n,
+                    1.0f, 0.0f);
+            if (rc != 0) {
+                throw new IllegalStateException("Metal matmulTransposedRight failed with code " + rc);
+            }
+            if (bias == null) {
+                return out;
+            }
+            AccelTensor biased = AccelOps.add(out, bias);
+            out.close();
+            return biased;
+        } catch (RuntimeException e) {
+            out.close();
+            log.debugf("Falling back from Metal float linear to AccelOps: %s", e.getMessage());
+            return null;
+        } finally {
+            if (contiguousInput != input && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+        }
     }
 
     private static AccelTensor resolveBias(Map<String, AccelTensor> weights, String key) {
@@ -602,7 +1476,34 @@ public class DirectForwardPass {
         if (Boolean.getBoolean(FORCE_CPU_FORWARD_PROPERTY)) {
             return false;
         }
-        return metal != null && metal.deviceName() != null && !metal.deviceName().contains("CPU");
+        return metalReady;
+    }
+
+    private boolean canUseMetalElementwise(ModelConfig config, int seqLen) {
+        if (!canUseMetal()) {
+            return false;
+        }
+        int defaultMinSeq = isGemma4Text(config) ? 1 : 16;
+        if (seqLen < Integer.getInteger(METAL_ELEMENTWISE_MIN_SEQ_PROPERTY, defaultMinSeq)) {
+            return false;
+        }
+        return !isGemma4Text(config) || !Boolean.getBoolean(DISABLE_METAL_GEMMA4_ELEMENTWISE_PROPERTY);
+    }
+
+    private boolean shouldUseMetalPostFfnNorm(ModelConfig config) {
+        if (Boolean.getBoolean(DISABLE_METAL_POST_FFN_NORM_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_POST_FFN_NORM_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return isGemma4Text(config) || hasGemma4StylePerLayerInputs(config);
+    }
+
+    private boolean hasGemma4StylePerLayerInputs(ModelConfig config) {
+        return config != null
+                && (config.hiddenSizePerLayerInput() > 0 || config.vocabSizePerLayerInput() > 0);
     }
 
     private void rmsNormRowsMetal(java.lang.foreign.MemorySegment out, java.lang.foreign.MemorySegment in,
@@ -610,15 +1511,26 @@ public class DirectForwardPass {
         long rowBytes = (long) hiddenSize * Float.BYTES;
         for (int row = 0; row < rows; row++) {
             long offset = (long) row * rowBytes;
-            metal.rmsNorm(out.asSlice(offset, rowBytes), in.asSlice(offset, rowBytes), weight, hiddenSize, eps, addOne);
+            int rc = metalBinding.rmsNorm(
+                    out.asSlice(offset, rowBytes),
+                    in.asSlice(offset, rowBytes),
+                    weight,
+                    hiddenSize, eps, addOne);
+            if (rc != 0) {
+                throw new IllegalStateException("Metal rmsNorm failed with code " + rc);
+            }
         }
     }
 
     private void residualAdd(java.lang.foreign.MemorySegment left, AccelTensor right,
-            java.lang.foreign.MemorySegment out, long[] shape, int seqLen, long hiddenSize) {
-        if (canUseMetal()) {
+            java.lang.foreign.MemorySegment out, long[] shape, int seqLen, long hiddenSize, boolean useMetalElementwise) {
+        if (useMetalElementwise) {
             try {
-                metal.add(left, right.dataPtr(), out, shape);
+                int elements = Math.toIntExact(seqLen * hiddenSize);
+                int rc = metalBinding.add(out, left, right.dataPtr(), elements);
+                if (rc != 0) {
+                    throw new IllegalStateException("Metal add failed with code " + rc);
+                }
                 return;
             } catch (IllegalStateException | UnsupportedOperationException e) {
                 log.debugf("Falling back from Metal add to direct CPU accumulation: %s", e.getMessage());
@@ -648,6 +1560,9 @@ public class DirectForwardPass {
 
     private AccelTensor[] buildPerLayerInputs(long[] inputIds, AccelTensor inputsEmbeds,
             Map<String, AccelTensor> weights, ModelConfig config, ModelArchitecture arch) {
+        if (isGemma4Text(config) && Boolean.getBoolean(DISABLE_GEMMA4_PER_LAYER_INPUT_PROPERTY)) {
+            return null;
+        }
         if (config.hiddenSizePerLayerInput() <= 0) {
             return null;
         }
@@ -667,9 +1582,9 @@ public class DirectForwardPass {
                 .reshape(1L, seqLen, numLayers, pleDim);
         AccelTensor tokenPle = AccelOps.mulScalar(tokenPleRaw, (float) Math.sqrt(Math.max(1, pleDim)));
         tokenPleRaw.close();
-        AccelTensor projectedPle = AccelOps.linear(inputsEmbeds, pleProjection);
-        AccelTensor projectedPleScaled = AccelOps.mulScalar(projectedPle,
-                (float) (1.0 / Math.sqrt(Math.max(1, config.hiddenSize()))));
+        AccelTensor projectedPle = linear(inputsEmbeds, pleProjection, null, "ple_projection", config);
+        float pleProjectionScale = (float) (1.0 / Math.sqrt(Math.max(1, config.hiddenSize())));
+        AccelTensor projectedPleScaled = AccelOps.mulScalar(projectedPle, pleProjectionScale);
         projectedPle.close();
 
         AccelTensor projectedPle4d = projectedPleScaled.reshape(1L, seqLen, numLayers, pleDim);
@@ -716,7 +1631,8 @@ public class DirectForwardPass {
         }
 
         AccelTensor hidden = AccelTensor.view(hiddenSeg, hiddenShape);
-        AccelTensor gate = AccelOps.linear(hidden, gateWeight);
+        AccelTensor gate = linear(hidden, gateWeight, null, "per_layer_gate", config);
+        hidden.close();
         if (arch.activationType() == FFNActivationType.GELU) {
             AccelTensor activated = AccelOps.gelu(gate);
             gate.close();
@@ -729,18 +1645,16 @@ public class DirectForwardPass {
         AccelTensor mixed = AccelOps.mul(gate, perLayerInput);
         gate.close();
 
-        AccelTensor projected = AccelOps.linear(mixed, projectionWeight);
+        AccelTensor projected = linear(mixed, projectionWeight, null, "per_layer_projection", config);
         mixed.close();
 
         AccelTensor normed = AccelOps.rmsNorm(projected, normWeight,
                 config.rmsNormEps(), useAddOneRmsNorm(arch, config));
         projected.close();
 
-        AccelTensor residual = AccelOps.add(hidden, normed);
+        residualAdd(hiddenSeg, normed, hiddenSeg, hiddenShape, seqLen, config.hiddenSize(),
+                canUseMetalElementwise(config, seqLen));
         normed.close();
-        java.lang.foreign.MemorySegment.copy(residual.dataPtr(), 0, hiddenSeg, 0,
-                (long) seqLen * config.hiddenSize() * Float.BYTES);
-        residual.close();
     }
 
     private void closePerLayerInputs(AccelTensor[] perLayerInputs) {
@@ -755,7 +1669,28 @@ public class DirectForwardPass {
     }
 
     private boolean useAddOneRmsNorm(ModelArchitecture arch, ModelConfig config) {
+        if (config != null && config.modelType() != null) {
+            String mt = config.modelType().toLowerCase();
+            if (mt.startsWith("gemma3")) {
+                // Gemma3 reference RMSNorm uses output * (1 + weight).
+                return true;
+            }
+        }
         return arch.addOneToRmsNormWeight() && !isGemma4Text(config);
+    }
+
+    private float resolveEmbeddingScale(ModelArchitecture arch, ModelConfig config, int hiddenDim) {
+        return arch.embeddingScaleFactor(hiddenDim);
+    }
+
+    private boolean shouldApplyLayerScalar(ModelConfig config) {
+        if (!isGemma4Text(config)) {
+            return true;
+        }
+        if (Boolean.getBoolean(DISABLE_GEMMA4_LAYER_SCALAR_PROPERTY)) {
+            return false;
+        }
+        return true;
     }
 
     private boolean isGemma4Text(ModelConfig config) {
@@ -764,10 +1699,18 @@ public class DirectForwardPass {
     }
 
     private void scaleSegmentInPlace(java.lang.foreign.MemorySegment seg, long[] shape, int seqLen, long hiddenSize, float scale) {
-        AccelTensor view = AccelTensor.view(seg, shape);
-        AccelTensor scaled = AccelOps.mulScalar(view, scale);
-        java.lang.foreign.MemorySegment.copy(scaled.dataPtr(), 0, seg, 0, (long) seqLen * hiddenSize * 4);
-        scaled.close();
+        long elements = seqLen * hiddenSize;
+        long i = 0;
+        long upperBound = FLOAT_SPECIES.loopBound(elements);
+        for (; i < upperBound; i += FLOAT_SPECIES.length()) {
+            FloatVector vec = FloatVector.fromMemorySegment(
+                    FLOAT_SPECIES, seg, i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+            vec.mul(scale).intoMemorySegment(seg, i * Float.BYTES, java.nio.ByteOrder.nativeOrder());
+        }
+        for (; i < elements; i++) {
+            float value = seg.getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i);
+            seg.setAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i, value * scale);
+        }
     }
 
     private float readScalarValue(AccelTensor tensor) {
@@ -777,7 +1720,7 @@ public class DirectForwardPass {
         if (tensor.quantType() == AccelTensor.QuantType.F32) {
             return tensor.dataPtr().get(java.lang.foreign.ValueLayout.JAVA_FLOAT, 0);
         }
-        AccelTensor dequantized = tensor.dequantizeTransient();
+        AccelTensor dequantized = tensor.dequantize();
         try {
             return dequantized.dataPtr().get(java.lang.foreign.ValueLayout.JAVA_FLOAT, 0);
         } finally {
@@ -785,6 +1728,56 @@ public class DirectForwardPass {
                 dequantized.close();
             }
         }
+    }
+
+    private boolean shouldUseMetalHalfMatvec(ModelConfig config, int outputDim) {
+        if (DISABLE_METAL_HALF_MATVEC_ENABLED) {
+            return false;
+        }
+        String explicit = ENABLE_METAL_HALF_MATVEC_VALUE;
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit) && outputDim <= metalHalfMatvecMaxOutput();
+        }
+        return shouldAutoUseMetalHalfMatvec(config, outputDim);
+    }
+
+    private boolean shouldUseMetalHalfMatvecPair(ModelConfig config, int outputDim) {
+        if (DISABLE_METAL_HALF_MATVEC_PAIR_ENABLED) {
+            return false;
+        }
+        String explicit = ENABLE_METAL_HALF_MATVEC_PAIR_VALUE;
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit) && outputDim <= metalHalfMatvecMaxOutput();
+        }
+        return shouldAutoUseMetalHalfMatvec(config, outputDim);
+    }
+
+    private boolean shouldAutoUseMetalHalfMatvec(ModelConfig config, int outputDim) {
+        return AUTO_METAL_HALF_MATVEC_ENABLED
+                && outputDim <= metalHalfMatvecMaxOutput()
+                && isMetalHalfMatvecAutoCandidate(config);
+    }
+
+    private boolean isMetalHalfMatvecAutoCandidate(ModelConfig config) {
+        if (config == null || config.modelType() == null || config.modelType().isBlank()) {
+            return false;
+        }
+        String modelType = config.modelType().toLowerCase();
+        if (isGemma4Text(config) || hasGemma4StylePerLayerInputs(config)) {
+            return true;
+        }
+        if (modelType.contains("qwen")) {
+            return config.numHiddenLayers() >= 20
+                    && config.hiddenSize() <= 2048
+                    && config.intermediateSize() >= 2048;
+        }
+        return config.numHiddenLayers() >= 30
+                && config.intermediateSize() >= 4096
+                && config.hiddenSize() <= 4096;
+    }
+
+    private static int metalHalfMatvecMaxOutput() {
+        return Integer.getInteger(METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY, DEFAULT_METAL_HALF_MATVEC_MAX_OUTPUT);
     }
 
 }

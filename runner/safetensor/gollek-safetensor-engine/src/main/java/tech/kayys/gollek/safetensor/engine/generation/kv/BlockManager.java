@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class BlockManager {
     public enum KvStorageType {
         FP32,
-        INT8
+        INT8,
+        INT4
     }
 
     private MemorySegment kPoolSlab;
@@ -69,20 +70,25 @@ public class BlockManager {
         this.headDim = headDim;
         this.maxBlocks = maxBlocks;
         this.storageType = storageType;
-        this.bytesPerElement = storageType == KvStorageType.INT8 ? Byte.BYTES : Float.BYTES;
+        this.bytesPerElement = storageType == KvStorageType.FP32 ? Float.BYTES : Byte.BYTES;
 
         // Layout: [head, token, dim] per block
         this.tokenStride = headDim;
         this.headStride = (long) tokensPerBlock * tokenStride;
         this.scaleStride = (long) tokensPerBlock;
-        this.blockSizeBytes = (int) (numHeads * headStride * bytesPerElement);
+        long blockElements = (long) numHeads * headStride;
+        this.blockSizeBytes = switch (storageType) {
+            case FP32 -> Math.toIntExact(blockElements * Float.BYTES);
+            case INT8 -> Math.toIntExact(blockElements);
+            case INT4 -> Math.toIntExact((blockElements + 1L) / 2L);
+        };
 
         long totalBytes = (long) maxBlocks * blockSizeBytes;
 
         // Allocate contiguous slabs for K and V
         this.kPoolSlab = poolArena.allocate(totalBytes, 64);
         this.vPoolSlab = poolArena.allocate(totalBytes, 64);
-        if (storageType == KvStorageType.INT8) {
+        if (storageType != KvStorageType.FP32) {
             long totalScaleBytes = (long) maxBlocks * numHeads * tokensPerBlock * Float.BYTES;
             this.kScaleSlab = poolArena.allocate(totalScaleBytes, 64);
             this.vScaleSlab = poolArena.allocate(totalScaleBytes, 64);
@@ -165,6 +171,14 @@ public class BlockManager {
 
     public boolean isInt8Quantized() {
         return storageType == KvStorageType.INT8;
+    }
+
+    public boolean isInt4Quantized() {
+        return storageType == KvStorageType.INT4;
+    }
+
+    public boolean isQuantized() {
+        return storageType != KvStorageType.FP32;
     }
 
     public int getBytesPerElement() {

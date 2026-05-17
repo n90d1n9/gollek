@@ -26,8 +26,17 @@ public class GroupNorm extends NNModule {
     }
 
     public GroupNorm(int numGroups, int numChannels, float eps) {
+        if (numGroups <= 0) {
+            throw new IllegalArgumentException("numGroups must be positive");
+        }
+        if (numChannels <= 0) {
+            throw new IllegalArgumentException("numChannels must be positive");
+        }
         if (numChannels % numGroups != 0) {
             throw new IllegalArgumentException("numChannels must be divisible by numGroups");
+        }
+        if (!Float.isFinite(eps) || eps <= 0f) {
+            throw new IllegalArgumentException("eps must be finite and positive");
         }
         this.numGroups = numGroups;
         this.numChannels = numChannels;
@@ -47,6 +56,9 @@ public class GroupNorm extends NNModule {
         int C = (int) shape[1];
         int H = (int) shape[2];
         int W = (int) shape[3];
+        if (C != numChannels) {
+            throw new IllegalArgumentException("input channel count must be " + numChannels + ", got: " + C);
+        }
 
         // Reshape to [N, numGroups, C // numGroups, H * W]
         int channelsPerGroup = C / numGroups;

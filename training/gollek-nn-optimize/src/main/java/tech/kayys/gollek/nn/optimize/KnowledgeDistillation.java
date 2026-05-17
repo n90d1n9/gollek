@@ -2,7 +2,7 @@ package tech.kayys.gollek.ml.optimize;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
-import tech.kayys.gollek.train.data.DataLoader;
+import tech.kayys.gollek.ml.data.DataLoader;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.optim.Optimizer;
 

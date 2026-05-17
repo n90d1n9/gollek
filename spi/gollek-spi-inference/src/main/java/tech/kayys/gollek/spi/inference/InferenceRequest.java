@@ -287,7 +287,11 @@ public final class InferenceRequest {
 
     public double getRepeatPenalty() {
         Object val = parameters.get("repeat_penalty");
-        return val instanceof Number n ? n.doubleValue() : 1.1;
+        if (val instanceof Number n) {
+            return n.doubleValue();
+        }
+        Object alias = parameters.get("repetition_penalty");
+        return alias instanceof Number n ? n.doubleValue() : 1.1;
     }
 
     public boolean isJsonMode() {
@@ -396,11 +400,22 @@ public final class InferenceRequest {
 
         public Builder parameter(String key, Object value) {
             this.parameters.put(key, value);
+            if ("repeat_penalty".equals(key)) {
+                this.parameters.put("repetition_penalty", value);
+            } else if ("repetition_penalty".equals(key)) {
+                this.parameters.put("repeat_penalty", value);
+            }
             return this;
         }
 
         public Builder parameters(Map<String, Object> parameters) {
             this.parameters.putAll(parameters);
+            if (parameters.containsKey("repeat_penalty") && !parameters.containsKey("repetition_penalty")) {
+                this.parameters.put("repetition_penalty", parameters.get("repeat_penalty"));
+            }
+            if (parameters.containsKey("repetition_penalty") && !parameters.containsKey("repeat_penalty")) {
+                this.parameters.put("repeat_penalty", parameters.get("repetition_penalty"));
+            }
             return this;
         }
 
@@ -451,6 +466,7 @@ public final class InferenceRequest {
 
         public Builder repeatPenalty(double repeatPenalty) {
             this.parameters.put("repeat_penalty", repeatPenalty);
+            this.parameters.put("repetition_penalty", repeatPenalty);
             return this;
         }
 

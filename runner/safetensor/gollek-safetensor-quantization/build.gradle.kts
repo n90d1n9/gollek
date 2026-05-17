@@ -5,6 +5,8 @@ plugins {
 dependencies {
     implementation(project(":runner:safetensor:gollek-safetensor-api"))
     implementation(project(":runner:safetensor:gollek-safetensor-core"))
+    implementation(project(":runner:safetensor:gollek-safetensor-loader"))
+    implementation("io.quarkus:quarkus-core")
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
     implementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")

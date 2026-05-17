@@ -39,6 +39,11 @@ public class ChatCommandHandler {
             return true;
         }
 
+        if (cmd.equals("/retry") || cmd.equals("/regen")) {
+            session.retryLastRequest();
+            return true;
+        }
+
         if (cmd.equals("/help")) {
             printHelp();
             return true;
@@ -101,6 +106,7 @@ public class ChatCommandHandler {
     private void printHelp() {
         System.out.println(ChatUIRenderer.DIM + "Available commands:" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /reset        - Clear conversation history" + ChatUIRenderer.RESET);
+        System.out.println(ChatUIRenderer.DIM + "  /retry        - Re-run the last prepared local request" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /quit         - Exit the chat session" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /log          - Show last 100 lines of log" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /list         - List available models" + ChatUIRenderer.RESET);
@@ -206,9 +212,12 @@ public class ChatCommandHandler {
 
     private void handleStats(ChatSessionManager session) {
         var stats = session.getSessionStats();
+        var diagnostics = session.getExecutionDiagnostics();
 
         System.out.println();
         System.out.println(ChatUIRenderer.BOLD + "┌──────────────────── Session Statistics ────────────────────┐" + ChatUIRenderer.RESET);
+        System.out.printf("│ %-22s │ %-33s │%n", "Session id", truncate(session.getSessionId(), 33));
+        System.out.printf("│ %-22s │ %-33s │%n", "Persistent session", session.isSessionEnabled() ? "enabled" : "disabled");
         System.out.printf("│ %-22s │ %-33s │%n", "Session started", stats.sessionStart().toString().substring(0, 19));
         System.out.printf("│ %-22s │ %-33s │%n", "Duration", formatDuration(stats.sessionDurationSeconds()));
         System.out.printf("│ %-22s │ %-33d │%n", "Total requests", stats.totalRequests());
@@ -239,8 +248,48 @@ public class ChatCommandHandler {
                             truncate(provider, 22), s[0], s[1], s[2]));
         }
 
+        System.out.println("├──────────────────── Engine Execution ──────────────────────┤");
+        System.out.printf("│ %-22s │ %-33s │%n", "Last route", truncate(diagnostics.route(), 33));
+        System.out.printf("│ %-22s │ %-33s │%n", "Provider impl", truncate(diagnostics.providerDescriptor(), 33));
+        System.out.printf("│ %-22s │ %-33s │%n", "Registry available", diagnostics.providerRegistryAvailable() ? "yes" : "no");
+        System.out.printf("│ %-22s │ %-33s │%n", "Provider registered", diagnostics.providerRegistered() ? "yes" : "no");
+        printMetadataRow("Backend", diagnostics.metadata(), "execution_backend");
+        printMetadataRow("Session scope", diagnostics.metadata(), "session_scope");
+        printMetadataRow("Acquire mode", diagnostics.metadata(), "session_acquisition_mode");
+        printMetadataRow("Reuse decision", diagnostics.metadata(), "session_reuse_decision");
+        printMetadataRow("Conversation turn", diagnostics.metadata(), "conversation_turn_mode");
+        printMetadataRow("Conversation state", diagnostics.metadata(), "conversation_session_status");
+        printMetadataRow("Fast path", diagnostics.metadata(), "conversation_fast_path_mode");
+        printMetadataRow("Fast-path why", diagnostics.metadata(), "conversation_fast_path_rationale");
+        printMetadataRow("Delta prefill", diagnostics.metadata(), "conversation_delta_prefill_used");
+        printMetadataRow("Cached prefix", diagnostics.metadata(), "conversation_turn_cached_tokens");
+        printMetadataRow("Delta prompt", diagnostics.metadata(), "conversation_turn_delta_tokens");
+        printMetadataRow("Prep profile", diagnostics.metadata(), "session_preparation_profile");
+        printMetadataRow("Artifact kind", diagnostics.metadata(), "session_artifact_kind");
+        printMetadataRow("KV retained", diagnostics.metadata(), "conversation_session_kv_retained");
+        if (diagnostics.lastError() != null && !diagnostics.lastError().isBlank()) {
+            System.out.printf("│ %-22s │ %-33s │%n", "Last error", truncate(diagnostics.lastError(), 33));
+        }
+
         System.out.println("└────────────────────────────────────────────────────────────┘");
-        System.out.println();
+        if (diagnostics.lastError() != null && !diagnostics.lastError().isBlank()) {
+            System.out.println(ChatUIRenderer.DIM + "Last error detail:" + ChatUIRenderer.RESET);
+            System.out.println(diagnostics.lastError());
+            System.out.println();
+        } else {
+            System.out.println();
+        }
+    }
+
+    private void printMetadataRow(String label, java.util.Map<String, Object> metadata, String key) {
+        if (metadata == null || metadata.isEmpty()) {
+            return;
+        }
+        Object value = metadata.get(key);
+        if (value == null) {
+            return;
+        }
+        System.out.printf("│ %-22s │ %-33s │%n", label, truncate(String.valueOf(value), 33));
     }
 
     private String formatDuration(long seconds) {

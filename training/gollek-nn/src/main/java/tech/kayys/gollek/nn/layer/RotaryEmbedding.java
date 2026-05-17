@@ -1,9 +1,8 @@
 package tech.kayys.gollek.ml.nn.layer;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.autograd.VectorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
-import tech.kayys.gollek.ml.nn.Parameter;
 
 /**
  * Rotary Position Embedding (RoPE) — encodes position information by rotating
@@ -95,7 +94,17 @@ public final class RotaryEmbedding extends NNModule {
      */
     public GradTensor apply(GradTensor x) {
         long[] s = x.shape();
+        if (s.length != 4) {
+            throw new IllegalArgumentException("RotaryEmbedding input must be [B, H, T, D], got rank " + s.length);
+        }
         int B = (int) s[0], H = (int) s[1], T = (int) s[2], D = (int) s[3];
+        if (D != dim) {
+            throw new IllegalArgumentException("RotaryEmbedding head dimension must be " + dim + ", got: " + D);
+        }
+        if (T > maxSeqLen) {
+            throw new IllegalArgumentException(
+                    "sequence length " + T + " exceeds RotaryEmbedding maxSeqLen " + maxSeqLen);
+        }
         int half = D / 2;
         float[] d = x.data(), out = new float[d.length];
 
@@ -112,7 +121,35 @@ public final class RotaryEmbedding extends NNModule {
                         out[base + 2 * i + 1] = x0 * sin + x1 * cos;
                     }
                 }
-        return GradTensor.of(out, s);
+
+        GradTensor result = GradTensor.of(out, s);
+        if (x.requiresGrad()) {
+            result.requiresGrad(true);
+            result.setGradFn(new Function.Context("RotaryEmbedding") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float[] ug = upstream.data();
+                    float[] grad = new float[ug.length];
+
+                    for (int b = 0; b < B; b++)
+                        for (int h = 0; h < H; h++)
+                            for (int t = 0; t < T; t++) {
+                                int offset = b * H * T * D + h * T * D + t * D;
+                                for (int i = 0; i < half; i++) {
+                                    float cos = cosCache[t * half + i];
+                                    float sin = sinCache[t * half + i];
+                                    float g0 = ug[offset + 2 * i];
+                                    float g1 = ug[offset + 2 * i + 1];
+                                    grad[offset + 2 * i] = g0 * cos + g1 * sin;
+                                    grad[offset + 2 * i + 1] = -g0 * sin + g1 * cos;
+                                }
+                            }
+
+                    x.backward(GradTensor.of(grad, s));
+                }
+            });
+        }
+        return result;
     }
 
     @Override

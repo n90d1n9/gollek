@@ -1,6 +1,6 @@
-package tech.kayys.gollek.train.transformer;
+package tech.kayys.gollek.ml.pipeline;
 
-import tech.kayys.gollek.train.transformer.base.BaseTransformer;
+import tech.kayys.gollek.ml.base.BaseTransformer;
 import java.util.*;
 
 /**

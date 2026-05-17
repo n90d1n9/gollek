@@ -185,6 +185,7 @@ public final class ProviderRequest {
 
     public double getRepeatPenalty() {
         return getParameter("repetition_penalty", Number.class)
+                .or(() -> getParameter("repeat_penalty", Number.class))
                 .map(Number::doubleValue)
                 .orElse(1.1);
     }

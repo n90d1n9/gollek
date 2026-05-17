@@ -55,6 +55,7 @@ package tech.kayys.gollek.safetensor.engine.tooling;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.arc.Arc;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager.KVCacheSession;
 import tech.kayys.gollek.safetensor.engine.generation.paged.PagedKVSessionRegistry;
@@ -97,6 +98,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ConversationSessionManager {
 
     private static final Logger log = Logger.getLogger(ConversationSessionManager.class);
+    private static final int DEFAULT_IDLE_TIMEOUT_MINUTES = 30;
+    private static final int DEFAULT_MAX_SESSIONS = 1000;
+    private static final int DEFAULT_MAX_TOKENS_PER_SESSION = 32768;
 
     @ConfigProperty(name = "gollek.session.idle-timeout-minutes", defaultValue = "30")
     int idleTimeoutMinutes;
@@ -124,14 +128,35 @@ public class ConversationSessionManager {
     private final AtomicInteger totalCreated = new AtomicInteger(0);
     private final AtomicInteger totalExpired = new AtomicInteger(0);
 
+    private PagedKVSessionRegistry sessionRegistry() {
+        if (sessionRegistry != null) {
+            return sessionRegistry;
+        }
+        try {
+            if (Arc.container() != null) {
+                var instance = Arc.container().instance(PagedKVSessionRegistry.class);
+                if (instance.isAvailable()) {
+                    sessionRegistry = instance.get();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (sessionRegistry == null) {
+            throw new IllegalStateException("PagedKVSessionRegistry is not available");
+        }
+        return sessionRegistry;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     @jakarta.annotation.PostConstruct
     void start() {
+        int idleTimeout = resolvedIdleTimeoutMinutes();
+        int sessionLimit = resolvedMaxSessions();
         cleaner.scheduleAtFixedRate(this::evictExpired,
-                idleTimeoutMinutes, idleTimeoutMinutes, TimeUnit.MINUTES);
+                idleTimeout, idleTimeout, TimeUnit.MINUTES);
         log.infof("ConversationSessionManager: started (timeout=%dm, max=%d)",
-                idleTimeoutMinutes, maxSessions);
+                idleTimeout, sessionLimit);
     }
 
     @PreDestroy
@@ -185,14 +210,15 @@ public class ConversationSessionManager {
     public ConversationSession create(String sessionId, String modelKey,
             int[] prefixTokens,
             KVCacheSession kvCache) {
-        if (sessions.size() >= maxSessions) {
-            evictOldest(sessions.size() - maxSessions + 1);
+        int sessionLimit = resolvedMaxSessions();
+        if (sessions.size() >= sessionLimit) {
+            evictOldest(sessions.size() - sessionLimit + 1);
         }
 
         ConversationSession session = new ConversationSession(
                 sessionId, modelKey, prefixTokens, kvCache, Instant.now());
         sessions.put(sessionId, session);
-        sessionRegistry.register(sessionId, null,
+        sessionRegistry().register(sessionId, null,
                 PagedKVSessionRegistry.SessionPriority.NORMAL);
         totalCreated.incrementAndGet();
 
@@ -212,9 +238,10 @@ public class ConversationSessionManager {
         if (s == null)
             return;
 
-        if (s.totalTokens() + newTokens.length > maxTokensPerSession) {
+        int maxTokens = resolvedMaxTokensPerSession();
+        if (s.totalTokens() + newTokens.length > maxTokens) {
             log.infof("Session %s exceeded max tokens (%d) — truncating prefix",
-                    sessionId, maxTokensPerSession);
+                    sessionId, maxTokens);
             // Sliding window: drop oldest half of the context
             s.truncateToHalf();
         }
@@ -229,7 +256,7 @@ public class ConversationSessionManager {
     public void close(String sessionId) {
         ConversationSession s = sessions.remove(sessionId);
         if (s != null) {
-            sessionRegistry.deregister(sessionId);
+            sessionRegistry().deregister(sessionId);
             s.close();
         }
     }
@@ -252,14 +279,14 @@ public class ConversationSessionManager {
     // ─────────────────────────────────────────────────────────────────────────
 
     private void evictExpired() {
-        Instant cutoff = Instant.now().minusSeconds(idleTimeoutMinutes * 60L);
+        Instant cutoff = expirationCutoff();
         int evicted = 0;
         Iterator<Map.Entry<String, ConversationSession>> it = sessions.entrySet().iterator();
         while (it.hasNext()) {
             ConversationSession s = it.next().getValue();
             if (s.lastAccessTime().isBefore(cutoff)) {
                 it.remove();
-                sessionRegistry.deregister(s.sessionId());
+                sessionRegistry().deregister(s.sessionId());
                 s.close();
                 evicted++;
             }
@@ -277,15 +304,30 @@ public class ConversationSessionManager {
                 .limit(count)
                 .forEach(e -> {
                     sessions.remove(e.getKey());
-                    sessionRegistry.deregister(e.getKey());
+                    sessionRegistry().deregister(e.getKey());
                     e.getValue().close();
                 });
         totalExpired.addAndGet(count);
     }
 
     private boolean isExpired(ConversationSession s) {
-        return s.lastAccessTime().isBefore(
-                Instant.now().minusSeconds(idleTimeoutMinutes * 60L));
+        return s.lastAccessTime().isBefore(expirationCutoff());
+    }
+
+    private Instant expirationCutoff() {
+        return Instant.now().minusSeconds(resolvedIdleTimeoutMinutes() * 60L);
+    }
+
+    private int resolvedIdleTimeoutMinutes() {
+        return idleTimeoutMinutes > 0 ? idleTimeoutMinutes : DEFAULT_IDLE_TIMEOUT_MINUTES;
+    }
+
+    private int resolvedMaxSessions() {
+        return maxSessions > 0 ? maxSessions : DEFAULT_MAX_SESSIONS;
+    }
+
+    private int resolvedMaxTokensPerSession() {
+        return maxTokensPerSession > 0 ? maxTokensPerSession : DEFAULT_MAX_TOKENS_PER_SESSION;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

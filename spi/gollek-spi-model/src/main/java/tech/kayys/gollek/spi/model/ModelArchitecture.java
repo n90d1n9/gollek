@@ -140,7 +140,7 @@ public interface ModelArchitecture {
     default String layerFfnDownBias(int i) { return null; }
 
 
-    /** Full tensor name of the post-attention (FFN) layer-norm weight. */
+    /** Full tensor name of the post-attention/pre-FFN layer-norm weight. */
     String layerFfnNormWeight(int i);
 
     /** Full tensor name of the post-attention layer-norm bias (null if absent). */
@@ -159,6 +159,9 @@ public interface ModelArchitecture {
 
     /** Full tensor name of the pre-FFN norm weight (Gemma-2). */
     default String layerPreFfnNormWeight(int i) { return null; }
+
+    /** Full tensor name of the post-FFN norm weight (Gemma-2/3/4 style blocks). */
+    default String layerPostFfnNormWeight(int i) { return null; }
 
     /** Full tensor name of the per-layer input gate weight (Gemma-4 PLE). */
     default String layerPerLayerInputGateWeight(int i) { return null; }

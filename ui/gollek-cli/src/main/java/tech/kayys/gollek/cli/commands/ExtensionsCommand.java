@@ -37,7 +37,7 @@ public class ExtensionsCommand implements Runnable {
             new ExtensionDef("runtime", "LibTorch", "experimental",
                     "tech.kayys.gollek.inference.libtorch.LibTorchProvider", "libtorch"),
             new ExtensionDef("runtime", "LiteRT", "optional",
-                    "tech.kayys.gollek.inference.litertTFLiteProvider", "litert"),
+                    "tech.kayys.gollek.provider.litert.LiteRTProvider", "litert"),
             new ExtensionDef("runtime", "TensorRT", "optional",
                     "tech.kayys.gollek.inference.tensorrt.TensorRTProvider", "tensorrt"),
 

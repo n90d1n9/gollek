@@ -2,6 +2,7 @@ package tech.kayys.gollek.safetensor.core.tensor;
 
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
+import jdk.incubator.vector.ShortVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 import java.lang.foreign.MemorySegment;
@@ -102,6 +103,47 @@ public class DequantizationKernel {
         }
     }
 
+    /**
+     * Transcodes BF16 storage to IEEE F16 storage for Apple MPS mixed matmul.
+     * MPS accepts Float32 x Float16 -> Float32 but rejects BF16 in this API.
+     */
+    public static void transcodeBf16ToF16(MemorySegment src, MemorySegment dst, long numel) {
+        for (long i = 0; i < numel; i++) {
+            dst.setAtIndex(ValueLayout.JAVA_SHORT, i, bf16ToFloat16(src.getAtIndex(ValueLayout.JAVA_SHORT, i)));
+        }
+    }
+
+    public static short bf16ToFloat16Value(short bf16) {
+        return bf16ToFloat16(bf16);
+    }
+
+    private static short bf16ToFloat16(short bf16) {
+        int bits = bf16 & 0xFFFF;
+        int sign = bits & 0x8000;
+        int exponent = (bits >>> 7) & 0xFF;
+        int mantissa = bits & 0x7F;
+
+        if (exponent == 0) {
+            // BF16 subnormals are far below F16 range, so they collapse to signed zero.
+            return (short) sign;
+        }
+        if (exponent == 0xFF) {
+            int payload = mantissa << 3;
+            return (short) (sign | 0x7C00 | (payload == 0 ? 0 : Math.max(1, payload)));
+        }
+
+        int halfExponent = exponent - 112; // BF16 bias 127 -> F16 bias 15.
+        if (halfExponent >= 0x1F) {
+            return (short) (sign | 0x7C00);
+        }
+        if (halfExponent <= 0) {
+            // Normal BF16 values near zero can become F16 subnormals; keep the exact converter here.
+            return float32ToFloat16(Float.intBitsToFloat(bits << 16));
+        }
+
+        return (short) (sign | (halfExponent << 10) | (mantissa << 3));
+    }
+
     private static float float16ToFloat32(short half) {
         int h = half & 0xFFFF;
         int sign = (h >> 15) & 0x1;
@@ -127,5 +169,49 @@ public class DequantizationKernel {
             f32 = (sign << 31) | ((exponent + 112) << 23) | (mantissa << 13);
         }
         return Float.intBitsToFloat(f32);
+    }
+
+    private static short float32ToFloat16(float value) {
+        int bits = Float.floatToRawIntBits(value);
+        int sign = (bits >>> 16) & 0x8000;
+        int exponent = (bits >>> 23) & 0xFF;
+        int mantissa = bits & 0x7FFFFF;
+
+        if (exponent == 0xFF) {
+            if (mantissa == 0) {
+                return (short) (sign | 0x7C00);
+            }
+            return (short) (sign | 0x7C00 | Math.max(1, mantissa >>> 13));
+        }
+
+        int halfExponent = exponent - 127 + 15;
+        if (halfExponent >= 0x1F) {
+            return (short) (sign | 0x7C00);
+        }
+        if (halfExponent <= 0) {
+            if (halfExponent < -10) {
+                return (short) sign;
+            }
+            mantissa |= 0x800000;
+            int shift = 14 - halfExponent;
+            int halfMantissa = mantissa >>> shift;
+            int roundBit = (mantissa >>> (shift - 1)) & 1;
+            halfMantissa += roundBit;
+            return (short) (sign | halfMantissa);
+        }
+
+        int halfMantissa = mantissa >>> 13;
+        int roundBits = mantissa & 0x1FFF;
+        if (roundBits > 0x1000 || (roundBits == 0x1000 && (halfMantissa & 1) != 0)) {
+            halfMantissa++;
+            if (halfMantissa == 0x400) {
+                halfMantissa = 0;
+                halfExponent++;
+                if (halfExponent >= 0x1F) {
+                    return (short) (sign | 0x7C00);
+                }
+            }
+        }
+        return (short) (sign | (halfExponent << 10) | (halfMantissa & 0x3FF));
     }
 }

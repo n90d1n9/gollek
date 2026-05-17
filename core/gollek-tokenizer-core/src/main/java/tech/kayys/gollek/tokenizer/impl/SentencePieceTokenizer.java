@@ -1,61 +1,34 @@
 package tech.kayys.gollek.tokenizer.impl;
 
-import tech.kayys.gollek.tokenizer.nativeffi.SentencePieceNative;
-import tech.kayys.gollek.tokenizer.spi.*;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
 import java.nio.file.Path;
 
-public class SentencePieceTokenizer implements Tokenizer {
-
-    private final SentencePieceNative nativeLib;
-    private final MemorySegment handle;
+/**
+ * Compatibility placeholder for the removed native SentencePiece bridge.
+ */
+public final class SentencePieceTokenizer implements Tokenizer {
 
     public SentencePieceTokenizer(Path libPath, Path modelPath) {
-        try (Arena arena = Arena.ofConfined()) {
-            this.nativeLib = new SentencePieceNative(libPath.toString());
-            this.handle = nativeLib.create();
-            nativeLib.load(handle, modelPath.toString(), arena);
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        }
+        throw unsupported(modelPath);
     }
 
     @Override
     public long[] encode(String text, EncodeOptions options) {
-        try (Arena arena = Arena.ofConfined()) {
-            int[] ids = nativeLib.encode(handle, text, arena);
-
-            long[] result = new long[ids.length];
-            for (int i = 0; i < ids.length; i++) {
-                result[i] = ids[i];
-            }
-            return result;
-
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        }
+        throw unsupported(null);
     }
 
     @Override
     public String decode(long[] tokens, DecodeOptions options) {
-        try (Arena arena = Arena.ofConfined()) {
-            int[] ids = new int[tokens.length];
-            for (int i = 0; i < tokens.length; i++) {
-                ids[i] = (int) tokens[i];
-            }
-            return nativeLib.decode(handle, ids, arena);
-
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        }
+        throw unsupported(null);
     }
 
     @Override
     public int vocabSize() {
         return -1;
-    } // can extend later
+    }
 
     @Override
     public int bosTokenId() {
@@ -74,7 +47,13 @@ public class SentencePieceTokenizer implements Tokenizer {
 
     @Override
     public int[] allStopTokenIds() {
-        int eos = eosTokenId();
-        return eos != -1 ? new int[]{eos} : new int[0];
+        return new int[0];
+    }
+
+    private static UnsupportedOperationException unsupported(Path modelPath) {
+        String suffix = modelPath == null ? "" : ": " + modelPath;
+        return new UnsupportedOperationException(
+                "Native SentencePiece is not part of the pure-Java tokenizer runtime. "
+                        + "Use tokenizer.json for SentencePiece-style models" + suffix);
     }
 }

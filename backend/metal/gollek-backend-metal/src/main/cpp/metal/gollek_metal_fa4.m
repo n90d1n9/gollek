@@ -39,6 +39,7 @@
 #import <Accelerate/Accelerate.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 // ── Shared globals from gollek_metal_bridge.m ─────────────────────────────────
 extern id<MTLDevice>       g_device;
@@ -82,6 +83,76 @@ static void transpose_bhtd_to_bthd_inplace(const float* src, float* dst, int B, 
     }
 }
 
+static inline int causal_limit_for_row(int T, int S, int t) {
+    int causalOffset = S > T ? (S - T) : 0;
+    int limit = causalOffset + t + 1;
+    return limit < S ? limit : S;
+}
+
+static int mps_matmul_tb_f32(float* out, const float* left, const float* right,
+        int M, int K, int N, float alpha) {
+    @autoreleasepool {
+        id<MTLBuffer> outBuf = wrap_ptr_fa4(out, (size_t) M * N * sizeof(float));
+        id<MTLBuffer> leftBuf = wrap_ptr_fa4((void*) left, (size_t) M * K * sizeof(float));
+        id<MTLBuffer> rightBuf = wrap_ptr_fa4((void*) right, (size_t) N * K * sizeof(float));
+
+        MPSMatrixDescriptor* leftDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor* rightDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:N columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor* outDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+
+        MPSMatrix* leftMat = [[MPSMatrix alloc] initWithBuffer:leftBuf descriptor:leftDesc];
+        MPSMatrix* rightMat = [[MPSMatrix alloc] initWithBuffer:rightBuf descriptor:rightDesc];
+        MPSMatrix* outMat = [[MPSMatrix alloc] initWithBuffer:outBuf descriptor:outDesc];
+
+        MPSMatrixMultiplication* mmul = [[MPSMatrixMultiplication alloc] initWithDevice:g_device
+                                                                          transposeLeft:NO
+                                                                         transposeRight:YES
+                                                                             resultRows:M
+                                                                          resultColumns:N
+                                                                        interiorColumns:K
+                                                                                   alpha:alpha
+                                                                                    beta:0.0f];
+
+        id<MTLCommandBuffer> cmd = [g_queue commandBuffer];
+        [mmul encodeToCommandBuffer:cmd leftMatrix:leftMat rightMatrix:rightMat resultMatrix:outMat];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        return [cmd status] == MTLCommandBufferStatusCompleted ? 0 : -1;
+    }
+}
+
+static int mps_matmul_nn_f32(float* out, const float* left, const float* right,
+        int M, int K, int N, float alpha) {
+    @autoreleasepool {
+        id<MTLBuffer> outBuf = wrap_ptr_fa4(out, (size_t) M * N * sizeof(float));
+        id<MTLBuffer> leftBuf = wrap_ptr_fa4((void*) left, (size_t) M * K * sizeof(float));
+        id<MTLBuffer> rightBuf = wrap_ptr_fa4((void*) right, (size_t) K * N * sizeof(float));
+
+        MPSMatrixDescriptor* leftDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:K rowBytes:K * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor* rightDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:K columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor* outDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:M columns:N rowBytes:N * sizeof(float) dataType:MPSDataTypeFloat32];
+
+        MPSMatrix* leftMat = [[MPSMatrix alloc] initWithBuffer:leftBuf descriptor:leftDesc];
+        MPSMatrix* rightMat = [[MPSMatrix alloc] initWithBuffer:rightBuf descriptor:rightDesc];
+        MPSMatrix* outMat = [[MPSMatrix alloc] initWithBuffer:outBuf descriptor:outDesc];
+
+        MPSMatrixMultiplication* mmul = [[MPSMatrixMultiplication alloc] initWithDevice:g_device
+                                                                          transposeLeft:NO
+                                                                         transposeRight:NO
+                                                                             resultRows:M
+                                                                          resultColumns:N
+                                                                        interiorColumns:K
+                                                                                   alpha:alpha
+                                                                                    beta:0.0f];
+
+        id<MTLCommandBuffer> cmd = [g_queue commandBuffer];
+        [mmul encodeToCommandBuffer:cmd leftMatrix:leftMat rightMatrix:rightMat resultMatrix:outMat];
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        return [cmd status] == MTLCommandBufferStatusCompleted ? 0 : -1;
+    }
+}
+
 // ── Public C API ───────────────────────────────────────────────────────────────
 
 /**
@@ -115,7 +186,7 @@ int gollek_metal_fa4_attention(
         const void*  key,
         const void*  value,
         int B, int T, int S, int H, int H_kv, int D,
-        float scale, int is_causal, int use_bf16) {
+        float scale, int is_causal, int use_bf16, float soft_cap) {
 
     if (!g_initialized) return -1;
 
@@ -146,6 +217,7 @@ int gollek_metal_fa4_attention(
     id<MTLBuffer> oBuf = wrap_ptr_fa4(oTransposed, oBytes);
 
     if (@available(macOS 15.0, *)) {
+    if (soft_cap <= 0.0f) {
         // ── MPSGraph SDPA path (macOS 15+, M3+ optimised) ─────────────────────
         // Fused single-pass attention: no intermediate attention matrix on DRAM.
         MPSGraph* graph = [MPSGraph new];
@@ -208,7 +280,8 @@ int gollek_metal_fa4_attention(
             }
             for (int b = 0; b < B; b++) {
                 for (int t = 0; t < T; t++) {
-                    for (int s = t + 1; s < S; s++) {
+                    int limit = causal_limit_for_row(T, S, t);
+                    for (int s = limit; s < S; s++) {
                         size_t idx = ((size_t) b * T + t) * S + s;
                         maskData[idx] = -1.0e9f;
                     }
@@ -255,33 +328,46 @@ int gollek_metal_fa4_attention(
         free(oTransposed);
         return 0;
     }
+    }
 
     // ── Fallback path for macOS 13 (separate MPS matmuls) ────────────────────
-    // QK^T per head using MPSMatrixMultiplication, then softmax, then ×V
+    // QK^T per head using MPSMatrixMultiplication, then CPU softmax / soft-cap, then ×V.
     for (int b = 0; b < B; b++) {
         for (int h = 0; h < H; h++) {
             int hk = h / (H / H_kv);  // GQA head mapping
 
-            // score[T, S] = Q[T, D] × K[S, D]^T * scale
-            size_t scoreBytes = (size_t)T * S * sizeof(float);
-            id<MTLBuffer> scoreBuf = [g_device newBufferWithLength:scoreBytes
-                                                           options:MTLResourceStorageModeShared];
-            float* scorePtr = (float*)[scoreBuf contents];
+            size_t scoreElems = (size_t) T * S;
+            float* scorePtr = (float*) calloc(scoreElems, sizeof(float));
+            if (!scorePtr) {
+                free(qTransposed);
+                free(kTransposed);
+                free(vTransposed);
+                free(oTransposed);
+                return -1;
+            }
 
-            const float* qPtr = (const float*)query  + (b * T * H    + h  * D);
-            const float* kPtr = (const float*)key    + (b * S * H_kv + hk * D);
+            const float* qPtr = qTransposed + ((((size_t) b * H) + h) * T * D);
+            const float* kPtr = kTransposed + ((((size_t) b * H_kv) + hk) * S * D);
+            float* oPtr = oTransposed + ((((size_t) b * H) + h) * T * D);
 
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
-                        T, S, D, scale,
-                        qPtr, H * D,
-                        kPtr, H_kv * D,
-                        0.0f, scorePtr, S);
+            if (mps_matmul_tb_f32(scorePtr, qPtr, kPtr, T, D, S, scale) != 0) {
+                cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                            T, S, D, scale,
+                            qPtr, D,
+                            kPtr, D,
+                            0.0f, scorePtr, S);
+            }
 
             // Causal mask + softmax per row
             for (int t = 0; t < T; t++) {
                 float* row = scorePtr + t * S;
-                int    lim = is_causal ? (t + 1) : S;
+                int    lim = is_causal ? causal_limit_for_row(T, S, t) : S;
                 for (int s = lim; s < S; s++) row[s] = -1e9f;
+                if (soft_cap > 0.0f) {
+                    for (int s = 0; s < lim; s++) {
+                        row[s] = soft_cap * tanhf(row[s] / soft_cap);
+                    }
+                }
                 float mx = row[0];
                 for (int s = 1; s < lim; s++) if (row[s] > mx) mx = row[s];
                 float sm = 0.f;
@@ -290,15 +376,18 @@ int gollek_metal_fa4_attention(
             }
 
             // out[T, D] = score[T, S] × V[S, D]
-            float* oPtr = (float*)output  + (b * T * H + h * D);
-            const float* vPtr = (const float*)value + (b * S * H_kv + hk * D);
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
-                        T, D, S, 1.0f,
-                        scorePtr, S,
-                        vPtr, H_kv * D,
-                        0.0f, oPtr, H * D);
+            const float* vPtr = vTransposed + ((((size_t) b * H_kv) + hk) * S * D);
+            if (mps_matmul_nn_f32(oPtr, scorePtr, vPtr, T, S, D, 1.0f) != 0) {
+                cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                            T, D, S, 1.0f,
+                            scorePtr, S,
+                            vPtr, D,
+                            0.0f, oPtr, D);
+            }
+            free(scorePtr);
         }
     }
+    transpose_bhtd_to_bthd_inplace(oTransposed, (float*) output, B, T, H, D);
     free(qTransposed);
     free(kTransposed);
     free(vTransposed);
@@ -311,7 +400,7 @@ int gollek_metal_fa4_attention(
  * Returns 1 if available, 0 if only fallback path is usable.
  */
 int gollek_metal_fa4_sdpa_available(void) {
-    if (@available(macOS 14.0, *)) return 1;
+    if (@available(macOS 15.0, *)) return 1;
     return 0;
 }
 

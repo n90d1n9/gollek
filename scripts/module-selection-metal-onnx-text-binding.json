@@ -1,0 +1,69 @@
+{
+  "backendTargets": [
+    "metal"
+  ],
+  "formatTargets": [
+    "onnx"
+  ],
+  "llmTargets": [
+    "text"
+  ],
+  "architecture": "binding",
+  "profile": "snapshot",
+  "modules": [
+    ":backend:metal:gollek-backend-metal",
+    ":backend:metal:gollek-mlx-binding",
+    ":core:gollek-core",
+    ":core:gollek-error-code",
+    ":core:gollek-model-repository",
+    ":core:gollek-provider-core",
+    ":core:gollek-tokenizer-core",
+    ":core:plugin:gollek-plugin-kernel-core",
+    ":models:gollek-model-gemma",
+    ":models:gollek-model-llama",
+    ":models:gollek-model-mistral",
+    ":models:gollek-model-phi",
+    ":models:gollek-model-qwen",
+    ":core:gollek-model-repo-hf",
+    ":core:gollek-model-repo-local",
+    ":core:gollek-model-runner",
+    ":runner:litert:gollek-litert-core",
+    ":runner:onnx:gollek-ml-export-onnx",
+    ":runner:onnx:gollek-ml-onnx",
+    ":runner:onnx:gollek-plugin-runner-onnx",
+    ":runner:onnx:gollek-runner-onnx",
+    ":sdk:gollek-sdk",
+    ":sdk:gollek-sdk-api",
+    ":sdk:gollek-sdk-core",
+    ":sdk:gollek-sdk-local",
+    ":sdk:gollek-sdk-session",
+    ":spi:gollek-spi",
+    ":spi:gollek-spi-inference",
+    ":spi:gollek-spi-model",
+    ":spi:gollek-spi-multimodal",
+    ":spi:gollek-spi-plugin",
+    ":spi:gollek-spi-provider",
+    ":spi:gollek-spi-runtime",
+    ":ui:gollek-api",
+    ":ui:gollek-cli"
+  ],
+  "backendProperty": "cpu,metal",
+  "platformTags": [
+    "macos",
+    "cpu"
+  ],
+  "warnings": [],
+  "rawSelection": {
+    "backendTargets": [
+      "metal"
+    ],
+    "formatTargets": [
+      "onnx"
+    ],
+    "llmTargets": [
+      "text"
+    ],
+    "architecture": "binding",
+    "profile": "snapshot"
+  }
+}

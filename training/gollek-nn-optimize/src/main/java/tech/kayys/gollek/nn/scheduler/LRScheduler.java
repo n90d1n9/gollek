@@ -1,5 +1,7 @@
 package tech.kayys.gollek.ml.optim;
 
+import java.util.Map;
+
 /**
  * Learning rate scheduler base class.
  * <p>
@@ -50,6 +52,19 @@ public abstract class LRScheduler {
     public abstract void step();
 
     /**
+     * Perform a learning rate schedule step using a monitored validation value.
+     *
+     * <p>Schedulers that react to validation loss or metrics should override
+     * this method. Step-based schedulers keep their existing behavior by
+     * delegating to {@link #step()}.</p>
+     *
+     * @param metric monitored value for this step, such as validation loss
+     */
+    public void step(double metric) {
+        step();
+    }
+
+    /**
      * Returns the current learning rate managed by this scheduler.
      *
      * @return current learning rate
@@ -72,5 +87,35 @@ public abstract class LRScheduler {
      */
     protected void setLearningRate(float lr) {
         optimizer.setLearningRate(lr);
+    }
+
+    /**
+     * Indicates whether this scheduler can export/import progress state.
+     *
+     * <p>Schedulers used with checkpoint resume should override this and
+     * return {@code true}; custom schedulers can still be used without
+     * checkpoint persistence.</p>
+     */
+    public boolean supportsStateDict() {
+        return false;
+    }
+
+    /**
+     * Export scheduler progress into a serializable map.
+     *
+     * <p>The default implementation is intentionally empty for custom
+     * schedulers that do not expose checkpoint state yet.</p>
+     */
+    public Map<String, Object> stateDict() {
+        return Map.of();
+    }
+
+    /**
+     * Restore scheduler progress from a previously exported state map.
+     *
+     * <p>The default implementation is a no-op.</p>
+     */
+    public void loadStateDict(Map<String, Object> state) {
+        // no-op by default
     }
 }

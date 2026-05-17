@@ -3,7 +3,7 @@ package tech.kayys.gollek.safetensor.utils;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import tech.kayys.gollek.ml.autograd.GradTensor;
+import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -36,26 +36,24 @@ public class SafetensorWriter {
      * @param tensors named tensors to save
      * @throws IOException if writing fails
      */
-    public static void save(Path path, Map<String, GradTensor> tensors) throws IOException {
+    public static void save(Path path, Map<String, AccelTensor> tensors) throws IOException {
         JsonObject header = new JsonObject();
         long currentOffset = 0;
 
         // 1. Build JSON metadata for each tensor
-        for (Map.Entry<String, GradTensor> entry : tensors.entrySet()) {
+        for (Map.Entry<String, AccelTensor> entry : tensors.entrySet()) {
             String name = entry.getKey();
-            GradTensor tensor = entry.getValue();
+            AccelTensor tensor = entry.getValue();
 
             JsonObject tensorMeta = new JsonObject();
 
             // Map DType to Safetensor string
-            String dtypeStr = switch (tensor.dtype()) {
-                case FLOAT32 -> "F32";
-                case FLOAT16 -> "F16";
-                case BFLOAT16 -> "BF16";
-                case INT32 -> "I32";
-                case INT64 -> "I64";
+            String dtypeStr = switch (tensor.quantType()) {
+                case F32 -> "F32";
+                case F16 -> "F16";
+                case BF16 -> "BF16";
                 case INT8 -> "I8";
-                default -> "F32"; // Fallback to F32 for GradTensor current storage
+                default -> "F32";
             };
             tensorMeta.addProperty("dtype", dtypeStr);
 
@@ -65,8 +63,7 @@ public class SafetensorWriter {
             }
             tensorMeta.add("shape", shapeArr);
 
-            long numel = tensor.numel();
-            long byteSize = numel * 4; // Each F32 element is 4 bytes
+            long byteSize = logicalByteSize(tensor);
 
             com.google.gson.JsonArray offsets = new com.google.gson.JsonArray();
             offsets.add(currentOffset);
@@ -111,28 +108,27 @@ public class SafetensorWriter {
             // Write JSON header
             channel.write(ByteBuffer.wrap(headerBytes));
 
-            // Write tensor data segments in order
-            // We use a buffer to convert float array to Little-Endian bytes efficiently
-            ByteBuffer dataBuf = ByteBuffer.allocate(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
-            for (GradTensor tensor : tensors.values()) {
-                float[] data = tensor.data();
-                for (float f : data) {
-                    if (!dataBuf.hasRemaining()) {
-                        dataBuf.flip();
-                        while (dataBuf.hasRemaining()) {
-                            channel.write(dataBuf);
-                        }
-                        dataBuf.clear();
-                    }
-                    dataBuf.putFloat(f);
+            // Write tensor data segments directly from the backing MemorySegment.
+            for (AccelTensor tensor : tensors.values()) {
+                ByteBuffer dataBuf = tensor.dataSegment()
+                        .asSlice(0L, logicalByteSize(tensor))
+                        .asByteBuffer()
+                        .duplicate()
+                        .order(ByteOrder.LITTLE_ENDIAN);
+                while (dataBuf.hasRemaining()) {
+                    channel.write(dataBuf);
                 }
             }
-
-            // Final flush of data buffer
-            dataBuf.flip();
-            while (dataBuf.hasRemaining()) {
-                channel.write(dataBuf);
-            }
         }
+    }
+
+    private static long logicalByteSize(AccelTensor tensor) {
+        long numel = tensor.numel();
+        return switch (tensor.quantType()) {
+            case F16, BF16 -> numel * 2L;
+            case INT8, FP8 -> numel;
+            case INT4 -> (numel + 1L) / 2L;
+            case F32 -> numel * 4L;
+        };
     }
 }

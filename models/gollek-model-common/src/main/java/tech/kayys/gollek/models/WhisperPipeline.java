@@ -61,13 +61,7 @@ public class WhisperPipeline {
             // Decoder forward: [1, seq_len, vocab_size]
             GradTensor logits = model.decoder.forward(decoderIn, audioFeatures);
             
-            // Extract last token's logits: [1, 1, vocab_size]
-            // We use indexSelect on dimension 1 (sequence dimension)
-            GradTensor lastTokenLogits = logits.indexSelect(1, tokens.size() - 1);
-            
-            // Argmax to finding next token
-            GradTensor nextTokenTensor = lastTokenLogits.argmax(-1);
-            int nextTokenId = (int) nextTokenTensor.item();
+            int nextTokenId = selectNextTokenId(logits, tokens.size() - 1);
             
             System.out.print("."); // Progress indicator
             System.out.flush();
@@ -81,5 +75,37 @@ public class WhisperPipeline {
         System.out.println(); // New line after dots
 
         return tokens;
+    }
+
+    /**
+     * The GradTensor compatibility surface does not currently expose full
+     * indexing helpers, so we scan the final-step logits directly.
+     */
+    private static int selectNextTokenId(GradTensor logits, int sequenceIndex) {
+        long[] shape = logits.shape();
+        if (shape.length != 3 || shape[0] != 1) {
+            throw new IllegalArgumentException("Expected logits shape [1, seq, vocab], got "
+                    + java.util.Arrays.toString(shape));
+        }
+
+        int seqLen = Math.toIntExact(shape[1]);
+        int vocabSize = Math.toIntExact(shape[2]);
+        if (sequenceIndex < 0 || sequenceIndex >= seqLen) {
+            throw new IllegalArgumentException("sequenceIndex out of bounds: " + sequenceIndex);
+        }
+
+        float[] values = logits.data();
+        int base = sequenceIndex * vocabSize;
+        int bestToken = 0;
+        float bestScore = values[base];
+
+        for (int token = 1; token < vocabSize; token++) {
+            float score = values[base + token];
+            if (score > bestScore) {
+                bestScore = score;
+                bestToken = token;
+            }
+        }
+        return bestToken;
     }
 }

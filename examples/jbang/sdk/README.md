@@ -1,44 +1,72 @@
-# Gollek v0.3 SDK Examples
+# Gollek JBang SDK Examples
 
-New examples demonstrating Gollek v0.3 framework capabilities.
+This folder contains ML framework and SDK-facing JBang examples.
 
-## New Examples
+During migration, this folder intentionally includes two lanes:
 
-| Example | Description | Usage |
-|---------|-------------|-------|
-| `unified_framework_demo.java` | Comprehensive demo of all v0.3 capabilities | `jbang unified_framework_demo.java --demo all` |
-| `graph_fusion_example.java` | Graph fusion benchmark and usage | `jbang graph_fusion_example.java --size 8192` |
+- compatibility examples that still use older `gollek-sdk-*` naming
+- newer examples that align better with the canonical module split
 
-## Unified Framework Demo
+## Recommended Order
 
-Demonstrates all v0.3 capabilities in a single runnable example:
+1. `gollek-quickstart.java`
+2. `gollek-sdk-core-example.java`
+3. `gollek-sdk-train-example.java`
+4. `gollek-sdk-vision-example.java`
+5. `gollek-sdk-export-example.java`
+6. `gollek-sdk-augment-example.java`
+
+Run from `gollek/examples/jbang`:
 
 ```bash
-# Run all demos
-jbang unified_framework_demo.java --demo all
-
-# Run specific demos
-jbang unified_framework_demo.java --demo runner
-jbang unified_framework_demo.java --demo batching
-jbang unified_framework_demo.java --demo fusion
-jbang unified_framework_demo.java --demo quantization
-jbang unified_framework_demo.java --demo memory-pool
-
-# Specify model and device
-jbang unified_framework_demo.java --model model.onnx --device cuda
+jbang sdk/gollek-quickstart.java
+jbang sdk/gollek-sdk-core-example.java
+jbang sdk/gollek-sdk-train-example.java 2
+jbang sdk/gollek-sdk-vision-example.java
+jbang sdk/gollek-sdk-export-example.java
+jbang sdk/gollek-sdk-augment-example.java
 ```
 
-## Graph Fusion Example
+## Additional Samples
 
-Shows how to fuse operations for performance:
+Compatibility-named files now rewritten as runnable scripts:
+
+- `gollek-quickstart.java`
+- `gollek-sdk-core-example.java`
+- `gollek-sdk-vision-example.java`
+- `gollek-sdk-train-example.java`
+- `gollek-sdk-augment-example.java`
+- `gollek-sdk-export-example.java`
+
+Exploratory v0.3-style demos:
+
+- `unified_framework_demo.java`
+- `graph_fusion_example.java`
+
+Legacy v0.2/v0.3 references:
+
+- `tensor_operations_v02.java`
+- `vision_transforms_v02.java`
+- `tokenization_v02.java`
+- `mnist_training_v02.java`
+- `pytorch_comparison_v02.java`
+
+Treat these as evolving references rather than the canonical trainer/runtime
+surface.
+
+## Prerequisites
+
+From `gollek/` project root:
 
 ```bash
-# Default: 4096 size
-jbang graph_fusion_example.java
+./run-install-local-macos.sh
+```
 
-# Custom size
-jbang graph_fusion_example.java --size 8192
+Or publish only the modules a specific script needs with targeted
+`publishToMavenLocal` tasks.
 
-# Disable fusion for comparison
-jbang graph_fusion_example.java --fuse false
+Then run with JBang:
+
+```bash
+jbang --fresh sdk/gollek-quickstart.java
 ```

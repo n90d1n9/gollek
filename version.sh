@@ -1,1 +1,1 @@
-mvn versions:set -DnewVersion=0.2.0-SNAPSHOT
+mvn versions:set -DnewVersion=0.1.0-SNAPSHOT

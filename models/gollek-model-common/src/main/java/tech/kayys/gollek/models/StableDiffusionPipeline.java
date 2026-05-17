@@ -9,7 +9,7 @@ import java.util.function.Consumer;
  * High-level pipeline for Stable Diffusion v1-4 Text-to-Image generation.
  * <p>
  * Orchestrates CLIP (Text), UNet (Denoising), and VAE (Decoding).
- * Fully accelerated by the Metal zero-copy backend.
+ * Uses the current array-backed {@link GradTensor} compatibility surface.
  */
 public class StableDiffusionPipeline extends NNModule {
 
@@ -43,11 +43,11 @@ public class StableDiffusionPipeline extends NNModule {
      */
     public GradTensor generate(String prompt, int numSteps, float guidance, Consumer<Integer> progress) {
         // 1. Get Text Embeddings from CLIP
-        GradTensor textEmbeds = clip.encode(prompt).to(tech.kayys.gollek.runtime.tensor.Device.METAL);
-        GradTensor nullEmbeds = clip.encode("").to(tech.kayys.gollek.runtime.tensor.Device.METAL);
-        
+        GradTensor textEmbeds = clip.encode(prompt);
+        GradTensor nullEmbeds = clip.encode("");
+
         // 2. Start from random Noise Latents [1, 4, 64, 64]
-        GradTensor latents = GradTensor.randn(1, 4, 64, 64).to(tech.kayys.gollek.runtime.tensor.Device.METAL);
+        GradTensor latents = GradTensor.randn(1, 4, 64, 64);
         
         // 3. Denoising Loop
         for (int i = numSteps - 1; i >= 0; i--) {
@@ -61,7 +61,7 @@ public class StableDiffusionPipeline extends NNModule {
                 emb[k] = (float) Math.sin(timestep * freq);
                 emb[k + (int)halfDim] = (float) Math.cos(timestep * freq);
             }
-            GradTensor ts = GradTensor.of(emb, 1, tembDim).to(tech.kayys.gollek.runtime.tensor.Device.METAL);
+            GradTensor ts = GradTensor.of(emb, 1, tembDim);
             
             // Unconditional and Conditional noise prediction (CFG)
             GradTensor noisePredUncond = unet.forward(latents, ts, nullEmbeds);

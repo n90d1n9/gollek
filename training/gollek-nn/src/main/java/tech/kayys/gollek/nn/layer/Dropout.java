@@ -77,7 +77,7 @@ public class Dropout extends NNModule {
      * @throws IllegalArgumentException if p is not in [0, 1]
      */
     public Dropout(float p) {
-        if (p < 0 || p > 1) {
+        if (!Float.isFinite(p) || p < 0 || p > 1) {
             throw new IllegalArgumentException("dropout probability must be in [0, 1], got: " + p);
         }
         this.p = p;
@@ -94,6 +94,9 @@ public class Dropout extends NNModule {
         // During eval mode or p=0, no dropout applied
         if (!isTraining() || p == 0) {
             return input;
+        }
+        if (p == 1f) {
+            return input.mul(0f);
         }
 
         float[] data = input.data();

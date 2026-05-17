@@ -1,7 +1,9 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.autograd.VectorOps;
+
+import java.util.Arrays;
 
 /**
  * Label Smoothing Cross-Entropy Loss — regularizes classification by
@@ -33,6 +35,10 @@ public final class LabelSmoothingLoss {
      * @param smoothing smoothing factor ε in [0, 1) (default 0.1)
      */
     public LabelSmoothingLoss(float smoothing) {
+        if (!Float.isFinite(smoothing) || smoothing < 0.0f || smoothing >= 1.0f) {
+            throw new IllegalArgumentException(
+                    "smoothing must be finite and in [0, 1), got: " + smoothing);
+        }
         this.smoothing = smoothing;
     }
 
@@ -50,9 +56,23 @@ public final class LabelSmoothingLoss {
      */
     public GradTensor forward(GradTensor logits, GradTensor labels) {
         long[] s = logits.shape();
+        if (s.length != 2) {
+            throw new IllegalArgumentException(
+                    "logits must be 2D [batch, classes], got shape: " + Arrays.toString(s));
+        }
         int N = (int) s[0], C = (int) s[1];
+        if (N <= 0 || C <= 0) {
+            throw new IllegalArgumentException(
+                    "logits must have positive batch and class dimensions, got shape: " + Arrays.toString(s));
+        }
         float[] lg = logits.data(), lb = labels.data();
-        float[] losses = new float[N];
+        if (lb.length != N) {
+            throw new IllegalArgumentException(
+                    "labels batch size must match logits batch size, got: " + lb.length + " vs " + N);
+        }
+        float[] softmaxData = new float[lg.length];
+        int[] targetClasses = new int[N];
+        float totalLoss = 0.0f;
 
         for (int n = 0; n < N; n++) {
             // Log-softmax for numerical stability
@@ -60,11 +80,17 @@ public final class LabelSmoothingLoss {
             for (int c = 0; c < C; c++)
                 max = Math.max(max, lg[n * C + c]);
             float sumExp = 0f;
+            for (int c = 0; c < C; c++) {
+                int index = n * C + c;
+                softmaxData[index] = (float) Math.exp(lg[index] - max);
+                sumExp += softmaxData[index];
+            }
             for (int c = 0; c < C; c++)
-                sumExp += Math.exp(lg[n * C + c] - max);
+                softmaxData[n * C + c] /= sumExp;
             float logSumExp = max + (float) Math.log(sumExp);
 
-            int cls = (int) lb[n];
+            int cls = ClassIndexTargets.require(lb[n], C, n);
+            targetClasses[n] = cls;
             float hardLoss = logSumExp - lg[n * C + cls]; // CE for true class
 
             // Uniform loss over all classes (smoothing term)
@@ -73,8 +99,31 @@ public final class LabelSmoothingLoss {
                 uniformLoss += logSumExp - lg[n * C + c];
             uniformLoss /= C;
 
-            losses[n] = (1f - smoothing) * hardLoss + smoothing * uniformLoss;
+            totalLoss += (1f - smoothing) * hardLoss + smoothing * uniformLoss;
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / N);
+        GradTensor out = GradTensor.scalar(totalLoss / N);
+        if (logits.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("LabelSmoothingLoss") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float scale = upstream.item() / N;
+                    float uniformTarget = smoothing / C;
+                    float hardTarget = 1.0f - smoothing + uniformTarget;
+                    float[] grad = new float[lg.length];
+
+                    for (int n = 0; n < N; n++) {
+                        int target = targetClasses[n];
+                        int offset = n * C;
+                        for (int c = 0; c < C; c++) {
+                            float smoothedTarget = c == target ? hardTarget : uniformTarget;
+                            grad[offset + c] = (softmaxData[offset + c] - smoothedTarget) * scale;
+                        }
+                    }
+                    logits.backward(GradTensor.of(grad, logits.shape()));
+                }
+            });
+        }
+        return out;
     }
 }

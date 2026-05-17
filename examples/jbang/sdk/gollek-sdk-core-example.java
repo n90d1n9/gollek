@@ -1,131 +1,48 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
-// Gollek SDK Core Tensor API Example
+// Legacy file name retained for compatibility during module migration.
 //
-// Demonstrates unified Tensor API with:
-// - Device placement (CPU, CUDA, MPS)
-// - Operator overloading
-// - Memory management
-// - NoGrad context
-//
-// Prerequisites:
-//   - Java 25+
-//   - JBang: curl -Ls https://sh.jbang.dev | bash -s -
-//   - All SDK modules built
-//
-// Usage:
-//   jbang gollek-sdk-core-example.java
-//
-// DEPS tech.kayys.gollek:gollek-sdk-core:0.1.0-SNAPSHOT
-// JAVA 25+
+//JAVA 25+
+//REPOS local,mavencentral
+//DEPS tech.kayys.gollek:gollek-sdk-nn:0.1.0-SNAPSHOT
+//DEPS tech.kayys.gollek:gollek-sdk-autograd:0.1.0-SNAPSHOT
+//COMPILE_OPTIONS --add-modules jdk.incubator.vector
+//RUNTIME_OPTIONS --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
 
-import tech.kayys.gollek.sdk.core.*;
+import java.util.Arrays;
+import java.util.Locale;
+import tech.kayys.gollek.ml.autograd.GradTensor;
+import tech.kayys.gollek.ml.nn.Linear;
+import tech.kayys.gollek.ml.nn.ReLU;
+import tech.kayys.gollek.ml.nn.Sequential;
 
-public class gollek_sdk_core_example {
+class GollekSdkCoreExample {
 
     public static void main(String[] args) {
-        System.out.println("╔══════════════════════════════════════════════════════════╗");
-        System.out.println("║     Gollek SDK Core Tensor API Example                   ║");
-        System.out.println("╚══════════════════════════════════════════════════════════╝");
-        System.out.println();
+        Locale.setDefault(Locale.US);
+        System.out.println("==============================================");
+        System.out.println(" Gollek Core Tensor Example (Compatibility)");
+        System.out.println("==============================================");
 
-        // 1. Tensor factory methods
-        System.out.println("1. Creating tensors with factory methods...");
-        Tensor zeros = Tensor.zeros(2, 3);
-        Tensor ones = Tensor.ones(2, 3);
-        Tensor randn = Tensor.randn(2, 3);
-        Tensor rand = Tensor.rand(2, 3);
+        GradTensor a = GradTensor.randn(2, 3);
+        GradTensor b = GradTensor.ones(2, 3);
+        GradTensor c = a.add(b);
+        GradTensor d = c.relu();
+        GradTensor e = d.reshape(3, 2);
 
-        System.out.println("   ✓ zeros: " + zeros);
-        System.out.println("   ✓ ones: " + ones);
-        System.out.println("   ✓ randn: " + randn);
-        System.out.println("   ✓ rand: " + rand);
-        System.out.println();
+        System.out.println("a shape: " + Arrays.toString(a.shape()));
+        System.out.println("b shape: " + Arrays.toString(b.shape()));
+        System.out.println("c=a+b shape: " + Arrays.toString(c.shape()));
+        System.out.println("d=relu(c) shape: " + Arrays.toString(d.shape()));
+        System.out.println("e=reshape(d,3,2) shape: " + Arrays.toString(e.shape()));
+        System.out.printf("Sample value e[0]=%.6f%n", e.item(0));
 
-        // 2. Device placement
-        System.out.println("2. Device placement...");
-        Device cpu = Device.CPU;
-        Device cuda = Device.of("cuda", 0);
-        Device mps = Device.MPS;
+        Sequential mlp = new Sequential(
+                new Linear(3, 8),
+                new ReLU(),
+                new Linear(8, 2));
 
-        Tensor x = Tensor.randn(2, 3).to(cpu);
-        System.out.println("   ✓ Tensor on CPU: " + x.device());
-        System.out.println("   ✓ Available devices: CPU, CUDA:0, MPS");
-        System.out.println();
-
-        // 3. Operator overloading
-        System.out.println("3. Tensor operations...");
-        Tensor a = Tensor.randn(2, 3);
-        Tensor b = Tensor.randn(2, 3);
-
-        Tensor c = a.add(b);
-        Tensor d = a.mul(2.0f);
-        Tensor e = a.sub(b);
-
-        System.out.println("   ✓ Addition: a + b");
-        System.out.println("   ✓ Scalar mul: a * 2.0");
-        System.out.println("   ✓ Subtraction: a - b");
-        System.out.println();
-
-        // 4. Activations
-        System.out.println("4. Activation functions...");
-        Tensor x_relu = a.relu();
-        Tensor x_sigmoid = a.sigmoid();
-        Tensor x_softmax = a.softmax();
-
-        System.out.println("   ✓ ReLU applied");
-        System.out.println("   ✓ Sigmoid applied");
-        System.out.println("   ✓ Softmax applied");
-        System.out.println();
-
-        // 5. Reshaping
-        System.out.println("5. Reshaping operations...");
-        Tensor x = Tensor.randn(2, 3, 4);
-        System.out.println("   ✓ Original shape: " + java.util.Arrays.toString(x.shape()));
-
-        Tensor x_flat = x.flatten();
-        System.out.println("   ✓ Flattened: " + java.util.Arrays.toString(x_flat.shape()));
-
-        Tensor x_reshaped = x_flat.reshape(6, 2);
-        System.out.println("   ✓ Reshaped: " + java.util.Arrays.toString(x_reshaped.shape()));
-
-        Tensor x_unsqueezed = x.unsqueeze(0);
-        System.out.println("   ✓ Unsqueezed: " + java.util.Arrays.toString(x_unsqueezed.shape()));
-        System.out.println();
-
-        // 6. Memory management
-        System.out.println("6. Memory tracking...");
-        MemoryManager mem = MemoryManager.getInstance();
-        mem.allocate(1024 * 1024);  // 1 MB
-        System.out.println("   ✓ Allocated: " + mem.getStats());
-
-        mem.free(512 * 1024);  // Free 512 KB
-        System.out.println("   ✓ After free: " + mem.getStats());
-        System.out.println();
-
-        // 7. NoGrad context
-        System.out.println("7. NoGrad context (inference mode)...");
-        System.out.println("   ✓ Gradients enabled: " + NoGrad.isEnabled());
-
-        try (NoGrad ctx = new NoGrad()) {
-            System.out.println("   ✓ Inside NoGrad: " + NoGrad.isEnabled());
-            // Inference code here - no gradients computed
-        }
-
-        System.out.println("   ✓ After NoGrad: " + NoGrad.isEnabled());
-        System.out.println();
-
-        // 8. Sequential container
-        System.out.println("8. Sequential model container...");
-        // Sequential model = new Sequential()
-        //     .add(new Conv2d(3, 64, 3, 1, 1))
-        //     .add(new BatchNorm2d(64))
-        //     .add(new ReLU())
-        //     .add(new MaxPool2d(2));
-        System.out.println("   ✓ Sequential container available");
-        System.out.println();
-
-        System.out.println("╔══════════════════════════════════════════════════════════╗");
-        System.out.println("║  Core Tensor API example complete!                       ║");
-        System.out.println("╚══════════════════════════════════════════════════════════╝");
+        GradTensor logits = mlp.forward(GradTensor.randn(4, 3));
+        System.out.println("MLP forward output shape: " + Arrays.toString(logits.shape()));
+        System.out.println("Parameter count: " + mlp.parameterCountFormatted());
     }
 }

@@ -1,6 +1,6 @@
 package tech.kayys.gollek.nlp;
 
-import tech.kayys.gollek.ml.tensor.Tensor;
+import tech.kayys.gollek.ml.autograd.GradTensor;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -40,7 +40,7 @@ public class EmbeddingProcessor implements Language.Processor {
 
         // Set document vector
         float[] docVec = results.get(0);
-        doc.setVector(Tensor.of(docVec));
+        doc.setVector(GradTensor.of(docVec));
 
         // Set token vectors and store in off-heap MemorySegment
         if (doc.length() > 0 && results.size() > 1) {
@@ -55,7 +55,7 @@ public class EmbeddingProcessor implements Language.Processor {
                     // results[1] corresponds to doc.getTokens()[0]
                     float[] vec = results.get(i + 1);
                     Token t = doc.get(i);
-                    t.setVector(Tensor.of(vec));
+                    t.setVector(GradTensor.of(vec));
 
                     // Copy to FFM buffer for SIMD scanning later
                     long offset = (long) i * dim * ValueLayout.JAVA_FLOAT.byteSize();

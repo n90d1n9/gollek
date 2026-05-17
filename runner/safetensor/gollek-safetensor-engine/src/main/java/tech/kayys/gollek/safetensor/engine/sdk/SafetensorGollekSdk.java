@@ -1,11 +1,18 @@
 package tech.kayys.gollek.safetensor.engine.sdk;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
+import tech.kayys.gollek.safetensor.engine.prompt.PromptTemplateCompat;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 import tech.kayys.gollek.sdk.exception.SdkException;
+import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.sdk.model.PullProgress;
 import tech.kayys.gollek.sdk.model.SystemInfo;
@@ -16,17 +23,26 @@ import tech.kayys.gollek.spi.inference.AsyncJobStatus;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
+import tech.kayys.gollek.spi.provider.LLMProvider;
 import tech.kayys.gollek.spi.provider.ProviderInfo;
+import tech.kayys.gollek.spi.provider.ProviderRegistry;
+import tech.kayys.gollek.spi.provider.ProviderRequest;
+import tech.kayys.gollek.spi.provider.ProviderRequests;
+import tech.kayys.gollek.spi.provider.StreamingProvider;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * GollekSdk implementation backed by the SafeTensor DirectInferenceEngine.
@@ -45,12 +61,20 @@ import java.util.function.Consumer;
  *   <li>SafetensorGollekSdk.createCompletion() → DirectInferenceEngine.generate()</li>
  * </ol>
  */
+@ApplicationScoped
 public class SafetensorGollekSdk implements GollekSdk {
 
     private static final Logger log = Logger.getLogger(SafetensorGollekSdk.class);
+    private static final Pattern GEMMA4_THOUGHT_CHANNEL =
+            Pattern.compile("^<\\|channel>thought\\n.*?<channel\\|>", Pattern.DOTALL);
+    private static final Pattern GEMMA4_GENERIC_CHANNEL_OPEN =
+            Pattern.compile("^<\\|channel>[^\\n]*\\n", Pattern.DOTALL);
+    private static final String ALLOW_UNSAFE_GEMMA3_DIRECT_PROPERTY =
+            "gollek.safetensor.allow_unsafe_gemma3_direct";
 
     private final DirectInferenceEngine engine;
     private final Path modelBasePath;
+    private final ProviderRegistry providerRegistry;
     private String preferredProvider = "safetensor";
 
     /**
@@ -59,10 +83,30 @@ public class SafetensorGollekSdk implements GollekSdk {
      * @param engine        the direct inference engine (may be CDI-managed or standalone)
      * @param modelBasePath base directory for model discovery
      */
+    @Inject
+    public SafetensorGollekSdk(
+            DirectInferenceEngine engine,
+            SafetensorProviderConfig config,
+            ProviderRegistry providerRegistry) {
+        this(engine, resolveModelBasePath(config), providerRegistry);
+    }
+
     public SafetensorGollekSdk(DirectInferenceEngine engine, Path modelBasePath) {
+        this(engine, modelBasePath, null);
+    }
+
+    public SafetensorGollekSdk(DirectInferenceEngine engine, Path modelBasePath, ProviderRegistry providerRegistry) {
         this.engine = engine;
         this.modelBasePath = modelBasePath;
+        this.providerRegistry = providerRegistry;
         log.infof("SafetensorGollekSdk initialized with model base path [%s]", modelBasePath);
+    }
+
+    private static Path resolveModelBasePath(SafetensorProviderConfig config) {
+        if (config != null && config.basePath() != null && !config.basePath().isBlank()) {
+            return Path.of(config.basePath());
+        }
+        return Path.of(System.getProperty("user.home"), ".gollek", "models");
     }
 
     // ==================== Core Inference ====================
@@ -70,11 +114,21 @@ public class SafetensorGollekSdk implements GollekSdk {
     @Override
     public InferenceResponse createCompletion(InferenceRequest request) throws SdkException {
         try {
+            if (useProviderPath() && !shouldUseLegacyDirectPath(request)) {
+                return requireProvider()
+                        .infer(buildProviderRequest(request, false))
+                        .await()
+                        .atMost(request.getTimeout().orElse(Duration.ofMinutes(5)));
+            }
             Path modelPath = resolveModelPath(request.getModel());
             GenerationConfig cfg = toGenerationConfig(request);
+            String modelType = readModelType(modelPath);
+            validateLegacyDirectModelSupport(modelType);
+            String prompt = buildLegacyPrompt(request, modelPath);
 
-            Uni<InferenceResponse> uni = engine.generate(request.getPrompt(), modelPath, cfg);
-            return uni.await().atMost(Duration.ofMinutes(5));
+            Uni<InferenceResponse> uni = engine.generate(prompt, modelPath, cfg);
+            InferenceResponse response = uni.await().atMost(Duration.ofMinutes(5));
+            return sanitizeLegacyResponse(response, modelType);
         } catch (Exception e) {
             throw new SdkException("SafeTensor inference failed: " + e.getMessage(), e);
         }
@@ -94,23 +148,32 @@ public class SafetensorGollekSdk implements GollekSdk {
     @Override
     public Multi<StreamingInferenceChunk> streamCompletion(InferenceRequest request) {
         try {
+            if (useProviderPath() && !shouldUseLegacyDirectPath(request)) {
+                return requireStreamingProvider().inferStream(buildProviderRequest(request, true));
+            }
             Path modelPath = resolveModelPath(request.getModel());
             GenerationConfig cfg = toGenerationConfig(request);
+            String modelType = readModelType(modelPath);
+            validateLegacyDirectModelSupport(modelType);
+            String prompt = buildLegacyPrompt(request, modelPath);
             String requestId = request.getRequestId() != null
                     ? request.getRequestId()
                     : java.util.UUID.randomUUID().toString();
 
             AtomicInteger index = new AtomicInteger(0);
-            return engine.generateStream(request.getPrompt(), modelPath, cfg)
+            AtomicBoolean leadingGemma4ChannelsPending = new AtomicBoolean(true);
+            return engine.generateStream(prompt, modelPath, cfg)
                     .map(response -> {
+                        String content = response.getContent();
+                        if (content != null) {
+                            content = sanitizeGemma4StreamingDelta(content, modelType, leadingGemma4ChannelsPending);
+                        }
                         int idx = index.getAndIncrement();
                         boolean isFinal = response.getFinishReason() != null;
                         if (isFinal) {
-                            return StreamingInferenceChunk.finalChunk(
-                                    requestId, idx, response.getContent());
+                            return StreamingInferenceChunk.finalChunk(requestId, idx, content);
                         }
-                        return StreamingInferenceChunk.textDelta(
-                                requestId, idx, response.getContent());
+                        return StreamingInferenceChunk.textDelta(requestId, idx, content);
                     });
         } catch (Exception e) {
             return Multi.createFrom().failure(
@@ -272,11 +335,283 @@ public class SafetensorGollekSdk implements GollekSdk {
                 ? ((Number) params.get("temperature")).floatValue() : 0.7f;
         float topP = params.containsKey("top_p")
                 ? ((Number) params.get("top_p")).floatValue() : 0.9f;
+        int topK = params.containsKey("top_k")
+                ? ((Number) params.get("top_k")).intValue() : 40;
+        float minP = params.containsKey("min_p")
+                ? ((Number) params.get("min_p")).floatValue() : 0.0f;
+        float repetitionPenalty = params.containsKey("repeat_penalty")
+                ? ((Number) params.get("repeat_penalty")).floatValue()
+                : params.containsKey("repetition_penalty")
+                ? ((Number) params.get("repetition_penalty")).floatValue()
+                : 1.0f;
+        float frequencyPenalty = params.containsKey("frequency_penalty")
+                ? ((Number) params.get("frequency_penalty")).floatValue() : 0.0f;
+        long seed = params.containsKey("seed")
+                ? ((Number) params.get("seed")).longValue() : -1L;
+        int maxKvCacheTokens = params.containsKey("max_kv_cache_tokens")
+                ? ((Number) params.get("max_kv_cache_tokens")).intValue() : 2048;
+        GenerationConfig.KvCacheQuantization kvCacheQuant = normalizeKvCacheQuantization(
+                (String) params.getOrDefault("kv_cache_quant", "none"));
 
         return GenerationConfig.builder()
                 .maxNewTokens(maxTokens)
+                .strategy(resolveSamplingStrategy(temperature, topK, topP))
                 .temperature(temperature)
+                .topK(topK)
                 .topP(topP)
+                .minP(minP)
+                .repetitionPenalty(repetitionPenalty)
+                .frequencyPenalty(frequencyPenalty)
+                .maxKvCacheTokens(maxKvCacheTokens)
+                .kvCacheQuant(kvCacheQuant)
+                .seed(seed)
                 .build();
+    }
+
+    private String buildLegacyPrompt(InferenceRequest request, Path modelPath) {
+        String rawPrompt = request.getPrompt();
+        if (rawPrompt == null || rawPrompt.isBlank()) {
+            return rawPrompt;
+        }
+        String modelType = readModelType(modelPath);
+        boolean useRawPrompt = shouldUseRawLegacyPrompt(request, rawPrompt, modelType);
+        boolean shouldFormat = shouldFormatLegacyPrompt(modelType);
+        if (Boolean.getBoolean("gollek.verbose")) {
+            int messageCount = request.getMessages() == null ? -1 : request.getMessages().size();
+            System.out.printf(
+                    "[DEBUG-PROMPT] modelType=%s shouldFormat=%s useRaw=%s messageCount=%d%n",
+                    modelType, shouldFormat, useRawPrompt, messageCount);
+            System.out.flush();
+        }
+        if (useRawPrompt || !shouldFormat) {
+            return rawPrompt;
+        }
+
+        List<Message> messages = request.getMessages();
+        if (messages == null || messages.isEmpty()) {
+            return rawPrompt;
+        }
+
+        try {
+            return PromptTemplateCompat.format(new ArrayList<>(messages), modelType);
+        } catch (Exception e) {
+            log.debugf("Falling back to raw prompt for legacy direct path: %s", e.getMessage());
+            return rawPrompt;
+        }
+    }
+
+    private boolean shouldUseRawLegacyPrompt(InferenceRequest request, String rawPrompt, String modelType) {
+        if (request == null) {
+            return true;
+        }
+        String normalizedModelType = modelType == null ? "" : modelType.trim().toLowerCase(Locale.ROOT);
+        if (normalizedModelType.startsWith("gemma3") || normalizedModelType.startsWith("gemma4")) {
+            return false;
+        }
+        List<Message> messages = request.getMessages();
+        if (messages == null || messages.size() != 1) {
+            return false;
+        }
+        Message only = messages.getFirst();
+        if (only.getRole() != Message.Role.USER) {
+            return false;
+        }
+        String messagePrompt = only.getContent();
+        if (messagePrompt == null) {
+            return false;
+        }
+        return rawPrompt.equals(messagePrompt);
+    }
+
+    private void validateLegacyDirectModelSupport(String modelType) {
+        String normalized = modelType == null ? "" : modelType.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.startsWith("gemma3")) {
+            return;
+        }
+        if (Boolean.getBoolean(ALLOW_UNSAFE_GEMMA3_DIRECT_PROPERTY)) {
+            return;
+        }
+        throw new IllegalStateException(
+                "Gemma3 direct safetensor path is temporarily disabled due incorrect generation quality. "
+                        + "Use GGUF/LiteRT route, or override only for debugging with -D"
+                        + ALLOW_UNSAFE_GEMMA3_DIRECT_PROPERTY + "=true");
+    }
+
+    private InferenceResponse sanitizeLegacyResponse(InferenceResponse response, String modelType) {
+        if (response == null || response.getContent() == null) {
+            return response;
+        }
+        String normalized = modelType == null ? "" : modelType.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.startsWith("gemma4")) {
+            return response;
+        }
+
+        String content = response.getContent();
+        content = GEMMA4_THOUGHT_CHANNEL.matcher(content).replaceFirst("");
+        content = GEMMA4_GENERIC_CHANNEL_OPEN.matcher(content).replaceFirst("");
+        content = stripGemma4InlineMarkers(content);
+
+        if (content.equals(response.getContent())) {
+            return response;
+        }
+        return response.toBuilder().content(content).build();
+    }
+
+    /**
+     * Strips Gemma 4 channel/control fragments from streamed deltas (non-streaming path uses
+     * {@link #sanitizeLegacyResponse}).
+     */
+    private static String sanitizeGemma4StreamingDelta(
+            String content, String modelType, AtomicBoolean leadingChannelsPending) {
+        if (content == null || modelType == null) {
+            return content;
+        }
+        String normalizedType = modelType.trim().toLowerCase(Locale.ROOT);
+        if (!normalizedType.startsWith("gemma4")) {
+            return content;
+        }
+        String text = content;
+        if (leadingChannelsPending.get()) {
+            text = GEMMA4_THOUGHT_CHANNEL.matcher(text).replaceFirst("");
+            text = GEMMA4_GENERIC_CHANNEL_OPEN.matcher(text).replaceFirst("");
+            if (!text.isBlank()) {
+                leadingChannelsPending.set(false);
+            }
+        }
+        return stripGemma4InlineMarkers(text);
+    }
+
+    private static String stripGemma4InlineMarkers(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        String content = text.replace("<channel|>", "");
+        content = content.replace("<turn|>", "");
+        return content.replace("<|tool_response>", "");
+    }
+
+    private String readModelType(Path modelPath) {
+        if (modelPath == null) {
+            return "";
+        }
+        try {
+            Path configDir = Files.isRegularFile(modelPath) ? modelPath.getParent() : modelPath;
+            if (configDir == null) {
+                return "";
+            }
+            ModelConfig config = ModelConfig.fromDirectory(configDir, new ObjectMapper());
+            return config.modelType() != null ? config.modelType() : "";
+        } catch (Exception e) {
+            log.debugf("Unable to read model type for legacy direct prompt shaping: %s", e.getMessage());
+            return "";
+        }
+    }
+
+    private boolean shouldFormatLegacyPrompt(String modelType) {
+        if (modelType == null || modelType.isBlank()) {
+            return false;
+        }
+        String normalized = modelType.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("gemma")
+                || normalized.startsWith("llama")
+                || normalized.startsWith("mistral")
+                || normalized.startsWith("mixtral")
+                || normalized.startsWith("phi")
+                || normalized.startsWith("qwen");
+    }
+
+    private GenerationConfig.SamplingStrategy resolveSamplingStrategy(float temperature, int topK, float topP) {
+        if (temperature < 1.0e-4f || topK == 1) {
+            return GenerationConfig.SamplingStrategy.GREEDY;
+        }
+        boolean hasTopK = topK > 0;
+        boolean hasTopP = topP > 0.0f && topP < 1.0f;
+        if (hasTopK && hasTopP) {
+            return GenerationConfig.SamplingStrategy.TOP_K_TOP_P;
+        }
+        if (hasTopP) {
+            return GenerationConfig.SamplingStrategy.TOP_P;
+        }
+        if (hasTopK) {
+            return GenerationConfig.SamplingStrategy.TOP_K;
+        }
+        return GenerationConfig.SamplingStrategy.GREEDY;
+    }
+
+    private GenerationConfig.KvCacheQuantization normalizeKvCacheQuantization(String raw) {
+        if (raw == null || raw.isBlank() || "none".equalsIgnoreCase(raw)) {
+            return GenerationConfig.KvCacheQuantization.NONE;
+        }
+        String normalized = raw.trim().toUpperCase(Locale.ROOT);
+        if ("INT8".equals(normalized)) {
+            return GenerationConfig.KvCacheQuantization.INT8;
+        }
+        if ("INT4".equals(normalized)) {
+            return GenerationConfig.KvCacheQuantization.INT4;
+        }
+        if ("TURBO".equals(normalized)) {
+            return GenerationConfig.KvCacheQuantization.INT4;
+        }
+        return GenerationConfig.KvCacheQuantization.NONE;
+    }
+
+    private boolean useProviderPath() {
+        return providerRegistry != null && providerRegistry.hasProvider(preferredProvider);
+    }
+
+    private boolean shouldUseLegacyDirectPath(InferenceRequest request) {
+        if (request == null) {
+            return false;
+        }
+        String preferred = request.getPreferredProvider().orElse(preferredProvider);
+        if (!"safetensor".equalsIgnoreCase(preferred)) {
+            return false;
+        }
+        if (request.getSessionId().isPresent()) {
+            return false;
+        }
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            return false;
+        }
+        if (request.getToolChoice() != null) {
+            return false;
+        }
+        if (request.getAttachments() != null && !request.getAttachments().isEmpty()) {
+            return false;
+        }
+        String prompt = request.getPrompt();
+        return prompt != null && !prompt.isBlank();
+    }
+
+    private LLMProvider requireProvider() throws SdkException {
+        if (providerRegistry == null) {
+            throw new SdkException("SafeTensor provider registry is not available");
+        }
+        return providerRegistry.getProvider(preferredProvider)
+                .orElseThrow(() -> new SdkException("SafeTensor provider is not available: " + preferredProvider));
+    }
+
+    private StreamingProvider requireStreamingProvider() throws SdkException {
+        LLMProvider provider = requireProvider();
+        if (!(provider instanceof StreamingProvider streamingProvider)) {
+            throw new SdkException("SafeTensor provider does not support streaming: " + preferredProvider);
+        }
+        return streamingProvider;
+    }
+
+    private ProviderRequest buildProviderRequest(InferenceRequest request, boolean streaming) {
+        Path resolvedModelPath = resolveModelPath(request.getModel());
+        Map<String, Object> parameters = new java.util.HashMap<>(request.getParameters());
+        if (resolvedModelPath != null) {
+            parameters.put("model_path", resolvedModelPath.toString());
+        }
+        return ProviderRequests.fromInferenceRequest(
+                request,
+                request.getModel(),
+                streaming,
+                Duration.ofMinutes(5),
+                preferredProvider,
+                parameters,
+                Map.of("request_id", request.getRequestId()));
     }
 }

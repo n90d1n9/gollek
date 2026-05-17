@@ -3,6 +3,8 @@ package tech.kayys.gollek.ml.nn.loss;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
 
+import java.util.Arrays;
+
 /**
  * Connectionist Temporal Classification (CTC) Loss — enables training sequence
  * models without requiring aligned input-output pairs.
@@ -38,7 +40,7 @@ public final class CTCLoss {
 
     /** Creates a CTC loss with blank label index 0. */
     public CTCLoss() {
-        this(0);
+        this(BLANK);
     }
 
     /**
@@ -47,6 +49,9 @@ public final class CTCLoss {
      * @param blank index of the blank label in the vocabulary
      */
     public CTCLoss(int blank) {
+        if (blank < 0) {
+            throw new IllegalArgumentException("blank index must be non-negative, got: " + blank);
+        }
         this.blank = blank;
     }
 
@@ -62,16 +67,47 @@ public final class CTCLoss {
     public GradTensor forward(GradTensor logProbs, GradTensor targets,
             int[] inputLens, int[] targetLens) {
         long[] s = logProbs.shape();
+        if (s.length != 3) {
+            throw new IllegalArgumentException(
+                    "logProbs must be 3D [time, batch, classes], got shape: " + Arrays.toString(s));
+        }
         int T = (int) s[0], N = (int) s[1], C = (int) s[2];
+        if (blank >= C) {
+            throw new IllegalArgumentException("blank index " + blank + " out of range [0, " + (C - 1) + "]");
+        }
+        long[] targetShape = targets.shape();
+        if (targetShape.length != 2) {
+            throw new IllegalArgumentException(
+                    "targets must be 2D [batch, maxTargetLength], got shape: " + Arrays.toString(targetShape));
+        }
+        if (targetShape[0] != N) {
+            throw new IllegalArgumentException(
+                    "targets batch size must match logProbs batch size, got: " + targetShape[0] + " vs " + N);
+        }
+        if (inputLens.length != N || targetLens.length != N) {
+            throw new IllegalArgumentException(
+                    "inputLens and targetLens length must match batch size " + N);
+        }
         float[] lp = logProbs.data(), tg = targets.data();
         float[] losses = new float[N];
+        int maxTargetLength = (int) targetShape[1];
 
         for (int n = 0; n < N; n++) {
             int tLen = targetLens[n];
             int iLen = inputLens[n];
+            if (iLen <= 0 || iLen > T) {
+                throw new IllegalArgumentException(
+                        "input length at sample " + n + " must be in [1, " + T + "], got: " + iLen);
+            }
+            if (tLen < 0 || tLen > maxTargetLength) {
+                throw new IllegalArgumentException(
+                        "target length at sample " + n + " must be in [0, "
+                                + maxTargetLength + "], got: " + tLen);
+            }
             int[] target = new int[tLen];
             for (int i = 0; i < tLen; i++)
-                target[i] = (int) tg[n * (int) targets.shape()[1] + i];
+                target[i] = ClassIndexTargets.require(
+                        tg[n * maxTargetLength + i], C, "sample " + n + " target " + i);
 
             losses[n] = ctcForward(lp, n, N, C, iLen, target, tLen);
         }

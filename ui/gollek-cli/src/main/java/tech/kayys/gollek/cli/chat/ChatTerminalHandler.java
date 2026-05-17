@@ -20,7 +20,7 @@ import tech.kayys.gollek.sdk.util.GollekHome;
 public class ChatTerminalHandler implements AutoCloseable {
 
     public static final List<String> COMMANDS = List.of(
-            "/help", "/reset", "/quit", "/log", "/list", "/models", "/model",
+            "/help", "/reset", "/retry", "/regen", "/quit", "/log", "/list", "/models", "/model",
             "/providers", "/provider", "/info", "/stats", "/extensions");
 
     private Terminal terminal;

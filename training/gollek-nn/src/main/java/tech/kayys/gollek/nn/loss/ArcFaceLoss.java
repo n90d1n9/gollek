@@ -5,6 +5,8 @@ import tech.kayys.gollek.ml.autograd.VectorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.Parameter;
 
+import java.util.Arrays;
+
 /**
  * ArcFace Loss (Additive Angular Margin) — improves face recognition and
  * metric learning by adding an angular margin to the target class logit.
@@ -48,13 +50,15 @@ public final class ArcFaceLoss extends NNModule {
      * @param scale      feature scale s (default 64)
      */
     public ArcFaceLoss(int numClasses, int featureDim, float margin, float scale) {
-        this.margin = margin;
-        this.scale = scale;
-        this.cosMargin = (float) Math.cos(margin);
-        this.sinMargin = (float) Math.sin(margin);
+        int validatedClasses = validatePositive(numClasses, "numClasses");
+        int validatedFeatureDim = validatePositive(featureDim, "featureDim");
+        this.margin = validateMargin(margin);
+        this.scale = validateScale(scale);
+        this.cosMargin = (float) Math.cos(this.margin);
+        this.sinMargin = (float) Math.sin(this.margin);
         // Weight matrix: each row is a class center (normalized)
         this.weight = registerParameter("weight",
-                GradTensor.randn(numClasses, featureDim));
+                GradTensor.randn(validatedClasses, validatedFeatureDim));
     }
 
     /** Creates ArcFace with default margin=0.5, scale=64. */
@@ -70,9 +74,28 @@ public final class ArcFaceLoss extends NNModule {
      * @return scalar cross-entropy loss with angular margin
      */
     public GradTensor forward(GradTensor features, GradTensor labels) {
-        int N = (int) features.shape()[0];
-        int C = (int) weight.data().shape()[0];
-        int D = (int) features.shape()[1];
+        long[] featureShape = features.shape();
+        if (featureShape.length != 2) {
+            throw new IllegalArgumentException(
+                    "features must be 2D [batch, featureDim], got shape: " + Arrays.toString(featureShape));
+        }
+        long[] weightShape = weight.data().shape();
+        int N = (int) featureShape[0];
+        int C = (int) weightShape[0];
+        int D = (int) featureShape[1];
+        if (D != (int) weightShape[1]) {
+            throw new IllegalArgumentException(
+                    "features featureDim " + D + " must match ArcFace weight featureDim " + weightShape[1]);
+        }
+        float[] lb = labels.data();
+        if (lb.length != N) {
+            throw new IllegalArgumentException(
+                    "labels batch size must match features batch size, got: " + lb.length + " vs " + N);
+        }
+        int[] targetClasses = new int[N];
+        for (int n = 0; n < N; n++) {
+            targetClasses[n] = ClassIndexTargets.require(lb[n], C, n);
+        }
 
         // Normalize weight vectors
         float[] wn = normalizeRows(weight.data().data(), C, D);
@@ -83,9 +106,8 @@ public final class ArcFaceLoss extends NNModule {
 
         // Apply angular margin to target class
         float[] logits = cosTheta.clone();
-        float[] lb = labels.data();
         for (int n = 0; n < N; n++) {
-            int cls = (int) lb[n];
+            int cls = targetClasses[n];
             float cos = cosTheta[n * C + cls];
             float sin = (float) Math.sqrt(Math.max(0, 1 - cos * cos));
             // cos(θ + m) = cos·cos(m) - sin·sin(m)
@@ -101,7 +123,7 @@ public final class ArcFaceLoss extends NNModule {
             float sumExp = 0;
             for (int c = 0; c < C; c++)
                 sumExp += Math.exp(scale * logits[n * C + c] - max);
-            int cls = (int) lb[n];
+            int cls = targetClasses[n];
             losses[n] = -(scale * logits[n * C + cls] - max - (float) Math.log(sumExp));
         }
         return GradTensor.scalar(VectorOps.sum(losses) / N);
@@ -131,5 +153,26 @@ public final class ArcFaceLoss extends NNModule {
             for (int c = 0; c < cols; c++)
                 t[c * rows + r] = m[r * cols + c];
         return t;
+    }
+
+    private static int validatePositive(int value, String name) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive, got: " + value);
+        }
+        return value;
+    }
+
+    private static float validateMargin(float margin) {
+        if (!Float.isFinite(margin) || margin < 0.0f || margin >= Math.PI) {
+            throw new IllegalArgumentException("margin must be finite and in [0, PI), got: " + margin);
+        }
+        return margin;
+    }
+
+    private static float validateScale(float scale) {
+        if (!Float.isFinite(scale) || scale <= 0.0f) {
+            throw new IllegalArgumentException("scale must be finite and positive, got: " + scale);
+        }
+        return scale;
     }
 }

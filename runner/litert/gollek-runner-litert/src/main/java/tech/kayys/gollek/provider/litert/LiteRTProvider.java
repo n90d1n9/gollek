@@ -18,8 +18,8 @@ import tech.kayys.gollek.spi.provider.AdapterCapabilityProfile;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.exception.InferenceException;
-import tech.kayys.gollek.spi.model.DeviceType;
-import tech.kayys.gollek.spi.model.ModelFormat;
+import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.spi.observability.AdapterMetricTagResolver;
 import tech.kayys.gollek.spi.observability.AdapterMetricsRecorder;
@@ -31,8 +31,12 @@ import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * LiteRT Provider for Wayang/Gollek.
@@ -89,7 +93,7 @@ public class LiteRTProvider implements StreamingProvider {
 
     @Override
     public boolean isEnabled() {
-        return config != null && config.enabled();
+        return config == null || config.enabled();
     }
 
     @Override
@@ -123,7 +127,7 @@ public class LiteRTProvider implements StreamingProvider {
         var features = new java.util.LinkedHashSet<>(Set.of("local_inference", "cpu_inference", "compiled_model_2.0"));
         features.addAll(AdapterCapabilityProfile.unsupportedWithMetrics().toFeatureFlags());
         return ProviderCapabilities.builder()
-                .streaming(false)
+                .streaming(true)
                 .functionCalling(false)
                 .multimodal(false)
                 .toolCalling(false)
@@ -141,9 +145,10 @@ public class LiteRTProvider implements StreamingProvider {
         if (config == null) {
             // Attempt to resolve config from cfg if possible, or expect it to be set already
             LOG.warn("LiteRTProvider initialized without explicit config mapping.");
+            config = defaultConfig();
         }
         
-        if (sessionManager == null && config != null) {
+        if (sessionManager == null) {
             sessionManager = new LiteRTSessionManager(config);
         }
 
@@ -154,6 +159,75 @@ public class LiteRTProvider implements StreamingProvider {
         initialized = true;
         LOG.infov("LiteRT 2.0 Provider initialized (GPU Auto-Metal: {0})", 
                 config != null && LiteRTDeviceSupport.shouldAutoMetal(config));
+    }
+
+    private LiteRTProviderConfig defaultConfig() {
+        return new LiteRTProviderConfig() {
+            @Override
+            public boolean enabled() {
+                return true;
+            }
+
+            @Override
+            public String modelBasePath() {
+                return Path.of(System.getProperty("user.home"), ".gollek", "models", "litert").toString();
+            }
+
+            @Override
+            public int threads() {
+                return Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+            }
+
+            @Override
+            public boolean gpuEnabled() {
+                return false;
+            }
+
+            @Override
+            public boolean autoMetalEnabled() {
+                return true;
+            }
+
+            @Override
+            public boolean npuEnabled() {
+                return false;
+            }
+
+            @Override
+            public String gpuBackend() {
+                return "auto";
+            }
+
+            @Override
+            public String npuType() {
+                return "auto";
+            }
+
+            @Override
+            public Duration defaultTimeout() {
+                return Duration.ofSeconds(30);
+            }
+
+            @Override
+            public LiteRTProviderConfig.SessionConfig session() {
+                return new LiteRTProviderConfig.SessionConfig() {
+                    @Override
+                    public int maxPerTenant() {
+                        return 2;
+                    }
+
+                    @Override
+                    public int idleTimeoutSeconds() {
+                        return 300;
+                    }
+
+                    @Override
+                    public int maxTotal() {
+                        return 8;
+                    }
+                };
+            }
+        };
     }
 
     @Override
@@ -235,6 +309,11 @@ public class LiteRTProvider implements StreamingProvider {
                         .metadata("litert_version", "2.0")
                         .build();
             } catch (Exception e) {
+                String userFacingMessage = userFacingLiteRtFailureMessage(e);
+                if (userFacingMessage != null) {
+                    LOG.error("LiteRT 2.0 Inference failed: " + userFacingMessage);
+                    throw new InferenceException(userFacingMessage);
+                }
                 LOG.error("LiteRT 2.0 Inference failed: " + e.getMessage(), e);
                 throw new InferenceException("Inference failed", e);
             } finally {
@@ -272,6 +351,11 @@ public class LiteRTProvider implements StreamingProvider {
                 try {
                     Path p = Paths.get(s);
                     if (Files.exists(p)) {
+                        Path nativeGemmaLitertlm = findNativeGemmaLitertlm(p);
+                        if (nativeGemmaLitertlm != null) {
+                            LOG.debugf("Explicit model_path preferred native Gemma LiteRT-LM: %s", nativeGemmaLitertlm);
+                            return nativeGemmaLitertlm;
+                        }
                         Optional<Path> bestFile = LiteRTContainerParser.findBestModelFile(p);
                         LOG.debugf("Model path resolved to: %s", bestFile.orElse(p));
                         return bestFile.orElse(p);
@@ -306,6 +390,11 @@ public class LiteRTProvider implements StreamingProvider {
             }
 
             if (targetPath != null && Files.exists(targetPath)) {
+                Path nativeGemmaLitertlm = findNativeGemmaLitertlm(targetPath);
+                if (nativeGemmaLitertlm != null) {
+                    LOG.debugf("Preferred native Gemma LiteRT-LM artifact: %s", nativeGemmaLitertlm);
+                    return nativeGemmaLitertlm;
+                }
                 java.util.Optional<Path> bestFile = LiteRTContainerParser.findBestModelFile(targetPath);
                 return bestFile.orElse(targetPath);
             }
@@ -314,6 +403,41 @@ public class LiteRTProvider implements StreamingProvider {
             LOG.warn("Error resolving model path for " + modelId, e);
             return config != null ? Paths.get(config.modelBasePath()).resolve(modelId) : Paths.get(modelId);
         }
+    }
+
+    private Path findNativeGemmaLitertlm(Path sourcePath) {
+        try {
+            Path searchDir = Files.isDirectory(sourcePath) ? sourcePath : sourcePath.getParent();
+            if (searchDir == null || !Files.isDirectory(searchDir)) {
+                return null;
+            }
+            try (var stream = Files.list(searchDir)) {
+                return stream
+                        .filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".litertlm"))
+                        .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).contains("gemma"))
+                        .sorted((left, right) -> Integer.compare(
+                                litertlmPreferenceScore(left),
+                                litertlmPreferenceScore(right)))
+                        .findFirst()
+                        .orElse(null);
+            }
+        } catch (Exception e) {
+            LOG.debugf("Failed to find native Gemma LiteRT-LM sibling for %s: %s", sourcePath, e.getMessage());
+            return null;
+        }
+    }
+
+    private int litertlmPreferenceScore(Path candidate) {
+        String fileName = candidate.getFileName().toString().toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (fileName.contains("qualcomm")) {
+            score += 10;
+        }
+        if (!fileName.contains("gemma-4-e2b-it.litertlm")) {
+            score += 1;
+        }
+        return score;
     }
 
     @Override
@@ -335,22 +459,118 @@ public class LiteRTProvider implements StreamingProvider {
 
     @Override
     public io.smallrye.mutiny.Multi<StreamingInferenceChunk> inferStream(ProviderRequest request) {
-        return infer(request).onItem().transformToMulti(response -> {
-            return io.smallrye.mutiny.Multi.createFrom().item(
-                new StreamingInferenceChunk(
-                    response.getRequestId(),
-                    0,
-                    ModalityType.TEXT,
-                    response.getContent(),
-                    null,
-                    true,
-                    "stop",
-                    null,
-                    java.time.Instant.now(),
-                    response.getMetadata()
-                )
-            );
+        return Multi.createFrom().emitter(emitter -> {
+            ensureInitialized();
+            if (AdapterMetricTagResolver.hasAdapterRequest(request)) {
+                emitter.fail(new UnsupportedOperationException(
+                        "LiteRT provider does not support adapters (adapter_unsupported)."));
+                return;
+            }
+
+            String tenantId = resolveTenantId(request);
+            Path modelPath = resolveModelPath(request.getModel(), request);
+            boolean gpuEnabled = config != null && LiteRTDeviceSupport.effectiveGpuEnabled(config);
+            String gpuBackend = config != null ? LiteRTDeviceSupport.resolveGpuBackend(config) : "auto";
+
+            LiteRTRunnerConfig runnerConfig = new LiteRTRunnerConfig(
+                    config != null ? config.threads() : 4,
+                    gpuEnabled,
+                    config != null && config.npuEnabled(),
+                    gpuBackend,
+                    config != null ? config.npuType() : "auto");
+
+            LiteRTSessionManager.SessionContext sessionContext = null;
+            Instant started = Instant.now();
+            AtomicInteger chunkIndex = new AtomicInteger(0);
+
+            try {
+                if (sessionManager == null) {
+                    throw new InferenceException("LiteRT Session manager not initialized");
+                }
+
+                sessionContext = sessionManager.getSession(tenantId, request.getModel(), modelPath, runnerConfig);
+                InferenceRequest inferenceRequest = InferenceRequest.builder()
+                        .requestId(request.getRequestId())
+                        .model(request.getModel())
+                        .messages(request.getMessages())
+                        .parameters(request.getParameters())
+                        .streaming(true)
+                        .build();
+
+                sessionContext.runner().stream(inferenceRequest, delta -> {
+                    Map<String, Object> metadata = Map.of(
+                            "provider", PROVIDER_ID,
+                            "litert_version", "2.0");
+                    emitter.emit(new StreamingInferenceChunk(
+                            request.getRequestId(),
+                            chunkIndex.getAndIncrement(),
+                            ModalityType.TEXT,
+                            delta,
+                            null,
+                            false,
+                            null,
+                            null,
+                            Instant.now(),
+                            metadata));
+                });
+
+                Map<String, Object> finalMetadata = new LinkedHashMap<>();
+                finalMetadata.put("provider", PROVIDER_ID);
+                finalMetadata.put("litert_version", "2.0");
+                finalMetadata.put("duration_ms", Duration.between(started, Instant.now()).toMillis());
+                finalMetadata.put("tokens.output", chunkIndex.get());
+                emitter.emit(new StreamingInferenceChunk(
+                        request.getRequestId(),
+                        chunkIndex.getAndIncrement(),
+                        ModalityType.TEXT,
+                        null,
+                        null,
+                        true,
+                        "stop",
+                        null,
+                        Instant.now(),
+                        finalMetadata));
+                emitter.complete();
+            } catch (Exception e) {
+                String userFacingMessage = userFacingLiteRtFailureMessage(e);
+                if (userFacingMessage != null) {
+                    emitter.fail(new InferenceException(userFacingMessage));
+                } else {
+                    LOG.error("LiteRT 2.0 Streaming inference failed: " + e.getMessage(), e);
+                    emitter.fail(new InferenceException("Streaming inference failed", e));
+                }
+            } finally {
+                if (sessionContext != null && sessionManager != null) {
+                    sessionManager.releaseSession(tenantId, request.getModel(), sessionContext);
+                }
+            }
         });
+    }
+
+    private String userFacingLiteRtFailureMessage(Throwable throwable) {
+        String rootMessage = rootCauseMessage(throwable);
+        if (rootMessage == null || rootMessage.isBlank()) {
+            return null;
+        }
+        if (rootMessage.contains("strict LiteRT mode")) {
+            return rootMessage;
+        }
+        if (rootMessage.contains("Gemma 4 LiteRT .task runner is disabled by default")
+                || rootMessage.contains("Raw Gemma LiteRT-LM signatures are disabled by default")) {
+            return rootMessage;
+        }
+        return null;
+    }
+
+    private String rootCauseMessage(Throwable throwable) {
+        if (throwable == null) {
+            return null;
+        }
+        Throwable cursor = throwable;
+        while (cursor.getCause() != null && cursor.getCause() != cursor) {
+            cursor = cursor.getCause();
+        }
+        return cursor.getMessage();
     }
 
     private void ensureInitialized() {

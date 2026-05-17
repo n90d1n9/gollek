@@ -95,14 +95,16 @@ public final class SafetensorToGgufConverter {
             long dataStart,       // offset inside shard data blob
             long dataEnd,
             GgmlType targetType,
-            long ggufOffset       // byte offset in GGUF tensor-data section
+            long ggufOffset,      // byte offset in GGUF tensor-data section
+            byte[] syntheticData
     ) {
         long numElements() {
             long n = 1;
             for (long d : shape) n *= d;
             return n;
         }
-        long srcBytes() { return dataEnd - dataStart; }
+        long srcBytes() { return syntheticData != null ? syntheticData.length : dataEnd - dataStart; }
+        boolean synthetic() { return syntheticData != null; }
     }
 
     // ── Entry point ───────────────────────────────────────────────────────
@@ -287,9 +289,10 @@ public final class SafetensorToGgufConverter {
 
             // Validate element count for block-aligned quantization types
             long numElem = entry.numElements();
-            if (dstType.blockSize > 1 && numElem % dstType.blockSize != 0) {
+            long rowElem = rowElements(entry.shape());
+            if (dstType.blockSize > 1 && (numElem % dstType.blockSize != 0 || rowElem % dstType.blockSize != 0)) {
                 log(opts, "  WARN: " + hfName + " has " + numElem +
-                        " elements, not multiple of " + dstType.blockSize +
+                        " elements / row width " + rowElem + ", not row-aligned to " + dstType.blockSize +
                         " for " + dstType.label + " – falling back to F32");
                 dstType = GgmlType.F32;
             }
@@ -304,12 +307,55 @@ public final class SafetensorToGgufConverter {
 
             plan.add(new TensorPlan(
                     ggufName, shard, hfName, entry.shape(), entry.dtype(),
-                    entry.dataStart(), entry.dataEnd(), dstType, ggufOffset));
+                    entry.dataStart(), entry.dataEnd(), dstType, ggufOffset, null));
         }
+
+        dataOffset = appendGemma4SyntheticTensors(opts, cfg, plan, dataOffset, alignment);
 
         // Close cached metadata (no open resources held – SafetensorsReader was
         // used in try-with-resources above and the map just holds the entries).
         return plan;
+    }
+
+    private static long appendGemma4SyntheticTensors(
+            Options opts,
+            HfConfigParser.ModelConfig cfg,
+            List<TensorPlan> plan,
+            long dataOffset,
+            int alignment) {
+        if (!GemmaArchMapper.isGemma4(cfg) || plan.stream().anyMatch(tp -> tp.ggufName().equals("rope_freqs.weight"))) {
+            return dataOffset;
+        }
+
+        int headDimFull = getTextInt(cfg, "global_head_dim", cfg.headDim() > 0 ? cfg.headDim() : cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads()));
+        float partialRotary = gemma4FullPartialRotaryFactor(cfg);
+        int nRot = Math.max(1, (int) (headDimFull * partialRotary / 2.0f));
+        int nUnrot = Math.max(0, headDimFull / 2 - nRot);
+        int length = nRot + nUnrot;
+        byte[] data = new byte[length * Float.BYTES];
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < nRot; i++) {
+            buffer.putFloat(1.0f);
+        }
+        for (int i = 0; i < nUnrot; i++) {
+            buffer.putFloat(1.0e30f);
+        }
+
+        long ggufOffset = dataOffset;
+        dataOffset = alignUp(dataOffset + data.length, alignment);
+        plan.add(new TensorPlan(
+                "rope_freqs.weight",
+                null,
+                "<synthetic:gemma4:rope_freqs>",
+                new long[] { length },
+                "F32",
+                0,
+                data.length,
+                GgmlType.F32,
+                ggufOffset,
+                data));
+        log(opts, "  synth: rope_freqs.weight [F32, shape=[" + length + "]]");
+        return dataOffset;
     }
 
     // ── Streaming write ───────────────────────────────────────────────────
@@ -371,7 +417,7 @@ public final class SafetensorToGgufConverter {
                                 i + 1, total, tp.ggufName()));
                     }
                     
-                    long convertedBytes = convertAndWriteTensor(tp, fos);
+                    long convertedBytes = convertAndWriteTensor(opts, tp, fos);
                     
                     if (convertedBytes == 0) {
                         log(opts, String.format("  WARNING: tensor %s converted to 0 bytes, skipping", 
@@ -403,7 +449,12 @@ public final class SafetensorToGgufConverter {
     // ── Tensor conversion ─────────────────────────────────────────────────
 
     /** Open shard, copy tensor bytes via mmap, convert in chunks, write directly to stream. */
-    private static long convertAndWriteTensor(TensorPlan tp, FileOutputStream fos) throws IOException {
+    private static long convertAndWriteTensor(Options opts, TensorPlan tp, FileOutputStream fos) throws IOException {
+        if (tp.synthetic()) {
+            fos.write(tp.syntheticData());
+            return tp.syntheticData().length;
+        }
+
         try (Arena arena = Arena.ofConfined();
              FileChannel fc = FileChannel.open(tp.shard(), StandardOpenOption.READ)) {
 
@@ -432,6 +483,18 @@ public final class SafetensorToGgufConverter {
             
             GgmlType srcType = ggmlTypeForDtype(tp.dtype());
             GgmlType dstType = tp.targetType();
+            GgmlNativeQuantizer nativeQuantizer = usesNativeGgmlQuantizer(dstType)
+                    ? GgmlNativeQuantizer.load().orElse(null)
+                    : null;
+            if (nativeQuantizer == null && isKQuant(dstType)) {
+                throw new IOException("Native ggml quantizer is required for " + dstType.label
+                        + " to produce llama.cpp-compatible K-quant blocks. "
+                        + "Set GOLLEK_GGML_LIB_DIR or -Dgollek.gguf.ggml.libdir to a llama.cpp build/lib directory, "
+                        + "or convert to F16/BF16 first.");
+            }
+            if (nativeQuantizer != null && Boolean.getBoolean("gollek.gguf.native_quant.debug")) {
+                log(opts, "  native ggml quantizer: " + nativeQuantizer.libraryPath());
+            }
             
             long srcBytesPerElem = srcBytesCount / numElem;
             if (srcBytesPerElem * numElem != srcBytesCount) {
@@ -440,8 +503,13 @@ public final class SafetensorToGgufConverter {
             
             // Chunk size: 16M elements (~64MB F32)
             long chunkSizeElem = 16 * 1024 * 1024L;
+            long rowElem = rowElements(tp.shape());
             if (dstType.blockSize > 1) {
-                chunkSizeElem = (chunkSizeElem / dstType.blockSize) * dstType.blockSize;
+                if (rowElem % dstType.blockSize != 0) {
+                    throw new IOException("Tensor " + tp.ggufName() + " row width " + rowElem
+                            + " is not compatible with " + dstType.label);
+                }
+                chunkSizeElem = Math.max(rowElem, (chunkSizeElem / rowElem) * rowElem);
             }
             
             long elementsProcessed = 0;
@@ -449,6 +517,9 @@ public final class SafetensorToGgufConverter {
             
             while (elementsProcessed < numElem) {
                 long chunkElem = Math.min(chunkSizeElem, numElem - elementsProcessed);
+                if (dstType.blockSize > 1) {
+                    chunkElem = Math.max(rowElem, (chunkElem / rowElem) * rowElem);
+                }
                 long chunkSrcBytes = chunkElem * srcBytesPerElem;
                 long chunkSrcOffset = dataOffset + tp.dataStart() + (elementsProcessed * srcBytesPerElem);
                 
@@ -478,12 +549,24 @@ public final class SafetensorToGgufConverter {
                         case F32  -> f32;
                         case F16  -> TensorConverter.f32ToF16(f32, chunkElem);
                         case BF16 -> TensorConverter.f32ToBf16(f32, chunkElem);
-                        case Q8_0 -> TensorConverter.quantizeQ8_0(f32, chunkElem);
-                        case Q4_0 -> TensorConverter.quantizeQ4_0(f32, chunkElem);
-                        case Q2_K -> TensorConverter.quantizeQ2_K(f32, chunkElem);
-                        case Q4_K -> TensorConverter.quantizeQ4_K(f32, chunkElem);
-                        case Q5_K -> TensorConverter.quantizeQ5_K(f32, chunkElem);
-                        case Q6_K -> TensorConverter.quantizeQ6_K(f32, chunkElem);
+                        case Q8_0 -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ8_0(f32, chunkElem);
+                        case Q4_0 -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ4_0(f32, chunkElem);
+                        case Q2_K -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ2_K(f32, chunkElem);
+                        case Q4_K -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ4_K(f32, chunkElem);
+                        case Q5_K -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ5_K(f32, chunkElem);
+                        case Q6_K -> nativeQuantizer != null
+                                ? nativeQuantizer.quantize(f32, chunkElem, rowElem, dstType)
+                                : TensorConverter.quantizeQ6_K(f32, chunkElem);
                         default   -> {
                             if (elementsProcessed == 0) {
                                 System.err.printf("[gguf] WARN: unsupported dst type %s for %s – keeping F32%n",
@@ -567,6 +650,63 @@ public final class SafetensorToGgufConverter {
 
     private static long alignUp(long offset, long alignment) {
         return (offset + alignment - 1) & ~(alignment - 1);
+    }
+
+    private static long rowElements(long[] hfShape) {
+        if (hfShape == null || hfShape.length == 0) {
+            return 1;
+        }
+        return hfShape[hfShape.length - 1];
+    }
+
+    private static boolean usesNativeGgmlQuantizer(GgmlType type) {
+        return switch (type) {
+            case Q4_0, Q8_0, Q2_K, Q4_K, Q5_K, Q6_K -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isKQuant(GgmlType type) {
+        return switch (type) {
+            case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K -> true;
+            default -> false;
+        };
+    }
+
+    private static JsonObject textConfig(HfConfigParser.ModelConfig cfg) {
+        JsonObject raw = cfg.raw();
+        if (raw != null && raw.has("text_config") && raw.get("text_config").isJsonObject()) {
+            return raw.getAsJsonObject("text_config");
+        }
+        return raw == null ? new JsonObject() : raw;
+    }
+
+    private static int getTextInt(HfConfigParser.ModelConfig cfg, String key, int fallback) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has(key) || text.get(key).isJsonNull()) {
+            return fallback;
+        }
+        try {
+            return text.get(key).getAsInt();
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static float gemma4FullPartialRotaryFactor(HfConfigParser.ModelConfig cfg) {
+        JsonObject text = textConfig(cfg);
+        if (!text.has("rope_parameters") || !text.get("rope_parameters").isJsonObject()) {
+            return 1.0f;
+        }
+        JsonObject params = text.getAsJsonObject("rope_parameters");
+        if (!params.has("full_attention") || !params.get("full_attention").isJsonObject()) {
+            return 1.0f;
+        }
+        JsonObject full = params.getAsJsonObject("full_attention");
+        if (!full.has("partial_rotary_factor") || full.get("partial_rotary_factor").isJsonNull()) {
+            return 1.0f;
+        }
+        return full.get("partial_rotary_factor").getAsFloat();
     }
 
     private static GgmlType ggmlTypeForDtype(String dtype) {

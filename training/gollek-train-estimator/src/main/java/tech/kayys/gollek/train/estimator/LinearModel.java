@@ -1,6 +1,6 @@
-package tech.kayys.gollek.train;
+package tech.kayys.gollek.ml.linear_model;
 
-import tech.kayys.gollek.train.base.BaseEstimator;
+import tech.kayys.gollek.ml.base.BaseEstimator;
 import java.util.*;
 import java.util.concurrent.*;
 

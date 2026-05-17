@@ -3,6 +3,9 @@ package tech.kayys.gollek.ml.nn.loss;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.Function;
 
+import java.util.Arrays;
+import java.util.Objects;
+
 /**
  * Cross-entropy loss for multi-class classification tasks.
  * <p>
@@ -101,6 +104,15 @@ import tech.kayys.gollek.ml.autograd.Function;
  * </ul>
  */
 public class CrossEntropyLoss {
+    private final float[] classWeights;
+
+    public CrossEntropyLoss() {
+        this.classWeights = null;
+    }
+
+    public CrossEntropyLoss(float[] classWeights) {
+        this.classWeights = validateClassWeights(classWeights);
+    }
 
     /**
      * Compute cross-entropy loss for classification.
@@ -117,11 +129,12 @@ public class CrossEntropyLoss {
         long[] s = logits.shape();
         if (s.length != 2) {
             throw new IllegalArgumentException(
-                "logits must be 2D [batch, numClasses], got shape: " + java.util.Arrays.toString(s));
+                "logits must be 2D [batch, numClasses], got shape: " + Arrays.toString(s));
         }
 
         int batch = (int) s[0];
         int numClasses = (int) s[1];
+        requireClassWeightShape(numClasses);
         float[] logitsData = logits.data();
         float[] targetsData = targets.data();
 
@@ -133,6 +146,9 @@ public class CrossEntropyLoss {
         // Compute log-softmax and NLL
         float totalLoss = 0;
         float[] softmaxData = new float[logitsData.length];
+        float[] sampleWeights = new float[batch];
+        int[] targetClasses = new int[batch];
+        float totalSampleWeight = 0.0f;
 
         // Process each sample in batch
         for (int b = 0; b < batch; b++) {
@@ -155,16 +171,17 @@ public class CrossEntropyLoss {
             }
 
             // Get target class and compute NLL
-            int target = (int) targetsData[b];
-            if (target < 0 || target >= numClasses) {
-                throw new IndexOutOfBoundsException(
-                    "target class index " + target + " out of range [0, " + (numClasses - 1) + "]");
-            }
+            int target = ClassIndexTargets.require(targetsData[b], numClasses, b);
+            targetClasses[b] = target;
+            float sampleWeight = classWeightFor(target);
+            sampleWeights[b] = sampleWeight;
+            totalSampleWeight += sampleWeight;
             // NLL = -log(softmax[target])
-            totalLoss -= (float) Math.log(softmaxData[off + target] + 1e-8f);
+            totalLoss -= sampleWeight * (float) Math.log(softmaxData[off + target] + 1e-8f);
         }
 
-        float meanLoss = totalLoss / batch;
+        final float finalTotalSampleWeight = totalSampleWeight;
+        float meanLoss = totalLoss / finalTotalSampleWeight;
         GradTensor out = GradTensor.scalar(meanLoss);
 
         if (logits.requiresGrad()) {
@@ -172,18 +189,19 @@ public class CrossEntropyLoss {
             out.setGradFn(new Function.Context("CrossEntropyLoss") {
                 @Override
                 public void backward(GradTensor upstream) {
-                    float scale = upstream.item() / batch;
+                    float scale = upstream.item() / finalTotalSampleWeight;
                     float[] grad = new float[logitsData.length];
 
                     // Gradient = softmax - one_hot(target)
                     for (int b = 0; b < batch; b++) {
                         int off = b * numClasses;
-                        int target = (int) targetsData[b];
+                        int target = targetClasses[b];
+                        float sampleScale = sampleWeights[b] * scale;
                         for (int c = 0; c < numClasses; c++) {
-                            grad[off + c] = softmaxData[off + c] * scale;
+                            grad[off + c] = softmaxData[off + c] * sampleScale;
                         }
                         // Subtract 1 for target class (one_hot encoding)
-                        grad[off + target] -= scale;
+                        grad[off + target] -= sampleScale;
                     }
                     logits.backward(GradTensor.of(grad, logits.shape()));
                 }
@@ -192,8 +210,41 @@ public class CrossEntropyLoss {
         return out;
     }
 
+    private float classWeightFor(int targetClass) {
+        if (classWeights == null) {
+            return 1.0f;
+        }
+        return classWeights[targetClass];
+    }
+
+    private void requireClassWeightShape(int numClasses) {
+        if (classWeights == null) {
+            return;
+        }
+        if (classWeights.length != numClasses) {
+            throw new IllegalArgumentException(
+                    "classWeights length " + classWeights.length + " must match logits numClasses " + numClasses);
+        }
+    }
+
+    private static float[] validateClassWeights(float[] weights) {
+        Objects.requireNonNull(weights, "classWeights must not be null");
+        if (weights.length == 0) {
+            throw new IllegalArgumentException("classWeights must contain at least one value");
+        }
+        float[] copy = weights.clone();
+        for (float weight : copy) {
+            if (!Float.isFinite(weight) || weight <= 0.0f) {
+                throw new IllegalArgumentException("classWeights must be finite and positive, got: " + weight);
+            }
+        }
+        return copy;
+    }
+
     @Override
     public String toString() {
-        return "CrossEntropyLoss()";
+        return classWeights == null
+                ? "CrossEntropyLoss()"
+                : "CrossEntropyLoss(classWeights=" + Arrays.toString(classWeights) + ")";
     }
 }

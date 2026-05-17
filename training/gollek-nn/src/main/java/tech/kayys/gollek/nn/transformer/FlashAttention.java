@@ -4,7 +4,6 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.TensorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.layer.Linear;
-import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Flash Attention — memory-efficient scaled dot-product attention that avoids
@@ -92,6 +91,13 @@ public final class FlashAttention extends NNModule {
     @Override
     public GradTensor forward(GradTensor x) {
         long[] s = x.shape();
+        if (s.length != 3) {
+            throw new IllegalArgumentException("FlashAttention expects [batch, seq, dModel], got "
+                    + java.util.Arrays.toString(s));
+        }
+        if (s[2] != dModel) {
+            throw new IllegalArgumentException("input last dimension must be " + dModel + ", got " + s[2]);
+        }
         int B = (int) s[0], T = (int) s[1];
         float scale = (float) (1.0 / Math.sqrt(headDim));
 
@@ -100,10 +106,33 @@ public final class FlashAttention extends NNModule {
         GradTensor K = wK.forward(x);
         GradTensor V = wV.forward(x);
 
+        if (Q.requiresGrad() || K.requiresGrad() || V.requiresGrad()) {
+            return differentiableAttention(Q, K, V, B, T, scale);
+        }
+
+        return tiledInferenceAttention(Q, K, V, B, T, scale);
+    }
+
+    private GradTensor differentiableAttention(GradTensor Q, GradTensor K, GradTensor V, int B, int T, float scale) {
+        GradTensor q = reshape4dAutograd(Q, B, T, nHeads, headDim);
+        GradTensor k = reshape4dAutograd(K, B, T, nHeads, headDim);
+        GradTensor v = reshape4dAutograd(V, B, T, nHeads, headDim);
+
+        GradTensor scores = TensorOps.einsum("bhid,bhjd->bhij", q, k).mul(scale);
+        if (causal) {
+            scores = GradTensor.where(causalMask(T), scores, GradTensor.full(-1e9f, scores.shape()));
+        }
+        GradTensor weights = scores.softmax();
+        GradTensor out = TensorOps.einsum("bhij,bhjd->bhid", weights, v);
+        GradTensor merged = TensorOps.permute(out, 0, 2, 1, 3).reshape(B, T, dModel);
+        return wO.forward(merged);
+    }
+
+    private GradTensor tiledInferenceAttention(GradTensor Q, GradTensor K, GradTensor V, int B, int T, float scale) {
         // Reshape to [B, H, T, headDim]
-        Q = reshape4d(Q, B, T, nHeads, headDim);
-        K = reshape4d(K, B, T, nHeads, headDim);
-        V = reshape4d(V, B, T, nHeads, headDim);
+        Q = reshape4dTiled(Q, B, T, nHeads, headDim);
+        K = reshape4dTiled(K, B, T, nHeads, headDim);
+        V = reshape4dTiled(V, B, T, nHeads, headDim);
 
         float[] qd = Q.data(), kd = K.data(), vd = V.data();
         float[] out = new float[B * nHeads * T * headDim];
@@ -175,13 +204,18 @@ public final class FlashAttention extends NNModule {
         }
 
         // Reshape back [B, H, T, D] → [B, T, dModel] and project
-        GradTensor attnOut = GradTensor.of(out, B, nHeads, T, headDim)
+        GradTensor attnOut = TensorOps.permute(GradTensor.of(out, B, nHeads, T, headDim), 0, 2, 1, 3)
                 .reshape(B, T, dModel);
         return wO.forward(attnOut);
     }
 
+    /** Differentiable reshape [B, T, H*D] → [B, H, T, D]. */
+    private static GradTensor reshape4dAutograd(GradTensor x, int B, int T, int H, int D) {
+        return TensorOps.permute(x.reshape(B, T, H, D), 0, 2, 1, 3);
+    }
+
     /** Reshapes [B, T, H*D] → [B, H, T, D] (transpose H and T). */
-    private static GradTensor reshape4d(GradTensor x, int B, int T, int H, int D) {
+    private static GradTensor reshape4dTiled(GradTensor x, int B, int T, int H, int D) {
         float[] src = x.data(), dst = new float[B * H * T * D];
         for (int b = 0; b < B; b++)
             for (int t = 0; t < T; t++)
@@ -189,6 +223,16 @@ public final class FlashAttention extends NNModule {
                     for (int d = 0; d < D; d++)
                         dst[b * H * T * D + h * T * D + t * D + d] = src[b * T * H * D + t * H * D + h * D + d];
         return GradTensor.of(dst, B, H, T, D);
+    }
+
+    private static GradTensor causalMask(int T) {
+        float[] mask = new float[T * T];
+        for (int row = 0; row < T; row++) {
+            for (int col = 0; col < T; col++) {
+                mask[row * T + col] = col <= row ? 1f : 0f;
+            }
+        }
+        return GradTensor.of(mask, T, T);
     }
 
     @Override

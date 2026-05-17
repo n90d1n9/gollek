@@ -1,7 +1,6 @@
 package tech.kayys.gollek.ml.nn;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.autograd.VectorOps;
 
 /**
  * Group Normalization — normalizes over groups of channels, independent of
@@ -57,8 +56,17 @@ public class GroupNorm extends NNModule {
      * @param eps         numerical stability constant
      */
     public GroupNorm(int numGroups, int numChannels, float eps) {
+        if (numGroups <= 0) {
+            throw new IllegalArgumentException("numGroups must be positive");
+        }
+        if (numChannels <= 0) {
+            throw new IllegalArgumentException("numChannels must be positive");
+        }
         if (numChannels % numGroups != 0)
             throw new IllegalArgumentException("numChannels must be divisible by numGroups");
+        if (!Float.isFinite(eps) || eps <= 0f) {
+            throw new IllegalArgumentException("eps must be finite and positive");
+        }
         this.numGroups = numGroups;
         this.numChannels = numChannels;
         this.eps = eps;
@@ -77,39 +85,24 @@ public class GroupNorm extends NNModule {
     @Override
     public GradTensor forward(GradTensor x) {
         long[] s = x.shape();
-        int N = (int) s[0], C = (int) s[1], H = (int) s[2], W = (int) s[3];
-        int G = numGroups, cPerG = C / G, groupSize = cPerG * H * W;
-        float[] d = x.data(), g = gamma.data().data(), b = beta.data().data();
-        float[] out = new float[d.length];
-
-        for (int n = 0; n < N; n++) {
-            for (int gr = 0; gr < G; gr++) {
-                // Collect group values
-                float[] vals = new float[groupSize];
-                int vi = 0;
-                for (int c = gr * cPerG; c < (gr + 1) * cPerG; c++)
-                    for (int h = 0; h < H; h++)
-                        for (int w = 0; w < W; w++)
-                            vals[vi++] = d[n * C * H * W + c * H * W + h * W + w];
-
-                float mean = VectorOps.sum(vals) / groupSize;
-                float[] sq = new float[groupSize];
-                for (int i = 0; i < groupSize; i++)
-                    sq[i] = (vals[i] - mean) * (vals[i] - mean);
-                float var = VectorOps.sum(sq) / groupSize;
-                float invStd = 1f / (float) Math.sqrt(var + eps);
-
-                vi = 0;
-                for (int c = gr * cPerG; c < (gr + 1) * cPerG; c++)
-                    for (int h = 0; h < H; h++)
-                        for (int w = 0; w < W; w++) {
-                            int idx = n * C * H * W + c * H * W + h * W + w;
-                            out[idx] = g[c] * (d[idx] - mean) * invStd + b[c];
-                            vi++;
-                        }
-            }
+        if (s.length != 4) {
+            throw new IllegalArgumentException("GroupNorm expects 4D input [N, C, H, W], got rank " + s.length);
         }
-        return GradTensor.of(out, N, C, H, W);
+        int N = (int) s[0], C = (int) s[1], H = (int) s[2], W = (int) s[3];
+        if (C != numChannels) {
+            throw new IllegalArgumentException("input channel count must be " + numChannels + ", got: " + C);
+        }
+
+        int cPerG = C / numGroups;
+        GradTensor grouped = x.reshape(N, numGroups, cPerG * H * W);
+        GradTensor mean = grouped.mean(-1).unsqueeze(-1);
+        GradTensor centered = grouped.sub(mean);
+        GradTensor variance = centered.pow(2f).mean(-1).unsqueeze(-1);
+        GradTensor normalized = centered.div(variance.add(eps).sqrt()).reshape(N, C, H, W);
+
+        GradTensor scale = gamma.data().reshape(1, C, 1, 1);
+        GradTensor shift = beta.data().reshape(1, C, 1, 1);
+        return normalized.mul(scale).add(shift);
     }
 
     @Override

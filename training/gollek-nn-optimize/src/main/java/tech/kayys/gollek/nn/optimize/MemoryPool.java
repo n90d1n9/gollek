@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 
  * <pre>
  * MemoryPool pool = MemoryPool.builder()
- *         .device(RunnerDevice.CUDA)
+ *         .device(DeviceType.CUDA)
  *         .maxSize(16L * 1024 * 1024 * 1024) // 16GB
  *         .strategy(MemoryStrategy.FRAGMENT_AWARE)
  *         .build();
@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class MemoryPool {
 
-    private final RunnerDevice device;
+    private final DeviceType device;
     private final long maxSize;
     private final MemoryStrategy strategy;
     private final Arena arena;
@@ -206,14 +206,14 @@ public class MemoryPool {
      * Builder for MemoryPool.
      */
     public static class Builder {
-        private RunnerDevice device = RunnerDevice.AUTO;
+        private DeviceType device = DeviceType.AUTO;
         private long maxSize = 4L * 1024 * 1024 * 1024; // 4GB default
         private MemoryStrategy strategy = MemoryStrategy.FRAGMENT_AWARE;
 
         Builder() {
         }
 
-        public Builder device(RunnerDevice device) {
+        public Builder device(DeviceType device) {
             this.device = device;
             return this;
         }

@@ -284,12 +284,18 @@ public final class SafetensorToGgufConverter {
 
             GgmlType srcType = entry.ggmlType();
             GgmlType dstType = TensorConverter.targetType(ggufName, opts.quantType);
+            if (isKQuant(dstType)) {
+                throw new IOException("gollek-gguf-converter-java cannot safely write llama.cpp-compatible "
+                        + dstType.label + " blocks. Use :runner:gguf:gollek-gguf-converter, which routes "
+                        + "K-quant tensors through ggml's native quantizer, or convert as F16/BF16.");
+            }
 
             // Validate element count for block-aligned quantization types
             long numElem = entry.numElements();
-            if (dstType.blockSize > 1 && numElem % dstType.blockSize != 0) {
+            long rowElem = rowElements(entry.shape());
+            if (dstType.blockSize > 1 && (numElem % dstType.blockSize != 0 || rowElem % dstType.blockSize != 0)) {
                 log(opts, "  WARN: " + hfName + " has " + numElem +
-                        " elements, not multiple of " + dstType.blockSize +
+                        " elements / row width " + rowElem + ", not row-aligned to " + dstType.blockSize +
                         " for " + dstType.label + " – falling back to F32");
                 dstType = GgmlType.F32;
             }
@@ -567,6 +573,20 @@ public final class SafetensorToGgufConverter {
 
     private static long alignUp(long offset, long alignment) {
         return (offset + alignment - 1) & ~(alignment - 1);
+    }
+
+    private static long rowElements(long[] hfShape) {
+        if (hfShape == null || hfShape.length == 0) {
+            return 1;
+        }
+        return hfShape[hfShape.length - 1];
+    }
+
+    private static boolean isKQuant(GgmlType type) {
+        return switch (type) {
+            case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K -> true;
+            default -> false;
+        };
     }
 
     private static GgmlType ggmlTypeForDtype(String dtype) {

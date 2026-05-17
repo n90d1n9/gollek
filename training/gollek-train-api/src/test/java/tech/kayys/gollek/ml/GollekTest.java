@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Disabled;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.layer.Linear;
 // TODO: nlp package - import tech.kayys.gollek.ml.nlp.Pipeline;
-import tech.kayys.gollek.runtime.tensor.Device;
+import tech.kayys.gollek.core.tensor.DeviceType;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -35,7 +35,7 @@ public class GollekTest {
 
     @Test
     public void testDeviceHeuristics() {
-        Device device = Gollek.defaultDevice();
+        DeviceType device = Gollek.defaultDevice();
         assertNotNull(device);
         // On most CI/Local it will be CPU
         System.out.println("Default device: " + device);

@@ -1,5 +1,7 @@
 package tech.kayys.gollek.gguf.loader;
 
+import tech.kayys.gollek.gguf.core.GgmlType;
+
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.ArrayList;
@@ -91,29 +93,13 @@ public final class GGUFParser {
     }
     
     private long calculateTensorSize(long numElements, int typeId) {
-        return switch (typeId) {
-            case 0 -> numElements * 4; // F32
-            case 1 -> numElements * 2; // F16
-            case 2 -> (numElements / 32) * 18; // Q4_0
-            case 3 -> (numElements / 32) * 20; // Q4_1
-            case 6 -> (numElements / 32) * 18; // Q5_0
-            case 7 -> (numElements / 32) * 22; // Q5_1
-            case 8 -> (numElements / 32) * 34; // Q8_0
-            case 9 -> numElements * 2; // Q8_1
-            case 10 -> (numElements / 256) * 84; // Q2_K
-            case 11 -> (numElements / 256) * 110; // Q3_K
-            case 12 -> (numElements / 256) * 144; // Q4_K
-            case 13 -> (numElements / 256) * 176; // Q5_K
-            case 14 -> (numElements / 256) * 210; // Q6_K
-            case 15 -> (numElements / 256) * 344; // Q8_K
-            case 16 -> (numElements / 256) * 73; // IQ2_XXS
-            case 17 -> (numElements / 256) * 80; // IQ2_XS
-            case 18 -> (numElements / 256) * 66; // IQ1_S
-            case 19 -> (numElements / 256) * 76; // IQ1_M
-            case 20 -> (numElements / 256) * 89; // IQ2_S
-            case 21 -> (numElements / 256) * 105; // IQ3_XXS
-            case 22 -> (numElements / 256) * 114; // IQ3_S
-            default -> numElements * 4; // Fallback
-        };
+        try {
+            return GgmlType.fromId(typeId).bytesFor(numElements);
+        } catch (IllegalArgumentException exception) {
+            throw new UnsupportedOperationException(
+                    "Unsupported or misaligned GGUF tensor type " + typeId
+                            + " with " + numElements + " element(s)",
+                    exception);
+        }
     }
 }

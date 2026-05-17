@@ -3,6 +3,7 @@ package tech.kayys.gollek.ml.optim;
 import tech.kayys.gollek.ml.nn.Parameter;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Base interface for all gradient-based optimizers.
@@ -105,7 +106,7 @@ public interface Optimizer {
     /**
      * Get the current learning rate.
      *
-     * @return the learning rate (positive float)
+     * @return the learning rate (non-negative float)
      */
     float learningRate();
 
@@ -122,9 +123,39 @@ public interface Optimizer {
      * Commonly used with learning rate schedules to adjust the learning rate
      * during training (e.g., cosine annealing, step decay, exponential decay).
      *
-     * @param lr new learning rate (should be positive)
+     * @param lr new learning rate (should be non-negative)
      *
-     * @throws IllegalArgumentException if lr is not positive
+     * @throws IllegalArgumentException if lr is negative
      */
     void setLearningRate(float lr);
+
+    /**
+     * Indicates whether this optimizer can export/import internal state
+     * (for checkpoint resume continuity).
+     *
+     * <p>Implementations that keep momentum or adaptive moments should
+     * override this and return {@code true}.</p>
+     */
+    default boolean supportsStateDict() {
+        return false;
+    }
+
+    /**
+     * Export optimizer internal state into a serializable map.
+     *
+     * <p>Default implementation returns an empty map for optimizers that do not
+     * expose checkpoint state.</p>
+     */
+    default Map<String, Object> stateDict() {
+        return Map.of();
+    }
+
+    /**
+     * Restore optimizer internal state from a previously exported state map.
+     *
+     * <p>Default implementation is a no-op.</p>
+     */
+    default void loadStateDict(Map<String, Object> state) {
+        // no-op by default
+    }
 }

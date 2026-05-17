@@ -1,5 +1,6 @@
 package tech.kayys.gollek.inference.safetensor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,6 +25,7 @@ import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
 import tech.kayys.gollek.spi.provider.StreamingProvider;
 import tech.kayys.gollek.spi.provider.AdapterCapabilityProfile;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import org.jboss.logging.Logger;
 
 import java.nio.file.Files;
@@ -38,6 +40,7 @@ import java.util.Set;
 public class SafetensorProvider implements StreamingProvider {
 
     private static final String PROVIDER_ID = "safetensor";
+    private static final String DIRECT_BACKEND_ID = "direct";
     private static final Logger log = Logger.getLogger(SafetensorProvider.class);
 
     @Inject
@@ -166,21 +169,30 @@ public class SafetensorProvider implements StreamingProvider {
         if (validation != null) {
             return Uni.createFrom().failure(validation);
         }
-        Backend backend = resolveBackend();
+        Backend backend = resolveBackendForRequest(request);
         if (backend == Backend.DIRECT) {
             return directBackend.infer(requestWithModelPath(request, resolved));
         }
         if (backend == Backend.LIBTORCH) {
+            if (isLibtorchBridgeRequest(request)) {
+                return Uni.createFrom().failure(new ProviderException(PROVIDER_ID,
+                        "LibTorch bridge mode requires the direct safetensor backend; refusing recursive libtorch delegation.",
+                        null, false));
+            }
             return Uni.createFrom().failure(new ProviderException(PROVIDER_ID,
                     "Safetensors cannot be executed directly in LibTorch. Set safetensor.provider.backend=gguf, direct or auto.",
                     null, false));
         }
         if (backend == Backend.GGUF || backend == Backend.AUTO) {
-            // Try DIRECT first if AUTO
-            if (backend == Backend.AUTO && directBackend != null) {
+            if (backend == Backend.AUTO && directBackend != null && !shouldPreferGgufInAutoMode(resolved)) {
                 return directBackend.infer(requestWithModelPath(request, resolved));
             }
             return inferViaGguf(request, resolved);
+        }
+        if (isLibtorchBridgeRequest(request)) {
+            return Uni.createFrom().failure(new ProviderException(PROVIDER_ID,
+                    "LibTorch bridge mode could not resolve a non-LibTorch safetensor backend.",
+                    null, false));
         }
         ProviderRequest delegated = requestWithModelPath(request, resolved);
         return libTorchProvider.infer(delegated);
@@ -199,21 +211,30 @@ public class SafetensorProvider implements StreamingProvider {
         if (validation != null) {
             return Multi.createFrom().failure(validation);
         }
-        Backend backend = resolveBackend();
+        Backend backend = resolveBackendForRequest(request);
         if (backend == Backend.DIRECT) {
             return directBackend.inferStream(requestWithModelPath(request, resolved));
         }
         if (backend == Backend.LIBTORCH) {
+            if (isLibtorchBridgeRequest(request)) {
+                return Multi.createFrom().failure(new ProviderException(PROVIDER_ID,
+                        "LibTorch bridge mode requires the direct safetensor backend; refusing recursive libtorch delegation.",
+                        null, false));
+            }
             return Multi.createFrom().failure(new ProviderException(PROVIDER_ID,
                     "Safetensors cannot be executed directly in LibTorch. Set safetensor.provider.backend=gguf, direct or auto.",
                     null, false));
         }
         if (backend == Backend.GGUF || backend == Backend.AUTO) {
-            // Try DIRECT first if AUTO
-            if (backend == Backend.AUTO && directBackend != null) {
+            if (backend == Backend.AUTO && directBackend != null && !shouldPreferGgufInAutoMode(resolved)) {
                 return directBackend.inferStream(requestWithModelPath(request, resolved));
             }
             return inferStreamViaGguf(request, resolved);
+        }
+        if (isLibtorchBridgeRequest(request)) {
+            return Multi.createFrom().failure(new ProviderException(PROVIDER_ID,
+                    "LibTorch bridge mode could not resolve a non-LibTorch safetensor backend.",
+                    null, false));
         }
         ProviderRequest delegated = requestWithModelPath(request, resolved);
         return libTorchProvider.inferStream(delegated);
@@ -259,20 +280,41 @@ public class SafetensorProvider implements StreamingProvider {
     }
 
     private ProviderRequest requestWithModelPath(ProviderRequest request, Path modelPath) {
-        return new ProviderRequest(
-                request.getRequestId(),
-                modelPath.toString(),
-                request.getMessages(),
-                request.getParameters(),
-                request.getTools(),
-                request.getToolChoice(),
-                request.isStreaming(),
-                request.getTimeout(),
-                request.getUserId().orElse(null),
-                request.getSessionId().orElse(null),
-                request.getTraceId().orElse(null),
-                request.getApiKey().orElse(null),
-                request.getMetadata());
+        ProviderRequest.Builder builder = ProviderRequest.builder()
+                .requestId(request.getRequestId())
+                .model(modelPath.toString())
+                .messages(request.getMessages())
+                .parameters(request.getParameters())
+                .tools(request.getTools())
+                .toolChoice(request.getToolChoice())
+                .streaming(request.isStreaming())
+                .timeout(request.getTimeout())
+                .metadata(request.getMetadata());
+        request.getUserId().ifPresent(builder::userId);
+        request.getSessionId().ifPresent(builder::sessionId);
+        request.getTraceId().ifPresent(builder::traceId);
+        request.getApiKey().ifPresent(builder::apiKey);
+        request.getPreferredProvider().ifPresent(builder::preferredProvider);
+        return builder.build();
+    }
+
+    private Backend resolveBackendForRequest(ProviderRequest request) {
+        Backend configured = resolveBackend();
+        if (!isLibtorchBridgeRequest(request)) {
+            return configured;
+        }
+        if (directBackend != null) {
+            return Backend.DIRECT;
+        }
+        if (configured == Backend.GGUF || configured == Backend.AUTO) {
+            return configured;
+        }
+        return Backend.LIBTORCH;
+    }
+
+    private boolean isLibtorchBridgeRequest(ProviderRequest request) {
+        Object delegatedFrom = request.getMetadata().get(LibTorchProvider.DELEGATED_FROM_PROVIDER_METADATA);
+        return delegatedFrom != null && "libtorch".equalsIgnoreCase(String.valueOf(delegatedFrom));
     }
 
     private Path resolveModelPath(String modelId) {
@@ -424,6 +466,35 @@ public class SafetensorProvider implements StreamingProvider {
 
         throw new ProviderException(PROVIDER_ID,
                 "No GGUF converter available. Install llama.cpp or enable native converter.", null, true);
+    }
+
+    private boolean shouldPreferGgufInAutoMode(Path resolvedModelPath) {
+        if (resolvedModelPath == null) {
+            return false;
+        }
+
+        String fingerprint = resolvedModelPath.toString().toLowerCase(Locale.ROOT);
+        if (fingerprint.contains("gemma4") || fingerprint.contains("gemma-4")) {
+            return true;
+        }
+
+        Path checkpointDir = Files.isDirectory(resolvedModelPath) ? resolvedModelPath : resolvedModelPath.getParent();
+        if (checkpointDir == null) {
+            return false;
+        }
+
+        try {
+            Path configPath = checkpointDir.resolve("config.json");
+            if (!Files.exists(configPath)) {
+                return false;
+            }
+            ModelConfig config = ModelConfig.load(configPath, new ObjectMapper());
+            String modelType = config.modelType();
+            return modelType != null && modelType.trim().toLowerCase(Locale.ROOT).startsWith("gemma4");
+        } catch (Exception e) {
+            log.debugf("Unable to inspect safetensor model type for backend auto-selection: %s", e.getMessage());
+            return false;
+        }
     }
 
     private Backend resolveBackend() {

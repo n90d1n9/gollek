@@ -20,14 +20,25 @@ public class MetalLibraryDiscovery {
             if (Files.exists(p)) return p;
         }
 
-        // 2. Standard Gollek installation path (~/.gollek/libs)
+        // 2. Prefer freshly built local development outputs when running from the repo.
+        Path cwd = Path.of("").toAbsolutePath();
+        Path[] localCandidates = new Path[] {
+                cwd.resolve("gollek/backend/metal/gollek-backend-metal/target/native/darwin-aarch64").resolve(LIB_NAME),
+                cwd.resolve("backend/metal/gollek-backend-metal/target/native/darwin-aarch64").resolve(LIB_NAME),
+                cwd.resolve(LIB_NAME)
+        };
+        for (Path candidate : localCandidates) {
+            if (Files.exists(candidate)) return candidate;
+        }
+
+        // 3. Standard Gollek installation path (~/.gollek/libs)
         String home = System.getProperty("user.home");
         if (home != null) {
             Path p = Path.of(home, ".gollek", "libs", LIB_NAME);
             if (Files.exists(p)) return p;
         }
 
-        // 3. Search in java.library.path
+        // 4. Search in java.library.path
         String libPath = System.getProperty("java.library.path");
         if (libPath != null) {
             for (String dir : libPath.split(File.pathSeparator)) {
@@ -36,10 +47,6 @@ public class MetalLibraryDiscovery {
             }
         }
 
-        // 4. Current directory
-        Path p = Path.of(LIB_NAME);
-        if (Files.exists(p)) return p;
-
-        return p; 
+        return cwd.resolve(LIB_NAME);
     }
 }

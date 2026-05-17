@@ -8,7 +8,7 @@ import org.jboss.logging.Logger;
 import tech.kayys.gollek.engine.routing.policy.SelectionPolicy;
 import tech.kayys.gollek.metal.config.MetalRunnerMode;
 import tech.kayys.gollek.spi.context.RequestContext;
-import tech.kayys.gollek.spi.model.DeviceType;
+import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.spi.model.ModelManifest;
 import tech.kayys.gollek.runner.RunnerCandidate;
 import tech.kayys.gollek.model.core.RunnerMetrics;

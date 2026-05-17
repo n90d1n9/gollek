@@ -138,18 +138,17 @@ public class LiteRTContainerParser {
             header.flip();
 
             String fileName = modelPath.getFileName().toString().toLowerCase();
-            boolean isTaskFile = fileName.endsWith(".task") || fileName.endsWith(".bin");
-
             if (fileSize >= 8 && matchesMagic(header, LITERTLM_MAGIC)) {
                 return parseLitertlmContainer(channel, fileSize);
             }
 
-            if (isTaskFile || (fileSize >= 4 && matchesMagic(header, ZIP_MAGIC))) {
-                 return scanForSegments(channel, fileSize);
-            }
-
             if (fileSize >= 8 && matchesTfl3(header)) {
                 return parseTfliteFile(channel, fileSize);
+            }
+
+            boolean isTaskFile = fileName.endsWith(".task") || fileName.endsWith(".bin");
+            if (isTaskFile || (fileSize >= 4 && matchesMagic(header, ZIP_MAGIC))) {
+                 return scanForSegments(channel, fileSize);
             }
 
             return new ContainerInfo(ContainerFormat.UNKNOWN, 0,
@@ -402,42 +401,19 @@ public class LiteRTContainerParser {
 
     /**
      * Find the best model file in a directory for LLM inference.
-     * Priority: .litertlm > .task
+     * Priority: runnable TFLite bundles (.task/.tflite) before opaque
+     * .litertlm containers.
      */
     public static Optional<Path> findBestModelFile(Path modelDir) throws IOException {
         if (!Files.isDirectory(modelDir)) {
             if (Files.isRegularFile(modelDir)) {
-                String name = modelDir.getFileName().toString();
-                // If it's not the optimal format, check if optimal .litertlm exists in the same directory
-                if (name.endsWith(".task") || name.endsWith(".tflite") || name.endsWith(".bin")) {
-                    try (var stream = Files.list(modelDir.getParent())) {
-                        Optional<Path> litertlm = stream
-                                .filter(p -> p.getFileName().toString().endsWith(".litertlm"))
-                                .findFirst();
-                        if (litertlm.isPresent()) {
-                            log.info("Auto-upgrading model path from {} to optimal format {}", name, litertlm.get().getFileName());
-                            return litertlm;
-                        }
-                    } catch (Exception e) {
-                        // ignore and fall back
-                    }
-                }
-                return Optional.of(modelDir);
+                Path companion = findRunnableSiblingForFile(modelDir);
+                return Optional.of(companion != null ? companion : modelDir);
             }
             return Optional.empty();
         }
 
-        // Priority 1: .litertlm files
-        try (var stream = Files.list(modelDir)) {
-            Optional<Path> litertlm = stream
-                    .filter(p -> p.getFileName().toString().endsWith(".litertlm"))
-                    .findFirst();
-            if (litertlm.isPresent()) {
-                return litertlm;
-            }
-        }
-
-        // Priority 2: .task files
+        // Priority 1: .task files
         try (var stream = Files.list(modelDir)) {
             Optional<Path> task = stream
                     .filter(p -> p.getFileName().toString().endsWith(".task"))
@@ -447,15 +423,46 @@ public class LiteRTContainerParser {
             }
         }
 
-        // Priority 3: .tflite files
+        // Priority 2: .tflite / .tfl files
         try (var stream = Files.list(modelDir)) {
-            return stream
+            Optional<Path> tflite = stream
                     .filter(p -> {
                         String name = p.getFileName().toString();
                         return name.endsWith(".tflite") || name.endsWith(".tfl");
                     })
                     .findFirst();
+            if (tflite.isPresent()) {
+                return tflite;
+            }
         }
+
+        // Priority 3: .litertlm files
+        try (var stream = Files.list(modelDir)) {
+            return stream
+                    .filter(p -> p.getFileName().toString().endsWith(".litertlm"))
+                    .findFirst();
+        }
+    }
+
+    private static Path findRunnableSiblingForFile(Path modelFile) {
+        String fileName = modelFile.getFileName().toString();
+        if (!fileName.endsWith(".litertlm")) {
+            return null;
+        }
+
+        Path dir = modelFile.getParent();
+        if (dir == null) {
+            return null;
+        }
+
+        String baseName = fileName.replaceAll("(_qualcomm_[^.]+)?\\.litertlm$", "");
+        for (String suffix : new String[]{"-web.task", ".task", ".tflite", ".tfl"}) {
+            Path candidate = dir.resolve(baseName + suffix);
+            if (Files.exists(candidate) && Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     // ===== Internal: LITERTLM container parsing =====

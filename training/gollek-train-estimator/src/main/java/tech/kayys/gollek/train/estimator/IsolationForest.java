@@ -1,6 +1,6 @@
 package tech.kayys.gollek.train.estimator;
 
-import tech.kayys.gollek.train.base.*;
+import tech.kayys.gollek.ml.base.BaseEstimator;
 import java.util.*;
 
 /**

@@ -76,8 +76,19 @@ public final class GgufConverterMain {
             System.exit(1);
         }
 
-        var opts = new HfToGgufConverter.ConvertOptions(
-                inputDir, outputFile, quantType, version, verbose);
+        if (containsSafetensors(inputDir)) {
+            var opts = new SafetensorToGgufConverter.Options.Builder()
+                    .inputDir(inputDir)
+                    .outputFile(outputFile)
+                    .quantType(quantType)
+                    .modelVersion(version)
+                    .verbose(verbose)
+                    .build();
+            SafetensorToGgufConverter.convert(opts);
+            return;
+        }
+
+        var opts = new HfToGgufConverter.ConvertOptions(inputDir, outputFile, quantType, version, verbose);
         HfToGgufConverter.convert(opts);
     }
 
@@ -144,6 +155,12 @@ public final class GgufConverterMain {
 
                   inspect <file.gguf>
                 """);
+    }
+
+    private static boolean containsSafetensors(Path inputDir) throws IOException {
+        try (var stream = Files.list(inputDir)) {
+            return stream.anyMatch(path -> path.getFileName().toString().endsWith(".safetensors"));
+        }
     }
 
     private static String truncate(String s, int max) {

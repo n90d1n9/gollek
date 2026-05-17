@@ -23,6 +23,7 @@ import org.jline.utils.AttributedString;
 import java.io.PrintWriter;
 import java.io.FileWriter;
 import java.util.*;
+import tech.kayys.gollek.cli.runtime.CliMetalRuntime;
 import tech.kayys.gollek.cli.util.PluginAvailabilityChecker;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.plugin.kernel.KernelPlatformDetector;
@@ -111,7 +112,7 @@ public class ChatCommand implements Runnable {
 
     @Option(names = {
             "--session" }, description = "Enable persistent session (KV cache reuse across calls)", negatable = true)
-    public boolean enableSession = true;
+    public Boolean enableSession;
 
     @Option(names = {
             "--auto-continue" }, description = "Automatically request continuation for truncated responses", negatable = true)
@@ -162,6 +163,9 @@ public class ChatCommand implements Runnable {
                 parentCommand.bootstrapInheritedEnvironment();
             }
 
+            providerId = normalizeRequestedProvider(providerId);
+            boolean providerExplicit = providerId != null && !providerId.isBlank();
+
             if (noColor) ChatUIRenderer.disableColor();
 
             // Check plugin availability first
@@ -182,19 +186,32 @@ public class ChatCommand implements Runnable {
                 System.exit(1);
                 return;
             }
+            CliMetalRuntime.initializeIfMetal(detectedPlatform);
 
-            if (!quiet) {
+            if (!quiet && parentCommand != null && parentCommand.verbose) {
                 System.out.println("Platform: " + detectedPlatform.getDisplayName());
                 if (detectedPlatform.isCpu()) {
                     System.out.println("⚠️  Running on CPU (GPU acceleration not available)");
+                } else if (CliMetalRuntime.isMetal(detectedPlatform) && !CliMetalRuntime.isNativeActive()) {
+                    System.out.println("⚠️  Metal selected but native runtime is not active (CPU fallback likely)");
                 } else {
                     System.out.println("✓ GPU acceleration enabled");
                 }
                 System.out.println();
             }
 
+            if (CliMetalRuntime.isMetal(detectedPlatform)
+                    && !CliMetalRuntime.isNativeActive()
+                    && !CliMetalRuntime.allowCpuFallbackWhenMetalRequested()) {
+                System.err.println("Error: Metal platform selected but native Metal runtime is not active.");
+                System.err.println("Refusing CPU fallback for this chat so performance behavior stays explicit.");
+                System.err.println("Set GOLLEK_ALLOW_CPU_FALLBACK=true to override.");
+                System.exit(1);
+                return;
+            }
+
             // Check if specific provider is requested but not available
-            if (providerId != null && !providerId.trim().isEmpty()) {
+            if (providerExplicit) {
                 if (!pluginChecker.hasProvider(providerId)) {
                     System.err.println(pluginChecker.getProviderNotFoundError(providerId));
                     System.exit(1);
@@ -245,8 +262,42 @@ public class ChatCommand implements Runnable {
                 }
                 modelPathOverride = dirPath.toAbsolutePath().toString();
                 isLocal = true;
-                providerId = "safetensor";
+                if (!providerExplicit) {
+                    providerId = "safetensor";
+                }
                 if (modelId == null) modelId = dirPath.getFileName().toString();
+            }
+
+            if (!isLocal
+                    && !sdk.isMcpProvider(providerId)
+                    && !sdk.isCloudProvider(providerId)
+                    && modelId != null
+                    && !modelId.isBlank()) {
+                try {
+                    var indexed = LocalModelIndex.find(modelId);
+                    if (indexed.isPresent()) {
+                        var entry = indexed.get();
+                        if (entry.path != null && !entry.path.isBlank()) {
+                            java.nio.file.Path indexedPath = java.nio.file.Path.of(entry.path);
+                            if (java.nio.file.Files.exists(indexedPath)) {
+                                modelPathOverride = indexedPath.toAbsolutePath().toString();
+                                modelId = modelPathOverride;
+                                isLocal = true;
+                                if (!providerExplicit) {
+                                    String inferred = inferProviderFromIndex(entry);
+                                    if (inferred != null && !inferred.isBlank()) {
+                                        providerId = inferred;
+                                    }
+                                }
+                                if (!quiet) {
+                                    System.out.println("Resolved local model index entry: " + modelPathOverride);
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Fall back to normal SDK resolution if the local index is stale or unreadable.
+                }
             }
 
             if (!isLocal && !sdk.isMcpProvider(providerId) && !sdk.isCloudProvider(providerId)) {
@@ -308,6 +359,20 @@ public class ChatCommand implements Runnable {
         }
     }
 
+    private String normalizeRequestedProvider(String rawProviderId) {
+        if (rawProviderId == null) {
+            return null;
+        }
+        String trimmed = rawProviderId.trim();
+        if (trimmed.isEmpty()) {
+            return trimmed;
+        }
+        return switch (trimmed.toLowerCase(Locale.ROOT)) {
+            case "torch", "torchscript", "pytorch" -> "libtorch";
+            default -> trimmed.toLowerCase(Locale.ROOT);
+        };
+    }
+
 
     private void configureLogging() {
         if (parentCommand != null && parentCommand.verbose) {
@@ -321,7 +386,8 @@ public class ChatCommand implements Runnable {
 
     private void setupSession() {
         uiRenderer.setJsonMode(jsonMode);
-        sessionManager.initialize(modelId, providerId, modelPathOverride, enableSession, forceGguf);
+        boolean persistentSessionEnabled = enableSession == null ? true : enableSession;
+        sessionManager.initialize(modelId, providerId, modelPathOverride, persistentSessionEnabled, forceGguf);
         sessionManager.setInferenceParams(autoContinue, maxTokens, temperature);
 
         PrintWriter writer = null;
@@ -403,6 +469,7 @@ public class ChatCommand implements Runnable {
 
             InferenceRequest.Builder reqBuilder = InferenceRequest.builder()
                     .requestId(UUID.randomUUID().toString())
+                    .messages(sessionManager.getHistory())
                     .temperature(temperature)
                     .parameter("top_p", topP)
                     .parameter("top_k", topK)

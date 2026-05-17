@@ -30,6 +30,7 @@ import java.lang.invoke.MethodHandle;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.stream.IntStream;
 
 /**
  * Lightweight Float32 tensor backed by FFM {@link MemorySegment}.
@@ -42,8 +43,26 @@ public final class AccelOps {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final String EXPERIMENTAL_SMALL_BATCH_HALF_LINEAR_PROPERTY =
             "gollek.safetensor.experimental_small_batch_half_linear";
+    private static final String EXPERIMENTAL_SINGLE_TOKEN_HALF_LINEAR_PROPERTY =
+            "gollek.safetensor.experimental_single_token_half_linear";
+    private static final String EXPERIMENTAL_SINGLE_TOKEN_SGEMV_PROPERTY =
+            "gollek.safetensor.experimental_single_token_sgemv";
+    private static final String HALF_LINEAR_PARALLELISM_PROPERTY =
+            "gollek.safetensor.half_linear_parallelism";
+    private static final String HALF_LINEAR_PARALLEL_MIN_OUTPUTS_PROPERTY =
+            "gollek.safetensor.half_linear_parallel_min_outputs";
+    private static final String HALF_LINEAR_PARALLEL_TARGET_OUTPUTS_PROPERTY =
+            "gollek.safetensor.half_linear_parallel_target_outputs";
     private static final int SMALL_BATCH_HALF_LINEAR_MAX_M = Integer.getInteger(
-            "gollek.safetensor.small_half_linear_max_m", 16);
+            "gollek.safetensor.small_half_linear_max_m", 64);
+    private static final int SMALL_BATCH_HALF_LINEAR_VECTOR_MAX_ROWS = Integer.getInteger(
+            "gollek.safetensor.small_half_linear_vector_max_rows", 4);
+    private static final int SINGLE_TOKEN_HALF_LINEAR_TILE_ROWS = Integer.getInteger(
+            "gollek.safetensor.single_token_half_linear_tile_rows", 32);
+    private static final int HALF_LINEAR_PARALLEL_MIN_OUTPUTS = Integer.getInteger(
+            HALF_LINEAR_PARALLEL_MIN_OUTPUTS_PROPERTY, 1024);
+    private static final int HALF_LINEAR_PARALLEL_TARGET_OUTPUTS = Integer.getInteger(
+            HALF_LINEAR_PARALLEL_TARGET_OUTPUTS_PROPERTY, 256);
 
     private AccelOps() {} // utility class
 
@@ -369,7 +388,9 @@ public final class AccelOps {
         long K = inputShape[inputShape.length - 1];
         long M = input.numel() / K;
 
-        if (M == 1 && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
+        if (useExperimentalSingleTokenHalfLinear()
+                && M == 1
+                && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
             return linearSingleTokenHalfWeight(input, weight, bias);
         }
         if (useExperimentalSmallBatchHalfLinear()
@@ -405,7 +426,7 @@ public final class AccelOps {
         MemorySegment outSeg = out.dataSegment();
 
         try {
-            if (M == 1) {
+            if (useExperimentalSingleTokenSgemv() && M == 1) {
                 // Single-token decode is overwhelmingly matrix-vector work.
                 // Using sgemv avoids the heavier sgemm setup costs on the hot decode path.
                 sgemv().invokeExact(
@@ -427,6 +448,234 @@ public final class AccelOps {
         } catch (Throwable t) {
             throw new RuntimeException("Linear/sgemm failed", t);
         }
+        return out;
+    }
+
+    /**
+     * Specialized gated FFN fast path for BF16/F16 gate/up weights sharing the same input.
+     * Computes activation(input @ gate^T + gateBias) * (input @ up^T + upBias)
+     * directly into {@code outputBuffer} when provided.
+     */
+    public static AccelTensor fusedGatedHalfLinear(AccelTensor input,
+                                                   AccelTensor gateWeight,
+                                                   AccelTensor gateBias,
+                                                   AccelTensor upWeight,
+                                                   AccelTensor upBias,
+                                                   boolean geluActivation,
+                                                   AccelTensor outputBuffer) {
+        input = input.contiguous();
+        if (!canUseFusedGatedHalfLinear(input, gateWeight, upWeight)) {
+            return null;
+        }
+
+        gateWeight = gateWeight.contiguous();
+        upWeight = upWeight.contiguous();
+
+        long[] inputShape = input.shape();
+        int K = Math.toIntExact(inputShape[inputShape.length - 1]);
+        long rowsLong = input.numel() / Math.max(1L, K);
+        int rows = Math.toIntExact(rowsLong);
+        int N = Math.toIntExact(gateWeight.shape()[0]);
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = N;
+        long requiredOutputBytes = 1L;
+        for (long dim : outputShape) {
+            requiredOutputBytes *= dim;
+        }
+        requiredOutputBytes *= Float.BYTES;
+
+        if (outputBuffer != null && (!Arrays.equals(outputBuffer.shape(), outputShape)
+                || outputBuffer.dataSegment().byteSize() < requiredOutputBytes)) {
+            outputBuffer = null;
+        }
+        AccelTensor out = outputBuffer != null ? outputBuffer : AccelTensor.zeros(outputShape);
+
+        MemorySegment inputSeg = input.dataSegment();
+        MemorySegment gateWeightSeg = gateWeight.dataSegment();
+        MemorySegment upWeightSeg = upWeight.dataSegment();
+        MemorySegment outSeg = out.dataSegment();
+
+        boolean bf16 = gateWeight.quantType() == AccelTensor.QuantType.BF16;
+        AccelTensor contiguousGateBias = null;
+        AccelTensor contiguousUpBias = null;
+        MemorySegment gateBiasSeg = null;
+        MemorySegment upBiasSeg = null;
+        if (gateBias != null) {
+            contiguousGateBias = gateBias.contiguous();
+            gateBiasSeg = contiguousGateBias.dataSegment();
+        }
+        if (upBias != null) {
+            contiguousUpBias = upBias.contiguous();
+            upBiasSeg = contiguousUpBias.dataSegment();
+        }
+        final MemorySegment finalGateBiasSeg = gateBiasSeg;
+        final MemorySegment finalUpBiasSeg = upBiasSeg;
+
+        try {
+            forEachHalfLinearOutputRange(N, (startCol, endCol) -> {
+                try (Arena arena = Arena.ofConfined()) {
+                    boolean useSmallRowVector = canUseSmallBatchVectorRows(rows);
+                    boolean useSmallBatchSgemm = rows > 1 && !useSmallRowVector;
+                    int tileRows = singleTokenHalfLinearTileRows();
+                    MemorySegment gateScratch = useSmallBatchSgemm ? null : arena.allocate((long) K * Float.BYTES);
+                    MemorySegment upScratch = useSmallBatchSgemm ? null : arena.allocate((long) K * Float.BYTES);
+                    float[] gateDots = useSmallRowVector ? new float[rows] : null;
+                    float[] upDots = useSmallRowVector ? new float[rows] : null;
+                    MemorySegment fusedTile = (rows == 1 || useSmallBatchSgemm)
+                            ? arena.allocate((long) tileRows * 2L * K * Float.BYTES)
+                            : null;
+                    MemorySegment fusedOut = rows == 1
+                            ? arena.allocate((long) tileRows * 2L * Float.BYTES)
+                            : (useSmallBatchSgemm ? arena.allocate((long) rows * tileRows * 2L * Float.BYTES) : null);
+                    long gateBaseBytes = (long) startCol * K * 2L;
+                    long upBaseBytes = (long) startCol * K * 2L;
+
+                    if (rows == 1 && fusedTile != null && fusedOut != null) {
+                        for (int tileStart = startCol; tileStart < endCol; tileStart += tileRows) {
+                            int tileCount = Math.min(tileRows, endCol - tileStart);
+                            long tileGateBaseBytes = (long) tileStart * K * 2L;
+                            long tileUpBaseBytes = (long) tileStart * K * 2L;
+                            dequantizeHalfWeightBlock(
+                                    gateWeightSeg,
+                                    tileGateBaseBytes,
+                                    fusedTile,
+                                    K,
+                                    tileCount,
+                                    bf16);
+                            dequantizeHalfWeightBlock(
+                                    upWeightSeg,
+                                    tileUpBaseBytes,
+                                    fusedTile.asSlice((long) tileCount * K * Float.BYTES, (long) tileCount * K * Float.BYTES),
+                                    K,
+                                    tileCount,
+                                    bf16);
+                            try {
+                                sgemv().invokeExact(
+                                        CblasRowMajor, CblasNoTrans,
+                                        tileCount * 2, K,
+                                        1.0f,
+                                        fusedTile, K,
+                                        inputSeg, 1,
+                                        0.0f,
+                                        fusedOut, 1);
+                            } catch (Throwable t) {
+                                throw new RuntimeException(t);
+                            }
+                            for (int i = 0; i < tileCount; i++) {
+                                int outCol = tileStart + i;
+                                float gateBiasVal = finalGateBiasSeg != null
+                                        ? finalGateBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                        : 0.0f;
+                                float upBiasVal = finalUpBiasSeg != null
+                                        ? finalUpBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                        : 0.0f;
+                                float gateVal = gateBiasVal + fusedOut.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                                float upVal = upBiasVal + fusedOut.getAtIndex(ValueLayout.JAVA_FLOAT, tileCount + i);
+                                float activated = geluActivation ? geluScalar(gateVal) : siluScalar(gateVal);
+                                outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, outCol, activated * upVal);
+                            }
+                        }
+                    } else if (useSmallBatchSgemm && fusedTile != null && fusedOut != null) {
+                        for (int tileStart = startCol; tileStart < endCol; tileStart += tileRows) {
+                            int tileCount = Math.min(tileRows, endCol - tileStart);
+                            long tileGateBaseBytes = (long) tileStart * K * 2L;
+                            long tileUpBaseBytes = (long) tileStart * K * 2L;
+                            dequantizeHalfWeightBlock(
+                                    gateWeightSeg,
+                                    tileGateBaseBytes,
+                                    fusedTile,
+                                    K,
+                                    tileCount,
+                                    bf16);
+                            dequantizeHalfWeightBlock(
+                                    upWeightSeg,
+                                    tileUpBaseBytes,
+                                    fusedTile.asSlice((long) tileCount * K * Float.BYTES, (long) tileCount * K * Float.BYTES),
+                                    K,
+                                    tileCount,
+                                    bf16);
+                            try {
+                                sgemm().invokeExact(
+                                        CblasRowMajor, CblasNoTrans, CblasTrans,
+                                        rows, tileCount * 2, K,
+                                        1.0f,
+                                        inputSeg, K,
+                                        fusedTile, K,
+                                        0.0f,
+                                        fusedOut, tileCount * 2);
+                            } catch (Throwable t) {
+                                throw new RuntimeException(t);
+                            }
+                            for (int row = 0; row < rows; row++) {
+                                long outBaseIndex = (long) row * N + tileStart;
+                                long tileBaseIndex = (long) row * tileCount * 2L;
+                                for (int i = 0; i < tileCount; i++) {
+                                    int outCol = tileStart + i;
+                                    float gateBiasVal = finalGateBiasSeg != null
+                                            ? finalGateBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                            : 0.0f;
+                                    float upBiasVal = finalUpBiasSeg != null
+                                            ? finalUpBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                            : 0.0f;
+                                    float gateVal = gateBiasVal + fusedOut.getAtIndex(ValueLayout.JAVA_FLOAT, tileBaseIndex + i);
+                                    float upVal = upBiasVal + fusedOut.getAtIndex(ValueLayout.JAVA_FLOAT, tileBaseIndex + tileCount + i);
+                                    float activated = geluActivation ? geluScalar(gateVal) : siluScalar(gateVal);
+                                    outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, outBaseIndex + i, activated * upVal);
+                                }
+                            }
+                        }
+                    } else {
+                        for (int outCol = startCol; outCol < endCol; outCol++) {
+                            dequantizeHalfWeightRow(gateWeightSeg, gateBaseBytes, gateScratch, K, bf16);
+                            dequantizeHalfWeightRow(upWeightSeg, upBaseBytes, upScratch, K, bf16);
+
+                            float gateBiasVal = finalGateBiasSeg != null
+                                    ? finalGateBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                    : 0.0f;
+                            float upBiasVal = finalUpBiasSeg != null
+                                    ? finalUpBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                    : 0.0f;
+
+                            if (gateDots != null) {
+                                dualDotProductsSmallRows(inputSeg, gateScratch, upScratch, K, rows, gateDots, upDots);
+                                for (int row = 0; row < rows; row++) {
+                                    float gateVal = gateBiasVal + gateDots[row];
+                                    float upVal = upBiasVal + upDots[row];
+                                    float activated = geluActivation ? geluScalar(gateVal) : siluScalar(gateVal);
+                                    outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (long) row * N + outCol, activated * upVal);
+                                }
+                            } else {
+                                for (int row = 0; row < rows; row++) {
+                                    long inputOffsetBytes = (long) row * K * Float.BYTES;
+                                    float gateDot;
+                                    float upDot;
+                                    try {
+                                        gateDot = (float) sdot().invokeExact(K, inputSeg.asSlice(inputOffsetBytes), 1, gateScratch, 1);
+                                        upDot = (float) sdot().invokeExact(K, inputSeg.asSlice(inputOffsetBytes), 1, upScratch, 1);
+                                    } catch (Throwable t) {
+                                        throw new RuntimeException(t);
+                                    }
+                                    float gateVal = gateBiasVal + gateDot;
+                                    float upVal = upBiasVal + upDot;
+                                    float activated = geluActivation ? geluScalar(gateVal) : siluScalar(gateVal);
+                                    outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (long) row * N + outCol, activated * upVal);
+                                }
+                            }
+                            gateBaseBytes += K * 2L;
+                            upBaseBytes += K * 2L;
+                        }
+                    }
+                }
+            });
+        } finally {
+            if (contiguousGateBias != null && contiguousGateBias != gateBias && !contiguousGateBias.isClosed()) {
+                contiguousGateBias.close();
+            }
+            if (contiguousUpBias != null && contiguousUpBias != upBias && !contiguousUpBias.isClosed()) {
+                contiguousUpBias.close();
+            }
+        }
+
         return out;
     }
 
@@ -452,32 +701,45 @@ public final class AccelOps {
             contiguousBias = bias.contiguous();
             biasSeg = contiguousBias.dataSegment();
         }
+        final MemorySegment finalBiasSeg = biasSeg;
 
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment scratch = arena.allocate((long) K * Float.BYTES);
-            long rowBaseBytes = 0L;
-            for (int row = 0; row < N; row++) {
-                float sum = biasSeg != null ? biasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, row) : 0.0f;
-                
-                if (bf16) {
-                    DequantizationKernel.dequantizeBf16(weightSeg.asSlice(rowBaseBytes), scratch, K);
-                } else {
-                    try {
-                        vflt16().invokeExact(weightSeg.asSlice(rowBaseBytes), 1L, scratch, 1L, (long)K);
-                    } catch (Throwable t) {
-                        throw new RuntimeException(t);
+        try {
+            forEachHalfLinearOutputRange(N, (startRow, endRow) -> {
+                try (Arena arena = Arena.ofConfined()) {
+                    MemorySegment tileWeights = arena.allocate((long) singleTokenHalfLinearTileRows() * K * Float.BYTES);
+                    MemorySegment tileOut = arena.allocate((long) singleTokenHalfLinearTileRows() * Float.BYTES);
+                    long rowBaseBytes = (long) startRow * K * 2L;
+                    int tileRows = singleTokenHalfLinearTileRows();
+                    for (int tileStart = startRow; tileStart < endRow; tileStart += tileRows) {
+                        int tileCount = Math.min(tileRows, endRow - tileStart);
+                        dequantizeHalfWeightBlock(
+                                weightSeg,
+                                rowBaseBytes,
+                                tileWeights,
+                                K,
+                                tileCount,
+                                bf16);
+                        try {
+                            sgemv().invokeExact(
+                                    CblasRowMajor, CblasNoTrans,
+                                    tileCount, K,
+                                    1.0f,
+                                    tileWeights, K,
+                                    inputSeg, 1,
+                                    0.0f,
+                                    tileOut, 1);
+                        } catch (Throwable t) {
+                            throw new RuntimeException(t);
+                        }
+                        for (int i = 0; i < tileCount; i++) {
+                            int row = tileStart + i;
+                            float sum = finalBiasSeg != null ? finalBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, row) : 0.0f;
+                            outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, row, sum + tileOut.getAtIndex(ValueLayout.JAVA_FLOAT, i));
+                        }
+                        rowBaseBytes += (long) tileCount * K * 2L;
                     }
                 }
-                
-                float dot = 0.0f;
-                try {
-                    dot = (float) sdot().invokeExact(K, inputSeg, 1, scratch, 1);
-                } catch (Throwable t) {
-                    throw new RuntimeException(t);
-                }
-                outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, row, sum + dot);
-                rowBaseBytes += K * 2L;
-            }
+            });
         } finally {
             if (contiguousBias != null && contiguousBias != bias && !contiguousBias.isClosed()) {
                 contiguousBias.close();
@@ -508,34 +770,70 @@ public final class AccelOps {
             contiguousBias = bias.contiguous();
             biasSeg = contiguousBias.dataSegment();
         }
+        final MemorySegment finalBiasSeg = biasSeg;
 
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment scratch = arena.allocate((long) K * Float.BYTES);
-            long rowBaseBytes = 0L;
-            for (int outCol = 0; outCol < N; outCol++) {
-                if (bf16) {
-                    DequantizationKernel.dequantizeBf16(weightSeg.asSlice(rowBaseBytes), scratch, K);
-                } else {
-                    try {
-                        vflt16().invokeExact(weightSeg.asSlice(rowBaseBytes), 1L, scratch, 1L, (long)K);
-                    } catch (Throwable t) {
-                        throw new RuntimeException(t);
+        try {
+            forEachHalfLinearOutputRange(N, (startCol, endCol) -> {
+                try (Arena arena = Arena.ofConfined()) {
+                    boolean useSmallRowVector = canUseSmallBatchVectorRows(rows);
+                    int tileRows = singleTokenHalfLinearTileRows();
+                    if (!useSmallRowVector) {
+                        MemorySegment tileWeights = arena.allocate((long) tileRows * K * Float.BYTES);
+                        MemorySegment tileOut = arena.allocate((long) rows * tileRows * Float.BYTES);
+                        for (int tileStart = startCol; tileStart < endCol; tileStart += tileRows) {
+                            int tileCount = Math.min(tileRows, endCol - tileStart);
+                            long tileBaseBytes = (long) tileStart * K * 2L;
+                            dequantizeHalfWeightBlock(
+                                    weightSeg,
+                                    tileBaseBytes,
+                                    tileWeights,
+                                    K,
+                                    tileCount,
+                                    bf16);
+                            try {
+                                sgemm().invokeExact(
+                                        CblasRowMajor, CblasNoTrans, CblasTrans,
+                                        rows, tileCount, K,
+                                        1.0f,
+                                        inputSeg, K,
+                                        tileWeights, K,
+                                        0.0f,
+                                        tileOut, tileCount);
+                            } catch (Throwable t) {
+                                throw new RuntimeException(t);
+                            }
+                            for (int row = 0; row < rows; row++) {
+                                long outBaseIndex = (long) row * N + tileStart;
+                                long tileBaseIndex = (long) row * tileCount;
+                                for (int i = 0; i < tileCount; i++) {
+                                    int outCol = tileStart + i;
+                                    float biasVal = finalBiasSeg != null
+                                            ? finalBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol)
+                                            : 0.0f;
+                                    outSeg.setAtIndex(
+                                            ValueLayout.JAVA_FLOAT,
+                                            outBaseIndex + i,
+                                            biasVal + tileOut.getAtIndex(ValueLayout.JAVA_FLOAT, tileBaseIndex + i));
+                                }
+                            }
+                        }
+                    } else {
+                        MemorySegment scratch = arena.allocate((long) K * Float.BYTES);
+                        float[] rowDots = new float[rows];
+                        long rowBaseBytes = (long) startCol * K * 2L;
+                        for (int outCol = startCol; outCol < endCol; outCol++) {
+                            dequantizeHalfWeightRow(weightSeg, rowBaseBytes, scratch, K, bf16);
+
+                            float biasVal = finalBiasSeg != null ? finalBiasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol) : 0.0f;
+                            dotProductsSmallRows(inputSeg, scratch, K, rows, rowDots);
+                            for (int row = 0; row < rows; row++) {
+                                outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (long) row * N + outCol, biasVal + rowDots[row]);
+                            }
+                            rowBaseBytes += K * 2L;
+                        }
                     }
                 }
-
-                float biasVal = biasSeg != null ? biasSeg.getAtIndex(ValueLayout.JAVA_FLOAT, outCol) : 0.0f;
-
-                for (int row = 0; row < rows; row++) {
-                    float dot = 0.0f;
-                    try {
-                        dot = (float) sdot().invokeExact(K, inputSeg.asSlice((long) row * K * Float.BYTES), 1, scratch, 1);
-                    } catch (Throwable t) {
-                        throw new RuntimeException(t);
-                    }
-                    outSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (long) row * N + outCol, biasVal + dot);
-                }
-                rowBaseBytes += K * 2L;
-            }
+            });
         } finally {
             if (contiguousBias != null && contiguousBias != bias && !contiguousBias.isClosed()) {
                 contiguousBias.close();
@@ -545,8 +843,534 @@ public final class AccelOps {
         return out;
     }
 
+    @FunctionalInterface
+    private interface HalfLinearOutputRange {
+        void run(int startInclusive, int endExclusive);
+    }
+
+    private static void forEachHalfLinearOutputRange(int outputs, HalfLinearOutputRange range) {
+        int taskCount = halfLinearParallelTaskCount(outputs);
+        if (taskCount <= 1) {
+            range.run(0, outputs);
+            return;
+        }
+        IntStream.range(0, taskCount).parallel().forEach(taskIndex -> {
+            int start = (int) (((long) taskIndex * outputs) / taskCount);
+            int end = (int) (((long) (taskIndex + 1) * outputs) / taskCount);
+            if (start < end) {
+                range.run(start, end);
+            }
+        });
+    }
+
+    private static int halfLinearParallelTaskCount(int outputs) {
+        if (outputs < HALF_LINEAR_PARALLEL_MIN_OUTPUTS) {
+            return 1;
+        }
+        int configured = Integer.getInteger(HALF_LINEAR_PARALLELISM_PROPERTY, 0);
+        int parallelism = configured > 0 ? configured : Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
+        if (parallelism <= 1) {
+            return 1;
+        }
+        int sized = Math.max(1, (outputs + HALF_LINEAR_PARALLEL_TARGET_OUTPUTS - 1) / HALF_LINEAR_PARALLEL_TARGET_OUTPUTS);
+        return Math.max(1, Math.min(parallelism, sized));
+    }
+
     private static boolean useExperimentalSmallBatchHalfLinear() {
-        return Boolean.getBoolean(EXPERIMENTAL_SMALL_BATCH_HALF_LINEAR_PROPERTY);
+        return Boolean.parseBoolean(System.getProperty(EXPERIMENTAL_SMALL_BATCH_HALF_LINEAR_PROPERTY, "true"));
+    }
+
+    private static boolean useExperimentalSingleTokenHalfLinear() {
+        return Boolean.parseBoolean(System.getProperty(EXPERIMENTAL_SINGLE_TOKEN_HALF_LINEAR_PROPERTY, "true"));
+    }
+
+    private static boolean useExperimentalSingleTokenSgemv() {
+        return Boolean.getBoolean(EXPERIMENTAL_SINGLE_TOKEN_SGEMV_PROPERTY);
+    }
+
+    private static boolean canUseSmallBatchVectorRows(int rows) {
+        return rows >= 2 && rows <= Math.min(4, SMALL_BATCH_HALF_LINEAR_VECTOR_MAX_ROWS);
+    }
+
+    private static int singleTokenHalfLinearTileRows() {
+        return Math.max(1, SINGLE_TOKEN_HALF_LINEAR_TILE_ROWS);
+    }
+
+    private static void dequantizeHalfWeightRow(MemorySegment weightSeg,
+                                                long rowBaseBytes,
+                                                MemorySegment scratch,
+                                                int K,
+                                                boolean bf16) {
+        if (bf16) {
+            DequantizationKernel.dequantizeBf16(weightSeg.asSlice(rowBaseBytes), scratch, K);
+            return;
+        }
+        try {
+            vflt16().invokeExact(weightSeg.asSlice(rowBaseBytes), 1L, scratch, 1L, (long) K);
+        } catch (Throwable t) {
+            throw new RuntimeException(t);
+        }
+    }
+
+    private static void dequantizeHalfWeightBlock(MemorySegment weightSeg,
+                                                  long baseBytes,
+                                                  MemorySegment scratch,
+                                                  int K,
+                                                  int rows,
+                                                  boolean bf16) {
+        long elements = (long) K * rows;
+        if (bf16) {
+            DequantizationKernel.dequantizeBf16(
+                    weightSeg.asSlice(baseBytes, elements * 2L),
+                    scratch.asSlice(0, elements * Float.BYTES),
+                    elements);
+            return;
+        }
+        try {
+            vflt16().invokeExact(
+                    weightSeg.asSlice(baseBytes, elements * 2L),
+                    1L,
+                    scratch.asSlice(0, elements * Float.BYTES),
+                    1L,
+                    elements);
+        } catch (Throwable t) {
+            throw new RuntimeException(t);
+        }
+    }
+
+    private static boolean canUseFusedGatedHalfLinear(AccelTensor input, AccelTensor gateWeight, AccelTensor upWeight) {
+        if (gateWeight == null || upWeight == null) {
+            return false;
+        }
+        if (gateWeight.quantType() != upWeight.quantType()) {
+            return false;
+        }
+        if (gateWeight.quantType() != AccelTensor.QuantType.BF16
+                && gateWeight.quantType() != AccelTensor.QuantType.F16) {
+            return false;
+        }
+        if (gateWeight.rank() != 2 || upWeight.rank() != 2) {
+            return false;
+        }
+        if (gateWeight.shape()[0] != upWeight.shape()[0] || gateWeight.shape()[1] != upWeight.shape()[1]) {
+            return false;
+        }
+        if (!gateWeight.isContiguous() || !upWeight.isContiguous()) {
+            return false;
+        }
+        long[] inputShape = input.shape();
+        if (inputShape.length < 2) {
+            return false;
+        }
+        long k = inputShape[inputShape.length - 1];
+        if (gateWeight.shape()[1] != k) {
+            return false;
+        }
+        long rows = input.numel() / Math.max(1L, k);
+        if (rows == 1L) {
+            return useExperimentalSingleTokenHalfLinear();
+        }
+        return rows > 1L && rows <= SMALL_BATCH_HALF_LINEAR_MAX_M && useExperimentalSmallBatchHalfLinear();
+    }
+
+    private static float siluScalar(float x) {
+        return (float) (x / (1.0 + Math.exp(-x)));
+    }
+
+    private static float geluScalar(float x) {
+        float inner = 0.79788456f * (x + 0.044715f * x * x * x);
+        return 0.5f * x * (1.0f + (float) Math.tanh(inner));
+    }
+
+    private static float dotProductSegment(MemorySegment aSeg, MemorySegment bSeg, int n) {
+        int i = 0;
+        float sum = 0.0f;
+        if (n >= SPECIES.length()) {
+            FloatVector vSum = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                FloatVector va = FloatVector.fromMemorySegment(SPECIES, aSeg, (long) i * Float.BYTES, ByteOrder.nativeOrder());
+                FloatVector vb = FloatVector.fromMemorySegment(SPECIES, bSeg, (long) i * Float.BYTES, ByteOrder.nativeOrder());
+                vSum = vSum.add(va.mul(vb));
+            }
+            sum = vSum.reduceLanes(VectorOperators.ADD);
+        }
+        for (; i < n; i++) {
+            sum += aSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i) * bSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+        }
+        return sum;
+    }
+
+    private static long dualDotProductPacked(MemorySegment inputSeg, MemorySegment firstSeg, MemorySegment secondSeg, int n) {
+        int i = 0;
+        float first = 0.0f;
+        float second = 0.0f;
+        if (n >= SPECIES.length()) {
+            FloatVector vFirst = FloatVector.zero(SPECIES);
+            FloatVector vSecond = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector input = FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder());
+                FloatVector firstWeights = FloatVector.fromMemorySegment(SPECIES, firstSeg, offset, ByteOrder.nativeOrder());
+                FloatVector secondWeights = FloatVector.fromMemorySegment(SPECIES, secondSeg, offset, ByteOrder.nativeOrder());
+                vFirst = vFirst.add(input.mul(firstWeights));
+                vSecond = vSecond.add(input.mul(secondWeights));
+            }
+            first = vFirst.reduceLanes(VectorOperators.ADD);
+            second = vSecond.reduceLanes(VectorOperators.ADD);
+        }
+        for (; i < n; i++) {
+            float input = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            first += input * firstSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            second += input * secondSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+        }
+        return (Float.floatToRawIntBits(first) & 0xffffffffL)
+                | (((long) Float.floatToRawIntBits(second)) << 32);
+    }
+
+    private static void dotProductsSmallRows(MemorySegment inputSeg,
+                                             MemorySegment weightSeg,
+                                             int n,
+                                             int rows,
+                                             float[] out) {
+        switch (rows) {
+            case 2 -> dotProductsTwoRows(inputSeg, weightSeg, n, out);
+            case 3 -> dotProductsThreeRows(inputSeg, weightSeg, n, out);
+            case 4 -> dotProductsFourRows(inputSeg, weightSeg, n, out);
+            default -> throw new IllegalArgumentException("Unsupported small-row dot count: " + rows);
+        }
+    }
+
+    private static void dualDotProductsSmallRows(MemorySegment inputSeg,
+                                                 MemorySegment firstSeg,
+                                                 MemorySegment secondSeg,
+                                                 int n,
+                                                 int rows,
+                                                 float[] firstOut,
+                                                 float[] secondOut) {
+        switch (rows) {
+            case 2 -> dualDotProductsTwoRows(inputSeg, firstSeg, secondSeg, n, firstOut, secondOut);
+            case 3 -> dualDotProductsThreeRows(inputSeg, firstSeg, secondSeg, n, firstOut, secondOut);
+            case 4 -> dualDotProductsFourRows(inputSeg, firstSeg, secondSeg, n, firstOut, secondOut);
+            default -> throw new IllegalArgumentException("Unsupported small-row dual dot count: " + rows);
+        }
+    }
+
+    private static void dotProductsTwoRows(MemorySegment inputSeg, MemorySegment weightSeg, int n, float[] out) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float sum0;
+        float sum1;
+        if (n >= SPECIES.length()) {
+            FloatVector acc0 = FloatVector.zero(SPECIES);
+            FloatVector acc1 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector weights = FloatVector.fromMemorySegment(SPECIES, weightSeg, offset, ByteOrder.nativeOrder());
+                acc0 = acc0.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder()).mul(weights));
+                acc1 = acc1.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder()).mul(weights));
+            }
+            sum0 = acc0.reduceLanes(VectorOperators.ADD);
+            sum1 = acc1.reduceLanes(VectorOperators.ADD);
+        } else {
+            sum0 = 0.0f;
+            sum1 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float weight = weightSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            sum0 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i) * weight;
+            sum1 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i) * weight;
+        }
+        out[0] = sum0;
+        out[1] = sum1;
+    }
+
+    private static void dotProductsThreeRows(MemorySegment inputSeg, MemorySegment weightSeg, int n, float[] out) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float sum0;
+        float sum1;
+        float sum2;
+        if (n >= SPECIES.length()) {
+            FloatVector acc0 = FloatVector.zero(SPECIES);
+            FloatVector acc1 = FloatVector.zero(SPECIES);
+            FloatVector acc2 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector weights = FloatVector.fromMemorySegment(SPECIES, weightSeg, offset, ByteOrder.nativeOrder());
+                acc0 = acc0.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder()).mul(weights));
+                acc1 = acc1.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder()).mul(weights));
+                acc2 = acc2.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 2L + offset, ByteOrder.nativeOrder()).mul(weights));
+            }
+            sum0 = acc0.reduceLanes(VectorOperators.ADD);
+            sum1 = acc1.reduceLanes(VectorOperators.ADD);
+            sum2 = acc2.reduceLanes(VectorOperators.ADD);
+        } else {
+            sum0 = 0.0f;
+            sum1 = 0.0f;
+            sum2 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float weight = weightSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            sum0 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i) * weight;
+            sum1 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i) * weight;
+            sum2 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (2 * n) + i) * weight;
+        }
+        out[0] = sum0;
+        out[1] = sum1;
+        out[2] = sum2;
+    }
+
+    private static void dotProductsFourRows(MemorySegment inputSeg, MemorySegment weightSeg, int n, float[] out) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float sum0;
+        float sum1;
+        float sum2;
+        float sum3;
+        if (n >= SPECIES.length()) {
+            FloatVector acc0 = FloatVector.zero(SPECIES);
+            FloatVector acc1 = FloatVector.zero(SPECIES);
+            FloatVector acc2 = FloatVector.zero(SPECIES);
+            FloatVector acc3 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector weights = FloatVector.fromMemorySegment(SPECIES, weightSeg, offset, ByteOrder.nativeOrder());
+                acc0 = acc0.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder()).mul(weights));
+                acc1 = acc1.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder()).mul(weights));
+                acc2 = acc2.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 2L + offset, ByteOrder.nativeOrder()).mul(weights));
+                acc3 = acc3.add(FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 3L + offset, ByteOrder.nativeOrder()).mul(weights));
+            }
+            sum0 = acc0.reduceLanes(VectorOperators.ADD);
+            sum1 = acc1.reduceLanes(VectorOperators.ADD);
+            sum2 = acc2.reduceLanes(VectorOperators.ADD);
+            sum3 = acc3.reduceLanes(VectorOperators.ADD);
+        } else {
+            sum0 = 0.0f;
+            sum1 = 0.0f;
+            sum2 = 0.0f;
+            sum3 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float weight = weightSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            sum0 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i) * weight;
+            sum1 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i) * weight;
+            sum2 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (2 * n) + i) * weight;
+            sum3 += inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (3 * n) + i) * weight;
+        }
+        out[0] = sum0;
+        out[1] = sum1;
+        out[2] = sum2;
+        out[3] = sum3;
+    }
+
+    private static void dualDotProductsTwoRows(MemorySegment inputSeg,
+                                               MemorySegment firstSeg,
+                                               MemorySegment secondSeg,
+                                               int n,
+                                               float[] firstOut,
+                                               float[] secondOut) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float first0;
+        float first1;
+        float second0;
+        float second1;
+        if (n >= SPECIES.length()) {
+            FloatVector firstAcc0 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc1 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc0 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc1 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector input0 = FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder());
+                FloatVector input1 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder());
+                FloatVector firstWeights = FloatVector.fromMemorySegment(SPECIES, firstSeg, offset, ByteOrder.nativeOrder());
+                FloatVector secondWeights = FloatVector.fromMemorySegment(SPECIES, secondSeg, offset, ByteOrder.nativeOrder());
+                firstAcc0 = firstAcc0.add(input0.mul(firstWeights));
+                firstAcc1 = firstAcc1.add(input1.mul(firstWeights));
+                secondAcc0 = secondAcc0.add(input0.mul(secondWeights));
+                secondAcc1 = secondAcc1.add(input1.mul(secondWeights));
+            }
+            first0 = firstAcc0.reduceLanes(VectorOperators.ADD);
+            first1 = firstAcc1.reduceLanes(VectorOperators.ADD);
+            second0 = secondAcc0.reduceLanes(VectorOperators.ADD);
+            second1 = secondAcc1.reduceLanes(VectorOperators.ADD);
+        } else {
+            first0 = 0.0f;
+            first1 = 0.0f;
+            second0 = 0.0f;
+            second1 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float input0 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float input1 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i);
+            float firstWeight = firstSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float secondWeight = secondSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            first0 += input0 * firstWeight;
+            first1 += input1 * firstWeight;
+            second0 += input0 * secondWeight;
+            second1 += input1 * secondWeight;
+        }
+        firstOut[0] = first0;
+        firstOut[1] = first1;
+        secondOut[0] = second0;
+        secondOut[1] = second1;
+    }
+
+    private static void dualDotProductsThreeRows(MemorySegment inputSeg,
+                                                 MemorySegment firstSeg,
+                                                 MemorySegment secondSeg,
+                                                 int n,
+                                                 float[] firstOut,
+                                                 float[] secondOut) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float first0;
+        float first1;
+        float first2;
+        float second0;
+        float second1;
+        float second2;
+        if (n >= SPECIES.length()) {
+            FloatVector firstAcc0 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc1 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc2 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc0 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc1 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc2 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector input0 = FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder());
+                FloatVector input1 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder());
+                FloatVector input2 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 2L + offset, ByteOrder.nativeOrder());
+                FloatVector firstWeights = FloatVector.fromMemorySegment(SPECIES, firstSeg, offset, ByteOrder.nativeOrder());
+                FloatVector secondWeights = FloatVector.fromMemorySegment(SPECIES, secondSeg, offset, ByteOrder.nativeOrder());
+                firstAcc0 = firstAcc0.add(input0.mul(firstWeights));
+                firstAcc1 = firstAcc1.add(input1.mul(firstWeights));
+                firstAcc2 = firstAcc2.add(input2.mul(firstWeights));
+                secondAcc0 = secondAcc0.add(input0.mul(secondWeights));
+                secondAcc1 = secondAcc1.add(input1.mul(secondWeights));
+                secondAcc2 = secondAcc2.add(input2.mul(secondWeights));
+            }
+            first0 = firstAcc0.reduceLanes(VectorOperators.ADD);
+            first1 = firstAcc1.reduceLanes(VectorOperators.ADD);
+            first2 = firstAcc2.reduceLanes(VectorOperators.ADD);
+            second0 = secondAcc0.reduceLanes(VectorOperators.ADD);
+            second1 = secondAcc1.reduceLanes(VectorOperators.ADD);
+            second2 = secondAcc2.reduceLanes(VectorOperators.ADD);
+        } else {
+            first0 = 0.0f;
+            first1 = 0.0f;
+            first2 = 0.0f;
+            second0 = 0.0f;
+            second1 = 0.0f;
+            second2 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float input0 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float input1 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i);
+            float input2 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (2 * n) + i);
+            float firstWeight = firstSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float secondWeight = secondSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            first0 += input0 * firstWeight;
+            first1 += input1 * firstWeight;
+            first2 += input2 * firstWeight;
+            second0 += input0 * secondWeight;
+            second1 += input1 * secondWeight;
+            second2 += input2 * secondWeight;
+        }
+        firstOut[0] = first0;
+        firstOut[1] = first1;
+        firstOut[2] = first2;
+        secondOut[0] = second0;
+        secondOut[1] = second1;
+        secondOut[2] = second2;
+    }
+
+    private static void dualDotProductsFourRows(MemorySegment inputSeg,
+                                                MemorySegment firstSeg,
+                                                MemorySegment secondSeg,
+                                                int n,
+                                                float[] firstOut,
+                                                float[] secondOut) {
+        long rowStrideBytes = (long) n * Float.BYTES;
+        int i = 0;
+        float first0;
+        float first1;
+        float first2;
+        float first3;
+        float second0;
+        float second1;
+        float second2;
+        float second3;
+        if (n >= SPECIES.length()) {
+            FloatVector firstAcc0 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc1 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc2 = FloatVector.zero(SPECIES);
+            FloatVector firstAcc3 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc0 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc1 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc2 = FloatVector.zero(SPECIES);
+            FloatVector secondAcc3 = FloatVector.zero(SPECIES);
+            for (; i < SPECIES.loopBound(n); i += SPECIES.length()) {
+                long offset = (long) i * Float.BYTES;
+                FloatVector input0 = FloatVector.fromMemorySegment(SPECIES, inputSeg, offset, ByteOrder.nativeOrder());
+                FloatVector input1 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes + offset, ByteOrder.nativeOrder());
+                FloatVector input2 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 2L + offset, ByteOrder.nativeOrder());
+                FloatVector input3 = FloatVector.fromMemorySegment(SPECIES, inputSeg, rowStrideBytes * 3L + offset, ByteOrder.nativeOrder());
+                FloatVector firstWeights = FloatVector.fromMemorySegment(SPECIES, firstSeg, offset, ByteOrder.nativeOrder());
+                FloatVector secondWeights = FloatVector.fromMemorySegment(SPECIES, secondSeg, offset, ByteOrder.nativeOrder());
+                firstAcc0 = firstAcc0.add(input0.mul(firstWeights));
+                firstAcc1 = firstAcc1.add(input1.mul(firstWeights));
+                firstAcc2 = firstAcc2.add(input2.mul(firstWeights));
+                firstAcc3 = firstAcc3.add(input3.mul(firstWeights));
+                secondAcc0 = secondAcc0.add(input0.mul(secondWeights));
+                secondAcc1 = secondAcc1.add(input1.mul(secondWeights));
+                secondAcc2 = secondAcc2.add(input2.mul(secondWeights));
+                secondAcc3 = secondAcc3.add(input3.mul(secondWeights));
+            }
+            first0 = firstAcc0.reduceLanes(VectorOperators.ADD);
+            first1 = firstAcc1.reduceLanes(VectorOperators.ADD);
+            first2 = firstAcc2.reduceLanes(VectorOperators.ADD);
+            first3 = firstAcc3.reduceLanes(VectorOperators.ADD);
+            second0 = secondAcc0.reduceLanes(VectorOperators.ADD);
+            second1 = secondAcc1.reduceLanes(VectorOperators.ADD);
+            second2 = secondAcc2.reduceLanes(VectorOperators.ADD);
+            second3 = secondAcc3.reduceLanes(VectorOperators.ADD);
+        } else {
+            first0 = 0.0f;
+            first1 = 0.0f;
+            first2 = 0.0f;
+            first3 = 0.0f;
+            second0 = 0.0f;
+            second1 = 0.0f;
+            second2 = 0.0f;
+            second3 = 0.0f;
+        }
+        for (; i < n; i++) {
+            float input0 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float input1 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, n + i);
+            float input2 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (2 * n) + i);
+            float input3 = inputSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) (3 * n) + i);
+            float firstWeight = firstSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float secondWeight = secondSeg.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            first0 += input0 * firstWeight;
+            first1 += input1 * firstWeight;
+            first2 += input2 * firstWeight;
+            first3 += input3 * firstWeight;
+            second0 += input0 * secondWeight;
+            second1 += input1 * secondWeight;
+            second2 += input2 * secondWeight;
+            second3 += input3 * secondWeight;
+        }
+        firstOut[0] = first0;
+        firstOut[1] = first1;
+        firstOut[2] = first2;
+        firstOut[3] = first3;
+        secondOut[0] = second0;
+        secondOut[1] = second1;
+        secondOut[2] = second2;
+        secondOut[3] = second3;
     }
 
     private static float decodeHalf(short raw, boolean bf16) {
@@ -744,12 +1568,30 @@ public final class AccelOps {
 
     /** C = A * scalar */
     public static AccelTensor mulScalar(AccelTensor a, float b) {
-        return vdspBinaryOp(a, AccelTensor.fromFloatArray(new float[]{b}, 1), false, false);
+        return vdspScalarOp(a, b, false);
     }
 
     /** C = A + scalar */
     public static AccelTensor addScalar(AccelTensor a, float b) {
-        return vdspBinaryOp(a, AccelTensor.fromFloatArray(new float[]{b}, 1), true, false);
+        return vdspScalarOp(a, b, true);
+    }
+
+    private static AccelTensor vdspScalarOp(AccelTensor a, float scalar, boolean isAdd) {
+        a = a.contiguous();
+        long n = a.numel();
+        AccelTensor out = AccelTensor.zeros(a.shape());
+        MemorySegment aSeg = a.dataSegment();
+        MemorySegment outSeg = out.dataSegment();
+
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment scalarSeg = arena.allocateFrom(ValueLayout.JAVA_FLOAT, scalar);
+            MethodHandle handle = isAdd ? vsadd() : vsmul();
+            handle.invokeExact(aSeg, 1L, scalarSeg, outSeg, 1L, n);
+        } catch (Throwable t) {
+            out.close();
+            throw new RuntimeException("vDSP scalar op failed", t);
+        }
+        return out;
     }
 
     private static AccelTensor vdspBinaryOp(AccelTensor a, AccelTensor b, boolean isAdd, boolean isSub) {
@@ -851,6 +1693,10 @@ public final class AccelOps {
         if (weight == null) return x.contiguous();
         x = x.contiguous();
         if (residual != null) residual = residual.contiguous();
+        AccelTensor weightView = weight;
+        if (weight.quantType() != AccelTensor.QuantType.F32) {
+            weightView = dequantize(weight);
+        }
 
         long[] shape = x.shape();
         int hidden = (int) shape[shape.length - 1];
@@ -859,29 +1705,35 @@ public final class AccelOps {
         AccelTensor out = AccelTensor.zeros(shape);
         MemorySegment xSeg = x.dataSegment();
         MemorySegment rSeg = residual != null ? residual.dataSegment() : null;
-        MemorySegment wSeg = weight.dataSegment();
+        MemorySegment wSeg = weightView.dataSegment();
         MemorySegment oSeg = out.dataSegment();
 
-        for (int row = 0; row < outer; row++) {
-            long base = (long) row * hidden;
-            float sumSq = 0.0f;
-            
-            // Pass 1: Add (if residual exists) and Sum Squares
-            for (int i = 0; i < hidden; i++) {
-                float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
-                if (rSeg != null) val += rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
-                oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + i, val);
-                sumSq += val * val;
-            }
+        try {
+            for (int row = 0; row < outer; row++) {
+                long base = (long) row * hidden;
+                float sumSq = 0.0f;
 
-            float rms = (float) (1.0 / Math.sqrt(sumSq / hidden + eps));
-            
-            // Pass 2: Normalize and Weight
-            for (int j = 0; j < hidden; j++) {
-                float val = oSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + j);
-                float weightVal = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) j);
-                if (addOne) weightVal += 1.0f;
-                oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + j, val * rms * weightVal);
+                // Pass 1: Add (if residual exists) and Sum Squares
+                for (int i = 0; i < hidden; i++) {
+                    float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                    if (rSeg != null) val += rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                    oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + i, val);
+                    sumSq += val * val;
+                }
+
+                float rms = (float) (1.0 / Math.sqrt(sumSq / hidden + eps));
+
+                // Pass 2: Normalize and Weight
+                for (int j = 0; j < hidden; j++) {
+                    float val = oSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + j);
+                    float weightVal = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (long) j);
+                    if (addOne) weightVal += 1.0f;
+                    oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + j, val * rms * weightVal);
+                }
+            }
+        } finally {
+            if (weightView != weight && !weightView.isClosed()) {
+                weightView.close();
             }
         }
         return out;
@@ -894,6 +1746,10 @@ public final class AccelOps {
     public static AccelTensor perHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne) {
         if (weight == null) return x.contiguous();
         x = x.contiguous();
+        AccelTensor weightView = weight;
+        if (weight.quantType() != AccelTensor.QuantType.F32) {
+            weightView = dequantize(weight);
+        }
         long[] shape = x.shape();
         int headDim = (int) shape[shape.length - 1];
         int numHeads = (int) shape[shape.length - 2];
@@ -901,28 +1757,56 @@ public final class AccelOps {
 
         AccelTensor out = AccelTensor.zeros(shape);
         MemorySegment xSeg = x.dataSegment();
-        MemorySegment wSeg = weight.dataSegment();
+        MemorySegment wSeg = weightView.dataSegment();
         MemorySegment oSeg = out.dataSegment();
 
-        for (int b = 0; b < outer; b++) {
-            for (int h = 0; h < numHeads; h++) {
-                long base = (long) (b * numHeads + h) * headDim;
-                long wBase = (weight.numel() == headDim) ? 0 : (long) h * headDim;
-                
-                float sumSq = 0.0f;
-                for (int i = 0; i < headDim; i++) {
-                    float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
-                    sumSq += val * val;
-                }
+        try {
+            for (int b = 0; b < outer; b++) {
+                for (int h = 0; h < numHeads; h++) {
+                    long base = (long) (b * numHeads + h) * headDim;
+                    long wBase = (weightView.numel() == headDim) ? 0 : (long) h * headDim;
 
-                float rms = (float) (1.0 / Math.sqrt(sumSq / headDim + eps));
-                
-                for (int j = 0; j < headDim; j++) {
-                    float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + j);
-                    float weightVal = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, wBase + j);
-                    if (addOne) weightVal += 1.0f;
-                    oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + j, val * rms * weightVal);
+                    int upperBound = SPECIES.loopBound(headDim);
+                    float sumSq = 0.0f;
+                    int i = 0;
+                    FloatVector sumSqVec = FloatVector.zero(SPECIES);
+                    for (; i < upperBound; i += SPECIES.length()) {
+                        FloatVector valueVec = FloatVector.fromMemorySegment(
+                                SPECIES, xSeg, (base + i) * Float.BYTES, ByteOrder.nativeOrder());
+                        sumSqVec = valueVec.fma(valueVec, sumSqVec);
+                    }
+                    sumSq = sumSqVec.reduceLanes(VectorOperators.ADD);
+                    for (; i < headDim; i++) {
+                        float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + i);
+                        sumSq += val * val;
+                    }
+
+                    float rms = (float) (1.0 / Math.sqrt(sumSq / headDim + eps));
+                    FloatVector rmsVec = FloatVector.broadcast(SPECIES, rms);
+
+                    int j = 0;
+                    for (; j < upperBound; j += SPECIES.length()) {
+                        FloatVector valueVec = FloatVector.fromMemorySegment(
+                                SPECIES, xSeg, (base + j) * Float.BYTES, ByteOrder.nativeOrder());
+                        FloatVector weightVec = FloatVector.fromMemorySegment(
+                                SPECIES, wSeg, (wBase + j) * Float.BYTES, ByteOrder.nativeOrder());
+                        if (addOne) {
+                            weightVec = weightVec.add(1.0f);
+                        }
+                        valueVec.mul(rmsVec).mul(weightVec).intoMemorySegment(
+                                oSeg, (base + j) * Float.BYTES, ByteOrder.nativeOrder());
+                    }
+                    for (; j < headDim; j++) {
+                        float val = xSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + j);
+                        float weightVal = wSeg.getAtIndex(ValueLayout.JAVA_FLOAT, wBase + j);
+                        if (addOne) weightVal += 1.0f;
+                        oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, base + j, val * rms * weightVal);
+                    }
                 }
+            }
+        } finally {
+            if (weightView != weight && !weightView.isClosed()) {
+                weightView.close();
             }
         }
         return out;

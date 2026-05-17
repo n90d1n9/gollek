@@ -208,7 +208,7 @@ final class LocalModelIndex {
         Entry e = new Entry();
         e.id = base.relativize(file).toString().replace("\\", "/");
         e.shortId = CLIUtils.generateShortId(e.id);
-        e.name = file.getFileName().toString();
+        e.name = deriveDisplayName(file);
         e.format = detectFormat(file, fallbackFormat);
         e.runnable = runnable && !e.format.equalsIgnoreCase("safetensors") && !e.format.equalsIgnoreCase("bin");
         e.path = file.toAbsolutePath().toString();
@@ -229,6 +229,17 @@ final class LocalModelIndex {
         // Populate quantization metadata from gollek_quant.json if present
         populateQuantMetadata(e, file.getParent());
         return e;
+    }
+
+    private static String deriveDisplayName(Path file) {
+        String fileName = file.getFileName().toString();
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        if ((lower.equals("model.safetensors") || lower.equals("model.safetensor"))
+                && file.getParent() != null
+                && file.getParent().getFileName() != null) {
+            return file.getParent().getFileName().toString();
+        }
+        return fileName;
     }
 
     private static boolean isRunnableFormat(String format) {

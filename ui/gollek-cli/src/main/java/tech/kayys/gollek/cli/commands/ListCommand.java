@@ -52,6 +52,9 @@ public class ListCommand implements Runnable {
                     .build();
 
             List<ModelInfo> models = sdk.listModels(request);
+            if (models.isEmpty()) {
+                models = fromLocalIndex();
+            }
 
             if (models.isEmpty()) {
                 System.out.println("No models found.");
@@ -65,6 +68,49 @@ public class ListCommand implements Runnable {
             }
         } catch (Exception e) {
             System.err.println("Failed to list models: " + e.getMessage());
+        }
+    }
+
+    private List<ModelInfo> fromLocalIndex() {
+        List<LocalModelIndex.Entry> entries = LocalModelIndex.refreshFromDisk();
+        List<ModelInfo> models = new ArrayList<>();
+        for (LocalModelIndex.Entry e : entries) {
+            if (e == null) {
+                continue;
+            }
+            if (runnableOnly && !e.runnable) {
+                continue;
+            }
+            String modelId = (e.id != null && !e.id.isBlank()) ? e.id : e.path;
+            if (modelId == null || modelId.isBlank()) {
+                continue;
+            }
+            models.add(ModelInfo.builder()
+                    .modelId(modelId)
+                    .shortId(e.shortId)
+                    .name(e.name != null ? e.name : modelId)
+                    .architecture(e.architecture)
+                    .parameterCount(e.parameterCount)
+                    .format(e.format)
+                    .sizeBytes(e.sizeBytes)
+                    .updatedAt(parseInstant(e.updatedAt))
+                    .build());
+        }
+        models.sort(Comparator.comparing((ModelInfo m) -> m.getUpdatedAt() != null ? m.getUpdatedAt() : Instant.EPOCH).reversed());
+        if (models.size() > limit) {
+            return new ArrayList<>(models.subList(0, limit));
+        }
+        return models;
+    }
+
+    private Instant parseInstant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

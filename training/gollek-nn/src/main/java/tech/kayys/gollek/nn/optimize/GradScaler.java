@@ -4,6 +4,7 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.Parameter;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Gradient scaler for mixed-precision (FP16/BF16) training.
@@ -21,9 +22,9 @@ import java.util.List;
  *
  * for (var batch : loader) {
  *     var loss = model.forward(batch.inputs());
- *     scaler.scale(loss);
- *     loss.backward();
- *     boolean overflow = scaler.unscaleAndCheck(optimizer.getParameters());
+ *     var scaledLoss = scaler.scale(loss);
+ *     scaledLoss.backward();
+ *     boolean overflow = scaler.unscaleAndCheck(optimizer);
  *     if (!overflow) { scaler.step(optimizer); }
  *     scaler.update();
  *     optimizer.zeroGrad();
@@ -35,6 +36,9 @@ import java.util.List;
  */
 public class GradScaler {
 
+    private static final double MIN_REPRESENTABLE_SCALE = Float.MIN_NORMAL;
+    private static final double MAX_REPRESENTABLE_SCALE = Float.MAX_VALUE;
+
     private double scale;
     private final double growthFactor;
     private final double backoffFactor;
@@ -43,6 +47,16 @@ public class GradScaler {
     private boolean overflowDetected;
 
     private GradScaler(Builder builder) {
+        requireRepresentableScale(builder.initScale, "initScale");
+        if (!Double.isFinite(builder.growthFactor) || builder.growthFactor <= 1.0) {
+            throw new IllegalArgumentException("growthFactor must be finite and > 1.0");
+        }
+        if (!Double.isFinite(builder.backoffFactor) || builder.backoffFactor <= 0.0 || builder.backoffFactor >= 1.0) {
+            throw new IllegalArgumentException("backoffFactor must be finite and in (0.0, 1.0)");
+        }
+        if (builder.growthInterval <= 0) {
+            throw new IllegalArgumentException("growthInterval must be positive");
+        }
         this.scale = builder.initScale;
         this.growthFactor = builder.growthFactor;
         this.backoffFactor = builder.backoffFactor;
@@ -62,14 +76,46 @@ public class GradScaler {
 
     /**
      * Scale the loss tensor for mixed-precision backward pass.
-     * This multiplies the loss value by the current scale factor.
+     * This returns a differentiable tensor, so callers must backpropagate the
+     * returned value.
      *
      * @param loss the loss tensor to scale
+     * @return differentiable scaled loss tensor
      */
-    public void scale(GradTensor loss) {
-        // In a real implementation, this would modify the loss gradient
-        // scale before backward is called. Here we track the scale factor
-        // for unscaling after backward.
+    public GradTensor scale(GradTensor loss) {
+        Objects.requireNonNull(loss, "loss");
+        return loss.mul(checkedScaleAsFloat());
+    }
+
+    /**
+     * Unscale gradients owned by an optimizer and check for overflow/NaN.
+     *
+     * @param optimizer optimizer whose parameter gradients should be unscaled
+     * @return true if overflow was detected (gradients are invalid)
+     */
+    public boolean unscaleAndCheck(Optimizer optimizer) {
+        Objects.requireNonNull(optimizer, "optimizer");
+        return unscaleAndCheckParameters(optimizer.parameters());
+    }
+
+    /**
+     * Unscale parameter gradients and check for overflow/NaN.
+     *
+     * @param parameters list of parameters whose gradients to unscale
+     * @return true if overflow was detected (gradients are invalid)
+     */
+    public boolean unscaleAndCheckParameters(List<Parameter> parameters) {
+        Objects.requireNonNull(parameters, "parameters");
+        overflowDetected = false;
+        double invScale = inverseScale();
+
+        for (Parameter parameter : parameters) {
+            if (parameter != null && parameter.grad() != null
+                    && unscaleGradient(parameter.grad().data(), invScale)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -79,19 +125,14 @@ public class GradScaler {
      * @return true if overflow was detected (gradients are invalid)
      */
     public boolean unscaleAndCheck(List<GradTensor> parameters) {
+        Objects.requireNonNull(parameters, "parameters");
         overflowDetected = false;
-        double invScale = 1.0 / scale;
+        double invScale = inverseScale();
 
         for (GradTensor param : parameters) {
-            if (param.grad() != null) {
-                float[] grad = param.grad().data();
-                for (int i = 0; i < grad.length; i++) {
-                    grad[i] *= (float) invScale;
-                    if (Float.isInfinite(grad[i]) || Float.isNaN(grad[i])) {
-                        overflowDetected = true;
-                        return true;
-                    }
-                }
+            if (param != null && param.grad() != null
+                    && unscaleGradient(param.grad().data(), invScale)) {
+                return true;
             }
         }
         return false;
@@ -115,12 +156,12 @@ public class GradScaler {
      */
     public void update() {
         if (overflowDetected) {
-            scale *= backoffFactor;
+            scale = Math.max(scale * backoffFactor, MIN_REPRESENTABLE_SCALE);
             stepsWithoutOverflow = 0;
         } else {
             stepsWithoutOverflow++;
             if (stepsWithoutOverflow >= growthInterval) {
-                scale *= growthFactor;
+                scale = Math.min(scale * growthFactor, MAX_REPRESENTABLE_SCALE);
                 stepsWithoutOverflow = 0;
             }
         }
@@ -136,6 +177,45 @@ public class GradScaler {
     }
 
     /**
+     * Returns whether the last unscale pass found invalid gradients.
+     *
+     * @return true when the last optimizer step should be skipped
+     */
+    public boolean overflowDetected() {
+        return overflowDetected;
+    }
+
+    private boolean unscaleGradient(float[] grad, double invScale) {
+        for (int i = 0; i < grad.length; i++) {
+            grad[i] *= (float) invScale;
+            if (!Float.isFinite(grad[i])) {
+                overflowDetected = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double inverseScale() {
+        requireRepresentableScale(scale, "scale");
+        return 1.0 / scale;
+    }
+
+    private float checkedScaleAsFloat() {
+        requireRepresentableScale(scale, "scale");
+        return (float) scale;
+    }
+
+    private static void requireRepresentableScale(double value, String name) {
+        if (!Double.isFinite(value)
+                || value < MIN_REPRESENTABLE_SCALE
+                || value > MAX_REPRESENTABLE_SCALE) {
+            throw new IllegalArgumentException(
+                    name + " must be finite and representable as a positive float scale");
+        }
+    }
+
+    /**
      * Builder for GradScaler.
      */
     public static class Builder {
@@ -147,16 +227,38 @@ public class GradScaler {
         private Builder() {}
 
         /** Set the initial scale factor (default: 65536.0). */
-        public Builder initScale(double scale) { this.initScale = scale; return this; }
+        public Builder initScale(double scale) {
+            requireRepresentableScale(scale, "initScale");
+            this.initScale = scale;
+            return this;
+        }
 
         /** Set the growth factor (default: 2.0). */
-        public Builder growthFactor(double factor) { this.growthFactor = factor; return this; }
+        public Builder growthFactor(double factor) {
+            if (!Double.isFinite(factor) || factor <= 1.0) {
+                throw new IllegalArgumentException("growthFactor must be finite and > 1.0");
+            }
+            this.growthFactor = factor;
+            return this;
+        }
 
         /** Set the backoff factor on overflow (default: 0.5). */
-        public Builder backoffFactor(double factor) { this.backoffFactor = factor; return this; }
+        public Builder backoffFactor(double factor) {
+            if (!Double.isFinite(factor) || factor <= 0.0 || factor >= 1.0) {
+                throw new IllegalArgumentException("backoffFactor must be finite and in (0.0, 1.0)");
+            }
+            this.backoffFactor = factor;
+            return this;
+        }
 
         /** Set the number of successful steps before growing (default: 2000). */
-        public Builder growthInterval(int interval) { this.growthInterval = interval; return this; }
+        public Builder growthInterval(int interval) {
+            if (interval <= 0) {
+                throw new IllegalArgumentException("growthInterval must be positive");
+            }
+            this.growthInterval = interval;
+            return this;
+        }
 
         /** Build the GradScaler instance. */
         public GradScaler build() { return new GradScaler(this); }

@@ -1,4 +1,4 @@
-package tech.kayys.gollek.train.transformer;
+package tech.kayys.gollek.ml.feature_selection;
 
 import tech.kayys.gollek.ml.base.*;
 import java.util.*;

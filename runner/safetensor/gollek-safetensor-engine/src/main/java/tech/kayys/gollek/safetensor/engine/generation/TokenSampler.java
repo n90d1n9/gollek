@@ -107,15 +107,31 @@ public class TokenSampler {
             for (int i = 0; i < logits.length && i < freq.length; i++) {
                 if (freq[i] > 0) {
                     if (repPenalty > 1.0f) {
+                        float effectiveRepPenalty = freq[i] > 1
+                                ? (float) Math.pow(repPenalty, freq[i])
+                                : repPenalty;
                         if (logits[i] > 0) {
-                            logits[i] /= repPenalty;
+                            logits[i] /= effectiveRepPenalty;
                         } else {
-                            logits[i] *= repPenalty;
+                            logits[i] *= effectiveRepPenalty;
                         }
                     }
                     if (freqPenalty > 0.0f) {
                         logits[i] -= freqPenalty * freq[i];
                     }
+                }
+            }
+        }
+
+        // For deterministic decoding, aggressively suppress prompt-echo tokens once
+        // they have already been generated on top of their prompt occurrence. This
+        // helps short local QA prompts avoid falling into `jakarta jakarta ...` style
+        // loops while still letting the model use the prompt vocabulary for the first
+        // step.
+        if (temp < 1e-4f && freq != null && repPenalty > 1.0f) {
+            for (int i = 0; i < logits.length && i < freq.length; i++) {
+                if (freq[i] > 1) {
+                    logits[i] = Float.NEGATIVE_INFINITY;
                 }
             }
         }

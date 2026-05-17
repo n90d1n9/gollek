@@ -1,5 +1,8 @@
 package tech.kayys.gollek.ml.optim;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Cosine Annealing Learning Rate Scheduler.
  * <p>
@@ -87,6 +90,100 @@ public class CosineAnnealingLR extends LRScheduler {
     @Override
     public float getLr() {
         return optimizer.learningRate();
+    }
+
+    @Override
+    public boolean supportsStateDict() {
+        return true;
+    }
+
+    @Override
+    public Map<String, Object> stateDict() {
+        Map<String, Object> state = new HashMap<>();
+        state.put("scheduler", "CosineAnnealingLR");
+        state.put("initialLr", initialLr);
+        state.put("tMax", tMax);
+        state.put("minLr", minLr);
+        state.put("step", step);
+        state.put("currentLr", optimizer.learningRate());
+        return state;
+    }
+
+    @Override
+    public void loadStateDict(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) {
+            return;
+        }
+        Object schedulerName = state.get("scheduler");
+        if (schedulerName instanceof String name && !"CosineAnnealingLR".equals(name)) {
+            throw new IllegalArgumentException(
+                    "Checkpoint scheduler mismatch: expected CosineAnnealingLR but got " + name);
+        }
+        requireFloatMatch(state.get("initialLr"), initialLr, "initialLr");
+        requireIntMatch(state.get("tMax"), tMax, "tMax");
+        requireFloatMatch(state.get("minLr"), minLr, "minLr");
+        this.step = Math.max(0, readInt(state.get("step"), step));
+        setLearningRate(readFloat(state.get("currentLr"), computeLearningRateForStep(this.step)));
+    }
+
+    private float computeLearningRateForStep(int targetStep) {
+        if (targetStep >= tMax) {
+            return minLr;
+        }
+        float cosineDecay = (float) Math.cos(Math.PI * Math.max(0, targetStep) / tMax);
+        return minLr + 0.5f * (initialLr - minLr) * (1 + cosineDecay);
+    }
+
+    private static void requireIntMatch(Object value, int expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        int loaded = readInt(value, expected);
+        if (loaded != expected) {
+            throw new IllegalArgumentException(
+                    "Invalid CosineAnnealingLR checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static void requireFloatMatch(Object value, float expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        float loaded = readFloat(value, expected);
+        if (Math.abs(loaded - expected) > 1e-7f) {
+            throw new IllegalArgumentException(
+                    "Invalid CosineAnnealingLR checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static int readInt(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static float readFloat(Object value, float fallback) {
+        if (value instanceof Number number) {
+            return number.floatValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Float.parseFloat(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     @Override

@@ -1,5 +1,7 @@
 package tech.kayys.gollek.plugin.runner.gguf;
 
+import io.quarkus.arc.Unremovable;
+import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.plugin.runner.*;
 import tech.kayys.gollek.core.model.ModelFormat;
@@ -13,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Unified GGUF runner plugin that defaults to Java-native execution but can
  * fall back to or explicitly use llama.cpp bindings.
  */
+@ApplicationScoped
+@Unremovable
 public class GgufRunnerPlugin implements RunnerPlugin {
     private static final Logger LOG = Logger.getLogger(GgufRunnerPlugin.class);
     public static final String ID = "gguf-runner";

@@ -26,6 +26,12 @@ import java.util.function.BiFunction;
  * trainer.fit(trainingData, trainingLabels, batchSize);
  * }</pre>
  */
+/**
+ * @deprecated Legacy experimental trainer variant retained for compatibility.
+ *             Prefer {@link tech.kayys.gollek.trainer.Trainers} and the
+ *             canonical {@link tech.kayys.gollek.ml.train.Trainer} runtime.
+ */
+@Deprecated(since = "0.1.0", forRemoval = false)
 public class Trainer {
 
     private final NNModule model;

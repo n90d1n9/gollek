@@ -1,125 +1,56 @@
-╔═══════════════════════════════════════════════════════════════════╗
-║           GOLLEK SDK v0.2 - JBANG EXAMPLES QUICKSTART             ║
-╚═══════════════════════════════════════════════════════════════════╝
+===================================================================
+ GOLLEK JBANG QUICKSTART (GRADLE-FIRST, 2026)
+===================================================================
 
-🚀 GET STARTED IN 30 SECONDS
+1) One-time setup
+-------------------------------------------------------------------
+Install JBang:
+  brew install jbang/tap/jbang
 
-1. Install JBang (one-time)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   brew install jbang/tap/jbang    # macOS
-   # or visit https://jbang.dev
+From gollek project root, prepare local artifacts:
+  ./run-install-local-macos.sh
 
-2. Navigate to examples
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   cd gollek/examples/jbang/sdk
+2) Move to examples
+-------------------------------------------------------------------
+cd gollek/examples/jbang
 
-3. Run any example
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   jbang 01_tensor_operations.java
-   jbang 02_vision_transforms.java
-   jbang 03_tokenization.java
-   jbang 04_mnist_training.java
-   jbang 05_pytorch_comparison.java
+3) Run recommended entrypoints
+-------------------------------------------------------------------
+Canonical trainer runtime:
+  jbang trainer/trainer_runtime_bootstrap.java
 
-═══════════════════════════════════════════════════════════════════
+SDK compatibility lane (verified runnable):
+  jbang sdk/gollek-quickstart.java
+  jbang sdk/gollek-sdk-core-example.java
+  jbang sdk/gollek-sdk-train-example.java 2
+  jbang sdk/gollek-sdk-vision-example.java
+  jbang sdk/gollek-sdk-export-example.java
+  jbang sdk/gollek-sdk-augment-example.java
 
-📚 EXAMPLES AT A GLANCE
+Experimental lane (may require extra local publishing):
+  jbang sdk/tensor_operations_v02.java
+  jbang sdk/vision_transforms_v02.java
+  jbang sdk/tokenization_v02.java
 
-01_tensor_operations.java (⭐ Beginner)
-   └─ Slicing, concatenation, gathering, masking
-   └─ Run: jbang 01_tensor_operations.java
-   └─ Time: 10 minutes
+===================================================================
+ NOTES
+===================================================================
 
-02_vision_transforms.java (⭐⭐ Intermediate)
-   └─ Image resize, crop, normalize, augment
-   └─ Run: jbang 02_vision_transforms.java
-   └─ Time: 15 minutes
+- Older scripts named gollek-sdk-* are kept as compatibility examples.
+- Some legacy samples still depend on local jars under:
+  ${user.home}/.gollek/jbang/libs
+- If dependency resolution fails, re-run targeted publish:
+  ./gradlew :trainer:gollek-trainer-api:publishToMavenLocal :trainer:gollek-trainer:publishToMavenLocal
 
-03_tokenization.java (⭐⭐ Intermediate)
-   └─ Text encoding, special tokens, NLP tasks
-   └─ Run: jbang 03_tokenization.java
-   └─ Time: 20 minutes
+===================================================================
+ TROUBLESHOOTING
+===================================================================
 
-04_mnist_training.java (⭐⭐⭐ Advanced)
-   └─ CNN architecture, training loop, evaluation
-   └─ Run: jbang 04_mnist_training.java 10 32
-   └─ Time: 30 minutes (+ 7 min running)
+JBang not found:
+  export PATH="$PATH:$HOME/.jbang/bin"
 
-05_pytorch_comparison.java (⭐ Beginner)
-   └─ PyTorch API equivalence, migration guide
-   └─ Run: jbang 05_pytorch_comparison.java
-   └─ Time: 10 minutes
+Force refresh JBang cache:
+  jbang --fresh trainer/trainer_runtime_bootstrap.java
 
-═══════════════════════════════════════════════════════════════════
-
-💡 THREE LEARNING PATHS
-
-QUICK PATH (30 min)
-  → 01_tensor_operations
-  → 05_pytorch_comparison
-  → 02_vision_transforms
-
-COMPLETE PATH (120 min)
-  → All 5 examples in order
-  → Modify code and experiment
-
-SPECIALIST PATHS
-  PyTorch Dev: 05 → 01 → 04 (30 min)
-  Vision: 02 → 04 (45 min)
-  NLP: 03 → 04 (40 min)
-
-═══════════════════════════════════════════════════════════════════
-
-📖 DOCUMENTATION
-
-README.md            Complete guide with setup & troubleshooting
-INDEX.md             Quick reference & file listing
-COMPLETION_REPORT.md Technical overview
-
-═══════════════════════════════════════════════════════════════════
-
-❓ TROUBLESHOOTING
-
-JBang not found?
-  → export PATH="$PATH:$HOME/.jbang/bin"
-
-Dependencies not downloading?
-  → rm -rf ~/.jbang && jbang 01_tensor_operations.java
-
-Out of memory?
-  → jbang --java-options="-Xmx4g" 04_mnist_training.java
-
-═══════════════════════════════════════════════════════════════════
-
-✨ KEY FEATURES
-
-✅ Production-grade code (no placeholders)
-✅ Comprehensive documentation
-✅ Real-world patterns demonstrated
-✅ Easy to modify and experiment
-✅ No build system needed (JBang handles everything)
-✅ Progressive difficulty levels
-✅ Multiple learning paths
-
-═══════════════════════════════════════════════════════════════════
-
-🎯 NEXT STEPS
-
-After running examples:
-  1. Modify parameters and re-run
-  2. Create your own script
-  3. Read API documentation
-  4. Build larger projects with Maven
-
-═══════════════════════════════════════════════════════════════════
-
-📞 SUPPORT
-
-GitHub:        https://github.com/bhangun/gollek
-Issues:        https://github.com/bhangun/gollek/issues
-Documentation: https://gollek.io/docs
-Discussions:   https://github.com/bhangun/gollek/discussions
-
-═══════════════════════════════════════════════════════════════════
-
-v0.2.0 | Ready to use | No setup required
+Need higher heap for large demos:
+  jbang --java-options="-Xmx4g" sdk/mnist_training_v02.java

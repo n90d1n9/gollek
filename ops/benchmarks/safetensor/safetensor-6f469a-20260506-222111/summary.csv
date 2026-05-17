@@ -1,1 +1,0 @@
-case_id,mode,prompt_kind,quantize,status,exit_code,duration_s,speed_tps,chunks,answer,profile_summary,fatal_line,log_file

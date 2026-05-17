@@ -60,6 +60,17 @@ class ModelConfigTest {
     }
 
     @Test
+    void testDisabledSlidingWindow() {
+        ModelConfig config = new ModelConfig();
+        setField(config, "modelType", "qwen2");
+        setField(config, "slidingWindow", 32768);
+        setField(config, "useSlidingWindow", false);
+
+        assertFalse(config.hasSlidingWindow());
+        assertEquals(32768, config.slidingWindowSize());
+    }
+
+    @Test
     void testMoEConfig() {
         ModelConfig config = new ModelConfig();
         setField(config, "modelType", "mixtral");

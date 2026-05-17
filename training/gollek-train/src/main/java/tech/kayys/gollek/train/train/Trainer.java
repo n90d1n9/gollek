@@ -5,6 +5,10 @@ import tech.kayys.gollek.ml.optim.GradScaler;
 import tech.kayys.gollek.ml.optim.Optimizer;
 import tech.kayys.gollek.ml.nn.Parameter;
 import tech.kayys.gollek.train.data.DataLoader.Batch;
+import tech.kayys.gollek.trainer.api.TrainerConfig;
+import tech.kayys.gollek.trainer.api.TrainerSession;
+import tech.kayys.gollek.trainer.api.TrainingListener;
+import tech.kayys.gollek.trainer.api.TrainingSummary;
 
 import java.io.Closeable;
 import java.nio.file.Path;
@@ -41,13 +45,13 @@ import java.util.function.Consumer;
  * @author Gollek Team
  * @version 0.1.0
  */
-public class Trainer implements Closeable {
+public class Trainer implements Closeable, TrainerSession {
 
     private final Model model;
     private final Optimizer optimizer;
     private final LossFunction lossFn;
-    private final TrainingConfig config;
-    private final List<Callback> callbacks;
+    private final TrainerConfig config;
+    private final List<TrainingListener> listeners;
     private final List<LRScheduler> schedulers;
 
     private final TrainingMetrics metrics;
@@ -92,7 +96,7 @@ public class Trainer implements Closeable {
         this.optimizer = Objects.requireNonNull(builder.optimizer, "optimizer must not be null");
         this.lossFn = Objects.requireNonNull(builder.lossFn, "loss function must not be null");
         this.config = builder.buildConfig();
-        this.callbacks = new ArrayList<>(builder.callbacks);
+        this.listeners = new ArrayList<>(builder.listeners);
         this.schedulers = new ArrayList<>(builder.schedulers);
         this.metrics = new TrainingMetrics();
 
@@ -126,7 +130,7 @@ public class Trainer implements Closeable {
         onTrainingStart();
 
         try {
-            for (int epoch = 0; epoch < config.epochs && !stopped.get(); epoch++) {
+            for (int epoch = 0; epoch < config.epochs() && !stopped.get(); epoch++) {
                 currentEpoch = epoch;
                 onEpochStart(epoch);
 
@@ -158,6 +162,7 @@ public class Trainer implements Closeable {
             onTrainingError(e);
             throw new TrainingException("Training failed at epoch " + currentEpoch, e);
         } finally {
+            metrics.markEnded();
             onTrainingEnd();
         }
     }
@@ -207,12 +212,12 @@ public class Trainer implements Closeable {
             if (gradScaler != null) {
                 boolean overflow = gradScaler.unscaleAndCheck(
                     optimizer.parameters().stream().map(Parameter::data).toList());
-                if (!overflow && config.gradientClip > 0) {
-                    clipGradients(config.gradientClip);
+                if (!overflow && config.gradientClip() > 0) {
+                    clipGradients(config.gradientClip());
                 }
-            } else if (config.gradientClip > 0) {
+            } else if (config.gradientClip() > 0) {
                 // Standard gradient clipping
-                clipGradients(config.gradientClip);
+                clipGradients(config.gradientClip());
             }
 
             // Optimizer step
@@ -307,7 +312,7 @@ public class Trainer implements Closeable {
      * @return true if should stop early
      */
     private boolean shouldStopEarly() {
-        return callbacks.stream()
+        return listeners.stream()
                 .filter(EarlyStopping.class::isInstance)
                 .map(EarlyStopping.class::cast)
                 .anyMatch(EarlyStopping::shouldStop);
@@ -318,39 +323,40 @@ public class Trainer implements Closeable {
     // ─────────────────────────────────────────────────────────────────────────
 
     private void onTrainingStart() {
-        callbacks.forEach(c -> c.onTrainingStart(this));
+        listeners.forEach(listener -> listener.onTrainingStart(this));
     }
 
     private void onEpochStart(int epoch) {
-        callbacks.forEach(c -> c.onEpochStart(this, epoch));
+        listeners.forEach(listener -> listener.onEpochStart(this, epoch));
     }
 
     private void onEpochEnd(int epoch, double trainLoss) {
-        callbacks.forEach(c -> c.onEpochEnd(this, epoch, trainLoss));
+        listeners.forEach(listener -> listener.onEpochEnd(this, epoch, trainLoss));
     }
 
     private void onValidationEnd(int epoch, double valLoss) {
-        callbacks.forEach(c -> c.onValidationEnd(this, epoch, valLoss));
+        listeners.forEach(listener -> listener.onValidationEnd(this, epoch, valLoss));
     }
 
     private void onBatchStart(int step) {
-        callbacks.forEach(c -> c.onBatchStart(this, step));
+        listeners.forEach(listener -> listener.onBatchStart(this, step));
     }
 
     private void onBatchEnd(int step, double loss) {
-        callbacks.forEach(c -> c.onBatchEnd(this, step, loss));
+        listeners.forEach(listener -> listener.onBatchEnd(this, step, loss));
     }
 
     private void onEarlyStopping(int epoch) {
-        callbacks.forEach(c -> c.onEarlyStopping(this, epoch));
+        listeners.forEach(listener -> listener.onEarlyStopping(this, epoch));
     }
 
     private void onTrainingError(Exception e) {
-        callbacks.forEach(c -> c.onTrainingError(this, e));
+        listeners.forEach(listener -> listener.onTrainingError(this, e));
     }
 
     private void onTrainingEnd() {
-        callbacks.forEach(c -> c.onTrainingEnd(this));
+        TrainingSummary summary = summary();
+        listeners.forEach(listener -> listener.onTrainingEnd(this, summary));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -364,6 +370,11 @@ public class Trainer implements Closeable {
         stopped.set(true);
     }
 
+    @Override
+    public boolean isStopped() {
+        return stopped.get();
+    }
+
     /**
      * Get current epoch number.
      *
@@ -373,6 +384,11 @@ public class Trainer implements Closeable {
         return currentEpoch;
     }
 
+    @Override
+    public int currentEpoch() {
+        return getCurrentEpoch();
+    }
+
     /**
      * Get global step number.
      *
@@ -380,6 +396,11 @@ public class Trainer implements Closeable {
      */
     public int getGlobalStep() {
         return globalStep;
+    }
+
+    @Override
+    public int globalStep() {
+        return getGlobalStep();
     }
 
     /**
@@ -414,8 +435,18 @@ public class Trainer implements Closeable {
      *
      * @return config
      */
-    public TrainingConfig getConfig() {
+    public TrainerConfig getConfig() {
         return config;
+    }
+
+    @Override
+    public TrainerConfig config() {
+        return config;
+    }
+
+    @Override
+    public TrainingSummary summary() {
+        return metrics.toTrainingSummary();
     }
 
     /**
@@ -430,7 +461,7 @@ public class Trainer implements Closeable {
     @Override
     public void close() {
         stopped.set(true);
-        callbacks.forEach(Callback::close);
+        listeners.forEach(TrainingListener::close);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -448,7 +479,7 @@ public class Trainer implements Closeable {
         private double gradientClip = 0.0;
         private boolean mixedPrecision = false;
         private Path checkpointDir = null;
-        private final List<Callback> callbacks = new ArrayList<>();
+        private final List<TrainingListener> listeners = new ArrayList<>();
         private final List<LRScheduler> schedulers = new ArrayList<>();
 
         private Builder() {
@@ -538,7 +569,7 @@ public class Trainer implements Closeable {
          * @return this builder
          */
         public Builder callback(Callback callback) {
-            this.callbacks.add(callback);
+            this.listeners.add(callback);
             return this;
         }
 
@@ -549,7 +580,17 @@ public class Trainer implements Closeable {
          * @return this builder
          */
         public Builder callbacks(List<Callback> callbacks) {
-            this.callbacks.addAll(callbacks);
+            this.listeners.addAll(callbacks);
+            return this;
+        }
+
+        public Builder listener(TrainingListener listener) {
+            this.listeners.add(listener);
+            return this;
+        }
+
+        public Builder listeners(List<? extends TrainingListener> listeners) {
+            this.listeners.addAll(listeners);
             return this;
         }
 
@@ -573,19 +614,9 @@ public class Trainer implements Closeable {
             return new Trainer(this);
         }
 
-        private TrainingConfig buildConfig() {
-            return new TrainingConfig(epochs, gradientClip, mixedPrecision, checkpointDir);
+        private TrainerConfig buildConfig() {
+            return new TrainerConfig(epochs, gradientClip, mixedPrecision, checkpointDir);
         }
-    }
-
-    /**
-     * Training configuration record.
-     */
-    public record TrainingConfig(
-            int epochs,
-            double gradientClip,
-            boolean mixedPrecision,
-            Path checkpointDir) {
     }
 
     /**

@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 import tech.kayys.gollek.spi.tensor.ComputeBackend;
 import tech.kayys.gollek.spi.tensor.CpuBackend;
-import tech.kayys.gollek.runtime.tensor.Device;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -106,7 +105,7 @@ public class MetalComputeBackend implements ComputeBackend, AdvancedMetalOps {
     }
 
     private boolean canUseNative() {
-        return isNative && !forceCpu;
+        return isNative && !isCpuForced();
     }
 
     private float[] toFloatArray(MemorySegment segment, long elements) {

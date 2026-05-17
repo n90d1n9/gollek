@@ -215,11 +215,21 @@ public class MetalFlashAttentionBinding {
             MemorySegment value,
             int B, int T, int S, int H, int H_kv, int D,
             float scale, boolean isCausal, boolean useBf16) {
+        return fa4Attention(output, query, key, value, B, T, S, H, H_kv, D, scale, isCausal, useBf16, 0.0f);
+    }
+
+    public int fa4Attention(
+            MemorySegment output,
+            MemorySegment query,
+            MemorySegment key,
+            MemorySegment value,
+            int B, int T, int S, int H, int H_kv, int D,
+            float scale, boolean isCausal, boolean useBf16, float softCap) {
 
         if (!nativeAvailable) {
             return MetalFlashAttentionCpuFallback.execute(
                     output, query, key, value,
-                    B, T, S, H, H_kv, D, scale, isCausal);
+                    B, T, S, H, H_kv, D, scale, isCausal, softCap);
         }
 
         MethodHandle mh = methodHandles.get(FN_FA4_ATTENTION);
@@ -227,7 +237,7 @@ public class MetalFlashAttentionBinding {
             logCpuFallbackOnce(FN_FA4_ATTENTION + " not bound");
             return MetalFlashAttentionCpuFallback.execute(
                     output, query, key, value,
-                    B, T, S, H, H_kv, D, scale, isCausal);
+                    B, T, S, H, H_kv, D, scale, isCausal, softCap);
         }
         try {
             return (int) mh.invokeExact(
@@ -235,12 +245,13 @@ public class MetalFlashAttentionBinding {
                     B, T, S, H, H_kv, D,
                     scale,
                     isCausal ? 1 : 0,
-                    useBf16 ? 1 : 0);
+                    useBf16 ? 1 : 0,
+                    softCap);
         } catch (Throwable e) {
             logCpuFallbackOnce("Failed to invoke " + FN_FA4_ATTENTION + "; falling back to CPU attention: " + e.getMessage());
             return MetalFlashAttentionCpuFallback.execute(
                     output, query, key, value,
-                    B, T, S, H, H_kv, D, scale, isCausal);
+                    B, T, S, H, H_kv, D, scale, isCausal, softCap);
         }
     }
 
@@ -255,7 +266,7 @@ public class MetalFlashAttentionBinding {
 
     private void bindAll() {
         // int gollek_metal_fa4_attention(void*, void*, void*, void*,
-        // int, int, int, int, int, int, float, int, int) -> int
+        // int, int, int, int, int, int, float, int, int, float) -> int
         bind(FN_FA4_ATTENTION, FunctionDescriptor.of(
                 ValueLayout.JAVA_INT, // return
                 ValueLayout.ADDRESS, // output
@@ -270,7 +281,8 @@ public class MetalFlashAttentionBinding {
                 ValueLayout.JAVA_INT, // D
                 ValueLayout.JAVA_FLOAT, // scale
                 ValueLayout.JAVA_INT, // is_causal
-                ValueLayout.JAVA_INT // use_bf16
+                ValueLayout.JAVA_INT, // use_bf16
+                ValueLayout.JAVA_FLOAT // soft_cap
         ));
 
         // int gollek_metal_fa4_sdpa_available() -> int

@@ -1,6 +1,6 @@
 package tech.kayys.gollek.metal.kernel;
 
-import tech.kayys.gollek.spi.model.DeviceType;
+import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.spi.tensor.ComputeKernel;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 import tech.kayys.gollek.metal.binding.MetalFlashAttentionBinding;

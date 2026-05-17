@@ -1,4 +1,4 @@
-package tech.kayys.gollek.train.data;
+package tech.kayys.gollek.ml.data;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

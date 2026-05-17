@@ -5,9 +5,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.spi.provider.ProviderRequest;
 import tech.kayys.gollek.spi.Message;
-import tech.kayys.gollek.spi.model.DeviceType;
 import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
 
 import java.nio.file.Files;
@@ -43,6 +43,13 @@ class LiteRTProviderTest {
         restoreProperty("os.arch", originalArch);
         restoreProperty("gollek.runners.metal.enabled", originalMetalEnabled);
         restoreProperty("gollek.runners.metal.mode", originalMetalMode);
+    }
+
+    @Test
+    void providerIsDiscoverableBeforeConfigInjection() {
+        LiteRTProvider provider = new LiteRTProvider();
+
+        assertTrue(provider.isEnabled());
     }
 
     @Test

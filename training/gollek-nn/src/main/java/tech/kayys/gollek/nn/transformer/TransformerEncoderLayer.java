@@ -106,7 +106,7 @@ public class TransformerEncoderLayer extends NNModule {
                 "dModel, nHeads, and dFF must be positive, got: " + dModel + ", " + nHeads + ", " + dFF);
         }
 
-        this.selfAttn = register("self_attn", new MultiHeadAttention(dModel, nHeads));
+        this.selfAttn = register("self_attn", new MultiHeadAttention(dModel, nHeads, dropoutP));
         this.ff1 = register("ff1", new Linear(dModel, dFF));
         this.ff2 = register("ff2", new Linear(dFF, dModel));
         this.norm1 = register("norm1", new LayerNorm(dModel));

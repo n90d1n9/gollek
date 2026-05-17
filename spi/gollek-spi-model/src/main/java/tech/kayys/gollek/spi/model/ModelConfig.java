@@ -36,6 +36,8 @@ import org.jboss.logging.Logger;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ModelConfig {
 
+    private static final String DISABLE_GEMMA4_SHARED_KV_PROPERTY =
+            "gollek.safetensor.disable_gemma4_shared_kv";
     public ModelConfig() {
         // Defaults applied via field initializers
     }
@@ -123,11 +125,21 @@ public class ModelConfig {
     @JsonProperty("layer_types")
     private List<String> layerTypes;
 
+    @JsonProperty("rope_local_base_freq")
+    private Double ropeLocalBaseFreq;
+
     private Double ropeThetaFull;
     private Double ropeThetaSliding;
     private Double partialRotaryFactorFull;
     private Double partialRotaryFactorSliding;
 
+    @JsonProperty("query_pre_attn_scalar")
+    private Double queryPreAttnScalar;
+
+    @JsonProperty("attn_logit_softcapping")
+    private Double attnLogitSoftcapping;
+
+    @JsonProperty("final_logit_softcapping")
     private Double finalLogitSoftcapping;
 
     // ── Activation function ───────────────────────────────────────────────────
@@ -166,6 +178,9 @@ public class ModelConfig {
     @JsonProperty("sliding_window")
     private Integer slidingWindow; // null = full attention
 
+    @JsonProperty("use_sliding_window")
+    private Boolean useSlidingWindow;
+
     // ── Head dimension override (Gemma2, some Phi variants) ──────────────────
 
     @JsonProperty("head_dim")
@@ -173,6 +188,12 @@ public class ModelConfig {
 
     @JsonProperty("global_head_dim")
     private Integer globalHeadDim;
+
+    @JsonProperty("num_global_key_value_heads")
+    private Integer numGlobalKeyValueHeads;
+
+    @JsonProperty("attention_k_eq_v")
+    private Boolean attentionKeyEqualsValue;
 
     @JsonProperty("num_kv_shared_layers")
     private Integer numKvSharedLayers;
@@ -269,11 +290,27 @@ public class ModelConfig {
                     Integer v = intValue(textCfg, "global_head_dim");
                     if (v != null) cfg.globalHeadDim = v;
                 }
+                if (!root.has("num_global_key_value_heads")) {
+                    Integer v = intValue(textCfg, "num_global_key_value_heads");
+                    if (v != null) cfg.numGlobalKeyValueHeads = v;
+                }
+                if (!root.has("attention_k_eq_v")) {
+                    Boolean v = boolValue(textCfg, "attention_k_eq_v");
+                    if (v != null) cfg.attentionKeyEqualsValue = v;
+                }
                 if (!root.has("num_kv_shared_layers")) {
                     Integer v = intValue(textCfg, "num_kv_shared_layers");
                     if (v != null) cfg.numKvSharedLayers = v;
                 }
 
+                if (!root.has("query_pre_attn_scalar")) {
+                    Double v = doubleValue(textCfg, "query_pre_attn_scalar");
+                    if (v != null) cfg.queryPreAttnScalar = v;
+                }
+                if (!root.has("attn_logit_softcapping")) {
+                    Double v = doubleValue(textCfg, "attn_logit_softcapping");
+                    if (v != null) cfg.attnLogitSoftcapping = v;
+                }
                 if (!root.has("final_logit_softcapping")) {
                     Double v = doubleValue(textCfg, "final_logit_softcapping");
                     if (v != null) cfg.finalLogitSoftcapping = v;
@@ -289,21 +326,12 @@ public class ModelConfig {
                 if (!root.has("rope_parameters")) {
                     JsonNode ropeParams = textCfg.get("rope_parameters");
                     if (ropeParams != null && ropeParams.isObject()) {
-                        JsonNode full = ropeParams.get("full_attention");
-                        if (full != null && full.isObject()) {
-                            Double v = doubleValue(full, "rope_theta");
-                            if (v != null) cfg.ropeThetaFull = v;
-                            Double p = doubleValue(full, "partial_rotary_factor");
-                            if (p != null) cfg.partialRotaryFactorFull = p;
-                        }
-                        JsonNode sliding = ropeParams.get("sliding_attention");
-                        if (sliding != null && sliding.isObject()) {
-                            Double v = doubleValue(sliding, "rope_theta");
-                            if (v != null) cfg.ropeThetaSliding = v;
-                            Double p = doubleValue(sliding, "partial_rotary_factor");
-                            if (p != null) cfg.partialRotaryFactorSliding = p;
-                        }
+                        mergeRopeParameters(cfg, ropeParams);
                     }
+                }
+                if (!root.has("rope_local_base_freq")) {
+                    Double v = doubleValue(textCfg, "rope_local_base_freq");
+                    if (v != null) cfg.ropeLocalBaseFreq = v;
                 }
                 if (!root.has("hidden_size_per_layer_input")) {
                     Integer v = intValue(textCfg, "hidden_size_per_layer_input");
@@ -325,7 +353,47 @@ public class ModelConfig {
                     Integer v = intValue(textCfg, "pad_token_id");
                     if (v != null) cfg.padTokenId = v;
                 }
+                if (!root.has("sliding_window")) {
+                    Integer v = intValue(textCfg, "sliding_window");
+                    if (v != null) {
+                        cfg.slidingWindow = v;
+                    }
+                }
+                if (!root.has("use_sliding_window")) {
+                    Boolean v = boolValue(textCfg, "use_sliding_window");
+                    if (v != null) {
+                        cfg.useSlidingWindow = v;
+                    }
+                }
+                if (!root.has("max_position_embeddings")) {
+                    Integer v = intValue(textCfg, "max_position_embeddings");
+                    if (v != null) {
+                        cfg.maxPositionEmbeddings = v;
+                    }
+                }
+                if (!root.has("hidden_act")) {
+                    String act = textValue(textCfg, "hidden_activation");
+                    if (act == null || act.isBlank()) {
+                        act = textValue(textCfg, "hidden_act");
+                    }
+                    if (act != null && !act.isBlank()) {
+                        cfg.hiddenAct = act;
+                    }
+                }
             }
+            JsonNode rootRopeParams = root.get("rope_parameters");
+            if (rootRopeParams != null && rootRopeParams.isObject()) {
+                mergeRopeParameters(cfg, rootRopeParams);
+            }
+            String rootActivation = textValue(root, "hidden_activation");
+            if (rootActivation != null && !rootActivation.isBlank()) {
+                cfg.hiddenAct = rootActivation;
+            }
+            String dtype = textValue(root, "dtype");
+            if (dtype != null && !dtype.isBlank()) {
+                cfg.torchDtype = dtype;
+            }
+            reconcileGemma3RopeDefaults(cfg);
         } catch (Exception e) {
             log.debugf("ModelConfig: text_config merge failed: %s", e.getMessage());
         }
@@ -416,6 +484,52 @@ public class ModelConfig {
         this.padTokenId = firstInt(node);
     }
 
+    @JsonSetter("hidden_activation")
+    public void setHiddenActivation(String hiddenActivation) {
+        if (hiddenActivation != null && !hiddenActivation.isBlank()) {
+            this.hiddenAct = hiddenActivation;
+        }
+    }
+
+    @JsonSetter("dtype")
+    public void setDtype(String dtype) {
+        if (dtype != null && !dtype.isBlank()) {
+            this.torchDtype = dtype;
+        }
+    }
+
+    private static void mergeRopeParameters(ModelConfig cfg, JsonNode ropeParams) {
+        if (cfg == null || ropeParams == null || !ropeParams.isObject()) {
+            return;
+        }
+        JsonNode full = ropeParams.get("full_attention");
+        if (full != null && full.isObject()) {
+            Double v = doubleValue(full, "rope_theta");
+            if (v != null) cfg.ropeThetaFull = v;
+            Double p = doubleValue(full, "partial_rotary_factor");
+            if (p != null) cfg.partialRotaryFactorFull = p;
+        }
+        JsonNode sliding = ropeParams.get("sliding_attention");
+        if (sliding != null && sliding.isObject()) {
+            Double v = doubleValue(sliding, "rope_theta");
+            if (v != null) cfg.ropeThetaSliding = v;
+            Double p = doubleValue(sliding, "partial_rotary_factor");
+            if (p != null) cfg.partialRotaryFactorSliding = p;
+        }
+    }
+
+    private static void reconcileGemma3RopeDefaults(ModelConfig cfg) {
+        if (cfg == null || cfg.modelType == null || !cfg.modelType.toLowerCase().startsWith("gemma3")) {
+            return;
+        }
+        if (cfg.ropeThetaFull == null) {
+            cfg.ropeThetaFull = cfg.ropeTheta;
+        }
+        if (cfg.ropeThetaSliding == null) {
+            cfg.ropeThetaSliding = cfg.ropeLocalBaseFreq != null ? cfg.ropeLocalBaseFreq : 10000.0;
+        }
+    }
+
     private static String textValue(JsonNode node, String field) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
@@ -486,6 +600,17 @@ public class ModelConfig {
         return v.isNumber() ? v.asDouble() : null;
     }
 
+    private static Boolean boolValue(JsonNode node, String field) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        JsonNode v = node.get(field);
+        if (v == null || v.isNull()) {
+            return null;
+        }
+        return v.isBoolean() ? v.asBoolean() : null;
+    }
+
     private static List<Integer> allInts(JsonNode node) {
         if (node == null || node.isNull()) {
             return List.of();
@@ -510,6 +635,18 @@ public class ModelConfig {
         return numKeyValueHeads != null ? numKeyValueHeads : numAttentionHeads;
     }
 
+    public int resolvedNumGlobalKvHeads() {
+        return numGlobalKeyValueHeads != null ? numGlobalKeyValueHeads : resolvedNumKvHeads();
+    }
+
+    public int resolvedNumKvHeadsForLayer(int layerIdx) {
+        return usesAlternativeAttentionForLayer(layerIdx) ? resolvedNumGlobalKvHeads() : resolvedNumKvHeads();
+    }
+
+    public int resolvedMaxKvHeads() {
+        return Math.max(resolvedNumKvHeads(), resolvedNumGlobalKvHeads());
+    }
+
     /** Per-head dimension: {@code hiddenSize / numAttentionHeads}. */
     public int resolvedHeadDim() {
         return headDim != null ? headDim : (numAttentionHeads > 0 ? hiddenSize / numAttentionHeads : 0);
@@ -526,7 +663,9 @@ public class ModelConfig {
     }
 
     public boolean usesSharedKvCache(int layerIdx) {
-        if (isGemma4TextModel()) {
+        String modelTypeLower = modelType != null ? modelType.toLowerCase() : "";
+        if (modelTypeLower.startsWith("gemma4")
+                && Boolean.getBoolean(DISABLE_GEMMA4_SHARED_KV_PROPERTY)) {
             return false;
         }
         int sharedLayers = resolvedNumKvSharedLayers();
@@ -550,10 +689,23 @@ public class ModelConfig {
         return Math.max(0, sharedStart - 1);
     }
 
-    private boolean isGemma4TextModel() {
-        return modelType != null && modelType.toLowerCase().startsWith("gemma4");
+    public boolean isSharedKvSourceLayer(int layerIdx) {
+        if (layerIdx < 0 || layerIdx >= numHiddenLayers) {
+            return false;
+        }
+        int sharedStart = Math.max(0, numHiddenLayers - resolvedNumKvSharedLayers());
+        if (sharedStart <= 0 || layerIdx >= sharedStart) {
+            return false;
+        }
+        String type = layerType(layerIdx);
+        for (int sharedLayer = sharedStart; sharedLayer < numHiddenLayers; sharedLayer++) {
+            if ((type == null || type.equals(layerType(sharedLayer)))
+                    && sharedKvSourceLayer(sharedLayer) == layerIdx) {
+                return true;
+            }
+        }
+        return false;
     }
-
 
     /**
      * GQA group size: number of query heads sharing one KV head.
@@ -566,6 +718,14 @@ public class ModelConfig {
     /** Whether this model uses Grouped-Query Attention (GQA or MQA). */
     public boolean isGroupedQueryAttention() {
         return resolvedNumKvHeads() < numAttentionHeads;
+    }
+
+    public boolean attentionKeyEqualsValue() {
+        return Boolean.TRUE.equals(attentionKeyEqualsValue);
+    }
+
+    public boolean usesAlternativeAttentionForLayer(int layerIdx) {
+        return attentionKeyEqualsValue() && !isSlidingAttentionLayer(layerIdx);
     }
 
     public Optional<Integer> bosTokenId() {
@@ -689,6 +849,16 @@ public class ModelConfig {
         return finalLogitSoftcapping;
     }
 
+    public Double attnLogitSoftcapping() {
+        return attnLogitSoftcapping;
+    }
+
+    public double queryPreAttnScalar() {
+        return queryPreAttnScalar != null && queryPreAttnScalar > 0
+                ? queryPreAttnScalar
+                : Math.max(1, resolvedHeadDim());
+    }
+
     public double rmsNormEps() {
         return rmsNormEps;
     }
@@ -759,7 +929,9 @@ public class ModelConfig {
      * Check if model has sliding window attention.
      */
     public boolean hasSlidingWindow() {
-        return slidingWindow != null && slidingWindow > 0;
+        return !Boolean.FALSE.equals(useSlidingWindow)
+                && slidingWindow != null
+                && slidingWindow > 0;
     }
 
     /**

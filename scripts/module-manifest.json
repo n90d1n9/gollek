@@ -1,0 +1,170 @@
+{
+  "always": {
+    "modules": [
+      ":core:gollek-core",
+      ":core:gollek-error-code",
+      ":core:gollek-model-repository",
+      ":core:gollek-provider-core",
+      ":core:gollek-tokenizer-core",
+      ":sdk:gollek-sdk",
+      ":sdk:gollek-sdk-api",
+      ":sdk:gollek-sdk-core",
+      ":sdk:gollek-sdk-local",
+      ":sdk:gollek-sdk-session",
+      ":spi:gollek-spi",
+      ":spi:gollek-spi-inference",
+      ":spi:gollek-spi-model",
+      ":spi:gollek-spi-multimodal",
+      ":spi:gollek-spi-plugin",
+      ":spi:gollek-spi-provider",
+      ":spi:gollek-spi-runtime",
+      ":ui:gollek-api",
+      ":ui:gollek-cli"
+    ]
+  },
+  "backends": {
+    "metal": {
+      "platforms": ["macos", "cpu"],
+      "gradleBackends": ["cpu", "metal"],
+      "modules": [
+        ":backend:metal:gollek-backend-metal",
+        ":backend:metal:gollek-mlx-binding",
+        ":core:plugin:gollek-plugin-kernel-core"
+      ]
+    },
+    "cuda": {
+      "platforms": ["linux", "windows"],
+      "gradleBackends": ["cpu", "cuda"],
+      "modules": [
+        ":backend:cuda:gollek-backend-cuda",
+        ":backend:cuda:gollek-kernel-cuda",
+        ":backend:cuda:gollek-plugin-kernel-cuda",
+        ":core:plugin:gollek-plugin-kernel-core"
+      ]
+    },
+    "vulkan": {
+      "platforms": ["linux", "windows"],
+      "gradleBackends": ["cpu"],
+      "modules": []
+    },
+    "opencl": {
+      "platforms": ["linux", "windows"],
+      "gradleBackends": ["cpu"],
+      "modules": []
+    },
+    "all": {
+      "platforms": [],
+      "gradleBackends": [],
+      "modules": []
+    }
+  },
+  "formats": {
+    "safetensor": {
+      "modules": [
+        ":runner:safetensor:gollek-runner-safetensor",
+        ":runner:safetensor:gollek-runner-stable-diffusion",
+        ":runner:safetensor:gollek-safetensor-api",
+        ":runner:safetensor:gollek-safetensor-core",
+        ":runner:safetensor:gollek-safetensor-engine",
+        ":runner:safetensor:gollek-safetensor-loader",
+        ":runner:safetensor:gollek-safetensor-quantization",
+        ":runner:safetensor:gollek-safetensor-spi"
+      ]
+    },
+    "gguf": {
+      "modules": [
+        ":core:plugin:gollek-plugin-runner-gguf",
+        ":runner:gguf:gollek-gguf-converter",
+        ":runner:gguf:gollek-gguf-converter-java",
+        ":runner:gguf:gollek-gguf-core"
+      ]
+    },
+    "litert": {
+      "modules": [
+        ":runner:litert:gollek-litert-core",
+        ":runner:litert:gollek-plugin-runner-litert",
+        ":runner:litert:gollek-runner-litert"
+      ]
+    },
+    "onnx": {
+      "modules": [
+        ":runner:onnx:gollek-ml-export-onnx",
+        ":runner:onnx:gollek-ml-onnx",
+        ":runner:onnx:gollek-plugin-runner-onnx",
+        ":runner:onnx:gollek-runner-onnx"
+      ]
+    },
+    "all": {
+      "modules": []
+    }
+  },
+  "llmTypes": {
+    "text": {
+      "modules": [
+        ":models:gollek-model-gemma",
+        ":models:gollek-model-llama",
+        ":models:gollek-model-mistral",
+        ":models:gollek-model-phi",
+        ":models:gollek-model-qwen",
+        ":core:gollek-model-runner",
+        ":core:gollek-model-repo-hf",
+        ":core:gollek-model-repo-local"
+      ]
+    },
+    "vision": {
+      "modules": [
+        ":ml:gollek-ml-cnn",
+        ":ml:gollek-ml-vision"
+      ]
+    },
+    "audio": {
+      "modules": [
+        ":ml:gollek-ml-nlp",
+        ":ml:gollek-ml-audio"
+      ]
+    },
+    "multimodal": {
+      "modules": [
+        ":models:gollek-model-qwen",
+        ":spi:gollek-spi-multimodal",
+        ":ml:gollek-ml-multimodal"
+      ]
+    },
+    "stable-diffusion": {
+      "modules": [
+        ":runner:diffuser:gollek-diffuser",
+        ":runner:safetensor:gollek-runner-stable-diffusion"
+      ]
+    },
+    "whispering": {
+      "modules": [
+        ":runner:onnx:gollek-runner-onnx",
+        ":ml:gollek-ml-nlp",
+        ":ml:gollek-ml-audio"
+      ]
+    },
+    "all": {
+      "modules": []
+    }
+  },
+  "architectures": {
+    "native-java": {
+      "modules": [
+        ":core:gollek-tensor",
+        ":core:gollek-model-repo-hf",
+        ":core:gollek-model-repo-kaggle",
+        ":core:gollek-model-repo-local",
+        ":runner:gguf:gollek-gguf-core",
+        ":runner:safetensor:gollek-safetensor-core",
+        ":runner:safetensor:gollek-safetensor-engine"
+      ]
+    },
+    "binding": {
+      "modules": [
+        ":backend:metal:gollek-mlx-binding",
+        ":runner:litert:gollek-litert-core",
+        ":runner:onnx:gollek-runner-onnx"
+      ]
+    }
+  }
+}

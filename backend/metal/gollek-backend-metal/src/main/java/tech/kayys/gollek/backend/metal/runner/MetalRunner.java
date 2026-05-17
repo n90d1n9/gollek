@@ -5,7 +5,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import tech.kayys.gollek.spi.exception.InferenceException;
 import tech.kayys.gollek.runner.RunnerCapabilities;
 import tech.kayys.gollek.runner.RunnerConfiguration;
 import tech.kayys.gollek.plugin.runner.RunnerInitializationException;
@@ -22,9 +21,9 @@ import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModelManifest;
-import tech.kayys.gollek.spi.runner.RunnerMetadata;
+import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.gollek.spi.model.RunnerMetadata;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;

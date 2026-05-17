@@ -1,4 +1,4 @@
-package tech.kayys.gollek.ml.litert.model;
+package tech.kayys.gollek.litert.model;
 
 import java.util.List;
 import java.util.Map;

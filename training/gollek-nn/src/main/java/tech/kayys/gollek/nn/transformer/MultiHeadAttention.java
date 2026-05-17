@@ -1,7 +1,9 @@
 package tech.kayys.gollek.ml.transformer;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
+import tech.kayys.gollek.ml.autograd.TensorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
+import tech.kayys.gollek.ml.nn.layer.Dropout;
 import tech.kayys.gollek.ml.nn.layer.Linear;
 
 /**
@@ -42,6 +44,7 @@ public class MultiHeadAttention extends NNModule {
     private final Linear kProj;
     private final Linear vProj;
     private final Linear outProj;
+    private final Dropout attnDropout;
 
     /**
      * Create a multi-head attention module.
@@ -85,6 +88,7 @@ public class MultiHeadAttention extends NNModule {
         this.kProj = register("k_proj", new Linear(embedDim, embedDim));
         this.vProj = register("v_proj", new Linear(embedDim, embedDim));
         this.outProj = register("out_proj", new Linear(embedDim, embedDim));
+        this.attnDropout = register("attn_dropout", new Dropout(dropoutP));
     }
 
     /**
@@ -185,6 +189,7 @@ public class MultiHeadAttention extends NNModule {
         }
 
         attnWeights = attnWeights.softmax();
+        attnWeights = attnDropout.forward(attnWeights);
 
         // Attend to values
         GradTensor attnOutput = attnWeights.matmul(v);  // [batch*numHeads, seqQ, headDim]
@@ -222,20 +227,8 @@ public class MultiHeadAttention extends NNModule {
      * This distributes the embedDim across multiple heads.
      */
     private GradTensor reshapeToHeads(GradTensor x, int batch, int seq) {
-        float[] data = x.data();
-        float[] result = new float[batch * numHeads * seq * headDim];
-
-        for (int b = 0; b < batch; b++) {
-            for (int s = 0; s < seq; s++) {
-                for (int h = 0; h < numHeads; h++) {
-                    int srcOff = b * seq * embedDim + s * embedDim + h * headDim;
-                    int dstOff = (b * numHeads + h) * seq * headDim + s * headDim;
-                    System.arraycopy(data, srcOff, result, dstOff, headDim);
-                }
-            }
-        }
-        return GradTensor.of(result, batch * numHeads, seq, headDim)
-                .requiresGrad(x.requiresGrad());
+        return TensorOps.permute(x.reshape(batch, seq, numHeads, headDim), 0, 2, 1, 3)
+                .reshape((long) batch * numHeads, seq, headDim);
     }
 
     /**
@@ -243,20 +236,8 @@ public class MultiHeadAttention extends NNModule {
      * This recombines the heads back into a single embedding dimension.
      */
     private GradTensor reshapeFromHeads(GradTensor x, int batch, int seq) {
-        float[] data = x.data();
-        float[] result = new float[batch * seq * embedDim];
-
-        for (int b = 0; b < batch; b++) {
-            for (int s = 0; s < seq; s++) {
-                for (int h = 0; h < numHeads; h++) {
-                    int srcOff = (b * numHeads + h) * seq * headDim + s * headDim;
-                    int dstOff = b * seq * embedDim + s * embedDim + h * headDim;
-                    System.arraycopy(data, srcOff, result, dstOff, headDim);
-                }
-            }
-        }
-        return GradTensor.of(result, batch, seq, embedDim)
-                .requiresGrad(x.requiresGrad());
+        return TensorOps.permute(x.reshape(batch, numHeads, seq, headDim), 0, 2, 1, 3)
+                .reshape(batch, seq, embedDim);
     }
 
     /**
@@ -270,24 +251,7 @@ public class MultiHeadAttention extends NNModule {
      * @return            masked attention weights
      */
     private GradTensor applyMask(GradTensor attnWeights, GradTensor mask) {
-        float[] aw = attnWeights.data();
-        float[] m = mask.data();
-        float[] result = new float[aw.length];
-
-        long[] awShape = attnWeights.shape();
-        int seqQ = (int) awShape[1];
-        int seqK = (int) awShape[2];
-
-        // Apply mask to each head independently
-        for (int i = 0; i < aw.length; i++) {
-            // Map flat index to (seq_q, seq_k) position
-            int posInHead = i % (seqQ * seqK);
-            int maskIdx = posInHead;
-            result[i] = m[maskIdx] > 0.5f ? aw[i] : -1e9f;
-        }
-
-        return GradTensor.of(result, attnWeights.shape())
-                .requiresGrad(attnWeights.requiresGrad());
+        return GradTensor.where(mask, attnWeights, GradTensor.full(-1e9f, attnWeights.shape()));
     }
 
     /**

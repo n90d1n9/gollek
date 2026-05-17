@@ -27,6 +27,7 @@ package tech.kayys.gollek.ml.optim;
 import tech.kayys.gollek.ml.nn.Parameter;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -126,6 +127,195 @@ public class AdamW implements Optimizer {
 
     @Override
     public List<Parameter> parameters() { return parameters; }
+
+    @Override
+    public boolean supportsStateDict() {
+        return true;
+    }
+
+    @Override
+    public Map<String, Object> stateDict() {
+        Map<String, Object> state = new HashMap<>();
+        state.put("optimizer", "AdamW");
+        state.put("step", step);
+        state.put("learningRate", learningRate);
+        state.put("beta1", beta1);
+        state.put("beta2", beta2);
+        state.put("epsilon", epsilon);
+        state.put("weightDecay", weightDecay);
+        state.put("amsgrad", amsgrad);
+        state.put("m", exportSlot(m));
+        state.put("v", exportSlot(v));
+        if (amsgrad) {
+            state.put("maxV", exportSlot(maxV));
+        }
+        return state;
+    }
+
+    @Override
+    public void loadStateDict(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) {
+            return;
+        }
+
+        Object optimizerName = state.get("optimizer");
+        if (optimizerName instanceof String name && !"AdamW".equals(name)) {
+            throw new IllegalArgumentException(
+                    "Checkpoint optimizer mismatch: expected AdamW but got " + name);
+        }
+
+        requireFloatMatch(state.get("beta1"), beta1, "beta1");
+        requireFloatMatch(state.get("beta2"), beta2, "beta2");
+        requireFloatMatch(state.get("epsilon"), epsilon, "epsilon");
+        requireFloatMatch(state.get("weightDecay"), weightDecay, "weightDecay");
+        requireBooleanMatch(state.get("amsgrad"), amsgrad, "amsgrad");
+        this.step = Math.max(0, readInt(state.get("step"), step));
+        this.learningRate = readFloat(state.get("learningRate"), learningRate);
+
+        Object mState = state.get("m");
+        if (mState == null) {
+            throw new IllegalArgumentException("Invalid AdamW checkpoint payload: missing key 'm'");
+        }
+        restoreSlot(m, mState, "m");
+
+        Object vState = state.get("v");
+        if (vState == null) {
+            throw new IllegalArgumentException("Invalid AdamW checkpoint payload: missing key 'v'");
+        }
+        restoreSlot(v, vState, "v");
+
+        if (amsgrad) {
+            Object maxVState = state.get("maxV");
+            if (maxVState == null) {
+                throw new IllegalArgumentException(
+                        "Invalid AdamW checkpoint payload: missing key 'maxV' for AMSGrad optimizer");
+            }
+            restoreSlot(maxV, maxVState, "maxV");
+        }
+    }
+
+    private List<float[]> exportSlot(Map<Parameter, float[]> slotMap) {
+        List<float[]> exported = new ArrayList<>(parameters.size());
+        for (Parameter param : parameters) {
+            float[] source = slotMap.get(param);
+            if (source == null) {
+                exported.add(new float[(int) param.data().numel()]);
+            } else {
+                exported.add(source.clone());
+            }
+        }
+        return exported;
+    }
+
+    private void restoreSlot(Map<Parameter, float[]> slotMap, Object rawState, String slotName) {
+        if (!(rawState instanceof List<?> serializedSlot)) {
+            throw new IllegalArgumentException(
+                    "Invalid AdamW checkpoint payload: " + slotName + " must be a List");
+        }
+        if (serializedSlot.size() != parameters.size()) {
+            throw new IllegalArgumentException(
+                    "Invalid AdamW checkpoint payload: " + slotName + " size mismatch (expected "
+                            + parameters.size() + ", got " + serializedSlot.size() + ")");
+        }
+
+        for (int i = 0; i < parameters.size(); i++) {
+            float[] source = coerceFloatArray(serializedSlot.get(i), slotName, i);
+            Parameter param = parameters.get(i);
+            float[] target = slotMap.get(param);
+            if (target == null) {
+                target = new float[(int) param.data().numel()];
+                slotMap.put(param, target);
+            }
+            if (source.length != target.length) {
+                throw new IllegalArgumentException(
+                        "Invalid AdamW checkpoint payload: " + slotName + "[" + i
+                                + "] length mismatch (expected " + target.length
+                                + ", got " + source.length + ")");
+            }
+            System.arraycopy(source, 0, target, 0, source.length);
+        }
+    }
+
+    private static int readInt(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static float readFloat(Object value, float fallback) {
+        if (value instanceof Number number) {
+            return number.floatValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Float.parseFloat(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static void requireFloatMatch(Object value, float expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        float loaded = readFloat(value, expected);
+        if (Math.abs(loaded - expected) > 1e-7f) {
+            throw new IllegalArgumentException(
+                    "Invalid AdamW checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static void requireBooleanMatch(Object value, boolean expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        boolean loaded;
+        if (value instanceof Boolean bool) {
+            loaded = bool;
+        } else if (value instanceof String text) {
+            loaded = Boolean.parseBoolean(text);
+        } else {
+            throw new IllegalArgumentException(
+                    "Invalid AdamW checkpoint payload: " + fieldName + " must be boolean");
+        }
+        if (loaded != expected) {
+            throw new IllegalArgumentException(
+                    "Invalid AdamW checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static float[] coerceFloatArray(Object value, String slotName, int index) {
+        if (value instanceof float[] array) {
+            return array;
+        }
+        if (value instanceof List<?> numbers) {
+            float[] converted = new float[numbers.size()];
+            for (int i = 0; i < numbers.size(); i++) {
+                Object element = numbers.get(i);
+                if (!(element instanceof Number number)) {
+                    throw new IllegalArgumentException(
+                            "Invalid AdamW checkpoint payload: " + slotName + "[" + index + "][" + i
+                                    + "] must be numeric");
+                }
+                converted[i] = number.floatValue();
+            }
+            return converted;
+        }
+        throw new IllegalArgumentException(
+                "Invalid AdamW checkpoint payload: " + slotName + "[" + index + "] must be float[]");
+    }
 
     @Override
     public String toString() {

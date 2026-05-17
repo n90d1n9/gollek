@@ -148,9 +148,19 @@ public class TurboQuantService implements AutoCloseable {
             case BNB_NF4, BNB_INT8 -> new BnBDequantizer();
             case HQQ -> new HQQDequantizer(4, 128, HQQDequantizer.QuantAxis.INPUT); // Default: 4-bit, groupSize=128
             case SQUEEZELLM -> new SqueezeLLMDequantizer();
-            case GGUF -> new tech.kayys.gollek.spi.tensor.weights.Dequantizer();
+            case GGUF -> createLegacyDequantizer();
             default -> null;
         };
+    }
+
+    private Object createLegacyDequantizer() {
+        try {
+            Class<?> dequantizerClass = Class.forName("tech.kayys.gollek.spi.tensor.weights.Dequantizer");
+            return dequantizerClass.getDeclaredConstructor().newInstance();
+        } catch (ReflectiveOperationException e) {
+            log.debug("GGUF dequantizer class not present on classpath: {}", e.getMessage());
+            return null;
+        }
     }
 
     // ── Model Inspection ─────────────────────────────────────────────────────

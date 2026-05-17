@@ -1,5 +1,5 @@
 //REPOS mavenLocal,central
-//DEPS tech.kayys.gollek:gollek-audio:0.1.0-SNAPSHOT
+//DEPS tech.kayys.gollek:gollek-ml-audio:0.1.0-SNAPSHOT
 //DEPS tech.kayys.gollek:gollek-ml-cnn:0.1.0-SNAPSHOT
 //DEPS tech.kayys.gollek:gollek-transformer:0.1.0-SNAPSHOT
 

@@ -127,7 +127,7 @@ public class LiteRTCommand implements Runnable {
         @Parameters(index = "0", description = "Model spec (e.g. hf:user/repo, kaggle:user/repo)")
         String modelSpec;
 
-        @Option(names = {"--dir"}, description = "Output directory (default: ~/.wayang/gollek/models/litert; legacy: ~/.gollek/models/litert)")
+        @Option(names = {"--dir"}, description = "Output directory (default: ~/.gollek/models/litert)")
         String outputDir;
 
         @Override

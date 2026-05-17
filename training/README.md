@@ -137,17 +137,17 @@ for (int epoch = 0; epoch < 10; epoch++) {
 ### DataLoader
 
 ```java
-import tech.kayys.gollek.train.data.DataLoader;
+import tech.kayys.gollek.ml.data.DataLoader;
 
 var dataset = new DataLoader.TensorDataset(inputs, targets);
-var loader = DataLoader.builder(dataset)
+var loader = DataLoader.tensorBuilder(dataset)
     .batchSize(32)
     .shuffle(true)
     .dropLast(true)
     .build();
 
-for (List<GradTensor> batch : loader) {
-    var input = batch.get(0);
+for (DataLoader.Batch batch : loader) {
+    var input = batch.inputs();
     var target = batch.get(1);
     // training step
 }
@@ -156,14 +156,38 @@ for (List<GradTensor> batch : loader) {
 ### Model Hub
 
 ```java
-import tech.kayys.gollek.sdk.hub.ModelHub;
+import tech.kayys.gollek.ml.Gollek;
+import tech.kayys.gollek.ml.hub.HubConfig;
+import tech.kayys.gollek.ml.nn.layer.*;
 
 // Download and load weights
 var model = new Sequential(
     new Linear(768, 768),
     new LayerNorm(768)
 );
-model.loadSafetensors("path/to/model.safetensors");
+
+Gollek.Hub.loadInto(
+    model,
+    "Qwen/Qwen2.5-0.5B",
+    HubConfig.builder()
+        .revision("main")
+        .build()
+);
+```
+
+### Export
+
+```java
+import tech.kayys.gollek.ml.Gollek;
+import tech.kayys.gollek.ml.export.ModelExporter;
+
+ModelExporter exporter = Gollek.Export.model(model)
+    .inputShape(1, 3, 224, 224)
+    .build();
+
+exporter.toONNX("model.onnx");
+exporter.toGGUF("model.gguf", ModelExporter.Quantization.INT4);
+exporter.toLiteRT("model.litert");
 ```
 
 ### Training with Trainer (PyTorch Lightning Style)
@@ -191,22 +215,20 @@ trainer.fit(trainLoader, valLoader);
 ## Architecture
 
 ```
-gollek-framework/
-├── gollek-ml-autograd/     # GradTensor, Functions, VectorOps (SIMD)
-├── gollek-ml-tensor/       # Tensor wrapper, Device, MemoryManager
-├── gollek-ml-nn/           # NNModule, layers (Linear, Conv*, Norm*, Dropout, etc.)
-├── gollek-ml-cnn/          # Convolution operations (im2col + GEMM)
-├── gollek-ml-rnn/          # RNN, LSTM, GRU cells and layers
-├── gollek-ml-data/         # DataLoader, Dataset, TensorDataset
-├── gollek-ml-optimize/     # Optimizers (Adam, SGD, etc.), GradScaler
-├── gollek-ml-train/        # Trainer, Callbacks, LRScheduler, EarlyStopping
-├── gollek-ml-hub/          # ModelHub, HuggingFace integration, SafeTensors
-├── gollek-ml-nlp/          # NLP pipelines (text-gen, embedding, classification)
-├── gollek-ml-vision/       # Vision models (ResNet), transforms
-├── gollek-ml-multimodal/   # Vision/Audio/Video builders
-├── gollek-ml-export/       # ONNX, GGUF, LiteRT exporters
-├── gollek-ml-api/          # Gollek.java — torch-like entry point
-└── gollek-ml-examples/     # MNIST, Transformer examples
+gollek/
+├── ml/gollek-ml-autograd/      # GradTensor, autograd, GGUF compatibility
+├── ml/gollek-ml-core/          # BaseEstimator, BaseTransformer foundations
+├── ml/gollek-ml-nn/            # NNModule, layers, activations, losses
+├── ml/gollek-ml-cnn/           # CNN-focused model/layer extensions
+├── ml/gollek-ml-data/          # DataLoader, Dataset, Csv/Text datasets
+├── ml/gollek-ml-optimize/      # Optimizers, memory/runtime helpers
+├── ml/gollek-ml-selection/     # Metrics, CV, search, evaluation
+├── ml/gollek-ml-hub/           # ModelHub, HF/local repositories, SafeTensors
+├── ml/gollek-ml-export/        # ONNX, GGUF, LiteRT exporters and benchmark
+├── ml/gollek-ml-api/           # Gollek.java umbrella ML entry point
+├── trainer/gollek-trainer-api/ # Canonical trainer session/config contracts
+├── trainer/gollek-trainer/     # Trainer bridge/runtime facade
+└── examples/gollek-ml-examples/# Samples and migration-era examples
 ```
 
 ## JVM Flags Required

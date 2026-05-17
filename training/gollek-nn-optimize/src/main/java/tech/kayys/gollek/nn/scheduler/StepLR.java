@@ -1,5 +1,8 @@
 package tech.kayys.gollek.ml.optim;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Step Decay Learning Rate Scheduler.
  * <p>
@@ -78,6 +81,101 @@ public class StepLR extends LRScheduler {
     @Override
     public float getLr() {
         return optimizer.learningRate();
+    }
+
+    @Override
+    public boolean supportsStateDict() {
+        return true;
+    }
+
+    @Override
+    public Map<String, Object> stateDict() {
+        Map<String, Object> state = new HashMap<>();
+        state.put("scheduler", "StepLR");
+        state.put("initialLr", initialLr);
+        state.put("stepSize", stepSize);
+        state.put("gamma", gamma);
+        state.put("step", step);
+        state.put("currentLr", optimizer.learningRate());
+        return state;
+    }
+
+    @Override
+    public void loadStateDict(Map<String, Object> state) {
+        if (state == null || state.isEmpty()) {
+            return;
+        }
+        Object schedulerName = state.get("scheduler");
+        if (schedulerName instanceof String name && !"StepLR".equals(name)) {
+            throw new IllegalArgumentException(
+                    "Checkpoint scheduler mismatch: expected StepLR but got " + name);
+        }
+        requireFloatMatch(state.get("initialLr"), initialLr, "initialLr");
+        requireIntMatch(state.get("stepSize"), stepSize, "stepSize");
+        requireFloatMatch(state.get("gamma"), gamma, "gamma");
+        this.step = Math.max(0, readInt(state.get("step"), step));
+        setLearningRate(readFloat(state.get("currentLr"), computeLearningRateForStep(this.step)));
+    }
+
+    private float computeLearningRateForStep(int targetStep) {
+        int decayCount = Math.max(0, targetStep) / stepSize;
+        float newLr = initialLr;
+        for (int i = 0; i < decayCount; i++) {
+            newLr *= gamma;
+        }
+        return newLr;
+    }
+
+    private static void requireIntMatch(Object value, int expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        int loaded = readInt(value, expected);
+        if (loaded != expected) {
+            throw new IllegalArgumentException(
+                    "Invalid StepLR checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static void requireFloatMatch(Object value, float expected, String fieldName) {
+        if (value == null) {
+            return;
+        }
+        float loaded = readFloat(value, expected);
+        if (Math.abs(loaded - expected) > 1e-7f) {
+            throw new IllegalArgumentException(
+                    "Invalid StepLR checkpoint payload: " + fieldName
+                            + " mismatch (expected " + expected + ", got " + loaded + ")");
+        }
+    }
+
+    private static int readInt(Object value, int fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static float readFloat(Object value, float fallback) {
+        if (value instanceof Number number) {
+            return number.floatValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Float.parseFloat(text);
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     @Override

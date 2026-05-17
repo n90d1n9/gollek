@@ -1,11 +1,13 @@
 package tech.kayys.gollek.spi.provider;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.tool.ToolDefinition;
 
 /**
@@ -63,6 +65,51 @@ public final class ProviderRequests {
     public static CopyBuilder copyOf(ProviderRequest source) {
         Objects.requireNonNull(source, "source");
         return new CopyBuilder(source);
+    }
+
+    /**
+     * Map an {@link InferenceRequest} into a {@link ProviderRequest} for direct
+     * local execution.
+     */
+    public static ProviderRequest fromInferenceRequest(
+            InferenceRequest request,
+            String providerModel,
+            boolean streaming,
+            Duration defaultTimeout,
+            String preferredProvider,
+            Map<String, Object> parameterOverrides,
+            Map<String, Object> metadataOverrides) {
+        Objects.requireNonNull(request, "request");
+
+        Map<String, Object> parameters = new HashMap<>(request.getParameters());
+        if (parameters.containsKey("repeat_penalty") && !parameters.containsKey("repetition_penalty")) {
+            parameters.put("repetition_penalty", parameters.get("repeat_penalty"));
+        }
+        if (parameters.containsKey("repetition_penalty") && !parameters.containsKey("repeat_penalty")) {
+            parameters.put("repeat_penalty", parameters.get("repetition_penalty"));
+        }
+        if (parameterOverrides != null) {
+            parameters.putAll(parameterOverrides);
+        }
+
+        Map<String, Object> metadata = new HashMap<>(request.getMetadata());
+        if (metadataOverrides != null) {
+            metadata.putAll(metadataOverrides);
+        }
+
+        return ProviderRequest.builder()
+                .requestId(request.getRequestId())
+                .model(providerModel != null ? providerModel : request.getModel())
+                .messages(request.getMessages())
+                .parameters(parameters)
+                .streaming(streaming)
+                .timeout(request.getTimeout().orElse(defaultTimeout))
+                .userId(request.getUserId().orElse(null))
+                .sessionId(request.getSessionId().orElse(null))
+                .traceId(request.getTraceId().orElse(null))
+                .metadata(metadata)
+                .preferredProvider(request.getPreferredProvider().orElse(preferredProvider))
+                .build();
     }
 
     // ── CopyBuilder ───────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 package tech.kayys.gollek.nlp;
 
-import tech.kayys.gollek.ml.tensor.Tensor;
+import tech.kayys.gollek.ml.autograd.GradTensor;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -24,7 +24,7 @@ public class Token {
     private boolean isStop;
     private boolean isPunct;
 
-    private Tensor vector;
+    private GradTensor vector;
     private Map<String, Object> userDict;
 
     private Token(Builder builder) {
@@ -102,7 +102,7 @@ public class Token {
         return isPunct;
     }
 
-    public Tensor getVector() {
+    public GradTensor getVector() {
         return vector;
     }
 
@@ -139,7 +139,7 @@ public class Token {
         isPunct = punct;
     }
 
-    public void setVector(Tensor vector) {
+    public void setVector(GradTensor vector) {
         this.vector = vector;
     }
 
@@ -168,7 +168,7 @@ public class Token {
         private boolean isAlpha;
         private boolean isStop;
         private boolean isPunct;
-        private Tensor vector;
+        private GradTensor vector;
         private Map<String, Object> userDict = new HashMap<>();
 
         public Builder doc(Doc doc) {
@@ -236,7 +236,7 @@ public class Token {
             return this;
         }
 
-        public Builder vector(Tensor vector) {
+        public Builder vector(GradTensor vector) {
             this.vector = vector;
             return this;
         }

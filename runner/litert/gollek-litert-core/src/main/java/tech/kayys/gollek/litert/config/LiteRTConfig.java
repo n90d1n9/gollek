@@ -1,4 +1,4 @@
-package tech.kayys.gollek.ml.litert.config;
+package tech.kayys.gollek.litert.config;
 
 import java.util.Objects;
 

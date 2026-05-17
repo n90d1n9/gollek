@@ -11,6 +11,12 @@ import tech.kayys.gollek.ir.GValueId;
 import java.util.*;
 import java.util.function.Consumer;
 
+/**
+ * @deprecated Legacy training entrypoint retained for compatibility.
+ *             Prefer {@link tech.kayys.gollek.trainer.Trainers} and the
+ *             richer {@link tech.kayys.gollek.ml.train.Trainer} runtime.
+ */
+@Deprecated(since = "0.1.0", forRemoval = false)
 public final class Trainer {
     private final Module model;
     private final Optimizer optimizer;

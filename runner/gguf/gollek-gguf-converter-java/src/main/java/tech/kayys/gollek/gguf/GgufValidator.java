@@ -75,6 +75,14 @@ public final class GgufValidator {
             // Check tokenizer presence
             if (!model.getMeta("tokenizer.ggml.model").isPresent()) {
                 warnings.add("No tokenizer metadata found");
+            } else {
+                String tokenizerModel = model.getMeta("tokenizer.ggml.model")
+                        .map(GgufMetaValue::asString)
+                        .orElse("");
+                if ("gpt2".equalsIgnoreCase(tokenizerModel)
+                        && !model.getMeta("tokenizer.ggml.merges").isPresent()) {
+                    errors.add("Missing required metadata for gpt2 tokenizer: tokenizer.ggml.merges");
+                }
             }
 
             // Check shape consistency

@@ -7,7 +7,7 @@ import org.jboss.logging.Logger;
 import tech.kayys.gollek.spi.context.RequestContext;
 import tech.kayys.gollek.spi.model.ModelManifest;
 import tech.kayys.gollek.spi.model.Pageable;
-import tech.kayys.gollek.registry.repository.CachedModelRepository;
+import tech.kayys.gollek.model.cache.CachedModelRepository;
 
 import java.util.List;
 

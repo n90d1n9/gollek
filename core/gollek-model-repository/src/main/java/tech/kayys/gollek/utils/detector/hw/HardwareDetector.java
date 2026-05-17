@@ -18,7 +18,9 @@ package tech.kayys.gollek.model.core;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 import tech.kayys.gollek.model.config.HardwareConfig;
+import tech.kayys.gollek.spi.spec.HardwareCapabilities;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
@@ -27,6 +29,8 @@ import java.nio.file.Paths;
  */
 @ApplicationScoped
 public class HardwareDetector {
+
+    private static final Logger LOG = Logger.getLogger(HardwareDetector.class);
 
     @Inject
     HardwareConfig hardwareConfig;
@@ -39,8 +43,11 @@ public class HardwareDetector {
                 .build();
     }
 
-    @Override
     public boolean cudaEnabled() {
+        return isCUDAAvailable();
+    }
+
+    public boolean hasCUDA() {
         return isCUDAAvailable();
     }
 

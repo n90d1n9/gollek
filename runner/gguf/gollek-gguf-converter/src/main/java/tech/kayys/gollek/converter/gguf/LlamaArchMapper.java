@@ -114,6 +114,10 @@ public final class LlamaArchMapper {
                 model.addMeta("tokenizer.ggml.tokens",
                         GgufMetaValue.ofStringArray(tok.vocab()));
             }
+            if (!tok.merges().isEmpty()) {
+                model.addMeta("tokenizer.ggml.merges",
+                        GgufMetaValue.ofStringArray(tok.merges()));
+            }
             if (!tok.scores().isEmpty()) {
                 model.addMeta("tokenizer.ggml.scores",
                         GgufMetaValue.ofFloat32Array(tok.scores()));

@@ -1,7 +1,7 @@
 package tech.kayys.gollek.spi.registry;
 
 import org.junit.jupiter.api.Test;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.gollek.spi.model.ModelFormat;
 
 import java.nio.file.Path;
 import java.time.Instant;

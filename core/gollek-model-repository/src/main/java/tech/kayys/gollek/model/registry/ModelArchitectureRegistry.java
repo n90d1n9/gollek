@@ -1,4 +1,4 @@
-package tech.kayys.gollek.models.core;
+package tech.kayys.gollek.model.registry;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Any;
@@ -42,14 +42,14 @@ public class ModelArchitectureRegistry {
         String modelType = config.modelType();
 
         for (ModelArchitecture arch : allArchitectures) {
-            if (arch.supportedArchClassNames().contains(primaryArch)) {
-                log.debugf("Architecture resolved by class name: %s → %s", primaryArch, arch.id());
+            if (modelType != null && arch.supportedModelTypes().contains(modelType)) {
+                log.debugf("Architecture resolved by model_type: %s → %s", modelType, arch.id());
                 return arch;
             }
         }
         for (ModelArchitecture arch : allArchitectures) {
-            if (modelType != null && arch.supportedModelTypes().contains(modelType)) {
-                log.debugf("Architecture resolved by model_type: %s → %s", modelType, arch.id());
+            if (arch.supportedArchClassNames().contains(primaryArch)) {
+                log.debugf("Architecture resolved by class name: %s → %s", primaryArch, arch.id());
                 return arch;
             }
         }

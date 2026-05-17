@@ -1,5 +1,5 @@
 //REPOS mavenLocal,central
-//DEPS tech.kayys.gollek:gollek-audio:0.1.0-SNAPSHOT
+//DEPS tech.kayys.gollek:gollek-ml-audio:0.1.0-SNAPSHOT
 //JAVA 25
 //JAVA_OPTIONS --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
 

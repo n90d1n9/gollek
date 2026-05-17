@@ -12,10 +12,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import tech.kayys.gollek.spi.execution.ExecutionContext;
-import tech.kayys.gollek.spi.plugin.InferencePhasePlugin;
 import tech.kayys.gollek.spi.context.EngineContext;
-import tech.kayys.gollek.spi.plugin.InferencePhase;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
+import tech.kayys.gollek.spi.inference.InferencePhase;
+import tech.kayys.gollek.spi.inference.InferencePhasePlugin;
 import tech.kayys.gollek.spi.plugin.PluginContext;
 import tech.kayys.gollek.spi.exception.PluginException;
 import tech.kayys.gollek.spi.plugin.PhasePluginException;
@@ -116,7 +116,7 @@ public class SamplingPolicyPlugin implements InferencePhasePlugin {
                 getDouble(params, "temperature", defaultTemperature),
                 getInt(params, "top_k", defaultTopK),
                 getDouble(params, "top_p", defaultTopP),
-                getDouble(params, "repetition_penalty", defaultRepetitionPenalty),
+                getDoubleAlias(params, "repetition_penalty", "repeat_penalty", defaultRepetitionPenalty),
                 getDouble(params, "presence_penalty", defaultPresencePenalty),
                 getInt(params, "max_tokens", defaultMaxTokens),
                 getStringList(params, "stop"),
@@ -154,6 +154,14 @@ public class SamplingPolicyPlugin implements InferencePhasePlugin {
     private double getDouble(Map<String, Object> params, String key, double defaultValue) {
         Object val = params.get(key);
         if (val instanceof Number n) return n.doubleValue();
+        return defaultValue;
+    }
+
+    private double getDoubleAlias(Map<String, Object> params, String primaryKey, String aliasKey, double defaultValue) {
+        Object val = params.get(primaryKey);
+        if (val instanceof Number n) return n.doubleValue();
+        Object alias = params.get(aliasKey);
+        if (alias instanceof Number n) return n.doubleValue();
         return defaultValue;
     }
 

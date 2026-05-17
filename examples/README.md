@@ -30,15 +30,15 @@ A comprehensive collection of working examples demonstrating Gollek's capabiliti
 - [nlp_sentiment_analysis.java](jbang/nlp/nlp_sentiment_analysis.java) - Text classification
 - [nlp_transformer_classifier.java](jbang/nlp/nlp_transformer_classifier.java) - Custom classifier training
 
-### 🔧 **SDK Integration**
+### 🔧 **ML Framework & Compatibility**
 
 #### JBang Examples
-- [gollek-quickstart.java](jbang/sdk/gollek-quickstart.java) - Quick start guide
-- [gollek-sdk-core-example.java](jbang/sdk/gollek-sdk-core-example.java) - Core SDK features
-- [gollek-sdk-vision-example.java](jbang/sdk/gollek-sdk-vision-example.java) - Vision API
-- [gollek-sdk-train-example.java](jbang/sdk/gollek-sdk-train-example.java) - Training API
-- [gollek-sdk-augment-example.java](jbang/sdk/gollek-sdk-augment-example.java) - Data augmentation
-- [gollek-sdk-export-example.java](jbang/sdk/gollek-sdk-export-example.java) - Model export
+- [gollek-quickstart.java](jbang/sdk/gollek-quickstart.java) - Quick start guide for the ML framework migration
+- [gollek-sdk-core-example.java](jbang/sdk/gollek-sdk-core-example.java) - Legacy SDK-named tensor/core compatibility sample
+- [gollek-sdk-vision-example.java](jbang/sdk/gollek-sdk-vision-example.java) - Legacy SDK-named vision compatibility sample
+- [gollek-sdk-train-example.java](jbang/sdk/gollek-sdk-train-example.java) - Legacy SDK-named trainer compatibility sample
+- [gollek-sdk-augment-example.java](jbang/sdk/gollek-sdk-augment-example.java) - Legacy SDK-named augmentation compatibility sample
+- [gollek-sdk-export-example.java](jbang/sdk/gollek-sdk-export-example.java) - Legacy SDK-named export compatibility sample
 - [graph_fusion_example.java](jbang/sdk/graph_fusion_example.java) - Graph optimization
 - [unified_framework_demo.java](jbang/sdk/unified_framework_demo.java) - Unified inference
 - [mnist_training_v02.java](jbang/sdk/mnist_training_v02.java) - MNIST training
@@ -141,7 +141,7 @@ jupyter notebook examples/jupyter
 | **Vision QA** | ✅ 1 | ❌ | LLaVA image understanding |
 | **Video Analysis** | ✅ 1 | ❌ | Temporal video understanding |
 | **NLP/Chat** | ✅ 6 | ✅ 1 | Text generation & classification |
-| **SDK Usage** | ✅ 13 | ✅ 1 | Core API examples |
+| **ML Framework / Compatibility** | ✅ 13 | ✅ 1 | Core API and migration examples |
 | **Edge/LiteRT** | ✅ 9 | ❌ | Mobile/edge inference |
 | **Quantization** | ✅ 5 | ❌ | Model compression |
 | **Integrations** | ✅ 5 | ❌ | Third-party libraries |

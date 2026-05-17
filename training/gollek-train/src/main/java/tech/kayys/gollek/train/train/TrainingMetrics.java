@@ -3,6 +3,8 @@ package tech.kayys.gollek.ml.train;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import tech.kayys.gollek.trainer.api.TrainingSummary;
+
 /**
  * Training metrics tracker.
  *
@@ -247,6 +249,17 @@ public class TrainingMetrics {
         summary.put("duration_ms", getDurationMs());
         summary.put("duration_sec", getDurationMs() / 1000.0);
         return summary;
+    }
+
+    public TrainingSummary toTrainingSummary() {
+        return new TrainingSummary(
+                getEpochCount(),
+                getBestValLoss(),
+                getBestValLossEpoch(),
+                getLatestTrainLoss(),
+                getLatestValLoss(),
+                getDurationMs(),
+                getSummary());
     }
 
     @Override

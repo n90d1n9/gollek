@@ -30,6 +30,16 @@ public final class MetalFlashAttentionCpuFallback {
             MemorySegment value,
             int B, int T, int S, int H, int Hkv, int D,
             float scale, boolean isCausal) {
+        return execute(output, query, key, value, B, T, S, H, Hkv, D, scale, isCausal, 0.0f);
+    }
+
+    public static int execute(
+            MemorySegment output,
+            MemorySegment query,
+            MemorySegment key,
+            MemorySegment value,
+            int B, int T, int S, int H, int Hkv, int D,
+            float scale, boolean isCausal, float softCap) {
 
         LOG.debug("MetalFlashAttention CPU fallback (native unavailable)");
 
@@ -38,13 +48,14 @@ public final class MetalFlashAttentionCpuFallback {
         for (int b = 0; b < B; b++) {
             for (int h = 0; h < H; h++) {
                 int hk = h / groupSize;
+                int causalOffset = Math.max(0, S - T);
 
                 for (int t = 0; t < T; t++) {
                     float[] scores = new float[S];
                     float maxS = Float.NEGATIVE_INFINITY;
 
                     for (int s = 0; s < S; s++) {
-                        if (isCausal && s > t) {
+                        if (isCausal && s > causalOffset + t) {
                             scores[s] = Float.NEGATIVE_INFINITY;
                             continue;
                         }
@@ -54,14 +65,18 @@ public final class MetalFlashAttentionCpuFallback {
                             long ki = ((long) (b * S * Hkv + s * Hkv + hk) * D + d);
                             dot += getf(query, qi) * getf(key, ki);
                         }
-                        scores[s] = dot * scale;
+                        float score = dot * scale;
+                        if (softCap > 0.0f) {
+                            score = (float) (Math.tanh(score / softCap) * softCap);
+                        }
+                        scores[s] = score;
                         if (scores[s] > maxS)
                             maxS = scores[s];
                     }
 
                     float sum = 0f;
                     for (int s = 0; s < S; s++) {
-                        if (!isCausal || s <= t) {
+                        if (!isCausal || s <= causalOffset + t) {
                             scores[s] = (float) Math.exp(scores[s] - maxS);
                             sum += scores[s];
                         } else {

@@ -1,6 +1,6 @@
 package tech.kayys.gollek.ml.vision.transforms;
 
-import tech.kayys.gollek.ml.tensor.Tensor;
+import tech.kayys.gollek.ml.autograd.GradTensor;
 import java.util.List;
 import java.util.Random;
 
@@ -30,8 +30,8 @@ import java.util.Random;
  *         ));
  *
  * // Apply to image
- * Tensor image = Tensor.randn(3, 256, 256);
- * Tensor processed = pipeline.apply(image);
+ * GradTensor image = GradTensor.randn(3, 256, 256);
+ * GradTensor processed = pipeline.apply(image);
  * }</pre>
  *
  * @author Gollek Team
@@ -46,7 +46,7 @@ public final class VisionTransforms {
      * Base transform interface.
      */
     public interface Transform {
-        Tensor apply(Tensor tensor);
+        GradTensor apply(GradTensor tensor);
     }
 
     /**
@@ -62,7 +62,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             long[] shape = tensor.shape();
             int channels = (int) shape[0];
             int srcH = (int) shape[1];
@@ -105,7 +105,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(dstData, channels, height, width);
+            return GradTensor.of(dstData, channels, height, width);
         }
     }
 
@@ -122,7 +122,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             long[] shape = tensor.shape();
             int channels = (int) shape[0];
             int srcH = (int) shape[1];
@@ -148,7 +148,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(dstData, channels, height, width);
+            return GradTensor.of(dstData, channels, height, width);
         }
     }
 
@@ -166,7 +166,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             long[] shape = tensor.shape();
             int channels = (int) shape[0];
             int srcH = (int) shape[1];
@@ -191,7 +191,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(dstData, channels, height, width);
+            return GradTensor.of(dstData, channels, height, width);
         }
     }
 
@@ -208,7 +208,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             float[] data = tensor.data().clone();
             long[] shape = tensor.shape();
             int channels = (int) shape[0];
@@ -222,7 +222,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(data, shape);
+            return GradTensor.of(data, shape);
         }
     }
 
@@ -231,12 +231,12 @@ public final class VisionTransforms {
      */
     public static class ToTensor implements Transform {
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             float[] data = tensor.data().clone();
             for (int i = 0; i < data.length; i++) {
                 data[i] = data[i] / 255f;
             }
-            return Tensor.of(data, tensor.shape());
+            return GradTensor.of(data, tensor.shape());
         }
     }
 
@@ -252,7 +252,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             if (random.nextFloat() > probability) {
                 return tensor;
             }
@@ -275,7 +275,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(dstData, shape);
+            return GradTensor.of(dstData, shape);
         }
     }
 
@@ -291,7 +291,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             if (random.nextFloat() > probability) {
                 return tensor;
             }
@@ -314,7 +314,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(dstData, shape);
+            return GradTensor.of(dstData, shape);
         }
     }
 
@@ -334,7 +334,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             float[] data = tensor.data().clone();
 
             // Apply brightness
@@ -353,7 +353,7 @@ public final class VisionTransforms {
                 }
             }
 
-            return Tensor.of(data, tensor.shape());
+            return GradTensor.of(data, tensor.shape());
         }
     }
 
@@ -368,7 +368,7 @@ public final class VisionTransforms {
         }
 
         @Override
-        public Tensor apply(Tensor tensor) {
+        public GradTensor apply(GradTensor tensor) {
             for (Transform t : transforms) {
                 tensor = t.apply(tensor);
             }

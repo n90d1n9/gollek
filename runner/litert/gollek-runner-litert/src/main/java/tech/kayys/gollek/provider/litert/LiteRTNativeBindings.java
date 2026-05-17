@@ -597,6 +597,39 @@ public class LiteRTNativeBindings {
         }
     }
 
+    public LitertType getTensorTypeId(MemorySegment tensor, Arena arena) {
+        try {
+            MemorySegment out = arena.allocate(JAVA_INT);
+            int status = (int) hGetTensorTypeId.invoke(tensor, out);
+            check(status, "LiteRtGetTensorTypeId");
+            return LitertType.fromInt(out.get(JAVA_INT, 0));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable e) {
+            throw new RuntimeException("Failed to get tensor type id", e);
+        }
+    }
+
+    /**
+     * Returns the raw ranked tensor type struct bytes.
+     *
+     * <p>The exact layout is platform/runtime specific, so callers that only
+     * need debugging/introspection should inspect the returned bytes rather
+     * than assuming a stable Java struct layout.
+     */
+    public MemorySegment getRankedTensorType(MemorySegment tensor, Arena arena) {
+        try {
+            MemorySegment out = arena.allocate(128, 8);
+            int status = (int) hGetRankedTensorType.invoke(tensor, out);
+            check(status, "LiteRtGetRankedTensorType");
+            return out;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable e) {
+            throw new RuntimeException("Failed to get ranked tensor type", e);
+        }
+    }
+
     // ====================================================================
     // PUBLIC API — Options
     // ====================================================================
@@ -841,6 +874,23 @@ public class LiteRTNativeBindings {
             throw e;
         } catch (Throwable e) {
             throw new RuntimeException("Failed to get tensor buffer size", e);
+        }
+    }
+
+    /** Gets the required byte size for a TensorBufferRequirements handle. */
+    public long getTensorBufferRequirementsBufferSize(MemorySegment requirements, Arena arena) {
+        if (hGetTensorBufferRequirementsBufferSize == null) {
+            throw new UnsupportedOperationException("TensorBufferRequirements size query not available");
+        }
+        try {
+            MemorySegment out = arena.allocate(JAVA_LONG);
+            int status = (int) hGetTensorBufferRequirementsBufferSize.invoke(requirements, out);
+            check(status, "LiteRtGetTensorBufferRequirementsBufferSize");
+            return out.get(JAVA_LONG, 0);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable e) {
+            throw new RuntimeException("Failed to get tensor buffer requirements size", e);
         }
     }
 

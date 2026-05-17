@@ -23,7 +23,8 @@ public class GemmaFamily implements ModelArchitecture {
 
     @Override
     public boolean usesNeoxRope() {
-        return false;
+        // Gemma text variants (including Gemma3) follow split-half rotate_half.
+        return true;
     }
 
     @Override
@@ -33,7 +34,7 @@ public class GemmaFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("gemma", "gemma2", "gemma3", "gemma3_text", "gemma4", "gemma4_text");
+        return List.of("gemma", "gemma2", "gemma4", "gemma4_text");
     }
 
     @Override
@@ -149,6 +150,11 @@ public class GemmaFamily implements ModelArchitecture {
         return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
     }
 
+    @Override
+    public String layerPostFfnNormWeight(int i) {
+        return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
+    }
+
     // ── Runtime inference behaviors ──────────────────────────────────────────
 
     @Override
@@ -159,10 +165,7 @@ public class GemmaFamily implements ModelArchitecture {
 
     @Override
     public boolean addOneToRmsNormWeight() {
-        // The local GGUF fallback path is used primarily for newer Gemma text
-        // variants where the native runtime should not apply the legacy Gemma
-        // "weight + 1" RMSNorm adjustment.
-        return false;
+        return true;
     }
 
     @Override

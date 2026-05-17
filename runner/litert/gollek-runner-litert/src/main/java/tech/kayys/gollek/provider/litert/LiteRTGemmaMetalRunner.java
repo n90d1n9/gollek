@@ -38,21 +38,44 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
     private final Path modelPath;
     private final LiteRTTokenizer tokenizer;
 
-    private final Arena arena = Arena.ofAuto();
+    private final Arena arena = Arena.ofShared();
     private Map<String, MemorySegment> weightSegments;
     private final Map<String, MemorySegment> dequantizedWeights = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Integer, MemorySegment> lmHeadChunkCache = new ConcurrentHashMap<>();
+    private long matmulCalls;
+    private long rmsNormCalls;
+    private long addCalls;
+    private long dequantizeNanos;
+    private long lmHeadNanos;
     private boolean initialized = false;
 
     // ── Architecture Constants (Gemma-4 E2B) ──────────────────────────────────
     private static final int NUM_LAYERS = 35;
     private static final int HIDDEN_DIM = 1536;
+    private static final int PLE_DIM = 256;
     private static final int NUM_Q_HEADS = 8;
     private static final int NUM_KV_HEADS = 1;
-    private static final int HEAD_DIM = 256;
-    private static final int Q_DIM = NUM_Q_HEADS * HEAD_DIM;   // 2048
-    private static final int KV_DIM = NUM_KV_HEADS * HEAD_DIM; // 256
+    private static final int LOCAL_HEAD_DIM = 256;
+    private static final int GLOBAL_HEAD_DIM = 512;
+    private static final int MAX_HEAD_DIM = GLOBAL_HEAD_DIM;
+    private static final int MAX_Q_DIM = NUM_Q_HEADS * MAX_HEAD_DIM;
+    private static final int MAX_KV_DIM = NUM_KV_HEADS * MAX_HEAD_DIM;
     private static final int FFN_DIM = 6144;
     private static final int MAX_SEQ_LEN = 2048;
+    private static final int SLIDING_WINDOW = 512;
+    private static final int LM_HEAD_CHUNK_SIZE = 262144;
+    private static final float EMBEDDING_SCALE = (float) Math.sqrt(HIDDEN_DIM);
+    private static final float PLE_EMBEDDING_SCALE = (float) Math.sqrt(PLE_DIM);
+    private static final float PER_LAYER_BLEND_SCALE = (float) (1.0 / Math.sqrt(2.0));
+    private static final float PER_LAYER_MODEL_SCALE = (float) (1.0 / Math.sqrt(HIDDEN_DIM));
+    private static final float FINAL_LOGIT_SOFTCAP = 30.0f;
+    private static final float RMS_EPS = 1.0e-6f;
+    private static final boolean DISABLE_GEMMA4_PLE =
+            Boolean.getBoolean("gollek.litert.disable_gemma4_ple");
+    private static final boolean DISABLE_GEMMA4_LAYER_SCALAR =
+            Boolean.getBoolean("gollek.litert.disable_gemma4_layer_scalar");
+    private static final boolean USE_LEGACY_SIGNED_ROW_MAJOR_INT4 =
+            Boolean.getBoolean("gollek.litert.legacy_signed_row_major_int4");
 
     // TFLite type constants
     private static final int TFLITE_INT8 = 9;
@@ -62,6 +85,13 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
     // Per-layer KV cache: [seqLen, numKvHeads, headDim]
     private MemorySegment[] kCaches;
     private MemorySegment[] vCaches;
+    private MemorySegment localUnitNormWeight;
+    private MemorySegment globalUnitNormWeight;
+    private int[] layerHeadDims;
+    private int[] layerQDims;
+    private int[] layerKVDims;
+    private boolean[] fullAttentionLayers;
+    private boolean[] ownKvLayers;
     private int cacheLen = 0;
 
     public LiteRTGemmaMetalRunner(Path modelPath, LiteRTTokenizer tokenizer) {
@@ -103,6 +133,9 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
         }
         String device = metal.deviceName();
         log.info("✓ Compute backend: {} (unified_mem={})", device, metal.isUnifiedMemory());
+        if (!metal.isNativeAvailable()) {
+            log.warn("Metal native bridge is unavailable; using checked CPU fallback kernels.");
+        }
 
         // 2. Load weights from .task file
         Path weightSource = resolveWeightSource();
@@ -123,19 +156,51 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
         }
         log.info("✓ {} weight tensors memory-mapped", weightSegments.size());
 
-        // 3. Allocate KV caches (per-layer)
+        // 3. Discover per-layer layout and allocate KV caches
+        initializeLayerLayouts();
+        localUnitNormWeight = arena.allocate((long) LOCAL_HEAD_DIM * Float.BYTES, 64);
+        globalUnitNormWeight = arena.allocate((long) GLOBAL_HEAD_DIM * Float.BYTES, 64);
+        for (int i = 0; i < LOCAL_HEAD_DIM; i++) {
+            localUnitNormWeight.setAtIndex(ValueLayout.JAVA_FLOAT, i, 1.0f);
+        }
+        for (int i = 0; i < GLOBAL_HEAD_DIM; i++) {
+            globalUnitNormWeight.setAtIndex(ValueLayout.JAVA_FLOAT, i, 1.0f);
+        }
         kCaches = new MemorySegment[NUM_LAYERS];
         vCaches = new MemorySegment[NUM_LAYERS];
-        long kvLayerSize = (long) MAX_SEQ_LEN * KV_DIM * 4; // float32
+        long totalKvBytes = 0L;
         for (int l = 0; l < NUM_LAYERS; l++) {
+            long kvLayerSize = (long) MAX_SEQ_LEN * layerKVDims[l] * 4;
             kCaches[l] = arena.allocate(kvLayerSize, 64);
             vCaches[l] = arena.allocate(kvLayerSize, 64);
+            totalKvBytes += kvLayerSize * 2;
         }
         cacheLen = 0;
-        log.info("✓ KV-Cache allocated ({} MB per layer, {} layers)",
-                kvLayerSize * 2 / (1024 * 1024), NUM_LAYERS);
+        log.info("✓ KV-Cache allocated ({} MB total across {} layers)",
+                totalKvBytes / (1024 * 1024), NUM_LAYERS);
 
         this.initialized = true;
+    }
+
+    private void initializeLayerLayouts() {
+        layerHeadDims = new int[NUM_LAYERS];
+        layerQDims = new int[NUM_LAYERS];
+        layerKVDims = new int[NUM_LAYERS];
+        fullAttentionLayers = new boolean[NUM_LAYERS];
+        ownKvLayers = new boolean[NUM_LAYERS];
+
+        for (int l = 0; l < NUM_LAYERS; l++) {
+            String prefix = "transformer.layer_" + l + ".";
+            int headDim = LOCAL_HEAD_DIM;
+            if (hasWeight(prefix + "attn.q_norm.scale")) {
+                headDim = (int) (getWeight(prefix + "attn.q_norm.scale").byteSize() / Float.BYTES);
+            }
+            layerHeadDims[l] = headDim;
+            layerQDims[l] = NUM_Q_HEADS * headDim;
+            layerKVDims[l] = NUM_KV_HEADS * headDim;
+            fullAttentionLayers[l] = headDim > LOCAL_HEAD_DIM;
+            ownKvLayers[l] = hasWeight(prefix + "attn.k.w");
+        }
     }
 
     // ── Weight Access Helpers ────────────────────────────────────────────────
@@ -154,14 +219,14 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
 
     /**
      * Dequantize INT4 packed weight tensor to float32.
-     * INT4 packs 2 values per byte (little-endian nibble order).
-     * Each output element = int4_val * scale[output_channel].
      *
-     * @param weight INT4 packed data [outDim * inDim / 2 bytes]
-     * @param scale  float32 per-output-channel scales [outDim]
-     * @param outDim output dimension (rows)
-     * @param inDim  input dimension (cols)
-     * @return float32 MemorySegment [outDim × inDim]
+     * <p>The Gemma LiteRT companion `.task` weights are packed input-major and use
+     * centered unsigned nibbles (q - 8) with one scale per output channel. We
+     * expand them here into a conventional row-major [outDim, inDim] matrix so
+     * the rest of the runner can keep using standard GEMM.
+     *
+     * <p>The legacy row-major signed-nibble path remains behind a property only
+     * as a diagnostics escape hatch.
      */
     private MemorySegment dequantizeInt4(MemorySegment weight, MemorySegment scale,
                                           int outDim, int inDim, Arena a) {
@@ -171,22 +236,38 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
         byte[] wArr = weight.toArray(ValueLayout.JAVA_BYTE);
         float[] sArr = scale.toArray(ValueLayout.JAVA_FLOAT);
 
-        for (int row = 0; row < outDim; row++) {
-            float s = sArr[row];
-            int rowByteOffset = row * inDim / 2;
-            long outRowOffset = (long) row * inDim;
+        if (USE_LEGACY_SIGNED_ROW_MAJOR_INT4) {
+            for (int row = 0; row < outDim; row++) {
+                float s = sArr[row];
+                int rowByteOffset = row * inDim / 2;
+                long outRowOffset = (long) row * inDim;
 
-            for (int col = 0; col < inDim; col += 2) {
-                byte packed = wArr[rowByteOffset + col / 2];
-                int lo = (packed & 0x0F);
-                int hi = (packed >> 4) & 0x0F;
-                if (lo >= 8) lo -= 16;
-                if (hi >= 8) hi -= 16;
+                for (int col = 0; col < inDim; col += 2) {
+                    byte packed = wArr[rowByteOffset + col / 2];
+                    int lo = (packed & 0x0F);
+                    int hi = (packed >> 4) & 0x0F;
+                    if (lo >= 8) lo -= 16;
+                    if (hi >= 8) hi -= 16;
 
-                out.setAtIndex(ValueLayout.JAVA_FLOAT, outRowOffset + col, lo * s);
-                if (col + 1 < inDim) {
-                    out.setAtIndex(ValueLayout.JAVA_FLOAT, outRowOffset + col + 1, hi * s);
+                    out.setAtIndex(ValueLayout.JAVA_FLOAT, outRowOffset + col, lo * s);
+                    if (col + 1 < inDim) {
+                        out.setAtIndex(ValueLayout.JAVA_FLOAT, outRowOffset + col + 1, hi * s);
+                    }
                 }
+            }
+            return out;
+        }
+
+        for (int in = 0; in < inDim; in++) {
+            long baseFlatIndex = (long) in * outDim;
+            for (int outRow = 0; outRow < outDim; outRow++) {
+                long flatIndex = baseFlatIndex + outRow;
+                int packed = wArr[(int) (flatIndex >>> 1)] & 0xFF;
+                int q = ((flatIndex & 1L) == 0L) ? (packed & 0x0F) : ((packed >>> 4) & 0x0F);
+                q -= 8;
+                out.setAtIndex(ValueLayout.JAVA_FLOAT,
+                        (long) outRow * inDim + in,
+                        q * sArr[outRow]);
             }
         }
         return out;
@@ -215,11 +296,195 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
         return out;
     }
 
+    private void lookupScaledEmbeddingRow(
+            MemorySegment out,
+            MemorySegment packedWeight,
+            MemorySegment scale,
+            int tokenId,
+            int dim,
+            float embeddingScale) {
+        int vocabSize = (int) (scale.byteSize() / Float.BYTES);
+        if (tokenId < 0 || tokenId >= vocabSize) {
+            throw new IllegalArgumentException("Token id " + tokenId + " out of range for vocab " + vocabSize);
+        }
+
+        long rowBytes = packedWeight.byteSize() / vocabSize;
+        if (rowBytes * vocabSize != packedWeight.byteSize()) {
+            throw new IllegalStateException("Embedding table size does not divide cleanly by vocab");
+        }
+
+        float rowScale = scale.getAtIndex(ValueLayout.JAVA_FLOAT, tokenId);
+        if (rowBytes == dim) {
+            long rowOffset = (long) tokenId * dim;
+            for (int i = 0; i < dim; i++) {
+                byte val = packedWeight.get(ValueLayout.JAVA_BYTE, rowOffset + i);
+                out.setAtIndex(ValueLayout.JAVA_FLOAT, i, val * rowScale * embeddingScale);
+            }
+            return;
+        }
+
+        if (rowBytes * 2 == dim) {
+            long rowOffset = (long) tokenId * rowBytes;
+            for (int i = 0; i < dim; i += 2) {
+                int packed = packedWeight.get(ValueLayout.JAVA_BYTE, rowOffset + (i / 2)) & 0xFF;
+                int lo = packed & 0x0F;
+                int hi = (packed >>> 4) & 0x0F;
+                if (lo >= 8) lo -= 16;
+                if (hi >= 8) hi -= 16;
+                out.setAtIndex(ValueLayout.JAVA_FLOAT, i, lo * rowScale * embeddingScale);
+                if (i + 1 < dim) {
+                    out.setAtIndex(ValueLayout.JAVA_FLOAT, i + 1, hi * rowScale * embeddingScale);
+                }
+            }
+            return;
+        }
+
+        if (rowBytes * 4 == dim) {
+            long rowOffset = (long) tokenId * rowBytes;
+            for (int i = 0; i < dim; i++) {
+                int packed = packedWeight.get(ValueLayout.JAVA_BYTE, rowOffset + (i / 4)) & 0xFF;
+                int shift = (i & 0x03) * 2;
+                float q = ((packed >>> shift) & 0x03) - 1.5f;
+                out.setAtIndex(ValueLayout.JAVA_FLOAT, i, q * rowScale * embeddingScale);
+            }
+            return;
+        }
+
+        throw new IllegalStateException("Unsupported embedding row layout: rowBytes=" + rowBytes + " dim=" + dim);
+    }
+
+    private void applyLayerNormPerSlice(MemorySegment packed, MemorySegment normWeight, int slices, int sliceDim) {
+        for (int i = 0; i < slices; i++) {
+            long offset = (long) i * sliceDim * Float.BYTES;
+            rmsNorm(packed.asSlice(offset, (long) sliceDim * Float.BYTES),
+                    packed.asSlice(offset, (long) sliceDim * Float.BYTES),
+                    normWeight,
+                    sliceDim);
+        }
+    }
+
+    private void combinePerLayerInput(
+            MemorySegment out,
+            int layerIndex,
+            int tokenId,
+            MemorySegment projectedPerLayerPacked) {
+        String prefix = "transformer.layer_" + layerIndex + ".";
+        lookupScaledEmbeddingRow(
+                out,
+                getWeight(prefix + "per_layer_embeddings.w"),
+                getWeight(prefix + "per_layer_embeddings.w_quantized_scale"),
+                tokenId,
+                PLE_DIM,
+                PLE_EMBEDDING_SCALE);
+
+        long projectedOffset = (long) layerIndex * PLE_DIM * Float.BYTES;
+        MemorySegment projectedSlice = projectedPerLayerPacked.asSlice(projectedOffset, (long) PLE_DIM * Float.BYTES);
+        for (int i = 0; i < PLE_DIM; i++) {
+            float combined = (out.getAtIndex(ValueLayout.JAVA_FLOAT, i)
+                    + projectedSlice.getAtIndex(ValueLayout.JAVA_FLOAT, i)) * PER_LAYER_BLEND_SCALE;
+            out.setAtIndex(ValueLayout.JAVA_FLOAT, i, combined);
+        }
+    }
+
+    private void geluTanhInPlace(MemorySegment values, int dim) {
+        final float sqrt2OverPi = 0.7978845608f;
+        final float coeff = 0.044715f;
+        for (int i = 0; i < dim; i++) {
+            float x = values.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float x3 = x * x * x;
+            float inner = sqrt2OverPi * (x + coeff * x3);
+            float gelu = 0.5f * x * (1.0f + (float) Math.tanh(inner));
+            values.setAtIndex(ValueLayout.JAVA_FLOAT, i, gelu);
+        }
+    }
+
+    private void geluMultiply(MemorySegment out, MemorySegment gate, MemorySegment up, int dim) {
+        final float sqrt2OverPi = 0.7978845608f;
+        final float coeff = 0.044715f;
+        for (int i = 0; i < dim; i++) {
+            float x = gate.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float x3 = x * x * x;
+            float inner = sqrt2OverPi * (x + coeff * x3);
+            float gelu = 0.5f * x * (1.0f + (float) Math.tanh(inner));
+            out.setAtIndex(ValueLayout.JAVA_FLOAT, i, gelu * up.getAtIndex(ValueLayout.JAVA_FLOAT, i));
+        }
+    }
+
+    private void applyRotaryEmbedding(MemorySegment qk, int headDim, int pos, boolean fullAttention) {
+        int rotaryDim = fullAttention ? headDim / 4 : headDim;
+        float theta = fullAttention ? 1_000_000.0f : 10_000.0f;
+        int half = rotaryDim / 2;
+        for (int i = 0; i < half; i++) {
+            float freq = (float) (1.0 / Math.pow(theta, (double) i / half));
+            float angle = freq * pos;
+            float cos = (float) Math.cos(angle);
+            float sin = (float) Math.sin(angle);
+
+            float x1 = qk.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float x2 = qk.getAtIndex(ValueLayout.JAVA_FLOAT, i + half);
+            qk.setAtIndex(ValueLayout.JAVA_FLOAT, i, x1 * cos - x2 * sin);
+            qk.setAtIndex(ValueLayout.JAVA_FLOAT, i + half, x2 * cos + x1 * sin);
+        }
+    }
+
+    private void applyFinalLogitSoftcap(MemorySegment logits, int size) {
+        for (int i = 0; i < size; i++) {
+            float value = logits.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            float softcapped = (float) Math.tanh(value / FINAL_LOGIT_SOFTCAP) * FINAL_LOGIT_SOFTCAP;
+            logits.setAtIndex(ValueLayout.JAVA_FLOAT, i, softcapped);
+        }
+    }
+
+    private MemorySegment dequantizeEmbeddingChunk(int startRow, int rowCount) {
+        return lmHeadChunkCache.computeIfAbsent(startRow, ignored -> {
+            long startNanos = System.nanoTime();
+            MemorySegment packedWeight = getWeight("transformer.embedder.input_embedding.w");
+            MemorySegment scale = getWeight("transformer.embedder.input_embedding.w_quantized_scale");
+            MemorySegment chunk = arena.allocate((long) rowCount * HIDDEN_DIM * Float.BYTES, 64);
+            MemorySegment rowBuffer = arena.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+            for (int row = 0; row < rowCount; row++) {
+                lookupScaledEmbeddingRow(rowBuffer, packedWeight, scale, startRow + row, HIDDEN_DIM, 1.0f);
+                MemorySegment.copy(rowBuffer, 0, chunk, (long) row * HIDDEN_DIM * Float.BYTES, (long) HIDDEN_DIM * Float.BYTES);
+            }
+            dequantizeNanos += System.nanoTime() - startNanos;
+            return chunk;
+        });
+    }
+
+    private int argmaxLogitsFromEmbeddingHead(MemorySegment hiddenState, Arena stepArena) {
+        long startNanos = System.nanoTime();
+        MemorySegment scale = getWeight("transformer.embedder.input_embedding.w_quantized_scale");
+        int vocabSize = (int) (scale.byteSize() / Float.BYTES);
+        int bestToken = 0;
+        float bestLogit = Float.NEGATIVE_INFINITY;
+
+        for (int start = 0; start < vocabSize; start += LM_HEAD_CHUNK_SIZE) {
+            int rows = Math.min(LM_HEAD_CHUNK_SIZE, vocabSize - start);
+            MemorySegment chunkWeights = dequantizeEmbeddingChunk(start, rows);
+            MemorySegment logits = stepArena.allocate((long) rows * Float.BYTES, 64);
+            matmulTransposedRightChecked(logits, hiddenState, chunkWeights, HIDDEN_DIM, rows, "lm_head_chunk_" + start);
+            applyFinalLogitSoftcap(logits, rows);
+            for (int i = 0; i < rows; i++) {
+                float value = logits.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                if (value > bestLogit) {
+                    bestLogit = value;
+                    bestToken = start + i;
+                }
+            }
+        }
+        lmHeadNanos += System.nanoTime() - startNanos;
+        return bestToken;
+    }
+
     // ── Core Operations ─────────────────────────────────────────────────────
 
     /** RMS Normalization: out = x * weight / rms(x) */
     private void rmsNorm(MemorySegment out, MemorySegment x, MemorySegment weight, int dim) {
-        metal.rmsNorm(out, x, weight, dim, 1e-6f, true);
+        int status = metal.rmsNorm(out, x, weight, dim, RMS_EPS, false);
+        if (status != 0) {
+            throw new IllegalStateException("Metal/CPU rmsNorm failed with status " + status + " for dim=" + dim);
+        }
+        rmsNormCalls++;
     }
 
     /** Matrix multiplication with auto-dequantization caching. */
@@ -246,26 +511,31 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
             dequantizedWeights.put(cacheKey, wFloat);
         }
 
-        // out = input[1, inDim] × wFloat^T[inDim, outDim] → [1, outDim]
-        metal.matmul(out, input, wFloat, 1, inDim, outDim, 1.0f, 0.0f);
+        // Cached weights are row-major [outDim, inDim], so the right-hand side is transposed.
+        matmulTransposedRightChecked(out, input, wFloat, inDim, outDim, weightName);
     }
 
-    /** Apply RoPE (Rotary Position Embedding) to Q or K. */
-    private void applyRope(MemorySegment qk, int dim, int pos) {
-        // RoPE: for each pair (i, i+1) apply rotation by θ_i * pos
-        // θ_i = 1 / 10000^(2i/dim)
-        for (int i = 0; i < dim; i += 2) {
-            float freq = (float) (1.0 / Math.pow(10000.0, (double) i / dim));
-            float angle = freq * pos;
-            float cos = (float) Math.cos(angle);
-            float sin = (float) Math.sin(angle);
-
-            float r0 = qk.getAtIndex(ValueLayout.JAVA_FLOAT, i);
-            float r1 = qk.getAtIndex(ValueLayout.JAVA_FLOAT, i + 1);
-
-            qk.setAtIndex(ValueLayout.JAVA_FLOAT, i, r0 * cos - r1 * sin);
-            qk.setAtIndex(ValueLayout.JAVA_FLOAT, i + 1, r0 * sin + r1 * cos);
+    private void matmulTransposedRightChecked(
+            MemorySegment out,
+            MemorySegment input,
+            MemorySegment rowMajorWeight,
+            int inDim,
+            int outDim,
+            String label) {
+        int status = metal.matmulTransposedRight(out, input, rowMajorWeight, 1, inDim, outDim, 1.0f, 0.0f);
+        if (status != 0) {
+            throw new IllegalStateException("Metal/CPU matmulTransposedRight failed with status "
+                    + status + " for " + label + " [1," + inDim + "] x [" + outDim + "," + inDim + "]^T");
         }
+        matmulCalls++;
+    }
+
+    private void addChecked(MemorySegment out, MemorySegment left, MemorySegment right, int dim, String label) {
+        int status = metal.add(out, left, right, dim);
+        if (status != 0) {
+            throw new IllegalStateException("Metal/CPU add failed with status " + status + " for " + label);
+        }
+        addCalls++;
     }
 
     /** Softmax in-place over logits[0..size-1]. */
@@ -287,267 +557,237 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
         }
     }
 
-    /** Argmax over float array. */
-    private int argmax(MemorySegment logits, int size) {
-        int best = 0;
-        float bestVal = logits.getAtIndex(ValueLayout.JAVA_FLOAT, 0);
-        for (int i = 1; i < size; i++) {
-            float v = logits.getAtIndex(ValueLayout.JAVA_FLOAT, i);
-            if (v > bestVal) { bestVal = v; best = i; }
-        }
-        return best;
-    }
-
     // ── Transformer Forward Pass ────────────────────────────────────────────
 
-    /**
-     * Single decode step through the full transformer.
-     *
-     * @param tokenId input token
-     * @param pos     position in the sequence
-     * @param a       arena for temporary allocations
-     * @return logits over vocabulary
-     */
-    private MemorySegment forwardStep(int tokenId, int pos, Arena a) {
-        // ── 1. EMBEDDING ──
-        // input_embedding.w is INT8: [vocabSize, hiddenDim]
-        MemorySegment embW = getWeight("transformer.embedder.input_embedding.w");
-        MemorySegment embScale = getWeight("transformer.embedder.input_embedding.w_quantized_scale");
+    private MemorySegment forwardHiddenState(int tokenId, int pos, Arena a) {
+        MemorySegment x = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+        lookupScaledEmbeddingRow(
+                x,
+                getWeight("transformer.embedder.input_embedding.w"),
+                getWeight("transformer.embedder.input_embedding.w_quantized_scale"),
+                tokenId,
+                HIDDEN_DIM,
+                EMBEDDING_SCALE);
 
-        MemorySegment x = a.allocate((long) HIDDEN_DIM * 4, 64);
-        // Dequantize single row for the token
-        float rowScale = embScale.getAtIndex(ValueLayout.JAVA_FLOAT, tokenId);
-        long rowOffset = (long) tokenId * HIDDEN_DIM;
-        for (int i = 0; i < HIDDEN_DIM; i++) {
-            byte val = embW.get(ValueLayout.JAVA_BYTE, rowOffset + i);
-            x.setAtIndex(ValueLayout.JAVA_FLOAT, i, val * rowScale);
+        MemorySegment projectedPerLayer = a.allocate((long) NUM_LAYERS * PLE_DIM * Float.BYTES, 64);
+        linearForward(
+                projectedPerLayer,
+                x,
+                "transformer.embedder.per_layer_model_projection",
+                NUM_LAYERS * PLE_DIM,
+                HIDDEN_DIM,
+                a);
+        for (int i = 0; i < NUM_LAYERS * PLE_DIM; i++) {
+            projectedPerLayer.setAtIndex(
+                    ValueLayout.JAVA_FLOAT,
+                    i,
+                    projectedPerLayer.getAtIndex(ValueLayout.JAVA_FLOAT, i) * PER_LAYER_MODEL_SCALE);
         }
+        applyLayerNormPerSlice(
+                projectedPerLayer,
+                getWeight("transformer.embedder.per_layer_projection_norm.scale"),
+                NUM_LAYERS,
+                PLE_DIM);
 
-        MemorySegment residual = a.allocate((long) HIDDEN_DIM * 4, 64);
-        MemorySegment normed = a.allocate((long) HIDDEN_DIM * 4, 64);
+        MemorySegment residual = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+        MemorySegment normed = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+        MemorySegment q = a.allocate((long) MAX_Q_DIM * Float.BYTES, 64);
+        MemorySegment k = a.allocate((long) MAX_KV_DIM * Float.BYTES, 64);
+        MemorySegment v = a.allocate((long) MAX_KV_DIM * Float.BYTES, 64);
+        MemorySegment attnOut = a.allocate((long) MAX_Q_DIM * Float.BYTES, 64);
+        MemorySegment projOut = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+        MemorySegment gate = a.allocate((long) FFN_DIM * Float.BYTES, 64);
+        MemorySegment up = a.allocate((long) FFN_DIM * Float.BYTES, 64);
+        MemorySegment ffnOut = a.allocate((long) FFN_DIM * Float.BYTES, 64);
+        MemorySegment down = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
+        MemorySegment perLayerInput = a.allocate((long) PLE_DIM * Float.BYTES, 64);
+        MemorySegment perLayerGate = a.allocate((long) PLE_DIM * Float.BYTES, 64);
+        MemorySegment perLayerProj = a.allocate((long) HIDDEN_DIM * Float.BYTES, 64);
 
-        // Temporary buffers for projections
-        MemorySegment q = a.allocate((long) Q_DIM * 4, 64);
-        MemorySegment k = a.allocate((long) KV_DIM * 4, 64);
-        MemorySegment v = a.allocate((long) KV_DIM * 4, 64);
-        MemorySegment attnOut = a.allocate((long) Q_DIM * 4, 64);
-        MemorySegment projOut = a.allocate((long) HIDDEN_DIM * 4, 64);
-        MemorySegment gate = a.allocate((long) FFN_DIM * 4, 64);
-        MemorySegment up = a.allocate((long) FFN_DIM * 4, 64);
-        MemorySegment ffnOut = a.allocate((long) FFN_DIM * 4, 64);
-        MemorySegment down = a.allocate((long) HIDDEN_DIM * 4, 64);
+        int lastSlidingKvLayer = -1;
+        int lastFullKvLayer = -1;
 
-        // ── 2. TRANSFORMER LAYERS ──
         for (int l = 0; l < NUM_LAYERS; l++) {
             String prefix = "transformer.layer_" + l + ".";
+            int headDim = layerHeadDims[l];
+            int qDim = layerQDims[l];
+            int kvDim = layerKVDims[l];
+            boolean fullAttention = fullAttentionLayers[l];
 
-            // ── Pre-attention RMSNorm ──
             rmsNorm(normed, x, getWeight(prefix + "pre_attention_norm.scale"), HIDDEN_DIM);
-            // Save residual
-            MemorySegment.copy(x, 0, residual, 0, (long) HIDDEN_DIM * 4);
+            MemorySegment.copy(x, 0, residual, 0, (long) HIDDEN_DIM * Float.BYTES);
 
-            // ── Q/K/V Projections ──
-            linearForward(q, normed, prefix + "attn.q", Q_DIM, HIDDEN_DIM, a);
-
-            boolean hasKV = hasWeight(prefix + "attn.k.w");
-            if (hasKV) {
-                linearForward(k, normed, prefix + "attn.k", KV_DIM, HIDDEN_DIM, a);
-                linearForward(v, normed, prefix + "attn.v", KV_DIM, HIDDEN_DIM, a);
-
-                if (hasWeight(prefix + "attn.k_norm.scale")) {
-                    MemorySegment kNormW = getWeight(prefix + "attn.k_norm.scale");
-                    rmsNorm(k, k, kNormW, KV_DIM);
-                }
-
-                // Apply RoPE to K
-                applyRope(k, KV_DIM, pos);
-
-                // ── KV Cache Update ──
-                MemorySegment.copy(k, 0, kCaches[l], (long) pos * KV_DIM * 4, (long) KV_DIM * 4);
-                MemorySegment.copy(v, 0, vCaches[l], (long) pos * KV_DIM * 4, (long) KV_DIM * 4);
-            }
-
-            // ── Q Norm (Gemma-4 uses per-head normalization) ──
+            linearForward(q, normed, prefix + "attn.q", qDim, HIDDEN_DIM, a);
             if (hasWeight(prefix + "attn.q_norm.scale")) {
                 MemorySegment qNormW = getWeight(prefix + "attn.q_norm.scale");
-                // Apply per-head norm: Q is [numQHeads * headDim], norm is [headDim]
                 for (int h = 0; h < NUM_Q_HEADS; h++) {
-                    long headOff = (long) h * HEAD_DIM * 4;
-                    rmsNorm(q.asSlice(headOff, (long) HEAD_DIM * 4),
-                            q.asSlice(headOff, (long) HEAD_DIM * 4), qNormW, HEAD_DIM);
+                    long headOffset = (long) h * headDim * Float.BYTES;
+                    rmsNorm(q.asSlice(headOffset, (long) headDim * Float.BYTES),
+                            q.asSlice(headOffset, (long) headDim * Float.BYTES),
+                            qNormW,
+                            headDim);
                 }
             }
-
-            // ── RoPE on Q ──
             for (int h = 0; h < NUM_Q_HEADS; h++) {
-                applyRope(q.asSlice((long) h * HEAD_DIM * 4, (long) HEAD_DIM * 4), HEAD_DIM, pos);
+                long headOffset = (long) h * headDim * Float.BYTES;
+                applyRotaryEmbedding(q.asSlice(headOffset, (long) headDim * Float.BYTES), headDim, pos, fullAttention);
             }
 
-            // Find the active KV cache for this layer (for CLA/shared KV)
-            MemorySegment activeKCache = kCaches[l];
-            MemorySegment activeVCache = vCaches[l];
-            if (!hasKV) {
-                // Find the nearest previous layer that had K/V
-                for (int prev = l - 1; prev >= 0; prev--) {
-                    if (hasWeight("transformer.layer_" + prev + ".attn.k.w")) {
-                        activeKCache = kCaches[prev];
-                        activeVCache = vCaches[prev];
-                        break;
-                    }
+            if (ownKvLayers[l]) {
+                linearForward(k, normed, prefix + "attn.k", kvDim, HIDDEN_DIM, a);
+                linearForward(v, normed, prefix + "attn.v", kvDim, HIDDEN_DIM, a);
+                if (hasWeight(prefix + "attn.k_norm.scale")) {
+                    MemorySegment kNormW = getWeight(prefix + "attn.k_norm.scale");
+                    rmsNorm(k, k, kNormW, kvDim);
+                }
+                rmsNorm(v, v, fullAttention ? globalUnitNormWeight : localUnitNormWeight, kvDim);
+                applyRotaryEmbedding(k, headDim, pos, fullAttention);
+                MemorySegment.copy(k, 0, kCaches[l], (long) pos * kvDim * Float.BYTES, (long) kvDim * Float.BYTES);
+                MemorySegment.copy(v, 0, vCaches[l], (long) pos * kvDim * Float.BYTES, (long) kvDim * Float.BYTES);
+                if (fullAttention) {
+                    lastFullKvLayer = l;
+                } else {
+                    lastSlidingKvLayer = l;
                 }
             }
 
-            // ── Multi-Head Attention (GQA) ──
-            // Q: [numQHeads, headDim], K/V cache: [seqLen, numKvHeads, headDim]
-            int seqLen = pos + 1;
+            int sourceLayer = ownKvLayers[l]
+                    ? l
+                    : (fullAttention ? lastFullKvLayer : lastSlidingKvLayer);
+            if (sourceLayer < 0) {
+                throw new IllegalStateException("No KV source layer available for layer " + l);
+            }
+
+            MemorySegment activeKCache = kCaches[sourceLayer];
+            MemorySegment activeVCache = vCaches[sourceLayer];
+            int startPos = fullAttention ? 0 : Math.max(0, pos + 1 - SLIDING_WINDOW);
+            int scoreLen = pos - startPos + 1;
+            // Gemma 4 text attention uses an unscaled dot product in the HF reference.
+            float attentionScale = 1.0f;
+
             for (int h = 0; h < NUM_Q_HEADS; h++) {
-                long qOff = (long) h * HEAD_DIM;
-                int kvHead = h / (NUM_Q_HEADS / NUM_KV_HEADS); // GQA: map Q head to KV head
+                long qOffset = (long) h * headDim;
+                int kvHead = h / (NUM_Q_HEADS / NUM_KV_HEADS);
+                MemorySegment scores = a.allocate((long) scoreLen * Float.BYTES, 64);
 
-                // Compute attention scores: score[t] = Q_h · K_t / sqrt(headDim)
-                MemorySegment scores = a.allocate((long) seqLen * 4, 64);
-                float scale = (float) (1.0 / Math.sqrt(HEAD_DIM));
-
-                for (int t = 0; t < seqLen; t++) {
-                    float dot = 0;
-                    long kOff = (long) t * KV_DIM + (long) kvHead * HEAD_DIM;
-                    for (int d = 0; d < HEAD_DIM; d++) {
-                        dot += q.getAtIndex(ValueLayout.JAVA_FLOAT, qOff + d)
-                                * activeKCache.getAtIndex(ValueLayout.JAVA_FLOAT, kOff + d);
+                for (int idx = 0, t = startPos; idx < scoreLen; idx++, t++) {
+                    float dot = 0.0f;
+                    long kOffset = (long) t * kvDim + (long) kvHead * headDim;
+                    for (int d = 0; d < headDim; d++) {
+                        dot += q.getAtIndex(ValueLayout.JAVA_FLOAT, qOffset + d)
+                                * activeKCache.getAtIndex(ValueLayout.JAVA_FLOAT, kOffset + d);
                     }
-                    scores.setAtIndex(ValueLayout.JAVA_FLOAT, t, dot * scale);
+                    scores.setAtIndex(ValueLayout.JAVA_FLOAT, idx, dot * attentionScale);
                 }
 
-                // Softmax
-                softmax(scores, seqLen);
-
-                // Weighted sum of V
-                for (int d = 0; d < HEAD_DIM; d++) {
-                    float sum = 0;
-                    for (int t = 0; t < seqLen; t++) {
-                        long vOff = (long) t * KV_DIM + (long) kvHead * HEAD_DIM + d;
-                        sum += scores.getAtIndex(ValueLayout.JAVA_FLOAT, t)
-                                * activeVCache.getAtIndex(ValueLayout.JAVA_FLOAT, vOff);
+                softmax(scores, scoreLen);
+                for (int d = 0; d < headDim; d++) {
+                    float sum = 0.0f;
+                    for (int idx = 0, t = startPos; idx < scoreLen; idx++, t++) {
+                        long vOffset = (long) t * kvDim + (long) kvHead * headDim + d;
+                        sum += scores.getAtIndex(ValueLayout.JAVA_FLOAT, idx)
+                                * activeVCache.getAtIndex(ValueLayout.JAVA_FLOAT, vOffset);
                     }
-                    attnOut.setAtIndex(ValueLayout.JAVA_FLOAT, (long) h * HEAD_DIM + d, sum);
+                    attnOut.setAtIndex(ValueLayout.JAVA_FLOAT, (long) h * headDim + d, sum);
                 }
             }
 
-            // ── Output Projection (attn_vec_einsum) ──
-            linearForward(projOut, attnOut, prefix + "attn.attn_vec_einsum", HIDDEN_DIM, Q_DIM, a);
-
-            // ── Post-attention norm + residual ──
+            linearForward(projOut, attnOut, prefix + "attn.attn_vec_einsum", HIDDEN_DIM, qDim, a);
             if (hasWeight(prefix + "post_attention_norm.scale")) {
                 rmsNorm(projOut, projOut, getWeight(prefix + "post_attention_norm.scale"), HIDDEN_DIM);
             }
-            // Residual connection
-            metal.add(x, residual, projOut, HIDDEN_DIM);
+            addChecked(x, residual, projOut, HIDDEN_DIM, prefix + "attention_residual");
 
-            // ── Pre-FFN RMSNorm ──
             rmsNorm(normed, x, getWeight(prefix + "pre_ffw_norm.scale"), HIDDEN_DIM);
-            MemorySegment.copy(x, 0, residual, 0, (long) HIDDEN_DIM * 4);
-
-            // ── SwiGLU FFN ──
-            // gate = silu(normed @ ff_gate.w)
-            // up   = normed @ ff1.w
-            // ffn  = gate * up
-            // down = ffn @ linear.w
+            MemorySegment.copy(x, 0, residual, 0, (long) HIDDEN_DIM * Float.BYTES);
             linearForward(gate, normed, prefix + "mlp.ff_gate", FFN_DIM, HIDDEN_DIM, a);
             linearForward(up, normed, prefix + "mlp.ff1", FFN_DIM, HIDDEN_DIM, a);
-            metal.siluFfn(ffnOut, gate, up, FFN_DIM);
+            geluMultiply(ffnOut, gate, up, FFN_DIM);
             linearForward(down, ffnOut, prefix + "mlp.linear", HIDDEN_DIM, FFN_DIM, a);
-
-            // ── Post-FFN norm + residual ──
             if (hasWeight(prefix + "post_ffw_norm.scale")) {
                 rmsNorm(down, down, getWeight(prefix + "post_ffw_norm.scale"), HIDDEN_DIM);
             }
 
-            // Skip connection with learnable scale
-            if (hasWeight(prefix + "skip.scale")) {
-                float skipScale = getWeight(prefix + "skip.scale")
-                        .getAtIndex(ValueLayout.JAVA_FLOAT, 0);
-                for (int i = 0; i < HIDDEN_DIM; i++) {
-                    float r = residual.getAtIndex(ValueLayout.JAVA_FLOAT, i) * skipScale;
-                    float d = down.getAtIndex(ValueLayout.JAVA_FLOAT, i);
-                    x.setAtIndex(ValueLayout.JAVA_FLOAT, i, r + d);
+            addChecked(x, residual, down, HIDDEN_DIM, prefix + "ffn_residual");
+
+            if (!DISABLE_GEMMA4_PLE && hasWeight(prefix + "per_layer_embedding_gate.w")) {
+                combinePerLayerInput(perLayerInput, l, tokenId, projectedPerLayer);
+                MemorySegment.copy(x, 0, residual, 0, (long) HIDDEN_DIM * Float.BYTES);
+                linearForward(perLayerGate, x, prefix + "per_layer_embedding_gate", PLE_DIM, HIDDEN_DIM, a);
+                geluTanhInPlace(perLayerGate, PLE_DIM);
+                for (int i = 0; i < PLE_DIM; i++) {
+                    perLayerGate.setAtIndex(
+                            ValueLayout.JAVA_FLOAT,
+                            i,
+                            perLayerGate.getAtIndex(ValueLayout.JAVA_FLOAT, i)
+                                    * perLayerInput.getAtIndex(ValueLayout.JAVA_FLOAT, i));
                 }
-            } else {
-                metal.add(x, residual, down, HIDDEN_DIM);
+                linearForward(perLayerProj, perLayerGate, prefix + "per_layer_embedding_projection", HIDDEN_DIM, PLE_DIM, a);
+                if (hasWeight(prefix + "post_per_layer_input_norm.scale")) {
+                    rmsNorm(perLayerProj, perLayerProj, getWeight(prefix + "post_per_layer_input_norm.scale"), HIDDEN_DIM);
+                }
+                addChecked(x, residual, perLayerProj, HIDDEN_DIM, prefix + "per_layer_residual");
+            }
+
+            if (!DISABLE_GEMMA4_LAYER_SCALAR && hasWeight(prefix + "skip.scale")) {
+                float layerScalar = getWeight(prefix + "skip.scale").getAtIndex(ValueLayout.JAVA_FLOAT, 0);
+                for (int i = 0; i < HIDDEN_DIM; i++) {
+                    x.setAtIndex(ValueLayout.JAVA_FLOAT, i, x.getAtIndex(ValueLayout.JAVA_FLOAT, i) * layerScalar);
+                }
             }
         }
 
-        // ── 3. FINAL NORM ──
         rmsNorm(x, x, getWeight("transformer.final_norm.scale"), HIDDEN_DIM);
-
-        // ── 4. LM HEAD (weight-tied with embedding) ──
-        // logits = x[1, hiddenDim] @ embeddingWeight^T[hiddenDim, vocabSize]
-        // Since embedding is tied, we cache its dequantized float32 version.
-        String embKey = "transformer.embedder.input_embedding.w_float32";
-        MemorySegment embWFloat = dequantizedWeights.get(embKey);
-        if (embWFloat == null) {
-            int vSize = (int) (embW.byteSize() / HIDDEN_DIM);
-            embWFloat = dequantizeInt8(embW, embScale, vSize, HIDDEN_DIM, arena);
-            dequantizedWeights.put(embKey, embWFloat);
-        }
-
-        int vocabSize = (int) (embWFloat.byteSize() / (HIDDEN_DIM * 4));
-        MemorySegment logits = a.allocate((long) vocabSize * 4, 64);
-        
-        // out[1, vocabSize] = x[1, hiddenDim] @ embWFloat^T[hiddenDim, vocabSize]
-        metal.matmul(logits, x, embWFloat, 1, HIDDEN_DIM, vocabSize, 1.0f, 0.0f);
-
-        return logits;
+        return x;
     }
 
     // ── Generation ──────────────────────────────────────────────────────────
 
     public void generate(String prompt, Consumer<String> tokenCallback) {
+        generate(prompt, 512, tokenCallback);
+    }
+
+    public void generate(String prompt, int maxNewTokens, Consumer<String> tokenCallback) {
         if (!initialized) {
             throw new RuntimeException("Engine not initialized — call initialize() first");
         }
 
-        log.info("Starting generation for prompt ({} chars)", prompt.length());
+        String safePrompt = prompt == null ? "" : prompt;
+        log.info("Starting generation for prompt ({} chars)", safePrompt.length());
 
-        int[] inputIds = tokenizer.encodeChatPrompt(prompt);
+        int[] inputIds = tokenizer.encodeChatPrompt(safePrompt);
         int promptLen = inputIds.length;
 
         // Reset KV cache
         cacheLen = 0;
 
-        int maxNewTokens = 512;
-        int vocabSize = 0;
+        int nextToken = -1;
 
         try {
-            // ── PREFILL: process all prompt tokens ──
-            for (int i = 0; i < promptLen; i++) {
+            for (int i = 0; i < promptLen - 1; i++) {
                 try (Arena stepArena = Arena.ofConfined()) {
-                    MemorySegment logits = forwardStep(inputIds[i], cacheLen, stepArena);
-                    vocabSize = (int) (logits.byteSize() / 4);
+                    forwardHiddenState(inputIds[i], cacheLen, stepArena);
                     cacheLen++;
                 }
             }
 
-            // ── DECODE: generate new tokens ──
-            // Get the last logits for first prediction
-            int nextToken;
             try (Arena stepArena = Arena.ofConfined()) {
-                // Re-run last token to get logits (they were discarded)
-                cacheLen--; // rewind
-                MemorySegment logits = forwardStep(inputIds[promptLen - 1], cacheLen, stepArena);
-                vocabSize = (int) (logits.byteSize() / 4);
-                nextToken = argmax(logits, vocabSize);
+                MemorySegment hiddenState = forwardHiddenState(inputIds[promptLen - 1], cacheLen, stepArena);
+                nextToken = argmaxLogitsFromEmbeddingHead(hiddenState, stepArena);
                 cacheLen++;
             }
 
             for (int i = 0; i < maxNewTokens; i++) {
-                if (tokenizer.isEosToken(nextToken)) break;
+                if (tokenizer.isTerminalToken(nextToken)) break;
 
                 String tokenStr = tokenizer.decodeToken(nextToken);
-                tokenCallback.accept(tokenStr);
+                if (!tokenStr.isEmpty()) {
+                    tokenCallback.accept(tokenStr);
+                }
 
                 try (Arena stepArena = Arena.ofConfined()) {
-                    MemorySegment logits = forwardStep(nextToken, cacheLen, stepArena);
-                    nextToken = argmax(logits, vocabSize);
+                    MemorySegment hiddenState = forwardHiddenState(nextToken, cacheLen, stepArena);
+                    nextToken = argmaxLogitsFromEmbeddingHead(hiddenState, stepArena);
                     cacheLen++;
                 }
 
@@ -556,6 +796,13 @@ public class LiteRTGemmaMetalRunner implements AutoCloseable {
                     break;
                 }
             }
+            log.info("Gemma fallback runner stats: matmulCalls={}, rmsNormCalls={}, addCalls={}, lmHeadMs={}, dequantizeMs={}, lmHeadChunks={}",
+                    matmulCalls,
+                    rmsNormCalls,
+                    addCalls,
+                    lmHeadNanos / 1_000_000,
+                    dequantizeNanos / 1_000_000,
+                    lmHeadChunkCache.size());
 
         } catch (Exception e) {
             log.error("Generation failed at pos={}", cacheLen, e);

@@ -140,6 +140,7 @@ public final class HfConfigParser {
             String eosToken,
             int bosId,
             int eosId,
+            List<String> merges,      // BPE merge ranks, required by llama.cpp for gpt2 tokenizers
             String tokenizerModel     // "llama", "gpt2", "bert", …
     ) {}
 
@@ -182,6 +183,7 @@ public final class HfConfigParser {
             List<String>  vocab      = new ArrayList<>();
             List<Float>   scores     = new ArrayList<>();
             List<Integer> tokenTypes = new ArrayList<>();
+            List<String>  merges     = new ArrayList<>();
 
             // BPE / Unigram vocab
             if (root.has("model")) {
@@ -205,6 +207,15 @@ public final class HfConfigParser {
                         vocab.add(p.get("piece").getAsString());
                         scores.add(p.has("score") ? p.get("score").getAsFloat() : 0f);
                         tokenTypes.add(p.has("type") ? p.get("type").getAsInt() : 1);
+                    }
+                }
+                if (modelObj.has("merges") && modelObj.get("merges").isJsonArray()) {
+                    JsonArray mergeArray = modelObj.getAsJsonArray("merges");
+                    for (JsonElement merge : mergeArray) {
+                        String normalized = normalizeMerge(merge);
+                        if (!normalized.isBlank()) {
+                            merges.add(normalized);
+                        }
                     }
                 }
             }
@@ -244,6 +255,7 @@ public final class HfConfigParser {
 
             return new TokenizerData(vocab, scores, tokenTypes,
                     bosStr, eosStr, bosId, eosId,
+                    merges,
                     mapTokenizerModelType(tokModel));
         }
     }
@@ -278,6 +290,18 @@ public final class HfConfigParser {
             case "wordpiece" -> "bert";
             default          -> t.toLowerCase();
         };
+    }
+
+    private static String normalizeMerge(JsonElement merge) {
+        if (merge == null || merge.isJsonNull()) return "";
+        if (merge.isJsonPrimitive()) return merge.getAsString();
+        if (merge.isJsonArray()) {
+            JsonArray pair = merge.getAsJsonArray();
+            if (pair.size() >= 2) {
+                return pair.get(0).getAsString() + " " + pair.get(1).getAsString();
+            }
+        }
+        return "";
     }
 
     // ── JSON field accessors ──────────────────────────────────────────────

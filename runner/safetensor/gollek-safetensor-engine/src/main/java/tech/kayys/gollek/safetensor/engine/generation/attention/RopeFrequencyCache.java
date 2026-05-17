@@ -26,10 +26,13 @@ public class RopeFrequencyCache {
 
     private final Map<String, RopeFrequencies> cache = new ConcurrentHashMap<>();
 
-    public RopeFrequencies get(int rotaryDim, int maxSeqLen, double theta, ModelConfig.RopeScaling scaling) {
+    public RopeFrequencies get(int rotaryDim, int maxSeqLen, double theta, ModelConfig.RopeScaling scaling,
+            int exponentDenominator, int rotatedDim) {
         String scalingKey = scaling == null ? "none" : scaling.type + "-" + scaling.factor;
-        String key = rotaryDim + "-" + maxSeqLen + "-" + theta + "-" + scalingKey;
-        return cache.computeIfAbsent(key, k -> new RopeFrequencies(rotaryDim, maxSeqLen, theta, scaling));
+        String key = rotaryDim + "-" + maxSeqLen + "-" + theta + "-" + scalingKey + "-" + exponentDenominator
+                + "-" + rotatedDim;
+        return cache.computeIfAbsent(key,
+                k -> new RopeFrequencies(rotaryDim, maxSeqLen, theta, scaling, exponentDenominator, rotatedDim));
     }
 
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
@@ -39,16 +42,28 @@ public class RopeFrequencyCache {
         private final float[] sin;
         private final int rotaryDim;
 
-        public RopeFrequencies(int rotaryDim, int maxSeqLen, double theta, ModelConfig.RopeScaling scaling) {
+        public RopeFrequencies(int rotaryDim, int maxSeqLen, double theta, ModelConfig.RopeScaling scaling,
+                int exponentDenominator, int rotatedDim) {
             this.rotaryDim = rotaryDim;
             this.cos = new float[maxSeqLen * (rotaryDim / 2)];
             this.sin = new float[maxSeqLen * (rotaryDim / 2)];
-            precompute(maxSeqLen, theta, scaling);
+            precompute(maxSeqLen, theta, scaling, exponentDenominator, rotatedDim);
         }
 
-        private void precompute(int maxSeqLen, double theta, ModelConfig.RopeScaling scaling) {
-            for (int i = 0; i < rotaryDim / 2; i++) {
-                double freq = 1.0 / Math.pow(theta, (double) (2 * i) / rotaryDim);
+        private void precompute(int maxSeqLen, double theta, ModelConfig.RopeScaling scaling, int exponentDenominator,
+                int rotatedDim) {
+            int ropeDenominator = Math.max(2, exponentDenominator);
+            int half = rotaryDim / 2;
+            int rotatedHalf = Math.max(0, Math.min(half, rotatedDim / 2));
+            for (int i = 0; i < half; i++) {
+                if (i >= rotatedHalf) {
+                    for (int t = 0; t < maxSeqLen; t++) {
+                        cos[t * half + i] = 1.0f;
+                        sin[t * half + i] = 0.0f;
+                    }
+                    continue;
+                }
+                double freq = 1.0 / Math.pow(theta, (double) (2 * i) / ropeDenominator);
 
                 if (scaling != null && "llama3".equalsIgnoreCase(scaling.type)) {
                     double wavelen = 2 * Math.PI / freq;
@@ -68,8 +83,8 @@ public class RopeFrequencyCache {
 
                 for (int t = 0; t < maxSeqLen; t++) {
                     double val = t * freq;
-                    cos[t * (rotaryDim / 2) + i] = (float) Math.cos(val);
-                    sin[t * (rotaryDim / 2) + i] = (float) Math.sin(val);
+                    cos[t * half + i] = (float) Math.cos(val);
+                    sin[t * half + i] = (float) Math.sin(val);
                 }
             }
         }

@@ -7,6 +7,9 @@
 target/
 **/target/
 
+build/
+**/build/
+
 # The generated Quarkus application runner JAR structure (inside target/)
 # This ensures that the final packaged application (which includes lib/) is ignored.
 quarkus-app/
@@ -145,6 +148,8 @@ out/
 **/llama_h_2.java
 **/onnxruntime_c_api.java
 **/*_h.java
+
+
 
 # --------------------
 # Security / Local Files

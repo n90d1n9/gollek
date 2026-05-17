@@ -3,7 +3,7 @@ package tech.kayys.gollek.nlp;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
-import tech.kayys.gollek.ml.tensor.Tensor;
+import tech.kayys.gollek.ml.autograd.GradTensor;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -15,7 +15,7 @@ import java.nio.ByteOrder;
 public class VectorUtils {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
 
-    public static float cosineSimilarity(Tensor a, Tensor b) {
+    public static float cosineSimilarity(GradTensor a, GradTensor b) {
         return cosineSimilarity(a.data(), b.data());
     }
 

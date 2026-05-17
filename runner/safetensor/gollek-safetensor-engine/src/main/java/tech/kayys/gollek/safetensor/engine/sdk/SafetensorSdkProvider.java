@@ -1,10 +1,12 @@
 package tech.kayys.gollek.safetensor.engine.sdk;
 
+import io.quarkus.arc.Arc;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.sdk.config.SdkConfig;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.sdk.core.GollekSdkProvider;
 import tech.kayys.gollek.sdk.exception.SdkException;
+import tech.kayys.gollek.spi.provider.ProviderRegistry;
 
 import java.nio.file.Path;
 
@@ -33,11 +35,12 @@ public class SafetensorSdkProvider implements GollekSdkProvider {
             // Create a standalone DirectInferenceEngine for non-CDI contexts
             // In a CDI container (Quarkus), the engine would be injected instead
             DirectInferenceEngine engine = new DirectInferenceEngine();
+            ProviderRegistry providerRegistry = resolveProviderRegistry();
 
             // Resolve model base path from config or defaults
             Path modelBasePath = resolveModelBasePath(config);
 
-            return new SafetensorGollekSdk(engine, modelBasePath);
+            return new SafetensorGollekSdk(engine, modelBasePath, providerRegistry);
         } catch (Exception e) {
             throw new SdkException("Failed to create SafeTensor SDK: " + e.getMessage(), e);
         }
@@ -57,5 +60,17 @@ public class SafetensorSdkProvider implements GollekSdkProvider {
 
         // Default to ~/.gollek/models
         return Path.of(System.getProperty("user.home"), ".gollek", "models");
+    }
+
+    private ProviderRegistry resolveProviderRegistry() {
+        try {
+            if (Arc.container() == null) {
+                return null;
+            }
+            var instance = Arc.container().instance(ProviderRegistry.class);
+            return instance.isAvailable() ? instance.get() : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

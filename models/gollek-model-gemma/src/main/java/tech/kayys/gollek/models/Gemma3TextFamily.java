@@ -1,6 +1,7 @@
 package tech.kayys.gollek.models;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import java.util.List;
 
@@ -33,7 +34,12 @@ public class Gemma3TextFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("gemma3");
+        return List.of("gemma3", "gemma3_text");
+    }
+
+    @Override
+    public FFNActivationType activationType() {
+        return FFNActivationType.GELU;
     }
 
     @Override
@@ -87,6 +93,16 @@ public class Gemma3TextFamily implements ModelArchitecture {
     }
 
     @Override
+    public String layerPostFfnNormWeight(int i) {
+        return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
+    }
+
+    @Override
+    public String layerPreFfnNormWeight(int i) {
+        return "model.layers.%d.pre_feedforward_layernorm.weight".formatted(i);
+    }
+
+    @Override
     public String layerFfnGateWeight(int i) {
         return "model.layers.%d.mlp.gate_proj.weight".formatted(i);
     }
@@ -102,15 +118,45 @@ public class Gemma3TextFamily implements ModelArchitecture {
     }
 
     // QK-norms (Gemma-3 applies RMSNorm to Q and K before scaled dot-product)
-    public String layerQNorm(int i) {
+    @Override
+    public String layerQueryNormWeight(int i) {
         return "model.layers.%d.self_attn.q_norm.weight".formatted(i);
     }
 
-    public String layerKNorm(int i) {
+    @Override
+    public String layerKeyNormWeight(int i) {
         return "model.layers.%d.self_attn.k_norm.weight".formatted(i);
     }
 
-    public String layerPostAttnNorm(int i) {
+    @Override
+    public String layerPostAttnNormWeight(int i) {
         return "model.layers.%d.post_attention_layernorm.weight".formatted(i);
+    }
+
+    public String layerQNorm(int i) {
+        return layerQueryNormWeight(i);
+    }
+
+    public String layerKNorm(int i) {
+        return layerKeyNormWeight(i);
+    }
+
+    public String layerPostAttnNorm(int i) {
+        return layerPostAttnNormWeight(i);
+    }
+
+    @Override
+    public float embeddingScaleFactor(int hiddenDim) {
+        return (float) Math.sqrt(hiddenDim);
+    }
+
+    @Override
+    public boolean addOneToRmsNormWeight() {
+        return true;
+    }
+
+    @Override
+    public boolean usesNeoxRope() {
+        return true;
     }
 }

@@ -86,6 +86,9 @@ public final class DisableDirectForwardMetal {
 
     private static void patchArenaFactory(FileSystem zipFs, String classEntry) throws IOException {
         Path classPath = zipFs.getPath(classEntry);
+        if (!Files.exists(classPath)) {
+            return;
+        }
         byte[] original = Files.readAllBytes(classPath);
 
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
@@ -115,6 +118,9 @@ public final class DisableDirectForwardMetal {
 
     private static void patchArenaCloseCalls(FileSystem zipFs, String classEntry) throws IOException {
         Path classPath = zipFs.getPath(classEntry);
+        if (!Files.exists(classPath)) {
+            return;
+        }
         byte[] original = Files.readAllBytes(classPath);
 
         ClassNode classNode = new ClassNode();
@@ -145,6 +151,9 @@ public final class DisableDirectForwardMetal {
 
     private static void patchGemmaArchitectureRewrite(FileSystem zipFs, String classEntry) throws IOException {
         Path classPath = zipFs.getPath(classEntry);
+        if (!Files.exists(classPath)) {
+            return;
+        }
         byte[] original = Files.readAllBytes(classPath);
 
         ClassNode classNode = new ClassNode();

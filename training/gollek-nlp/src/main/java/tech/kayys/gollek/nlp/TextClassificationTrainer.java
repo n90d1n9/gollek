@@ -1,8 +1,6 @@
 package tech.kayys.gollek.nlp;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.train.data.DataLoader;
-import tech.kayys.gollek.train.data.Dataset;
 import tech.kayys.gollek.ml.metrics.MetricsTracker;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.loss.CrossEntropyLoss;

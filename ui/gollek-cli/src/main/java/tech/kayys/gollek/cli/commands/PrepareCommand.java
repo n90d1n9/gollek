@@ -6,7 +6,7 @@ import jakarta.inject.Inject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import tech.kayys.gollek.sdk.local.LocalGollekSdk;
+import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.sdk.model.ModelResolution;
 import tech.kayys.gollek.sdk.model.PullProgress;
 
@@ -16,7 +16,7 @@ import tech.kayys.gollek.sdk.model.PullProgress;
 public class PrepareCommand implements Runnable {
 
     @Inject
-    LocalGollekSdk sdk;
+    GollekSdk sdk;
 
     @Parameters(index = "0", description = "Model name or path (e.g. Qwen/Qwen2.5-0.5B-Instruct)")
     String modelName;

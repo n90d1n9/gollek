@@ -1,6 +1,6 @@
 package tech.kayys.gollek.nlp;
 
-import tech.kayys.gollek.ml.tensor.Tensor;
+import tech.kayys.gollek.ml.autograd.GradTensor;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -12,7 +12,7 @@ public class Doc {
     private final List<Token> tokens;
     private final List<Span> ents;
     private final List<Span> sents;
-    private Tensor vector;
+    private GradTensor vector;
 
     public Doc(String text) {
         this.text = text;
@@ -37,7 +37,7 @@ public class Doc {
         return sents;
     }
 
-    public Tensor getVector() {
+    public GradTensor getVector() {
         return vector;
     }
 
@@ -53,7 +53,7 @@ public class Doc {
         this.sents.add(sent);
     }
 
-    public void setVector(Tensor vector) {
+    public void setVector(GradTensor vector) {
         this.vector = vector;
     }
 

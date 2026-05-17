@@ -20,6 +20,57 @@ resolve_gollek_home() {
 GOLLEK_HOME_RESOLVED="$(resolve_gollek_home)"
 LIBTORCH_SRC="${GOLLEK_LIBTORCH_SOURCE_DIR:-$GOLLEK_HOME_RESOLVED/source/vendor/libtorch}"
 
+detect_shared_ext() {
+  case "$(uname -s)" in
+    Darwin) echo ".dylib" ;;
+    MINGW*|MSYS*|CYGWIN*) echo ".dll" ;;
+    *) echo ".so" ;;
+  esac
+}
+
+platform_hint() {
+  case "$(uname -s):$(uname -m)" in
+    Darwin:arm64|Darwin:aarch64)
+      echo "Download a macOS Apple Silicon archive such as https://download.pytorch.org/libtorch/nightly/cpu/libtorch-macos-arm64-latest.zip"
+      ;;
+    Darwin:*)
+      echo "Download a macOS LibTorch archive instead of a Linux .so bundle."
+      ;;
+    Linux:*)
+      echo "Download a Linux LibTorch archive instead of macOS or Windows binaries."
+      ;;
+    *)
+      echo "Download a LibTorch archive that matches this platform."
+      ;;
+  esac
+}
+
+validate_libtorch_dir() {
+  local dir="$1"
+  local expected_ext
+  expected_ext="$(detect_shared_ext)"
+  local shared_list
+  shared_list="$(
+    find "$dir" -maxdepth 2 -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print 2>/dev/null \
+      | sed "s#^$dir/##" \
+      | sort
+  )"
+
+  if [ -z "$shared_list" ]; then
+    return 0
+  fi
+
+  if printf '%s\n' "$shared_list" | grep -q "${expected_ext}\$"; then
+    return 0
+  fi
+
+  echo "LibTorch archive is not compatible with this platform."
+  echo "Found shared libraries:"
+  printf '%s\n' "$shared_list"
+  echo "$(platform_hint)"
+  return 1
+}
+
 mkdir -p "$(dirname "$LIBTORCH_SRC")"
 
 if [ -d "$LIBTORCH_SRC" ]; then
@@ -34,6 +85,7 @@ if [ -n "${GOLLEK_LIBTORCH_ARCHIVE_URL:-}" ]; then
   curl -fsSL "$GOLLEK_LIBTORCH_ARCHIVE_URL" -o "$ARCHIVE_PATH"
   unzip -q "$ARCHIVE_PATH" -d "$TMP_DIR"
   if [ -d "$TMP_DIR/libtorch" ]; then
+    validate_libtorch_dir "$TMP_DIR/libtorch"
     mv "$TMP_DIR/libtorch" "$LIBTORCH_SRC"
     echo "Prepared libtorch source from archive at: $LIBTORCH_SRC"
     exit 0

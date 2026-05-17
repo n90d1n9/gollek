@@ -106,6 +106,11 @@ public class Gemma2Family implements ModelArchitecture {
         return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
     }
 
+    @Override
+    public String layerPostFfnNormWeight(int i) {
+        return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
+    }
+
     /** Post-attention norm (applied after o_proj residual). */
     public String layerPostAttnNormWeight(int i) {
         return "model.layers.%d.post_attention_layernorm.weight".formatted(i);

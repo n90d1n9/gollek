@@ -61,6 +61,13 @@ public class AccelWeightBridge {
              if (shape.length >= 2) {
                  log.debugf("Bridge wrapped (half): '%s' %s shape=%s", name, dtype, java.util.Arrays.toString(shape));
                  t = AccelTensor.wrapSegment(st.segment(), shape);
+                 t.withQuantization(
+                         dtype == SafetensorDType.BF16
+                                 ? AccelTensor.QuantType.BF16
+                                 : AccelTensor.QuantType.F16,
+                         null,
+                         null,
+                         -1);
              } else {
                  log.debugf("Bridge upcast (1D half): '%s' %s shape=%s", name, dtype, java.util.Arrays.toString(shape));
                  t = upcastToF32(st, dtype);

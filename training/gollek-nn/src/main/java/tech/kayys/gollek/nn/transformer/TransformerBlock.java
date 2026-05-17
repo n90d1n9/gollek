@@ -5,6 +5,7 @@ import tech.kayys.gollek.ml.autograd.TensorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.layer.Linear;
 import tech.kayys.gollek.ml.nn.layer.LayerNorm;
+import tech.kayys.gollek.ml.nn.layer.GELU;
 
 /**
  * Transformer Encoder block — equivalent to {@code torch.nn.TransformerEncoderLayer}.
@@ -41,6 +42,7 @@ public class TransformerBlock extends NNModule {
 
     // Feed-forward network
     private final Linear ff1, ff2;
+    private final GELU activation;
 
     // Layer norms (pre-norm style)
     private final LayerNorm norm1, norm2;
@@ -69,6 +71,7 @@ public class TransformerBlock extends NNModule {
         this.wV    = register("wV",    new Linear(dModel, dModel, false));
         this.wO    = register("wO",    new Linear(dModel, dModel));
         this.ff1   = register("ff1",   new Linear(dModel, dFF));
+        this.activation = register("activation", new GELU());
         this.ff2   = register("ff2",   new Linear(dFF,   dModel));
         this.norm1 = register("norm1", new LayerNorm(dModel));
         this.norm2 = register("norm2", new LayerNorm(dModel));
@@ -134,20 +137,20 @@ public class TransformerBlock extends NNModule {
 
     /** Feed-forward network: Linear → GELU → Linear. */
     private GradTensor ffn(GradTensor x) {
-        return ff2.forward(ff1.forward(x).relu());
+        return ff2.forward(activation.forward(ff1.forward(x)));
     }
 
     /** Applies dropout during training (identity during eval). */
     private GradTensor dropout(GradTensor x) {
         if (!isTraining() || dropoutRate == 0f) return x;
-        float[] d = x.data().clone();
+        if (dropoutRate >= 1f) return x.mul(0f);
+        float[] mask = new float[x.data().length];
         float scale = 1f / (1f - dropoutRate);
         java.util.Random rng = new java.util.Random();
-        for (int i = 0; i < d.length; i++) {
-            if (rng.nextFloat() < dropoutRate) d[i] = 0f;
-            else d[i] *= scale;
+        for (int i = 0; i < mask.length; i++) {
+            mask[i] = rng.nextFloat() < dropoutRate ? 0f : scale;
         }
-        return GradTensor.of(d, x.shape());
+        return x.mul(GradTensor.of(mask, x.shape()));
     }
 
     /** Softmax over the last dimension. */
