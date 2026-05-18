@@ -6,6 +6,7 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.Parameter;
 import tech.kayys.gollek.ml.train.CanonicalTrainer;
+import tech.kayys.gollek.ml.train.TrainingLossFunction;
 import tech.kayys.gollek.ml.optim.Optimizer;
 import tech.kayys.gollek.ml.nn.loss.*;
 import tech.kayys.gollek.ml.ensemble.*;
@@ -857,7 +858,7 @@ public class GollekML {
         public static final Gollek.DL.EvaluationSummary evaluate(
                 NNModule model,
                 Iterable<Batch> loader,
-                CanonicalTrainer.LossFunction loss,
+                TrainingLossFunction loss,
                 java.util.function.Supplier<? extends CanonicalTrainer.Metric>... metrics) {
             return Gollek.DL.evaluate(model, loader, loss, metrics);
         }
@@ -866,7 +867,7 @@ public class GollekML {
         public static final Gollek.DL.EvaluationSummary evaluate(
                 NNModule model,
                 Iterable<Batch> loader,
-                CanonicalTrainer.LossFunction loss,
+                TrainingLossFunction loss,
                 String deviceId,
                 java.util.function.Supplier<? extends CanonicalTrainer.Metric>... metrics) {
             return Gollek.DL.evaluate(model, loader, loss, deviceId, metrics);

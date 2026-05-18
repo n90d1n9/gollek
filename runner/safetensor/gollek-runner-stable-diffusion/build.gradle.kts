@@ -18,7 +18,16 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-model-runner"))
+    implementation(project(":core:gollek-tensor"))
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":runner:safetensor:gollek-safetensor-spi"))
+    implementation(project(":runner:safetensor:gollek-safetensor-core"))
+    implementation(project(":runner:safetensor:gollek-safetensor-loader"))
+    implementation(project(":runner:safetensor:gollek-safetensor-quantization"))
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.16.1")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.16.1")
     implementation("io.smallrye.reactive:mutiny:2.5.5")

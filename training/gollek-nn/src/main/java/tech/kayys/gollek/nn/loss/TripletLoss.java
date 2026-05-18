@@ -1,7 +1,10 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
+
+import java.util.Arrays;
 
 /**
  * Triplet Loss — trains embeddings so that an anchor is closer to a positive
@@ -36,6 +39,9 @@ public final class TripletLoss {
      *               (default 0.2)
      */
     public TripletLoss(float margin) {
+        if (!Float.isFinite(margin) || margin < 0.0f) {
+            throw new IllegalArgumentException("margin must be finite and non-negative, got: " + margin);
+        }
         this.margin = margin;
     }
 
@@ -54,11 +60,17 @@ public final class TripletLoss {
      * @return scalar mean triplet loss
      */
     public GradTensor forward(GradTensor anchor, GradTensor positive, GradTensor negative) {
-        int N = (int) anchor.shape()[0];
+        long[] anchorShape = anchor.shape();
+        long[] positiveShape = positive.shape();
+        long[] negativeShape = negative.shape();
+        requireEmbeddingShapes(anchorShape, positiveShape, negativeShape);
+
+        int N = (int) anchorShape[0];
+        int D = (int) anchorShape[1];
         float[] a = anchor.data(), p = positive.data(), n = negative.data();
-        int D = (int) anchor.shape()[1];
 
         float[] losses = new float[N];
+        boolean[] active = new boolean[N];
         for (int i = 0; i < N; i++) {
             float distAP = 0f, distAN = 0f;
             for (int d = 0; d < D; d++) {
@@ -67,8 +79,72 @@ public final class TripletLoss {
                 distAP += dap * dap;
                 distAN += dan * dan;
             }
-            losses[i] = Math.max(0f, distAP - distAN + margin);
+            float rawLoss = distAP - distAN + margin;
+            losses[i] = Math.max(0f, rawLoss);
+            active[i] = rawLoss > 0.0f;
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / N);
+        GradTensor out = GradTensor.scalar(VectorOps.sum(losses) / N);
+        if (anchor.requiresGrad() || positive.requiresGrad() || negative.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("TripletLoss") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float scale = upstream.item() / N;
+                    float[] gradAnchor = new float[a.length];
+                    float[] gradPositive = new float[p.length];
+                    float[] gradNegative = new float[n.length];
+
+                    for (int i = 0; i < N; i++) {
+                        if (!active[i]) {
+                            continue;
+                        }
+                        int offset = i * D;
+                        for (int d = 0; d < D; d++) {
+                            int index = offset + d;
+                            float anchorValue = a[index];
+                            float positiveValue = p[index];
+                            float negativeValue = n[index];
+
+                            gradAnchor[index] = 2f * (negativeValue - positiveValue) * scale;
+                            gradPositive[index] = 2f * (positiveValue - anchorValue) * scale;
+                            gradNegative[index] = 2f * (anchorValue - negativeValue) * scale;
+                        }
+                    }
+
+                    if (anchor.requiresGrad()) {
+                        anchor.backward(GradTensor.of(gradAnchor, anchor.shape()));
+                    }
+                    if (positive.requiresGrad()) {
+                        positive.backward(GradTensor.of(gradPositive, positive.shape()));
+                    }
+                    if (negative.requiresGrad()) {
+                        negative.backward(GradTensor.of(gradNegative, negative.shape()));
+                    }
+                }
+            });
+        }
+        return out;
+    }
+
+    private static void requireEmbeddingShapes(long[] anchorShape, long[] positiveShape, long[] negativeShape) {
+        if (anchorShape.length != 2 || positiveShape.length != 2 || negativeShape.length != 2) {
+            throw new IllegalArgumentException(
+                    "anchor, positive, and negative must be 2D tensors [batch, dim], got: "
+                            + Arrays.toString(anchorShape) + ", "
+                            + Arrays.toString(positiveShape) + ", "
+                            + Arrays.toString(negativeShape));
+        }
+        if (!Arrays.equals(anchorShape, positiveShape) || !Arrays.equals(anchorShape, negativeShape)) {
+            throw new IllegalArgumentException(
+                    "anchor, positive, and negative shapes must match, got: "
+                            + Arrays.toString(anchorShape) + ", "
+                            + Arrays.toString(positiveShape) + ", "
+                            + Arrays.toString(negativeShape));
+        }
+        if (anchorShape[0] <= 0 || anchorShape[1] <= 0) {
+            throw new IllegalArgumentException(
+                    "anchor, positive, and negative must have positive batch and dim, got: "
+                            + Arrays.toString(anchorShape));
+        }
     }
 }

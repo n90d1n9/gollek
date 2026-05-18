@@ -225,11 +225,17 @@ gollek/
 ├── ml/gollek-ml-selection/     # Metrics, CV, search, evaluation
 ├── ml/gollek-ml-hub/           # ModelHub, HF/local repositories, SafeTensors
 ├── ml/gollek-ml-export/        # ONNX, GGUF, LiteRT exporters and benchmark
+├── ml/gollek-ml-byte-latent/   # Planned byte-latent language-model family
 ├── ml/gollek-ml-api/           # Gollek.java umbrella ML entry point
 ├── trainer/gollek-trainer-api/ # Canonical trainer session/config contracts
 ├── trainer/gollek-trainer/     # Trainer bridge/runtime facade
 └── examples/gollek-ml-examples/# Samples and migration-era examples
 ```
+
+Fast Byte Latent Transformer style work belongs in a new byte-latent language
+modeling family, not in the diffusion OPD stack. See
+`gollek/docs/FAST_BYTE_LATENT_TRANSFORMER_INTEGRATION_PLAN.md` for the paper
+mapping and the code paths that should be reused.
 
 ## JVM Flags Required
 

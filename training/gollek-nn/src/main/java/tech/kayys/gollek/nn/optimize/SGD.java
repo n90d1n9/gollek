@@ -47,10 +47,10 @@ public class SGD implements Optimizer {
     private final Map<Parameter, float[]> velocity = new HashMap<>();
 
     private SGD(Builder builder) {
-        this.parameters = builder.parameters;
-        this.learningRate = builder.lr;
-        this.momentum = builder.momentum;
-        this.weightDecay = builder.weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(builder.parameters);
+        this.learningRate = OptimizerValidation.learningRate(builder.lr);
+        this.momentum = OptimizerValidation.momentum(builder.momentum);
+        this.weightDecay = OptimizerValidation.weightDecay(builder.weightDecay);
         this.nesterov = builder.nesterov;
 
         for (Parameter param : parameters) {
@@ -64,6 +64,7 @@ public class SGD implements Optimizer {
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "SGD");
         for (Parameter param : parameters) {
             if (param.grad() == null) continue;
 
@@ -97,7 +98,7 @@ public class SGD implements Optimizer {
     }
 
     @Override public float learningRate() { return learningRate; }
-    @Override public void setLearningRate(float lr) { this.learningRate = lr; }
+    @Override public void setLearningRate(float lr) { this.learningRate = OptimizerValidation.learningRate(lr); }
     @Override public List<Parameter> parameters() { return parameters; }
 
     @Override
@@ -132,7 +133,7 @@ public class SGD implements Optimizer {
         requireFloatMatch(state.get("momentum"), momentum, "momentum");
         requireFloatMatch(state.get("weightDecay"), weightDecay, "weightDecay");
         requireBooleanMatch(state.get("nesterov"), nesterov, "nesterov");
-        this.learningRate = readFloat(state.get("learningRate"), learningRate);
+        this.learningRate = OptimizerValidation.learningRate(readFloat(state.get("learningRate"), learningRate));
         Object velocityState = state.get("velocity");
         if (velocityState != null) {
             restoreVelocity(velocityState);

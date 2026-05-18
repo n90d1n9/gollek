@@ -20,8 +20,11 @@ repositories {
 dependencies {
     implementation(project(":core:plugin:gollek-plugin-runner-core"))
     implementation(project(":runner:gguf:gollek-gguf-core"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-runner-llamacpp")
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi-provider"))
     implementation(project(":runner:safetensor:gollek-safetensor-engine"))
+    testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+    testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher")
 }
 
 publishing {
@@ -33,4 +36,22 @@ publishing {
     repositories {
         mavenLocal()
     }
+}
+
+tasks.jar {
+    manifest {
+        attributes(
+            mapOf(
+                "Plugin-Id" to "gguf-runner",
+                "Plugin-Type" to "runner",
+                "Plugin-Provider" to "tech.kayys.gollek.plugin.runner.gguf.GgufRunnerPlugin",
+                "Plugin-Version" to "0.1.0-SNAPSHOT",
+                "Supported-Formats" to ".gguf"
+            )
+        )
+    }
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }

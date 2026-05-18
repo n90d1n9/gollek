@@ -56,11 +56,14 @@ import java.util.regex.Pattern;
 public final class LiteRtLmFastRun {
     private static final int FALLBACK_TO_FULL_CLI = 42;
     private static final String DAEMON_MAGIC = "GOLLEK_LITERT_FAST_DAEMON_V1";
+    private static final String DAEMON_PREWARM_MAGIC = "GOLLEK_LITERT_FAST_DAEMON_PREWARM_V1";
     private static final String DAEMON_STOP_MAGIC = "GOLLEK_LITERT_FAST_DAEMON_STOP_V1";
     private static final int DEFAULT_MAX_NUM_TOKENS = 2048;
     private static final int DEFAULT_MAX_NUM_TOKENS_CEILING = 2048;
-    private static final int DEFAULT_MAX_NUM_TOKENS_FLOOR = 512;
+    private static final int DEFAULT_MAX_NUM_TOKENS_FLOOR = 256;
     private static final Pattern JSON_OBJECT_PATTERN = Pattern.compile("\\{.*?}", Pattern.DOTALL);
+    private static final Pattern BARE_QUESTION_PATTERN = Pattern.compile(
+            "(?i)^(who|what|where|when|why|how|which|whom|whose|is|are|was|were|do|does|did|can|could|should|would|will|may|might)\\b.*[^.?!]$");
 
     private LiteRtLmFastRun() {
     }
@@ -72,6 +75,10 @@ public final class LiteRtLmFastRun {
         }
         if (args.length > 0 && "__daemon-stop".equals(args[0])) {
             System.exit(stopDaemon());
+            return;
+        }
+        if (args.length > 0 && isPrewarmCommand(args[0])) {
+            System.exit(prewarm(args));
             return;
         }
         int status = run(args);
@@ -104,6 +111,112 @@ public final class LiteRtLmFastRun {
             }
             return FALLBACK_TO_FULL_CLI;
         }
+    }
+
+    static int prewarm(String[] args) {
+        try {
+            if (isHelpRequest(args)) {
+                printPrewarmUsage(System.out);
+                return 0;
+            }
+            String[] runArgs = prewarmRunArgs(args);
+            FastArgs parsed = FastArgs.parse(runArgs);
+            if (!parsed.supported()) {
+                printPrewarmUsage(System.err);
+                return 2;
+            }
+            if (resolveLiteRtLmModel(parsed).isEmpty()) {
+                System.err.println("LiteRT-LM daemon prewarm could not resolve a .litertlm model.");
+                return 2;
+            }
+            OptionalInt status = requestDaemonPrewarm(runArgs);
+            return status.orElse(2);
+        } catch (Throwable throwable) {
+            System.err.println("LiteRT-LM daemon prewarm failed: " + summarize(throwable));
+            if (Boolean.getBoolean("gollek.litert.fast_run.debug")) {
+                throwable.printStackTrace(System.err);
+            }
+            return 2;
+        }
+    }
+
+    private static void printPrewarmUsage(PrintStream out) {
+        out.println("Usage: gollek prewarm --provider litert --model MODEL [--backend metal|cpu]");
+        out.println("       gollek warmup  --provider litert --model MODEL [--backend metal|cpu]");
+        out.println();
+        out.println("Preloads the official LiteRT-LM daemon and opens the selected Metal/CPU engine");
+        out.println("so the next matching gollek run can skip cold engine initialization.");
+    }
+
+    private static boolean isHelpRequest(String[] args) {
+        for (String arg : args) {
+            if ("--help".equals(arg) || "-h".equals(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String[] prewarmRunArgs(String[] args) {
+        List<String> normalized = new ArrayList<>();
+        int startIndex = 0;
+        if (args.length > 0 && ("run".equals(args[0]) || isPrewarmCommand(args[0]))) {
+            startIndex = 1;
+        }
+        normalized.add("run");
+        boolean hasPrompt = false;
+        boolean hasMaxTokens = false;
+        boolean hasProvider = false;
+        for (int i = startIndex; i < args.length; i++) {
+            String arg = args[i];
+            normalized.add(arg);
+            String option = arg;
+            int eq = arg.indexOf('=');
+            if (arg.startsWith("--") && eq > 0) {
+                option = arg.substring(0, eq);
+            }
+            if (option.equals("--prompt") || option.equals("-p")) {
+                hasPrompt = true;
+            } else if (option.equals("--max-tokens")) {
+                hasMaxTokens = true;
+            } else if (option.equals("--provider")) {
+                hasProvider = true;
+            }
+        }
+        if (!hasPrompt) {
+            normalized.add("--prompt");
+            normalized.add(firstNonBlank(
+                    System.getProperty("gollek.litert.fast_run.prewarm_prompt"),
+                    System.getenv("GOLLEK_LITERT_FAST_PREWARM_PROMPT"),
+                    "where is jakarta"));
+        }
+        if (!hasMaxTokens) {
+            normalized.add("--max-tokens");
+            normalized.add(firstNonBlank(
+                    System.getProperty("gollek.litert.fast_run.prewarm_context_tokens"),
+                    System.getenv("GOLLEK_LITERT_FAST_PREWARM_CONTEXT_TOKENS"),
+                    "10"));
+        }
+        if (!hasProvider) {
+            normalized.add("--provider");
+            normalized.add("litert");
+        }
+        return normalized.toArray(String[]::new);
+    }
+
+    private static boolean isPrewarmCommand(String arg) {
+        return "__litert-daemon-prewarm".equals(arg)
+                || "prewarm".equals(arg)
+                || "warmup".equals(arg);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static Optional<Path> resolveLiteRtLmModel(FastArgs args) {
@@ -369,7 +482,7 @@ public final class LiteRtLmFastRun {
                 AtomicReference<Throwable> error = new AtomicReference<>();
                 StringBuilder accumulated = new StringBuilder();
                 StringBuilder emitted = new StringBuilder();
-                conversation.sendMessageAsync(Contents.Companion.of(args.prompt), new MessageCallback() {
+                conversation.sendMessageAsync(Contents.Companion.of(promptForModel(args.prompt)), new MessageCallback() {
                     @Override
                     public void onMessage(com.google.ai.edge.litertlm.Message message) {
                         if (cancelled.get()) {
@@ -412,6 +525,7 @@ public final class LiteRtLmFastRun {
                 if (error.get() != null && !cancelled.get()) {
                     throw new IllegalStateException(error.get());
                 }
+                lease.markPrewarmed(prewarmIterationCount());
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
                 out.printf("%n[Fast LiteRT-LM, Duration: %.2fs]%n", durationMs / 1000.0d);
                 if (Boolean.getBoolean("gollek.litert.fast_run.profile")) {
@@ -556,15 +670,40 @@ public final class LiteRtLmFastRun {
         if (configured != null && configured > 0) {
             return configured;
         }
-        if (!Boolean.getBoolean("gollek.litert.fast_run.dynamic_engine_tokens")) {
+        if (!dynamicEngineTokensEnabled()) {
             return DEFAULT_MAX_NUM_TOKENS;
         }
-        int requested = Math.max(1, args.maxTokens);
-        int promptEstimate = approximateTokenCount(args.prompt);
+        return dynamicEngineTokenBudget(args.prompt, args.maxTokens);
+    }
+
+    static int dynamicEngineTokenBudget(String prompt, int maxTokens) {
+        int requested = Math.max(1, maxTokens);
+        int promptEstimate = approximateTokenCount(prompt);
         int dynamic = requested + promptEstimate + 64;
         int floor = Integer.getInteger("gollek.litert.fast_run.min_engine_tokens", DEFAULT_MAX_NUM_TOKENS_FLOOR);
         int ceiling = Integer.getInteger("gollek.litert.fast_run.max_engine_tokens", DEFAULT_MAX_NUM_TOKENS_CEILING);
         return Math.max(1, Math.min(Math.max(floor, dynamic), Math.max(floor, ceiling)));
+    }
+
+    static boolean dynamicEngineTokensEnabled() {
+        String configured = System.getProperty("gollek.litert.fast_run.dynamic_engine_tokens");
+        return configured == null || configured.isBlank() || Boolean.parseBoolean(configured);
+    }
+
+    static String promptForModel(String prompt) {
+        if (prompt == null || !questionNormalizationEnabled()) {
+            return prompt;
+        }
+        String stripped = prompt.strip();
+        if (stripped.isEmpty() || !BARE_QUESTION_PATTERN.matcher(stripped).matches()) {
+            return prompt;
+        }
+        return Character.toUpperCase(stripped.charAt(0)) + stripped.substring(1) + "?";
+    }
+
+    static boolean questionNormalizationEnabled() {
+        String configured = System.getProperty("gollek.litert.fast_run.normalize_short_questions");
+        return configured == null || configured.isBlank() || Boolean.parseBoolean(configured);
     }
 
     private static Duration timeout() {
@@ -615,17 +754,47 @@ public final class LiteRtLmFastRun {
     }
 
     private static OptionalInt requestDaemon(String[] rawArgs) {
-        OptionalInt status = sendDaemonRequest(rawArgs);
+        OptionalInt status = sendDaemonRequestWithRetries(DAEMON_MAGIC, rawArgs, daemonRequestRetryMillis());
         if (status.isPresent()) {
             return status;
         }
         if (!startDaemon()) {
             return OptionalInt.empty();
         }
-        return sendDaemonRequest(rawArgs);
+        return sendDaemonRequestWithRetries(DAEMON_MAGIC, rawArgs, daemonStartTimeoutMillis());
     }
 
-    private static OptionalInt sendDaemonRequest(String[] rawArgs) {
+    private static OptionalInt requestDaemonPrewarm(String[] rawArgs) {
+        OptionalInt status = sendDaemonRequestWithRetries(DAEMON_PREWARM_MAGIC, rawArgs, daemonRequestRetryMillis());
+        if (status.isPresent()) {
+            return status;
+        }
+        if (!startDaemon()) {
+            return OptionalInt.empty();
+        }
+        return sendDaemonRequestWithRetries(DAEMON_PREWARM_MAGIC, rawArgs, daemonStartTimeoutMillis());
+    }
+
+    private static OptionalInt sendDaemonRequestWithRetries(String magic, String[] rawArgs, long retryMillis) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, retryMillis));
+        while (true) {
+            OptionalInt status = sendDaemonRequest(magic, rawArgs);
+            if (status.isPresent()) {
+                return status;
+            }
+            if (readDaemonInfo().isEmpty() || System.nanoTime() >= deadlineNanos) {
+                return OptionalInt.empty();
+            }
+            try {
+                Thread.sleep(daemonRequestRetrySleepMillis());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return OptionalInt.empty();
+            }
+        }
+    }
+
+    private static OptionalInt sendDaemonRequest(String magic, String[] rawArgs) {
         OptionalInt port = readDaemonPort();
         if (port.isEmpty()) {
             return OptionalInt.empty();
@@ -636,7 +805,7 @@ public final class LiteRtLmFastRun {
             socket.setSoTimeout((int) timeout().toMillis());
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
             DataInputStream in = new DataInputStream(socket.getInputStream());
-            writeString(out, DAEMON_MAGIC);
+            writeString(out, magic);
             out.writeInt(rawArgs.length);
             for (String arg : rawArgs) {
                 writeString(out, arg);
@@ -709,10 +878,28 @@ public final class LiteRtLmFastRun {
     }
 
     private static boolean startDetachedDaemon(List<String> command) throws IOException, InterruptedException {
-        if (isMacOs() && startDetachedDaemonWithLaunchctl(command)) {
+        String launcher = daemonLauncherMode();
+        if (Boolean.getBoolean("gollek.litert.fast_run.debug")) {
+            System.err.println("LiteRT-LM daemon launcher: " + launcher);
+        }
+        if (launcher.equals("launchctl")) {
+            return isMacOs() && startDetachedDaemonWithLaunchctl(command);
+        }
+        if (launcher.equals("auto") && isMacOs() && startDetachedDaemonWithLaunchctl(command)) {
             return true;
         }
         return startDetachedDaemonWithNohup(command);
+    }
+
+    static String daemonLauncherMode() {
+        String defaultLauncher = isMacOs() ? "launchctl" : "nohup";
+        String launcher = System.getProperty("gollek.litert.fast_run.daemon_launcher", defaultLauncher)
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        return switch (launcher) {
+            case "auto", "launchctl", "nohup" -> launcher;
+            default -> "nohup";
+        };
     }
 
     private static boolean startDetachedDaemonWithLaunchctl(List<String> command) throws IOException, InterruptedException {
@@ -834,14 +1021,20 @@ public final class LiteRtLmFastRun {
             writeDaemonPort(port);
             server.setSoTimeout(1000);
             long lastRequestNanos = System.nanoTime();
-            long idleNanos = TimeUnit.SECONDS.toNanos(
-                    Long.getLong("gollek.litert.fast_run.daemon_idle_seconds", 900L));
+            long idleSeconds = Long.getLong("gollek.litert.fast_run.daemon_idle_seconds", 900L);
+            long idleNanos = TimeUnit.SECONDS.toNanos(idleSeconds);
+            daemonLog("started port=%d pid=%d idleSeconds=%d keyHash=%s",
+                    port,
+                    ProcessHandle.current().pid(),
+                    idleSeconds,
+                    daemonKeyHash());
             while (!stop.get()) {
                 try (Socket socket = server.accept()) {
                     lastRequestNanos = System.nanoTime();
                     stop.set(handleDaemonClient(socket, engineCache));
                 } catch (SocketTimeoutException ignored) {
                     if (System.nanoTime() - lastRequestNanos > idleNanos) {
+                        daemonLog("idle timeout after %ds", idleSeconds);
                         break;
                     }
                 }
@@ -854,6 +1047,7 @@ public final class LiteRtLmFastRun {
             }
             return 1;
         } finally {
+            daemonLog("stopped port=%d", port);
             deleteDaemonPortFileIfPort(port);
         }
     }
@@ -864,10 +1058,12 @@ public final class LiteRtLmFastRun {
             DataOutputStream framed = new DataOutputStream(socket.getOutputStream());
             String magic = readString(in);
             if (DAEMON_STOP_MAGIC.equals(magic)) {
+                daemonLog("stop requested");
                 writeStatus(framed, 0);
                 return true;
             }
-            if (!DAEMON_MAGIC.equals(magic)) {
+            boolean prewarmRequest = DAEMON_PREWARM_MAGIC.equals(magic);
+            if (!DAEMON_MAGIC.equals(magic) && !prewarmRequest) {
                 writeStatus(framed, FALLBACK_TO_FULL_CLI);
                 return false;
             }
@@ -890,9 +1086,18 @@ public final class LiteRtLmFastRun {
                 writeStatus(framed, FALLBACK_TO_FULL_CLI);
                 return false;
             }
+            daemonLog("%s request model=%s backend=%s maxTokens=%d",
+                    prewarmRequest ? "prewarm" : "run",
+                    modelPath.get().getFileName(),
+                    normalizedBackend(parsed.backend),
+                    parsed.maxTokens);
             try (PrintStream out = new PrintStream(new FramedOutputStream(framed, 1), true, StandardCharsets.UTF_8);
                  PrintStream err = new PrintStream(new FramedOutputStream(framed, 2), true, StandardCharsets.UTF_8)) {
-                generate(modelPath.get(), parsed, out, err, engineCache, "daemon");
+                if (prewarmRequest) {
+                    prewarmEngine(modelPath.get(), parsed, out, engineCache);
+                } else {
+                    generate(modelPath.get(), parsed, out, err, engineCache, "daemon");
+                }
                 out.flush();
                 err.flush();
             }
@@ -907,6 +1112,121 @@ public final class LiteRtLmFastRun {
             }
         }
         return false;
+    }
+
+    private static void prewarmEngine(
+            Path modelPath,
+            FastArgs args,
+            PrintStream out,
+            EngineCache engineCache) throws Exception {
+        long startNanos = System.nanoTime();
+        Files.createDirectories(cacheDir());
+        Engine.Companion.setNativeMinLogSeverity(nativeLogSeverity());
+        int engineMaxNumTokens = maxNumTokens(args);
+        String requestedBackend = normalizedBackend(args.backend);
+        try (EngineLease lease = engineCache.acquire(modelPath, requestedBackend, engineMaxNumTokens)) {
+            int decodeWarmupTokens = prewarmTokenCount();
+            int targetWarmupIterations = prewarmIterationCount();
+            int decodeWarmupIterations = 0;
+            if (decodeWarmupTokens > 0) {
+                decodeWarmupIterations = lease.remainingPrewarmIterations(targetWarmupIterations);
+                for (int i = 0; i < decodeWarmupIterations; i++) {
+                    warmConversation(lease, args, decodeWarmupTokens);
+                }
+            }
+            lease.markPrewarmed(targetWarmupIterations);
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+            out.printf("Using official LiteRT-LM JVM daemon for %s (backend=%s, speculativeDecoding=%s, engineMaxNumTokens=%d, warmEngine=%s, decodeWarmupTokens=%d, decodeWarmupIterations=%d, warmupTargetIterations=%d).%n",
+                    modelPath.getFileName(),
+                    lease.backendName,
+                    lease.speculativeDecoding,
+                    engineMaxNumTokens,
+                    lease.reused,
+                    decodeWarmupTokens,
+                    decodeWarmupIterations,
+                    targetWarmupIterations);
+            out.printf("[LiteRT-LM daemon prewarm, Duration: %.2fs]%n", durationMs / 1000.0d);
+        }
+    }
+
+    private static void warmConversation(EngineLease lease, FastArgs args, int maxWarmupTokens) throws Exception {
+        SamplerConfig sampler = new SamplerConfig(
+                Math.max(1, args.topK),
+                Math.max(0.0d, Math.min(1.0d, args.topP)),
+                Math.max(0.0d, args.temperature),
+                0);
+        ConversationConfig conversationConfig = new ConversationConfig(
+                null,
+                List.of(),
+                List.of(),
+                sampler,
+                false,
+                null,
+                Map.of());
+        try (Conversation conversation = lease.engine.createConversation(conversationConfig)) {
+            CountDownLatch done = new CountDownLatch(1);
+            AtomicBoolean cancelled = new AtomicBoolean(false);
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            StringBuilder accumulated = new StringBuilder();
+            conversation.sendMessageAsync(Contents.Companion.of(promptForModel(args.prompt)), new MessageCallback() {
+                @Override
+                public void onMessage(com.google.ai.edge.litertlm.Message message) {
+                    if (cancelled.get()) {
+                        return;
+                    }
+                    accumulated.append(message.toString());
+                    if (approximateTokenCount(accumulated) >= maxWarmupTokens
+                            && cancelled.compareAndSet(false, true)) {
+                        conversation.cancelProcess();
+                        done.countDown();
+                    }
+                }
+
+                @Override
+                public void onDone() {
+                    done.countDown();
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    if (!cancelled.get()) {
+                        error.compareAndSet(null, throwable);
+                    }
+                    done.countDown();
+                }
+            }, Map.of());
+            if (!done.await(timeout().toMillis(), TimeUnit.MILLISECONDS)) {
+                conversation.cancelProcess();
+                throw new IllegalStateException("LiteRT-LM prewarm timed out");
+            }
+            if (error.get() != null && !cancelled.get()) {
+                throw new IllegalStateException(error.get());
+            }
+        }
+    }
+
+    private static ConversationConfig daemonKeepAliveConversationConfig() {
+        SamplerConfig sampler = new SamplerConfig(1, 1.0d, 0.0d, 0);
+        return new ConversationConfig(
+                null,
+                List.of(),
+                List.of(),
+                sampler,
+                false,
+                null,
+                Map.of());
+    }
+
+    static boolean keepAliveConversationEnabled() {
+        return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.keepalive_conversation", "false"));
+    }
+
+    static int prewarmTokenCount() {
+        return Math.max(0, Integer.getInteger("gollek.litert.fast_run.prewarm_tokens", 0));
+    }
+
+    static int prewarmIterationCount() {
+        return Math.max(1, Integer.getInteger("gollek.litert.fast_run.prewarm_iterations", 3));
     }
 
     private static int stopDaemon() {
@@ -957,7 +1277,11 @@ public final class LiteRtLmFastRun {
         if (info.isEmpty()) {
             return OptionalInt.empty();
         }
-        if (!daemonKey().equals(info.get().key())) {
+        if (!isDaemonProcessAlive(info.get().pid())) {
+            discardStaleDaemon(info.get());
+            return OptionalInt.empty();
+        }
+        if (strictDaemonKey() && !daemonKey().equals(info.get().key())) {
             discardStaleDaemon(info.get());
             return OptionalInt.empty();
         }
@@ -1013,29 +1337,68 @@ public final class LiteRtLmFastRun {
         return classPath;
     }
 
+    private static String daemonKeyHash() {
+        return Integer.toHexString(daemonKey().hashCode());
+    }
+
+    static boolean isDaemonProcessAlive(long pid) {
+        if (pid <= 0 || pid == ProcessHandle.current().pid()) {
+            return false;
+        }
+        try {
+            Optional<ProcessHandle> handle = ProcessHandle.of(pid);
+            return handle.isPresent() && handle.get().isAlive();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static void daemonLog(String format, Object... args) {
+        System.err.printf("%tF %<tT [litert-daemon] %s%n",
+                System.currentTimeMillis(),
+                String.format(Locale.ROOT, format, args));
+    }
+
     private static void discardStaleDaemon(DaemonInfo info) {
         deleteDaemonPortFile();
-        removeLaunchctlDaemon();
-        if (info.pid() <= 0 || info.pid() == ProcessHandle.current().pid()) {
+        try {
+            terminateStaleDaemonProcess(info.pid());
+        } catch (Exception ignored) {
+        } finally {
+            removeLaunchctlDaemon();
+        }
+    }
+
+    private static void terminateStaleDaemonProcess(long pid) {
+        if (!isDaemonProcessAlive(pid)) {
             return;
         }
         try {
-            Optional<ProcessHandle> handle = ProcessHandle.of(info.pid());
-            if (handle.isEmpty()) {
+            ProcessHandle process = ProcessHandle.of(pid).orElse(null);
+            if (process == null || !process.isAlive()) {
                 return;
             }
-            ProcessHandle process = handle.get();
-            if (!process.isAlive()) {
-                return;
-            }
-            process.destroy();
-            try {
-                process.onExit().get(2, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
+            if (staleDaemonForceKill()) {
                 process.destroyForcibly();
+            } else {
+                process.destroy();
             }
+            process.onExit().get(staleDaemonKillWaitMillis(), TimeUnit.MILLISECONDS);
         } catch (Exception ignored) {
+            ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
         }
+    }
+
+    static boolean staleDaemonForceKill() {
+        return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.stale_daemon_force_kill", "true"));
+    }
+
+    static long staleDaemonKillWaitMillis() {
+        return Math.max(100L, Long.getLong("gollek.litert.fast_run.stale_daemon_kill_wait_ms", 2000L));
+    }
+
+    static boolean strictDaemonKey() {
+        return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.strict_daemon_key", "true"));
     }
 
     private static void deleteDaemonPortFile() {
@@ -1056,11 +1419,19 @@ public final class LiteRtLmFastRun {
     }
 
     private static int daemonConnectTimeoutMillis() {
-        return Integer.getInteger("gollek.litert.fast_run.daemon_connect_timeout_ms", 250);
+        return Integer.getInteger("gollek.litert.fast_run.daemon_connect_timeout_ms", 1000);
     }
 
     private static int daemonStartTimeoutMillis() {
         return Integer.getInteger("gollek.litert.fast_run.daemon_start_timeout_ms", 20_000);
+    }
+
+    static long daemonRequestRetryMillis() {
+        return Math.max(0L, Long.getLong("gollek.litert.fast_run.daemon_request_retry_ms", 2_000L));
+    }
+
+    static long daemonRequestRetrySleepMillis() {
+        return Math.max(10L, Long.getLong("gollek.litert.fast_run.daemon_request_retry_sleep_ms", 75L));
     }
 
     private record DaemonInfo(int port, long pid, String key) {
@@ -1154,6 +1525,8 @@ public final class LiteRtLmFastRun {
         private final String fallbackReason;
         private final boolean closeOnClose;
         private final boolean reused;
+        private final WarmupState warmupState;
+        private Conversation keepAliveConversation;
 
         private EngineLease(
                 Engine engine,
@@ -1162,16 +1535,59 @@ public final class LiteRtLmFastRun {
                 String fallbackReason,
                 boolean closeOnClose,
                 boolean reused) {
+            this(engine, backendName, speculativeDecoding, fallbackReason, closeOnClose, reused, new WarmupState());
+        }
+
+        private EngineLease(
+                Engine engine,
+                String backendName,
+                boolean speculativeDecoding,
+                String fallbackReason,
+                boolean closeOnClose,
+                boolean reused,
+                WarmupState warmupState) {
             this.engine = engine;
             this.backendName = backendName;
             this.speculativeDecoding = speculativeDecoding;
             this.fallbackReason = fallbackReason;
             this.closeOnClose = closeOnClose;
             this.reused = reused;
+            this.warmupState = warmupState;
         }
 
         private EngineLease asBorrowed(boolean reused) {
-            return new EngineLease(engine, backendName, speculativeDecoding, fallbackReason, false, reused);
+            EngineLease borrowed = new EngineLease(
+                    engine,
+                    backendName,
+                    speculativeDecoding,
+                    fallbackReason,
+                    false,
+                    reused,
+                    warmupState);
+            borrowed.keepAliveConversation = keepAliveConversation;
+            return borrowed;
+        }
+
+        private void ensureKeepAliveConversation() {
+            if (!keepAliveConversationEnabled() || keepAliveConversation != null) {
+                return;
+            }
+            try {
+                keepAliveConversation = engine.createConversation(daemonKeepAliveConversationConfig());
+                daemonLog("engine keepalive conversation opened backend=%s", backendName);
+            } catch (Throwable throwable) {
+                daemonLog("engine keepalive conversation unavailable backend=%s reason=%s",
+                        backendName,
+                        summarize(throwable));
+            }
+        }
+
+        private int remainingPrewarmIterations(int targetIterations) {
+            return warmupState.remainingIterations(targetIterations);
+        }
+
+        private void markPrewarmed(int completedIterations) {
+            warmupState.markCompleted(completedIterations);
         }
 
         @Override
@@ -1179,6 +1595,7 @@ public final class LiteRtLmFastRun {
             if (!closeOnClose) {
                 return;
             }
+            closeKeepAliveConversation();
             try {
                 engine.close();
             } catch (Throwable ignored) {
@@ -1186,10 +1603,35 @@ public final class LiteRtLmFastRun {
         }
 
         private void forceClose() {
+            closeKeepAliveConversation();
             try {
                 engine.close();
             } catch (Throwable ignored) {
             }
+        }
+
+        private void closeKeepAliveConversation() {
+            Conversation keepAlive = keepAliveConversation;
+            keepAliveConversation = null;
+            if (keepAlive == null) {
+                return;
+            }
+            try {
+                keepAlive.close();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    static final class WarmupState {
+        private int prewarmIterationsCompleted;
+
+        synchronized int remainingIterations(int targetIterations) {
+            return Math.max(0, targetIterations - prewarmIterationsCompleted);
+        }
+
+        synchronized void markCompleted(int completedIterations) {
+            prewarmIterationsCompleted = Math.max(prewarmIterationsCompleted, completedIterations);
         }
     }
 
@@ -1197,27 +1639,53 @@ public final class LiteRtLmFastRun {
         private final Map<String, EngineLease> engines = new HashMap<>();
 
         private synchronized EngineLease acquire(Path modelPath, String requestedBackend, int engineMaxNumTokens) {
-            String key = modelPath.toAbsolutePath().normalize()
-                    + "|" + requestedBackend
-                    + "|" + engineMaxNumTokens
-                    + "|" + cacheDir()
-                    + "|" + System.getProperty("gollek.litert.fast_run.speculative_decoding", "");
+            String key = engineCacheKey(modelPath, requestedBackend, engineMaxNumTokens);
+            String label = engineCacheLabel(modelPath, requestedBackend, engineMaxNumTokens);
             EngineLease existing = engines.get(key);
             if (existing != null) {
+                daemonLog("engine cache hit %s", label);
                 return existing.asBorrowed(true);
             }
-            EngineLease created = openEngine(modelPath, requestedBackend, engineMaxNumTokens, false, false);
-            engines.put(key, created);
-            return created.asBorrowed(false);
+            daemonLog("engine cache miss %s", label);
+            try {
+                EngineLease created = openEngine(modelPath, requestedBackend, engineMaxNumTokens, false, false);
+                created.ensureKeepAliveConversation();
+                engines.put(key, created);
+                daemonLog("engine cache stored %s resolvedBackend=%s speculativeDecoding=%s",
+                        label,
+                        created.backendName,
+                        created.speculativeDecoding);
+                return created.asBorrowed(false);
+            } catch (Throwable throwable) {
+                daemonLog("engine cache open failed %s reason=%s", label, summarize(throwable));
+                throw throwable;
+            }
         }
 
         @Override
         public synchronized void close() {
+            daemonLog("closing engine cache count=%d", engines.size());
             for (EngineLease engine : engines.values()) {
                 engine.forceClose();
             }
             engines.clear();
         }
+    }
+
+    private static String engineCacheKey(Path modelPath, String requestedBackend, int engineMaxNumTokens) {
+        return modelPath.toAbsolutePath().normalize()
+                + "|" + requestedBackend
+                + "|" + engineMaxNumTokens
+                + "|" + cacheDir()
+                + "|" + System.getProperty("gollek.litert.fast_run.speculative_decoding", "");
+    }
+
+    private static String engineCacheLabel(Path modelPath, String requestedBackend, int engineMaxNumTokens) {
+        return "model=" + modelPath.getFileName()
+                + " backend=" + requestedBackend
+                + " engineMaxNumTokens=" + engineMaxNumTokens
+                + " cacheHash=" + Integer.toHexString(cacheDir().hashCode())
+                + " spec=" + System.getProperty("gollek.litert.fast_run.speculative_decoding", "");
     }
 
     private static final class FastArgs {
@@ -1314,6 +1782,10 @@ public final class LiteRtLmFastRun {
                         if (provider != null && !provider.isBlank() && !"litert".equalsIgnoreCase(provider)) {
                             parsed.supported = false;
                         }
+                    }
+                    case "--engine", "--gguf-engine" -> {
+                        Value next = valueOrNext(value, args, i);
+                        i = next.index();
                     }
                     case "--stream" -> {
                         String stream = value != null ? value : "true";

@@ -5,6 +5,7 @@ import tech.kayys.gollek.gguf.loader.GGUFModel;
 import tech.kayys.gollek.gguf.loader.GGUFParser;
 import tech.kayys.gollek.gguf.loader.GGUFReader;
 import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
+import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -12,9 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -37,10 +38,13 @@ public record GgufRuntimeProfile(
         long knownTypeTensorBytes,
         int requiredDecoderTensorCount,
         int presentDecoderTensorCount,
+        int malformedDecoderTensorCount,
         List<String> missingDecoderTensorExamples,
+        List<String> malformedDecoderTensorExamples,
         List<TensorTypeSummary> tensorTypes,
         List<String> unknownTensorTypeIds,
         List<String> unsupportedRowDotTypeIds,
+        ModelConfig modelConfig,
         long loadMillis
 ) {
     private static final Set<Integer> JAVA_KNOWN_LAYOUT_TYPE_IDS = Set.of(
@@ -52,11 +56,15 @@ public record GgufRuntimeProfile(
             GgmlType.Q5_0.id,
             GgmlType.Q5_1.id,
             GgmlType.Q8_0.id,
+            GgmlType.Q8_1.id,
             GgmlType.Q2_K.id,
             GgmlType.Q3_K.id,
             GgmlType.Q4_K.id,
             GgmlType.Q5_K.id,
-            GgmlType.Q6_K.id
+            GgmlType.Q6_K.id,
+            GgmlType.Q8_K.id,
+            GgmlType.IQ4_NL.id,
+            GgmlType.IQ4_XS.id
     );
 
     public static GgufRuntimeProfile load(Path modelPath) throws IOException {
@@ -110,19 +118,30 @@ public record GgufRuntimeProfile(
                 .sorted(Comparator.comparingLong(TensorTypeSummary::bytes).reversed())
                 .toList();
 
-        Set<String> tensorNames = new HashSet<>();
+        Map<String, GGUFTensorInfo> tensorsByName = new HashMap<>();
         for (GGUFTensorInfo tensor : tensors) {
-            tensorNames.add(tensor.name());
+            tensorsByName.put(tensor.name(), tensor);
         }
 
         List<String> required = requiredDecoderTensorNames(metadata, architecture);
+        DecoderHiddenSizeHint shapeHints = DecoderHiddenSizeHint.from(metadata, architecture);
         int presentRequired = 0;
+        int malformedRequired = 0;
         List<String> missingExamples = new ArrayList<>();
+        List<String> malformedExamples = new ArrayList<>();
         for (String name : required) {
-            if (tensorNames.contains(name)) {
+            GGUFTensorInfo tensor = tensorsByName.get(name);
+            if (tensor == null) {
+                if (missingExamples.size() < 8) {
+                    missingExamples.add(name);
+                }
+            } else if (decoderTensorShapeValid(name, tensor, shapeHints)) {
                 presentRequired++;
-            } else if (missingExamples.size() < 8) {
-                missingExamples.add(name);
+            } else {
+                malformedRequired++;
+                if (malformedExamples.size() < 8) {
+                    malformedExamples.add(name + " shape=" + Arrays.toString(tensor.shape()));
+                }
             }
         }
 
@@ -136,10 +155,13 @@ public record GgufRuntimeProfile(
                 knownTypeBytes,
                 required.size(),
                 presentRequired,
+                malformedRequired,
                 List.copyOf(missingExamples),
+                List.copyOf(malformedExamples),
                 List.copyOf(summaries),
                 unknownTypeIds.stream().distinct().sorted().toList(),
                 unsupportedRowDotTypeIds.stream().distinct().sorted().toList(),
+                ModelConfig.fromGgufMetadata(metadata),
                 loadMillis);
     }
 
@@ -157,9 +179,14 @@ public record GgufRuntimeProfile(
         return presentDecoderTensorCount / (double) requiredDecoderTensorCount;
     }
 
+    public int missingDecoderTensorCount() {
+        return Math.max(0, requiredDecoderTensorCount - presentDecoderTensorCount - malformedDecoderTensorCount);
+    }
+
     public boolean decoderTensorSetComplete() {
         return requiredDecoderTensorCount > 0
                 && presentDecoderTensorCount == requiredDecoderTensorCount
+                && malformedDecoderTensorCount == 0
                 && unknownTensorTypeIds.isEmpty();
     }
 
@@ -175,10 +202,16 @@ public record GgufRuntimeProfile(
         if (requiredDecoderTensorCount == 0) {
             return "loader-ready; decoder-shape-unknown; generation-disabled";
         }
-        if (presentDecoderTensorCount != requiredDecoderTensorCount) {
-            return "loader-ready; decoder-tensors-missing="
-                    + (requiredDecoderTensorCount - presentDecoderTensorCount)
-                    + "; generation-disabled";
+        int missingTensorCount = missingDecoderTensorCount();
+        if (missingTensorCount > 0 || malformedDecoderTensorCount > 0) {
+            List<String> readinessProblems = new ArrayList<>(2);
+            if (missingTensorCount > 0) {
+                readinessProblems.add("decoder-tensors-missing=" + missingTensorCount);
+            }
+            if (malformedDecoderTensorCount > 0) {
+                readinessProblems.add("decoder-tensor-shapes-invalid=" + malformedDecoderTensorCount);
+            }
+            return "loader-ready; " + String.join("; ", readinessProblems) + "; generation-disabled";
         }
         if (!unsupportedRowDotTypeIds.isEmpty()) {
             return "loader-ready; decoder-tensors-ready; row-dot-unsupported-types="
@@ -219,7 +252,8 @@ public record GgufRuntimeProfile(
             return List.of();
         }
 
-        List<String> required = new ArrayList<>(2 + blockCount * 9);
+        boolean requiresQkNorms = requiresGemmaQkNorms(architecture);
+        List<String> required = new ArrayList<>(2 + blockCount * (requiresQkNorms ? 11 : 9));
         required.add("token_embd.weight");
         required.add("output_norm.weight");
 
@@ -229,6 +263,10 @@ public record GgufRuntimeProfile(
             required.add(prefix + "attn_q.weight");
             required.add(prefix + "attn_k.weight");
             required.add(prefix + "attn_v.weight");
+            if (requiresQkNorms) {
+                required.add(prefix + "attn_q_norm.weight");
+                required.add(prefix + "attn_k_norm.weight");
+            }
             required.add(prefix + "attn_output.weight");
             required.add(prefix + "ffn_norm.weight");
             required.add(prefix + "ffn_gate.weight");
@@ -236,6 +274,67 @@ public record GgufRuntimeProfile(
             required.add(prefix + "ffn_down.weight");
         }
         return required;
+    }
+
+    private static boolean requiresGemmaQkNorms(String architecture) {
+        return architecture.equals("gemma3")
+                || architecture.equals("gemma3_text")
+                || architecture.equals("gemma4")
+                || architecture.equals("gemma4_text");
+    }
+
+    private static boolean decoderTensorShapeValid(
+            String name,
+            GGUFTensorInfo tensor,
+            DecoderHiddenSizeHint hints
+    ) {
+        if (!hints.hasHiddenSize()) {
+            return true;
+        }
+        if (name.equals("token_embd.weight")) {
+            return true;
+        }
+        if (name.equals("output_norm.weight")) {
+            return true;
+        }
+
+        String suffix = decoderTensorSuffix(name);
+        if (suffix == null) {
+            return true;
+        }
+        if (suffix.equals("attn_norm.weight") || suffix.equals("ffn_norm.weight")) {
+            return true;
+        }
+        if (suffix.equals("attn_q_norm.weight") || suffix.equals("attn_k_norm.weight")) {
+            return true;
+        }
+        if (suffix.equals("attn_q.weight")
+                || suffix.equals("attn_k.weight")
+                || suffix.equals("attn_v.weight")
+                || suffix.equals("ffn_gate.weight")
+                || suffix.equals("ffn_up.weight")) {
+            return matrixColumnsEqual(tensor, hints.hiddenSize());
+        }
+        return true;
+    }
+
+    private static String decoderTensorSuffix(String name) {
+        if (!name.startsWith("blk.")) {
+            return null;
+        }
+        int layerEnd = name.indexOf('.', 4);
+        if (layerEnd < 0 || layerEnd + 1 >= name.length()) {
+            return null;
+        }
+        return name.substring(layerEnd + 1);
+    }
+
+    private static boolean matrixColumnsEqual(GGUFTensorInfo tensor, long expected) {
+        try {
+            return GgufTensorOps.matrixColumns(tensor) == expected;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private static int metadataInt(Map<String, Object> metadata, String... keys) {
@@ -246,6 +345,27 @@ public record GgufRuntimeProfile(
             }
         }
         return 0;
+    }
+
+    private record DecoderHiddenSizeHint(int hiddenSize) {
+        private static DecoderHiddenSizeHint from(Map<String, Object> metadata, String architecture) {
+            int hiddenSize = metadataInt(metadata,
+                    architecture + ".embedding_length",
+                    "llama.embedding_length",
+                    "gemma.embedding_length",
+                    "gemma2.embedding_length",
+                    "gemma3.embedding_length",
+                    "gemma4.embedding_length",
+                    "qwen2.embedding_length",
+                    "mistral.embedding_length",
+                    "phi3.embedding_length",
+                    "general.embedding_length");
+            return new DecoderHiddenSizeHint(hiddenSize);
+        }
+
+        private boolean hasHiddenSize() {
+            return hiddenSize > 0;
+        }
     }
 
     public record TensorTypeSummary(

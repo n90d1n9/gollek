@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -28,6 +29,7 @@ public record GgufRuntimeProbe(
         long rowDotNanos,
         float rowDotChecksum,
         int matVecRows,
+        boolean preparedMatVecProbe,
         long matrixCacheNanos,
         long matVecNanos,
         float matVecChecksum,
@@ -73,7 +75,7 @@ public record GgufRuntimeProbe(
         GgufRuntimeProfile profile = GgufRuntimeProfile.fromModel(model, modelBytes, loadMillis);
         Optional<GGUFTensorInfo> tensor = selectProbeTensor(model);
         if (tensor.isEmpty()) {
-            return new GgufRuntimeProbe(profile, "", "", 0, 0, 0, 0, 0.0f, 0, 0, 0, 0.0f, 0, 0.0f);
+            return new GgufRuntimeProbe(profile, "", "", 0, 0, 0, 0, 0.0f, 0, false, 0, 0, 0.0f, 0, 0.0f);
         }
         return probeTensor(model, tensor.get(), requestedDotRows, requestedMatVecRows, profile);
     }
@@ -96,6 +98,43 @@ public record GgufRuntimeProbe(
 
     public double cachedMatVecMillis() {
         return cachedMatVecNanos / 1_000_000.0d;
+    }
+
+    public boolean preparedMatVecReady() {
+        return preparedMatVecProbe && matVecChecksumsAgree();
+    }
+
+    public boolean matVecChecksumsAgree() {
+        float tolerance = Math.max(1.0e-4f, Math.abs(matVecChecksum) * 1.0e-4f);
+        return Float.isFinite(matVecChecksum)
+                && Float.isFinite(cachedMatVecChecksum)
+                && Math.abs(matVecChecksum - cachedMatVecChecksum) <= tolerance;
+    }
+
+    public String compactSummary() {
+        if (!hasTensorProbe()) {
+            return "unavailable, no supported matrix tensor";
+        }
+        return String.format(
+                Locale.ROOT,
+                "tensor=%s, type=%s, rows=%d, cols=%d, sampledRows=%d, "
+                        + "dot=%.3fms, dotChecksum=%.6g, matVecRows=%d, cache=%.3fms, "
+                        + "preparedMatVecReady=%s, parallelMatVec=%.3fms, matVecChecksum=%.6g, "
+                        + "cachedGenericMatVec=%.3fms, cachedChecksum=%.6g",
+                tensorName,
+                tensorType,
+                rows,
+                columns,
+                sampledRows,
+                rowDotMillis(),
+                rowDotChecksum,
+                matVecRows,
+                matrixCacheMillis(),
+                preparedMatVecReady(),
+                matVecMillis(),
+                matVecChecksum,
+                cachedMatVecMillis(),
+                cachedMatVecChecksum);
     }
 
     private static Optional<GGUFTensorInfo> selectProbeTensor(GGUFModel model) {
@@ -141,78 +180,17 @@ public record GgufRuntimeProbe(
         float[] output = new float[matVecRows];
         long matrixCacheNanos = 0L;
         long matVecNanos;
+        boolean preparedMatVecProbe = false;
         long cachedMatVecNanos = 0L;
         float cachedMatVecChecksum = 0.0f;
-        if (GgufTensorOps.supportsQ32PreparedType(tensor.typeId())) {
-            GgufTensorOps.clearQ32MatrixCache(model);
-            long cacheStartNanos = System.nanoTime();
-            GgufTensorOps.Q32Matrix matrix = GgufTensorOps.q32MatrixCached(model, tensor);
-            matrixCacheNanos = System.nanoTime() - cacheStartNanos;
-            startNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(matrix, vector, output, matVecRows, true);
-            matVecNanos = System.nanoTime() - startNanos;
-
-            float[] cachedOutput = new float[matVecRows];
-            long cachedStartNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
-            cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
-            cachedMatVecChecksum = checksum(cachedOutput);
-        } else if (tensor.typeId() == GgmlType.Q4_K.id) {
-            GgufTensorOps.clearQ4KMatrixCache(model);
-            long cacheStartNanos = System.nanoTime();
-            GgufTensorOps.Q4KMatrix matrix = GgufTensorOps.q4KMatrixCached(model, tensor);
-            matrixCacheNanos = System.nanoTime() - cacheStartNanos;
-            startNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(matrix, vector, output, matVecRows, true);
-            matVecNanos = System.nanoTime() - startNanos;
-
-            float[] cachedOutput = new float[matVecRows];
-            long cachedStartNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
-            cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
-            cachedMatVecChecksum = checksum(cachedOutput);
-        } else if (tensor.typeId() == GgmlType.Q5_K.id) {
-            GgufTensorOps.clearQ5KMatrixCache(model);
-            long cacheStartNanos = System.nanoTime();
-            GgufTensorOps.Q5KMatrix matrix = GgufTensorOps.q5KMatrixCached(model, tensor);
-            matrixCacheNanos = System.nanoTime() - cacheStartNanos;
-            startNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(matrix, vector, output, matVecRows, true);
-            matVecNanos = System.nanoTime() - startNanos;
-
-            float[] cachedOutput = new float[matVecRows];
-            long cachedStartNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
-            cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
-            cachedMatVecChecksum = checksum(cachedOutput);
-        } else if (tensor.typeId() == GgmlType.Q6_K.id) {
-            GgufTensorOps.clearQ6KMatrixCache(model);
-            long cacheStartNanos = System.nanoTime();
-            GgufTensorOps.Q6KMatrix matrix = GgufTensorOps.q6KMatrixCached(model, tensor);
-            matrixCacheNanos = System.nanoTime() - cacheStartNanos;
-            startNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(matrix, vector, output, matVecRows, true);
-            matVecNanos = System.nanoTime() - startNanos;
-
-            float[] cachedOutput = new float[matVecRows];
-            long cachedStartNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
-            cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
-            cachedMatVecChecksum = checksum(cachedOutput);
-        } else if (tensor.typeId() == GgmlType.Q8_0.id) {
-            GgufTensorOps.clearQ8MatrixCache(model);
-            long cacheStartNanos = System.nanoTime();
-            GgufTensorOps.Q8Matrix matrix = GgufTensorOps.q8MatrixCached(model, tensor);
-            matrixCacheNanos = System.nanoTime() - cacheStartNanos;
-            startNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(matrix, vector, output, matVecRows, true);
-            matVecNanos = System.nanoTime() - startNanos;
-
-            float[] cachedOutput = new float[matVecRows];
-            long cachedStartNanos = System.nanoTime();
-            GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
-            cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
-            cachedMatVecChecksum = checksum(cachedOutput);
+        PreparedMatVecResult preparedMatVec = preparedMatVecProbe(model, tensor, vector, matVecRows);
+        if (preparedMatVec != null) {
+            preparedMatVecProbe = true;
+            matrixCacheNanos = preparedMatVec.matrixCacheNanos();
+            matVecNanos = preparedMatVec.matVecNanos();
+            output = preparedMatVec.output();
+            cachedMatVecNanos = preparedMatVec.cachedMatVecNanos();
+            cachedMatVecChecksum = preparedMatVec.cachedMatVecChecksum();
         } else {
             startNanos = System.nanoTime();
             GgufTensorOps.matVecRows(model, tensor, vector, output, matVecRows, true);
@@ -230,11 +208,153 @@ public record GgufRuntimeProbe(
                 rowDotNanos,
                 rowDotChecksum,
                 matVecRows,
+                preparedMatVecProbe,
                 matrixCacheNanos,
                 matVecNanos,
                 matVecChecksum,
                 cachedMatVecNanos,
                 cachedMatVecChecksum);
+    }
+
+    private static PreparedMatVecResult preparedMatVecProbe(
+            GGUFModel model,
+            GGUFTensorInfo tensor,
+            float[] vector,
+            int matVecRows) {
+        int typeId = tensor.typeId();
+        if (GgufTensorOps.supportsQ32PreparedType(typeId)) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ32MatrixCache(cacheModel),
+                    GgufTensorOps::q32MatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q2_K.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ2KMatrixCache(cacheModel),
+                    GgufTensorOps::q2KMatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q3_K.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ3KMatrixCache(cacheModel),
+                    GgufTensorOps::q3KMatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q4_K.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ4KMatrixCache(cacheModel),
+                    GgufTensorOps::q4KMatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q5_K.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ5KMatrixCache(cacheModel),
+                    GgufTensorOps::q5KMatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q6_K.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ6KMatrixCache(cacheModel),
+                    GgufTensorOps::q6KMatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        if (typeId == GgmlType.Q8_0.id || typeId == GgmlType.Q8_1.id || typeId == GgmlType.Q8_K.id
+                || typeId == GgmlType.IQ4_NL.id || typeId == GgmlType.IQ4_XS.id) {
+            return runPreparedMatVecProbe(
+                    model,
+                    tensor,
+                    vector,
+                    matVecRows,
+                    cacheModel -> GgufTensorOps.clearQ8MatrixCache(cacheModel),
+                    GgufTensorOps::q8MatrixCached,
+                    (matrix, probeVector, probeOutput, rows, parallel) ->
+                            GgufTensorOps.matVecRows(matrix, probeVector, probeOutput, rows, parallel));
+        }
+        return null;
+    }
+
+    private static <M> PreparedMatVecResult runPreparedMatVecProbe(
+            GGUFModel model,
+            GGUFTensorInfo tensor,
+            float[] vector,
+            int matVecRows,
+            MatrixCacheClearer cacheClearer,
+            PreparedMatrixLoader<M> matrixLoader,
+            PreparedMatVecRunner<M> matVecRunner) {
+        cacheClearer.clear(model);
+        long cacheStartNanos = System.nanoTime();
+        M matrix = matrixLoader.load(model, tensor);
+        long matrixCacheNanos = System.nanoTime() - cacheStartNanos;
+
+        float[] output = new float[matVecRows];
+        long startNanos = System.nanoTime();
+        matVecRunner.run(matrix, vector, output, matVecRows, true);
+        long matVecNanos = System.nanoTime() - startNanos;
+
+        float[] cachedOutput = new float[matVecRows];
+        long cachedStartNanos = System.nanoTime();
+        GgufTensorOps.matVecRows(model, tensor, vector, cachedOutput, matVecRows, true);
+        long cachedMatVecNanos = System.nanoTime() - cachedStartNanos;
+
+        return new PreparedMatVecResult(
+                matrixCacheNanos,
+                matVecNanos,
+                output,
+                cachedMatVecNanos,
+                checksum(cachedOutput));
+    }
+
+    private record PreparedMatVecResult(
+            long matrixCacheNanos,
+            long matVecNanos,
+            float[] output,
+            long cachedMatVecNanos,
+            float cachedMatVecChecksum) {
+    }
+
+    @FunctionalInterface
+    private interface MatrixCacheClearer {
+        void clear(GGUFModel model);
+    }
+
+    @FunctionalInterface
+    private interface PreparedMatrixLoader<M> {
+        M load(GGUFModel model, GGUFTensorInfo tensor);
+    }
+
+    @FunctionalInterface
+    private interface PreparedMatVecRunner<M> {
+        void run(M matrix, float[] vector, float[] output, int rowCount, boolean parallel);
     }
 
     private static float[] deterministicProbeVector(int columns) {

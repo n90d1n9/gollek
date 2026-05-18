@@ -25,6 +25,7 @@ import tech.kayys.gollek.ml.nn.loss.HuberLoss;
 import tech.kayys.gollek.ml.nn.loss.MSELoss;
 import tech.kayys.gollek.ml.optim.Adam;
 import tech.kayys.gollek.ml.optim.AdamW;
+import tech.kayys.gollek.ml.optim.GradScaler;
 import tech.kayys.gollek.ml.optim.RMSprop;
 import tech.kayys.gollek.ml.optim.SGD;
 import tech.kayys.gollek.ml.optim.StepLR;
@@ -124,6 +125,7 @@ class CanonicalTrainerTest {
             assertEquals(Boolean.FALSE, summary.metadata().get("executionAccelerated"));
             assertEquals(Boolean.TRUE, summary.metadata().get("requestedDeviceAvailable"));
             assertTrue(summary.metadata().get("acceleratedMatmulCalls") instanceof Number);
+            assertTrue(summary.metadata().get("acceleratedMatmulCallsDelta") instanceof Number);
         }
     }
 
@@ -1153,9 +1155,15 @@ class CanonicalTrainerTest {
         assertEquals(Boolean.TRUE, summary.metadata().get("trainingHistoryEnabled"));
         assertEquals(Boolean.TRUE, summary.metadata().get("trainingHistorySaved"));
         assertEquals(Boolean.FALSE, summary.metadata().get("trainingHistorySaveFailed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("checkpointManifestSaved"));
         assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-model.safetensors")));
         assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-optimizer.state")));
         assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-history.csv")));
+        String manifest = Files.readString(checkpointDir.resolve("canonical-checkpoints.metadata"));
+        assertTrue(manifest.contains("artifact.runtime.bytes="));
+        assertTrue(manifest.contains("artifact.runtime.sha256="));
+        assertTrue(manifest.contains("artifact.optimizer.bytes="));
+        assertTrue(manifest.contains("artifact.optimizer.sha256="));
     }
 
     @Test
@@ -1240,6 +1248,81 @@ class CanonicalTrainerTest {
     }
 
     @Test
+    void canonicalTrainerRejectsCorruptedBestModelCheckpointBeforeRestoreByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-best-integrity-mismatch");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 2f;
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> validation = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingListener corruptBestAfterFinalValidation = new TrainingListener() {
+            @Override
+            public void onValidationEnd(TrainerSession session, int epoch, double valLoss) {
+                if (epoch == 1) {
+                    writeCorruptCheckpoint(checkpointDir.resolve("canonical-best-model.safetensors"));
+                }
+            }
+        };
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                    .model(model)
+                    .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .restoreBestModelAtEnd()
+                    .listener(corruptBestAfterFinalValidation)
+                    .build()) {
+                trainer.fit(List.of(), validation);
+            }
+        });
+        assertTrue(error.getMessage().contains("Best model checkpoint integrity mismatch"));
+        assertTrue(error.getMessage().contains("bestModel checkpoint size mismatch"));
+    }
+
+    @Test
+    void canonicalTrainerReportsCorruptedBestModelCheckpointWhenRestoreGuardIsDisabled() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-best-integrity-lenient");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 2f;
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> validation = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingListener corruptBestAfterFinalValidation = new TrainingListener() {
+            @Override
+            public void onValidationEnd(TrainerSession session, int epoch, double valLoss) {
+                if (epoch == 1) {
+                    writeCorruptCheckpoint(checkpointDir.resolve("canonical-best-model.safetensors"));
+                }
+            }
+        };
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .restoreBestModelAtEnd()
+                .failOnCheckpointLoadError(false)
+                .listener(corruptBestAfterFinalValidation)
+                .build()) {
+            trainer.fit(List.of(), validation);
+
+            Map<String, Object> metadata = trainer.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("bestModelCheckpointLoadFailed"));
+            assertEquals(Boolean.FALSE, metadata.get("bestModelCheckpointRestored"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestIntegrityMismatch"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointCompatibilityMismatch"));
+            assertTrue(String.valueOf(metadata.get("bestModelCheckpointLoadError"))
+                    .contains("bestModel checkpoint size mismatch"));
+            assertTrue(String.valueOf(metadata.get("checkpointCompatibilityMismatches"))
+                    .contains("bestModel checkpoint size mismatch"));
+        }
+    }
+
+    @Test
     void canonicalTrainerCanEarlyStopByValidationMetric() {
         ScoredIdentityModel model = new ScoredIdentityModel();
         MSELoss mseLoss = new MSELoss();
@@ -1270,6 +1353,9 @@ class CanonicalTrainerTest {
             assertEquals("validationMetric.mean_prediction", summary.metadata().get("earlyStoppingMonitor"));
             assertEquals("MAX", summary.metadata().get("earlyStoppingMonitorMode"));
             assertEquals(Boolean.TRUE, summary.metadata().get("earlyStoppingMonitorMetricDriven"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("earlyStoppingEnabled"));
+            assertEquals(2, ((Number) summary.metadata().get("earlyStoppingPatience")).intValue());
+            assertEquals(0.0, metric(summary, "earlyStoppingMinDelta"), 1e-6);
             assertEquals(1, ((Number) summary.metadata().get("earlyStoppingMonitorBestEpoch")).intValue());
             assertEquals(3, ((Number) summary.metadata().get("earlyStoppingEpoch")).intValue());
             assertEquals(2, ((Number) summary.metadata()
@@ -1356,6 +1442,8 @@ class CanonicalTrainerTest {
             assertTrue(metric(summary, "latestGradientMaxAbsBeforeClip") > 0.1);
             assertTrue(metric(summary, "latestGradientMaxAbs") <= 0.1001);
             assertEquals(Boolean.TRUE, summary.metadata().get("latestGradientClipped"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradientClipEnabled"));
+            assertEquals(0.1, metric(summary, "gradientClipThreshold"), 1e-6);
             assertEquals(1, ((Number) summary.metadata().get("latestGradientParameterCount")).intValue());
             assertEquals(1L, ((Number) summary.metadata().get("latestGradientValueCount")).longValue());
             assertEquals(1, ((Number) summary.metadata().get("latestParameterCount")).intValue());
@@ -1413,11 +1501,471 @@ class CanonicalTrainerTest {
     }
 
     @Test
+    void canonicalTrainerRejectsVectorTrainingLossBeforeBackwardAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-vector-loss");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 0.5f;
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {1f, 2f}, 2));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
+                .loss((predictions, targets) -> predictions)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train loss tensor must contain exactly one value"));
+        assertEquals(0.5f, model.parameters().get(0).data().data()[0], 1e-6f);
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("lossShapeGuardEnabled"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidLossShapeDetected"));
+        assertEquals("train", summary.metadata().get("invalidLossShapePhase"));
+        assertEquals("[2, 1]", summary.metadata().get("invalidLossShape"));
+        assertEquals(2L, ((Number) summary.metadata().get("invalidLossShapeElementCount")).longValue());
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidLossShapeOptimizerStepSkipped"));
+        assertEquals("invalid-loss-shape-train", summary.metadata().get("stopReason"));
+        assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteTrainingInputBeforeForwardAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-input");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 0.5f;
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {Float.NaN}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train input must be finite"));
+        assertEquals(0.5f, model.parameters().get(0).data().data()[0], 1e-6f);
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteDetected"));
+        assertEquals("train", summary.metadata().get("nonFinitePhase"));
+        assertEquals("input", summary.metadata().get("nonFiniteKind"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteOptimizerStepSkipped"));
+        assertEquals("non-finite-train-input", summary.metadata().get("stopReason"));
+        assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteTrainingPredictionBeforeLossAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-prediction");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new NonFinitePredictionModel(Float.POSITIVE_INFINITY))
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train prediction must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteDetected"));
+        assertEquals("train", summary.metadata().get("nonFinitePhase"));
+        assertEquals("prediction", summary.metadata().get("nonFiniteKind"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteOptimizerStepSkipped"));
+        assertEquals("non-finite-train-prediction", summary.metadata().get("stopReason"));
+        assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteValidationLabelBeforeLoss() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-validation-label");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 0.5f;
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+        List<Batch> validation = List.of(batch(new float[] {1f}, new float[] {Float.POSITIVE_INFINITY}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, validation));
+        assertTrue(error.getMessage().contains("validation label must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteDetected"));
+        assertEquals("validation", summary.metadata().get("nonFinitePhase"));
+        assertEquals("label", summary.metadata().get("nonFiniteKind"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("nonFiniteOptimizerStepSkipped"));
+        assertEquals("non-finite-validation-label", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteValidationPredictionBeforeLoss() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-validation-nonfinite-prediction");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+        List<Batch> validation = List.of(batch(new float[] {99f}, new float[] {99f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new SentinelNonFinitePredictionModel(99f, Float.NaN))
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, validation));
+        assertTrue(error.getMessage().contains("validation prediction must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteDetected"));
+        assertEquals("validation", summary.metadata().get("nonFinitePhase"));
+        assertEquals("prediction", summary.metadata().get("nonFiniteKind"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("nonFiniteOptimizerStepSkipped"));
+        assertEquals("non-finite-validation-prediction", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsVectorValidationLossBeforeMetrics() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-validation-vector-loss");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 0.5f;
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+        List<Batch> validation = List.of(batch(new float[] {1f, 2f}, new float[] {1f, 2f}, 2));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
+                .loss((predictions, targets) -> predictions.numel() == 1L ? predictions.mean() : predictions)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, validation));
+        assertTrue(error.getMessage().contains("validation loss tensor must contain exactly one value"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidLossShapeDetected"));
+        assertEquals("validation", summary.metadata().get("invalidLossShapePhase"));
+        assertEquals("[2, 1]", summary.metadata().get("invalidLossShape"));
+        assertEquals(2L, ((Number) summary.metadata().get("invalidLossShapeElementCount")).longValue());
+        assertEquals(Boolean.FALSE, summary.metadata().get("invalidLossShapeOptimizerStepSkipped"));
+        assertEquals("invalid-loss-shape-validation", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteTrainingMetricAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-train-metric");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(() -> new ConstantMetric("bad_metric", Double.POSITIVE_INFINITY))
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train metric bad_metric must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("metricFiniteGuardEnabled"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("train", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("bad_metric", summary.metadata().get("invalidMetricName"));
+        assertEquals(Double.POSITIVE_INFINITY,
+                ((Number) summary.metadata().get("invalidMetricValue")).doubleValue());
+        assertEquals(Boolean.FALSE, summary.metadata().get("invalidMetricOptimizerStepSkipped"));
+        assertEquals("invalid-metric-train-bad_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsDuplicateMetricNamesBeforeRun() {
+        MSELoss mseLoss = new MSELoss();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(() -> new ConstantMetric("duplicate_metric", 1.0))
+                .metric(() -> new ConstantMetric("duplicate_metric", 2.0))
+                .epochs(1)
+                .build());
+
+        assertTrue(error.getMessage().contains("train metric name must be unique, duplicate: duplicate_metric"));
+    }
+
+    @Test
+    void canonicalTrainerRejectsDynamicDuplicateMetricNamesAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-dynamic-duplicate-metric");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(() -> new DynamicNameMetric("dynamic_metric_a", "duplicate_metric"))
+                .metric(() -> new DynamicNameMetric("dynamic_metric_b", "duplicate_metric"))
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train metric name must be unique, duplicate: duplicate_metric"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("train", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("duplicate_metric", summary.metadata().get("invalidMetricName"));
+        assertEquals("name", summary.metadata().get("invalidMetricKind"));
+        assertEquals("invalid-metric-train-duplicate_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsMetricValueFailureAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-throwing-metric");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(ThrowingMetric::new)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train metric throwing_metric failed to produce a value"));
+        assertTrue(error.getCause() instanceof IllegalStateException);
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("train", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("throwing_metric", summary.metadata().get("invalidMetricName"));
+        assertTrue(Double.isNaN(((Number) summary.metadata().get("invalidMetricValue")).doubleValue()));
+        assertEquals("IllegalStateException", summary.metadata().get("invalidMetricErrorType"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("invalidMetricOptimizerStepSkipped"));
+        assertEquals("invalid-metric-train-throwing_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteMetricDetailsAndSkipsCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-metric-detail");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(NonFiniteDetailMetric::new)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train metric detail_metric detail details.bad must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("train", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("detail_metric", summary.metadata().get("invalidMetricName"));
+        assertEquals("detail", summary.metadata().get("invalidMetricKind"));
+        assertEquals("details.bad", summary.metadata().get("invalidMetricDetailPath"));
+        assertTrue(Double.isNaN(((Number) summary.metadata().get("invalidMetricValue")).doubleValue()));
+        assertEquals("invalid-metric-train-detail_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsMetricDetailsFailureAndKeepsCause() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-throwing-metric-detail");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(ThrowingDetailMetric::new)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage()
+                .contains("train metric throwing_detail_metric detail details failed to produce a value"));
+        assertTrue(error.getCause() instanceof IllegalStateException);
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("train", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("throwing_detail_metric", summary.metadata().get("invalidMetricName"));
+        assertEquals("detail", summary.metadata().get("invalidMetricKind"));
+        assertEquals("details", summary.metadata().get("invalidMetricDetailPath"));
+        assertEquals("IllegalStateException", summary.metadata().get("invalidMetricErrorType"));
+        assertEquals("invalid-metric-train-throwing_detail_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsNonFiniteValidationMetricWithPhaseMetadata() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-validation-metric");
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {1f}, 1));
+        List<Batch> validation = List.of(batch(new float[] {99f}, new float[] {99f}, 1));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .metric(() -> new SentinelNonFiniteMetric(99f))
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, validation));
+        assertTrue(error.getMessage().contains("validation metric sentinel_metric must be finite"));
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidMetricDetected"));
+        assertEquals("validation", summary.metadata().get("invalidMetricPhase"));
+        assertEquals("sentinel_metric", summary.metadata().get("invalidMetricName"));
+        assertTrue(Double.isNaN(((Number) summary.metadata().get("invalidMetricValue")).doubleValue()));
+        assertEquals(Boolean.FALSE, summary.metadata().get("invalidMetricOptimizerStepSkipped"));
+        assertEquals("invalid-metric-validation-sentinel_metric", summary.metadata().get("stopReason"));
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+    }
+
+    @Test
+    void canonicalTrainerRejectsMismatchedTrainingBatchSamplesBeforeForward() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-invalid-batch");
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 0.5f;
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(new Batch(
+                GradTensor.of(new float[] {1f, 2f}, 2, 1),
+                GradTensor.of(new float[] {1f}, 1, 1)));
+
+        CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> trainer.fit(train, null));
+        assertTrue(error.getMessage().contains("train batch sample count mismatch"));
+        assertEquals(0.5f, model.parameters().get(0).data().data()[0], 1e-6f);
+
+        TrainingSummary summary = trainer.summary();
+        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("batchDataGuardEnabled"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidBatchDetected"));
+        assertEquals("train", summary.metadata().get("invalidBatchPhase"));
+        assertEquals("sample-count-mismatch", summary.metadata().get("invalidBatchReason"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("invalidBatchOptimizerStepSkipped"));
+        assertEquals("invalid-batch-train-sample-count-mismatch", summary.metadata().get("stopReason"));
+        assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
+
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
+        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+    }
+
+    @Test
     void canonicalTrainerRejectsNonFiniteGradientsBeforeOptimizerStep() throws Exception {
         Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-gradient");
         Linear model = new Linear(1, 1, false);
         model.parameters().get(0).data().data()[0] = 0.25f;
-        CanonicalTrainer.LossFunction nanGradientLoss = (predictions, targets) -> {
+        TrainingLossFunction nanGradientLoss = (predictions, targets) -> {
             GradTensor out = GradTensor.scalar(1f).requiresGrad(true);
             out.setGradFn(new Function.Context("NaNGradientLoss") {
                 @Override
@@ -1461,7 +2009,7 @@ class CanonicalTrainerTest {
         Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-nonfinite-accumulated-gradient");
         Linear model = new Linear(1, 1, false);
         model.parameters().get(0).data().data()[0] = 0.75f;
-        CanonicalTrainer.LossFunction nanGradientLoss = (predictions, targets) -> {
+        TrainingLossFunction nanGradientLoss = (predictions, targets) -> {
             GradTensor out = GradTensor.scalar(1f).requiresGrad(true);
             out.setGradFn(new Function.Context("NaNAccumulatedGradientLoss") {
                 @Override
@@ -1617,11 +2165,16 @@ class CanonicalTrainerTest {
                 .epochs(3)
                 .checkpointDir(checkpointDir)
                 .metric(CanonicalTrainer.Metrics.meanAbsoluteError())
+                .metric(MatrixDetailMetric::new)
                 .listener(stopAfterFirstEpoch)
                 .build()) {
             firstRun.fit(train, validation);
             assertEquals(1, firstRun.summary().epochCount());
-            assertEquals(2, Files.readString(checkpointDir.resolve("canonical-history.csv")).lines().count());
+            String csv = Files.readString(checkpointDir.resolve("canonical-history.csv"));
+            assertEquals(2, csv.lines().count());
+            assertTrue(csv.contains("trainMetricDetails.matrix_detail"));
+            assertTrue(csv.contains("\"\"matrix\"\":[[1,2],[3,4]]"));
+            assertFalse(csv.contains("matrix=[["));
         }
 
         Linear resumedModel = new Linear(1, 1);
@@ -1633,6 +2186,7 @@ class CanonicalTrainerTest {
                 .checkpointDir(checkpointDir)
                 .resumeFromCheckpoint()
                 .metric(CanonicalTrainer.Metrics.meanAbsoluteError())
+                .metric(MatrixDetailMetric::new)
                 .build()) {
             resumedRun.fit(train, validation);
 
@@ -1647,8 +2201,11 @@ class CanonicalTrainerTest {
             assertEquals(0, ((Number) history.get(0).get("epoch")).intValue());
             assertEquals(1, ((Number) history.get(1).get("epoch")).intValue());
             assertEquals(2, ((Number) history.get(2).get("epoch")).intValue());
-            assertTrue(history.get(0).get("validationMetric.mae") instanceof Number);
-            assertNotNull(metricMap(history.get(0), "validationMetrics").get("mae"));
+            assertTrue(history.get(0).get("trainMetric.mae") instanceof Number);
+            assertNotNull(metricMap(history.get(0), "trainMetrics").get("mae"));
+            assertEquals(
+                    List.of(List.of(1, 2), List.of(3, 4)),
+                    metricDetails(history.get(0), "trainMetricDetails", "matrix_detail").get("matrix"));
         }
 
         String csv = Files.readString(checkpointDir.resolve("canonical-history.csv"));
@@ -1656,37 +2213,6 @@ class CanonicalTrainerTest {
         assertTrue(csv.lines().anyMatch(line -> line.startsWith("0,")));
         assertTrue(csv.lines().anyMatch(line -> line.startsWith("1,")));
         assertTrue(csv.lines().anyMatch(line -> line.startsWith("2,")));
-    }
-
-    @Test
-    void canonicalTrainerReportsInvalidHistoryCsvOnResume() throws Exception {
-        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-history-invalid");
-        Files.writeString(checkpointDir.resolve("canonical-history.csv"), "epoch,trainLoss\n\"unterminated");
-
-        Linear model = new Linear(1, 1);
-        MSELoss mseLoss = new MSELoss();
-        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
-
-        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
-                .model(model)
-                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
-                .loss(mseLoss::compute)
-                .epochs(1)
-                .checkpointDir(checkpointDir)
-                .resumeFromCheckpoint()
-                .metric(CanonicalTrainer.Metrics.meanAbsoluteError())
-                .build()) {
-            trainer.fit(train);
-
-            TrainingSummary summary = trainer.summary();
-            assertEquals(1, summary.epochCount());
-            assertEquals(Boolean.FALSE, summary.metadata().get("trainingHistoryLoaded"));
-            assertEquals(Boolean.TRUE, summary.metadata().get("trainingHistoryLoadFailed"));
-            assertTrue(String.valueOf(summary.metadata().get("trainingHistoryLoadError"))
-                    .contains("unterminated quoted cell"));
-            assertEquals(Boolean.TRUE, summary.metadata().get("trainingHistorySaved"));
-            assertEquals(1, epochHistory(summary).size());
-        }
     }
 
     @Test
@@ -1732,6 +2258,29 @@ class CanonicalTrainerTest {
         assertEquals(2, ((Number) summary.metadata().get("gradientAccumulationSteps")).intValue());
         assertEquals(1, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
         assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
+    }
+
+    @Test
+    void gollekDlTrainingOptionsExposeMixedPrecision() {
+        Linear model = new Linear(1, 1);
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                model,
+                train,
+                List.of(),
+                1,
+                0.01f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .gradScaler(GradScaler.builder().initScale(8.0).growthInterval(1).build())
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("mixedPrecisionEnabled"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("mixedPrecisionOverflowDetected"));
+        assertEquals(0, ((Number) summary.metadata().get("mixedPrecisionOverflowSkipCount")).intValue());
+        assertEquals(16.0, ((Number) summary.metadata().get("mixedPrecisionLossScale")).doubleValue(), 1e-9);
+        assertEquals(1, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
     }
 
     @Test
@@ -1876,6 +2425,422 @@ class CanonicalTrainerTest {
             lenient.fit(train, null);
             assertEquals(Boolean.TRUE, lenient.summary().metadata().get("checkpointLoadFailed"));
             assertEquals(Boolean.FALSE, lenient.summary().metadata().get("resumedFromCheckpoint"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerRejectsCorruptedRuntimeCheckpointByManifestBeforeResume() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-runtime-integrity-mismatch");
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+            assertEquals(Boolean.TRUE, initial.summary().metadata().get("checkpointManifestSaved"));
+        }
+
+        writeCorruptCheckpoint(checkpointDir.resolve("canonical-runtime.state"));
+
+        Linear resumedModel = new Linear(1, 1);
+        IllegalStateException strictError = assertThrows(IllegalStateException.class,
+                () -> CanonicalTrainer.builder()
+                        .model(resumedModel)
+                        .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                        .loss(mseLoss::compute)
+                        .epochs(2)
+                        .checkpointDir(checkpointDir)
+                        .resumeFromCheckpoint()
+                        .build());
+        assertTrue(strictError.getMessage().contains("Runtime checkpoint integrity mismatch"));
+        assertTrue(strictError.getMessage().contains("runtime checkpoint size mismatch"));
+    }
+
+    @Test
+    void canonicalTrainerSkipsCorruptedRuntimeCheckpointInLenientResume() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-runtime-integrity-lenient");
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+        }
+
+        writeCorruptCheckpoint(checkpointDir.resolve("canonical-runtime.state"));
+
+        Linear resumedModel = new Linear(1, 1);
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(resumedModel)
+                .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .build()) {
+            resumed.fit(train, null);
+            Map<String, Object> metadata = resumed.summary().metadata();
+            assertEquals(Boolean.FALSE, metadata.get("resumedFromCheckpoint"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
+            assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointIntegrityMismatch"));
+            assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointResumeSkipped"));
+            assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointLoadFailed"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestIntegrityMismatch"));
+            assertTrue(String.valueOf(metadata.get("runtimeCheckpointLoadError"))
+                    .contains("runtime checkpoint size mismatch"));
+            assertTrue(String.valueOf(metadata.get("checkpointCompatibilityMismatches"))
+                    .contains("runtime checkpoint size mismatch"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerRejectsModelCheckpointMetadataMismatchByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-model-metadata-mismatch");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+            Map<String, Object> metadata = initial.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointMetadataPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointMetadataSaved"));
+            String metadataFile = Files.readString(checkpointDir.resolve("canonical-model.metadata"));
+            assertTrue(metadataFile.contains("modelCheckpointBytes="));
+            assertTrue(metadataFile.contains("modelCheckpointSha256="));
+        }
+
+        Linear incompatibleModel = new Linear(2, 1);
+        IllegalStateException strictError = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                    .model(incompatibleModel)
+                    .optimizer(SGD.builder(incompatibleModel.parameters(), 0.01f).build())
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .resumeFromCheckpoint()
+                    .build()) {
+                resumed.fit(List.of(), null);
+            }
+        });
+        assertTrue(strictError.getMessage().contains("Model checkpoint metadata mismatch"));
+        assertTrue(strictError.getMessage().contains("model parameter signature mismatch"));
+    }
+
+    @Test
+    void canonicalTrainerRejectsCorruptedModelCheckpointByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-model-integrity-mismatch");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+        }
+
+        Files.write(checkpointDir.resolve("canonical-model.safetensors"), new byte[] {1, 2, 3});
+
+        Linear resumedModel = new Linear(1, 1);
+        IllegalStateException strictError = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                    .model(resumedModel)
+                    .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .resumeFromCheckpoint()
+                    .build()) {
+                resumed.fit(List.of(), null);
+            }
+        });
+        assertTrue(strictError.getMessage().contains("Model checkpoint metadata mismatch"));
+        assertTrue(strictError.getMessage().contains("model checkpoint size mismatch"));
+    }
+
+    @Test
+    void canonicalTrainerReportsModelCheckpointMetadataMismatchWhenGuardIsDisabled() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-model-metadata-lenient");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+        }
+
+        Linear incompatibleModel = new Linear(2, 1);
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(incompatibleModel)
+                .optimizer(SGD.builder(incompatibleModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .build()) {
+            resumed.fit(List.of(), null);
+            Map<String, Object> metadata = resumed.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointCompatibilityMismatch"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointLoadFailed"));
+            assertEquals(Boolean.FALSE, metadata.get("modelCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointMetadataLoaded"));
+            assertEquals(Boolean.FALSE, metadata.get("modelCheckpointMetadataMissingOnResume"));
+            assertTrue(String.valueOf(metadata.get("modelCheckpointLoadError"))
+                    .contains("model parameter signature mismatch"));
+            assertTrue(String.valueOf(metadata.get("checkpointResumeCompatibilityMismatches"))
+                    .contains("model parameter signature mismatch"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerReportsCorruptedModelCheckpointWhenGuardIsDisabled() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-model-integrity-lenient");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+        }
+
+        Files.write(checkpointDir.resolve("canonical-model.safetensors"), new byte[] {1, 2, 3});
+
+        Linear resumedModel = new Linear(1, 1);
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(resumedModel)
+                .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .build()) {
+            resumed.fit(List.of(), null);
+            Map<String, Object> metadata = resumed.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointCompatibilityMismatch"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointLoadFailed"));
+            assertEquals(Boolean.FALSE, metadata.get("modelCheckpointLoaded"));
+            assertTrue(String.valueOf(metadata.get("modelCheckpointLoadError"))
+                    .contains("model checkpoint size mismatch"));
+            assertTrue(String.valueOf(metadata.get("checkpointResumeCompatibilityMismatches"))
+                    .contains("model checkpoint size mismatch"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerRejectsCorruptedOptimizerCheckpointByManifestByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-optimizer-integrity-mismatch");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+            Map<String, Object> metadata = initial.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestSaved"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestPresent"));
+        }
+
+        Files.write(checkpointDir.resolve("canonical-optimizer.state"), new byte[] {9, 8, 7, 6});
+
+        Linear resumedModel = new Linear(1, 1);
+        IllegalStateException strictError = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                    .model(resumedModel)
+                    .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .resumeFromCheckpoint()
+                    .build()) {
+                resumed.fit(train, null);
+            }
+        });
+        assertTrue(strictError.getMessage().contains("Optimizer checkpoint integrity mismatch"));
+        assertTrue(strictError.getMessage().contains("optimizer checkpoint size mismatch"));
+    }
+
+    @Test
+    void canonicalTrainerReportsCorruptedOptimizerCheckpointByManifestWhenGuardIsDisabled() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-optimizer-integrity-lenient");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .build()) {
+            initial.fit(train, null);
+        }
+
+        Files.write(checkpointDir.resolve("canonical-optimizer.state"), new byte[] {9, 8, 7, 6});
+
+        Linear resumedModel = new Linear(1, 1);
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(resumedModel)
+                .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .build()) {
+            resumed.fit(train, null);
+            Map<String, Object> metadata = resumed.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("checkpointManifestIntegrityMismatch"));
+            assertEquals(Boolean.FALSE, metadata.get("optimizerCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("optimizerCheckpointLoadFailed"));
+            assertTrue(String.valueOf(metadata.get("optimizerCheckpointLoadError"))
+                    .contains("optimizer checkpoint size mismatch"));
+            assertTrue(String.valueOf(metadata.get("checkpointResumeCompatibilityMismatches"))
+                    .contains("optimizer checkpoint size mismatch"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerReportsCheckpointArtifactsMissingAtResumeTime() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-partial-resume");
+        Linear model = new Linear(1, 1);
+        SGD optimizer = SGD.builder(model.parameters(), 0.01f).build();
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer initial = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .checkpointDir(checkpointDir)
+                .scheduler(new StepLR(optimizer, 1, 0.5f))
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .build()) {
+            initial.fit(train, null);
+            Map<String, Object> metadata = initial.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("optimizerCheckpointPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("schedulerCheckpointPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("gradScalerCheckpointPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("trainingHistoryPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("trainingReportPresent"));
+            assertEquals(Boolean.FALSE, metadata.get("optimizerCheckpointMissingOnResume"));
+        }
+
+        Files.deleteIfExists(checkpointDir.resolve("canonical-optimizer.state"));
+        Files.deleteIfExists(checkpointDir.resolve("canonical-scheduler.state"));
+        Files.deleteIfExists(checkpointDir.resolve("canonical-grad-scaler.state"));
+        Files.deleteIfExists(checkpointDir.resolve("canonical-history.csv"));
+
+        Linear resumedModel = new Linear(1, 1);
+        SGD resumedOptimizer = SGD.builder(resumedModel.parameters(), 0.01f).build();
+        IllegalStateException strictError = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                    .model(resumedModel)
+                    .optimizer(resumedOptimizer)
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .resumeFromCheckpoint()
+                    .scheduler(new StepLR(resumedOptimizer, 1, 0.5f))
+                    .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                    .build()) {
+                resumed.fit(train, null);
+            }
+        });
+        assertTrue(strictError.getMessage().contains("Missing optimizer checkpoint artifact"));
+
+        Linear lenientModel = new Linear(1, 1);
+        SGD lenientOptimizer = SGD.builder(lenientModel.parameters(), 0.01f).build();
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(lenientModel)
+                .optimizer(lenientOptimizer)
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .scheduler(new StepLR(lenientOptimizer, 1, 0.5f))
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .build()) {
+            resumed.fit(train, null);
+            Map<String, Object> metadata = resumed.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
+            assertEquals(
+                    List.of("optimizer", "scheduler", "gradScaler", "history"),
+                    metadata.get("checkpointResumeMissingArtifacts"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointLoaded"));
+            assertEquals(Boolean.FALSE, metadata.get("modelCheckpointMissingOnResume"));
+            assertEquals(Boolean.TRUE, metadata.get("modelCheckpointPresent"));
+            assertEquals(Boolean.FALSE, metadata.get("optimizerCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("optimizerCheckpointMissingOnResume"));
+            assertEquals(Boolean.TRUE, metadata.get("optimizerCheckpointPresent"));
+            assertEquals(Boolean.FALSE, metadata.get("schedulerCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("schedulerCheckpointMissingOnResume"));
+            assertEquals(Boolean.TRUE, metadata.get("schedulerCheckpointPresent"));
+            assertEquals(Boolean.FALSE, metadata.get("gradScalerCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("gradScalerCheckpointMissingOnResume"));
+            assertEquals(Boolean.TRUE, metadata.get("gradScalerCheckpointPresent"));
+            assertEquals(Boolean.FALSE, metadata.get("trainingHistoryLoaded"));
+            assertEquals(Boolean.TRUE, metadata.get("trainingHistoryMissingOnResume"));
+            assertEquals(Boolean.TRUE, metadata.get("trainingHistoryPresent"));
+            assertEquals(Boolean.TRUE, metadata.get("trainingReportPresent"));
         }
     }
 
@@ -2398,6 +3363,246 @@ class CanonicalTrainerTest {
     }
 
     @Test
+    void canonicalTrainerMixedPrecisionUsesGradScalerForEquivalentUpdate() {
+        Linear seed = new Linear(1, 1);
+        Linear fullPrecisionModel = new Linear(1, 1);
+        Linear mixedPrecisionModel = new Linear(1, 1);
+        copyParameters(seed, fullPrecisionModel);
+        copyParameters(seed, mixedPrecisionModel);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer fullPrecision = CanonicalTrainer.builder()
+                .model(fullPrecisionModel)
+                .optimizer(SGD.builder(fullPrecisionModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .build()) {
+            fullPrecision.fit(train, null);
+        }
+
+        try (CanonicalTrainer mixedPrecision = CanonicalTrainer.builder()
+                .model(mixedPrecisionModel)
+                .optimizer(SGD.builder(mixedPrecisionModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .gradScaler(GradScaler.builder().initScale(8.0).growthInterval(1).build())
+                .build()) {
+            mixedPrecision.fit(train, null);
+            TrainingSummary summary = mixedPrecision.summary();
+            assertEquals(Boolean.TRUE, summary.metadata().get("mixedPrecisionEnabled"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("mixedPrecisionOverflowDetected"));
+            assertEquals(0, ((Number) summary.metadata().get("mixedPrecisionOverflowSkipCount")).intValue());
+            assertEquals(16.0, ((Number) summary.metadata().get("mixedPrecisionLossScale")).doubleValue(), 1e-9);
+            assertEquals(1, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        }
+
+        assertParametersClose(fullPrecisionModel, mixedPrecisionModel, 1e-5f);
+    }
+
+    @Test
+    void canonicalTrainerMixedPrecisionSkipsOverflowStepAndBacksOffScale() {
+        Linear model = new Linear(1, 1, false);
+        model.parameters().get(0).data().data()[0] = 1f;
+        SGD optimizer = SGD.builder(model.parameters(), 0.1f).build();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {0f}, 1));
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(optimizer)
+                .loss((prediction, labels) -> prediction.mul(Float.MAX_VALUE / 2.0f).mean())
+                .epochs(1)
+                .gradScaler(GradScaler.builder().initScale(4.0).backoffFactor(0.5).build())
+                .build()) {
+            trainer.fit(train, null);
+            TrainingSummary summary = trainer.summary();
+            assertEquals(Boolean.TRUE, summary.metadata().get("mixedPrecisionEnabled"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("mixedPrecisionOverflowDetected"));
+            assertEquals(1, ((Number) summary.metadata().get("mixedPrecisionOverflowSkipCount")).intValue());
+            assertEquals(2.0, ((Number) summary.metadata().get("mixedPrecisionLossScale")).doubleValue(), 1e-9);
+            assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+            assertEquals(1f, model.parameters().get(0).data().data()[0], 1e-6f);
+        }
+    }
+
+    @Test
+    void canonicalTrainerMixedPrecisionCheckpointsGradScalerState() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-grad-scaler");
+        Linear seed = new Linear(1, 1);
+        Linear interruptedModel = new Linear(1, 1);
+        Linear baselineModel = new Linear(1, 1);
+        copyParameters(seed, interruptedModel);
+        copyParameters(seed, baselineModel);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingListener stopAfterFirstEpoch = new TrainingListener() {
+            @Override
+            public void onEpochEnd(TrainerSession session, int epoch, double trainLoss) {
+                if (epoch == 0) {
+                    session.stop();
+                }
+            }
+        };
+
+        try (CanonicalTrainer interrupted = CanonicalTrainer.builder()
+                .model(interruptedModel)
+                .optimizer(SGD.builder(interruptedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .listener(stopAfterFirstEpoch)
+                .build()) {
+            interrupted.fit(train, null);
+            TrainingSummary summary = interrupted.summary();
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradScalerCheckpointSupported"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradScalerCheckpointSaved"));
+            assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-grad-scaler.state")));
+            assertEquals(4.0, ((Number) summary.metadata().get("mixedPrecisionLossScale")).doubleValue(), 1e-9);
+        }
+
+        try (CanonicalTrainer baseline = CanonicalTrainer.builder()
+                .model(baselineModel)
+                .optimizer(SGD.builder(baselineModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .build()) {
+            baseline.fit(train, null);
+            assertEquals(
+                    8.0,
+                    ((Number) baseline.summary().metadata().get("mixedPrecisionLossScale")).doubleValue(),
+                    1e-9);
+        }
+
+        Linear resumedModel = new Linear(1, 1);
+        copyParameters(seed, resumedModel);
+        try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                .model(resumedModel)
+                .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .build()) {
+            resumed.fit(train, null);
+            TrainingSummary summary = resumed.summary();
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradScalerCheckpointLoaded"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("gradScalerCheckpointLoadFailed"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("gradScalerCheckpointFallbackUsed"));
+            assertEquals(8.0, ((Number) summary.metadata().get("mixedPrecisionLossScale")).doubleValue(), 1e-9);
+        }
+
+        assertParametersClose(baselineModel, resumedModel, 1e-5f);
+    }
+
+    @Test
+    void canonicalTrainerRejectsIncompatibleGradScalerCheckpointByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-grad-scaler-mismatch");
+        Linear seed = new Linear(1, 1);
+        Linear interruptedModel = new Linear(1, 1);
+        copyParameters(seed, interruptedModel);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingListener stopAfterFirstEpoch = new TrainingListener() {
+            @Override
+            public void onEpochEnd(TrainerSession session, int epoch, double trainLoss) {
+                if (epoch == 0) {
+                    session.stop();
+                }
+            }
+        };
+
+        try (CanonicalTrainer interrupted = CanonicalTrainer.builder()
+                .model(interruptedModel)
+                .optimizer(SGD.builder(interruptedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .listener(stopAfterFirstEpoch)
+                .build()) {
+            interrupted.fit(train, null);
+            assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-grad-scaler.state")));
+        }
+
+        Linear resumedModel = new Linear(1, 1);
+        copyParameters(seed, resumedModel);
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> {
+            try (CanonicalTrainer resumed = CanonicalTrainer.builder()
+                    .model(resumedModel)
+                    .optimizer(SGD.builder(resumedModel.parameters(), 0.01f).build())
+                    .loss(mseLoss::compute)
+                    .epochs(2)
+                    .checkpointDir(checkpointDir)
+                    .resumeFromCheckpoint()
+                    .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(3).build())
+                    .build()) {
+                resumed.fit(train, null);
+            }
+        });
+        assertTrue(error.getMessage().contains("GradScaler checkpoint"));
+        assertNotNull(error.getCause());
+        assertTrue(error.getCause().getMessage().contains("growthInterval"));
+    }
+
+    @Test
+    void canonicalTrainerCanContinueLenientlyAfterIncompatibleGradScalerCheckpoint() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-grad-scaler-lenient");
+        Linear seed = new Linear(1, 1);
+        Linear interruptedModel = new Linear(1, 1);
+        copyParameters(seed, interruptedModel);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        TrainingListener stopAfterFirstEpoch = new TrainingListener() {
+            @Override
+            public void onEpochEnd(TrainerSession session, int epoch, double trainLoss) {
+                if (epoch == 0) {
+                    session.stop();
+                }
+            }
+        };
+
+        try (CanonicalTrainer interrupted = CanonicalTrainer.builder()
+                .model(interruptedModel)
+                .optimizer(SGD.builder(interruptedModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(2).build())
+                .listener(stopAfterFirstEpoch)
+                .build()) {
+            interrupted.fit(train, null);
+        }
+
+        Linear lenientModel = new Linear(1, 1);
+        copyParameters(seed, lenientModel);
+        try (CanonicalTrainer lenient = CanonicalTrainer.builder()
+                .model(lenientModel)
+                .optimizer(SGD.builder(lenientModel.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .gradScaler(GradScaler.builder().initScale(4.0).growthInterval(3).build())
+                .build()) {
+            lenient.fit(train, null);
+            TrainingSummary summary = lenient.summary();
+            assertEquals(Boolean.FALSE, summary.metadata().get("gradScalerCheckpointLoaded"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradScalerCheckpointLoadFailed"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("gradScalerCheckpointFallbackUsed"));
+            assertTrue(String.valueOf(summary.metadata().get("gradScalerCheckpointLoadError"))
+                    .contains("growthInterval"));
+            assertEquals(0, ((Number) summary.metadata().get("mixedPrecisionOverflowSkipCount")).intValue());
+        }
+    }
+
+    @Test
     void canonicalTrainerReportsRegressionMetricsForTrainAndValidation() {
         MSELoss mseLoss = new MSELoss();
         List<Batch> train = List.of(
@@ -2410,8 +3615,8 @@ class CanonicalTrainerTest {
                 .optimizer(SGD.builder(List.of(), 0.01f).build())
                 .loss(mseLoss::compute)
                 .epochs(1)
-                .metric(CanonicalTrainer.Metrics.meanAbsoluteError())
-                .metric(CanonicalTrainer.Metrics.meanSquaredError())
+                .metric(TrainingMetrics.meanAbsoluteError())
+                .metric(TrainingMetrics.meanSquaredError())
                 .build()) {
             trainer.fit(train, validation);
 
@@ -2424,6 +3629,62 @@ class CanonicalTrainerTest {
             assertEquals(2.0, metricMap(summary, "latestTrainMetrics").get("mae"), 1e-6);
             assertEquals(5.0, metricMap(summary, "latestValidationMetrics").get("mse"), 1e-6);
         }
+    }
+
+    @Test
+    void canonicalTrainerAcceptsTopLevelMetricContracts() {
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 3f}, new float[] {2f, 1f}, 2));
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .metric(TrainingMetrics.meanAbsoluteError())
+                .metric(() -> new ConstantMetric("constant_metric", 1.0))
+                .build()) {
+            trainer.fit(train, null);
+
+            TrainingSummary summary = trainer.summary();
+            assertEquals(1.5, metric(summary, "trainMetric.mae"), 1e-6);
+            assertEquals(1.0, metric(summary, "trainMetric.constant_metric"), 1e-6);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void canonicalTrainerKeepsLegacyNestedMetricAliasCompatible() {
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f}, new float[] {2f}, 1));
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(new IdentityModel())
+                .optimizer(SGD.builder(List.of(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .metric(LegacyNestedMetric::new)
+                .build()) {
+            trainer.fit(train, null);
+
+            assertEquals(2.0, metric(trainer.summary(), "trainMetric.legacy_metric"), 1e-6);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("deprecation")
+    void canonicalTrainerKeepsLegacyDetailedMetricAliasCompatible() {
+        CanonicalTrainer.Metric metric = CanonicalTrainer.Metrics.binaryConfusionMatrix().get();
+        assertTrue(metric instanceof CanonicalTrainer.DetailedMetric);
+
+        metric.reset();
+        metric.update(
+                GradTensor.of(new float[] {2f, -1f}, 2),
+                GradTensor.of(new float[] {1f, 0f}, 2));
+
+        CanonicalTrainer.DetailedMetric detailedMetric = (CanonicalTrainer.DetailedMetric) metric;
+        assertEquals(1.0, metric.value(), 1e-6);
+        assertEquals("binary_confusion_matrix", detailedMetric.details().get("type"));
     }
 
     @Test
@@ -2733,6 +3994,14 @@ class CanonicalTrainerTest {
                 GradTensor.of(targets, rows, 1));
     }
 
+    private static void writeCorruptCheckpoint(Path checkpointFile) {
+        try {
+            Files.write(checkpointFile, new byte[] {9, 8, 7, 6});
+        } catch (Exception error) {
+            throw new RuntimeException(error);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Double> metricMap(TrainingSummary summary, String metadataKey) {
         Object value = summary.metadata().get(metadataKey);
@@ -2794,6 +4063,34 @@ class CanonicalTrainerTest {
         }
     }
 
+    private static final class NonFinitePredictionModel extends NNModule {
+        private final float value;
+
+        NonFinitePredictionModel(float value) {
+            this.value = value;
+        }
+
+        @Override
+        public GradTensor forward(GradTensor input) {
+            return GradTensor.full(value, input.shape());
+        }
+    }
+
+    private static final class SentinelNonFinitePredictionModel extends NNModule {
+        private final float sentinel;
+        private final float value;
+
+        SentinelNonFinitePredictionModel(float sentinel, float value) {
+            this.sentinel = sentinel;
+            this.value = value;
+        }
+
+        @Override
+        public GradTensor forward(GradTensor input) {
+            return input.item() == sentinel ? GradTensor.full(value, input.shape()) : input;
+        }
+    }
+
     private static final class ScoredIdentityModel extends NNModule {
         ScoredIdentityModel() {
             registerParameter("dummy", GradTensor.of(new float[] {1f}, 1));
@@ -2805,7 +4102,7 @@ class CanonicalTrainerTest {
         }
     }
 
-    private static final class MeanPredictionMetric implements CanonicalTrainer.Metric {
+    private static final class MeanPredictionMetric implements TrainingMetric {
         private double sum;
         private long count;
 
@@ -2831,6 +4128,222 @@ class CanonicalTrainerTest {
         @Override
         public double value() {
             return count == 0 ? Double.NaN : sum / count;
+        }
+    }
+
+    private static final class ConstantMetric implements TrainingMetric {
+        private final String name;
+        private final double value;
+
+        ConstantMetric(String name, double value) {
+            this.name = name;
+            this.value = value;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            return value;
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static final class LegacyNestedMetric implements CanonicalTrainer.Metric {
+        @Override
+        public String name() {
+            return "legacy_metric";
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            return 2.0;
+        }
+    }
+
+    private static final class MatrixDetailMetric implements DetailedTrainingMetric {
+        @Override
+        public String name() {
+            return "matrix_detail";
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            return 1.0;
+        }
+
+        @Override
+        public Map<String, Object> details() {
+            return Map.of(
+                    "label", "matrix-detail",
+                    "matrix", List.of(List.of(1, 2), List.of(3, 4)));
+        }
+    }
+
+    private static final class DynamicNameMetric implements TrainingMetric {
+        private final String initialName;
+        private final String updatedName;
+        private boolean updated;
+
+        DynamicNameMetric(String initialName, String updatedName) {
+            this.initialName = initialName;
+            this.updatedName = updatedName;
+        }
+
+        @Override
+        public String name() {
+            return updated ? updatedName : initialName;
+        }
+
+        @Override
+        public void reset() {
+            updated = false;
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+            updated = true;
+        }
+
+        @Override
+        public double value() {
+            return 1.0;
+        }
+    }
+
+    private static final class ThrowingMetric implements TrainingMetric {
+        @Override
+        public String name() {
+            return "throwing_metric";
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            throw new IllegalStateException("boom");
+        }
+    }
+
+    private static final class NonFiniteDetailMetric implements DetailedTrainingMetric {
+        @Override
+        public String name() {
+            return "detail_metric";
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            return 1.0;
+        }
+
+        @Override
+        public Map<String, Object> details() {
+            return Map.of("bad", Double.NaN);
+        }
+    }
+
+    private static final class ThrowingDetailMetric implements DetailedTrainingMetric {
+        @Override
+        public String name() {
+            return "throwing_detail_metric";
+        }
+
+        @Override
+        public void reset() {
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+        }
+
+        @Override
+        public double value() {
+            return 1.0;
+        }
+
+        @Override
+        public Map<String, Object> details() {
+            throw new IllegalStateException("boom");
+        }
+    }
+
+    private static final class SentinelNonFiniteMetric implements TrainingMetric {
+        private final float sentinel;
+        private boolean seenSentinel;
+        private long count;
+
+        SentinelNonFiniteMetric(float sentinel) {
+            this.sentinel = sentinel;
+        }
+
+        @Override
+        public String name() {
+            return "sentinel_metric";
+        }
+
+        @Override
+        public void reset() {
+            seenSentinel = false;
+            count = 0L;
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+            for (float value : predictions.data()) {
+                if (value == sentinel) {
+                    seenSentinel = true;
+                }
+                count++;
+            }
+        }
+
+        @Override
+        public double value() {
+            if (seenSentinel) {
+                return Double.NaN;
+            }
+            return count == 0L ? 0.0 : 1.0;
         }
     }
 

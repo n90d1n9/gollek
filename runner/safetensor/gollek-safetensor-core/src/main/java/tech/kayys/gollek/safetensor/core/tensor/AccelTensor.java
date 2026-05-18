@@ -288,6 +288,14 @@ public class AccelTensor implements AutoCloseable {
     }
 
     /**
+     * Creates a non-owning, offset-zero view over a sliced segment while retaining
+     * a parent tensor for lifecycle management.
+     */
+    public static AccelTensor view(MemorySegment data, long[] shape, AccelTensor parent) {
+        return new AccelTensor(data, shape, contiguousStride(shape), 0, Objects.requireNonNull(parent));
+    }
+
+    /**
      * Creates a tensor filled with ones.
      */
     public static AccelTensor ones(long... shape) {

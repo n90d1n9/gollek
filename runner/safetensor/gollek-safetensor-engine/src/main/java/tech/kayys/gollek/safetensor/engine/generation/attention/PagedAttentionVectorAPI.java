@@ -15,6 +15,7 @@ import java.util.List;
  * Matches the layout: [numHeads, tokensPerBlock, headDim]
  */
 public class PagedAttentionVectorAPI {
+    private static final String DEBUG_ATTENTION_PROBE_PROPERTY = "gollek.debug.attention_probe";
 
     /**
      * Compute attention using the Paged Attention algorithm.
@@ -42,6 +43,7 @@ public class PagedAttentionVectorAPI {
         BlockManager.KvStorageType storageType = blockManager.getStorageType();
         boolean slidingLayer = config != null && config.isSlidingAttentionLayer(layerIdx) && config.hasSlidingWindow();
         int slidingWindow = slidingLayer ? config.slidingWindowSize() : Integer.MAX_VALUE;
+        boolean debugProbe = Boolean.getBoolean(DEBUG_ATTENTION_PROBE_PROPERTY);
 
         AccelTensor out = AccelTensor.zeros(q.shape());
         float[] accScratch = new float[headDim];
@@ -50,7 +52,8 @@ public class PagedAttentionVectorAPI {
             for (int h = 0; h < numQHeads; h++) {
                 for (int i = 0; i < seqLenQ; i++) {
                     computePagedHeadQuery(b, h, i, q, blockTable, blockManager, out, scale, causal, tokensPerBlock,
-                            totalTokens, numKVHeads, headDim, softCap, storageType, slidingWindow, accScratch);
+                            totalTokens, numKVHeads, headDim, softCap, storageType, slidingWindow, accScratch,
+                            debugProbe && layerIdx == 0 && b == 0 && h == 0 && i == seqLenQ - 1);
                 }
             }
         }
@@ -60,7 +63,8 @@ public class PagedAttentionVectorAPI {
     private static void computePagedHeadQuery(int b, int h, int i,
             AccelTensor q, List<Integer> blockTable, BlockManager blockManager, AccelTensor out,
             float scale, boolean causal, int tokensPerBlock, int totalTokens, int numKVHeads, int headDim,
-            float softCap, BlockManager.KvStorageType storageType, int slidingWindow, float[] acc) {
+            float softCap, BlockManager.KvStorageType storageType, int slidingWindow, float[] acc,
+            boolean debugProbe) {
 
         MemorySegment qSeg = q.dataSegment();
         MemorySegment oSeg = out.dataSegment();
@@ -116,6 +120,10 @@ public class PagedAttentionVectorAPI {
                 
                 if (softCap > 0.0f) {
                     score = (float) (Math.tanh(score / softCap) * softCap);
+                }
+                if (debugProbe && absPos < 12) {
+                    System.err.printf("[DEBUG-ATTN] layer=0 head=0 query=%d key=%d score=%f%n",
+                            queryAbsPos, absPos, score);
                 }
 
                 // 2. Online Softmax Update

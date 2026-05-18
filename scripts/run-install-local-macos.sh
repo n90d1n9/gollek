@@ -9,6 +9,15 @@ YELLOW="$(printf '\033[33m')"
 MAGENTA="$(printf '\033[35m')"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help|--prewarm-plan|--prewarm-plan=*|--verify-fast-only|--verify-fast-only=*)
+      exec bash "$ROOT_DIR/scripts/install-local-runtime.sh" "$@"
+      ;;
+  esac
+done
+
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/module-selection-current.env"
 ARCHITECTURE_VALUE="${ARCHITECTURE_TARGETS:-${ARCHITECTURE_TARGET:-native-java,binding}}"
@@ -27,6 +36,10 @@ GRADLE_JAVA_HOME_ARG=()
 if [[ -n "${JAVA_HOME:-}" ]]; then
   GRADLE_JAVA_HOME_ARG+=("-Dorg.gradle.java.home=${JAVA_HOME}")
 fi
+GRADLE_MAX_WORKERS_ARG=()
+if [[ -n "${GOLLEK_GRADLE_MAX_WORKERS:-1}" ]]; then
+  GRADLE_MAX_WORKERS_ARG+=("--max-workers=${GOLLEK_GRADLE_MAX_WORKERS:-1}")
+fi
 
 append_java_tool_option() {
   local option="$1"
@@ -39,6 +52,43 @@ append_java_tool_option() {
 append_java_tool_option "--enable-native-access=ALL-UNNAMED"
 append_java_tool_option "--add-modules=jdk.incubator.vector"
 export JAVA_TOOL_OPTIONS
+
+bool_enabled() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+stop_build_daemons_after_install() {
+  if ! bool_enabled "${GOLLEK_INSTALL_STOP_BUILD_DAEMONS:-true}"; then
+    echo "${YELLOW}⚠ Leaving Gradle build daemons running. Set GOLLEK_INSTALL_STOP_BUILD_DAEMONS=true to restore benchmark hygiene.${RESET}"
+    return 0
+  fi
+
+  if [[ ! -x "$ROOT_DIR/gradlew" ]]; then
+    return 0
+  fi
+
+  echo "${BOLD}${CYAN}:) Benchmark hygiene:${RESET} stopping Gradle build daemons before local safetensor runs"
+  "$ROOT_DIR/gradlew" "${GRADLE_JAVA_HOME_ARG[@]}" --stop >/dev/null 2>&1 || true
+
+  local platform_root
+  platform_root="$(cd "$ROOT_DIR/.." && pwd)"
+  local -a gradle_homes=(
+    "$ROOT_DIR/.gradle-sandbox"
+    "$platform_root/.gradle-sandbox"
+  )
+  local seen=":"
+  local gradle_home
+  for gradle_home in "${gradle_homes[@]}"; do
+    if [[ ! -d "$gradle_home" || "$seen" == *":$gradle_home:"* ]]; then
+      continue
+    fi
+    seen="${seen}${gradle_home}:"
+    GRADLE_USER_HOME="$gradle_home" "$ROOT_DIR/gradlew" "${GRADLE_JAVA_HOME_ARG[@]}" --stop >/dev/null 2>&1 || true
+  done
+}
 
 is_legacy_gradle_module() {
   case "$1" in
@@ -82,12 +132,12 @@ fi
 
 echo "${BOLD}${GREEN}:) Step 1/2:${RESET} packaging and installing gollek via the macOS local installer"
 echo "${BOLD}${YELLOW}:| Install path:${RESET} ${GOLLEK_BIN_DIR:-$HOME/.local/bin}/gollek"
-bash "$ROOT_DIR/scripts/install-local-runtime.sh"
+bash "$ROOT_DIR/scripts/install-local-runtime.sh" "$@"
 
 echo "${BOLD}${GREEN}:) Step 2/2:${RESET} optional compatibility publish to local artifact cache"
 if [[ "${PUBLISH_RUNTIME_LOCAL}" == "true" ]]; then
   if [[ ${#GRADLE_INSTALL_TASKS[@]} -gt 0 ]]; then
-    if ./gradlew "${GRADLE_JAVA_HOME_ARG[@]}" "${GRADLE_INSTALL_TASKS[@]}" \
+    if ./gradlew "${GRADLE_JAVA_HOME_ARG[@]}" "${GRADLE_MAX_WORKERS_ARG[@]}" "${GRADLE_INSTALL_TASKS[@]}" \
       -Pgollek.backend="${RESOLVED_BACKEND_PROPERTY}" \
       -Pgollek.profile="${BUILD_PROFILE}" \
       -Pgollek.model.formats="${FORMAT_TARGETS}" \
@@ -103,5 +153,7 @@ if [[ "${PUBLISH_RUNTIME_LOCAL}" == "true" ]]; then
 else
   echo "${YELLOW}⚠ Skipping local artifact publish by default. Set GOLLEK_PUBLISH_RUNTIME_LOCAL=true to enable it.${RESET}"
 fi
+
+stop_build_daemons_after_install
 
 echo "${BOLD}${GREEN}:D Done.${RESET} Gollek is installed locally, and compatibility publish is optional."

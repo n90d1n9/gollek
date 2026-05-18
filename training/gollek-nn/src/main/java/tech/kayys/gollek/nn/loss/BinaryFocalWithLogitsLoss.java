@@ -75,8 +75,9 @@ public class BinaryFocalWithLogitsLoss {
         float[] targetSigns = new float[n];
 
         for (int i = 0; i < n; i++) {
+            float logit = requireFiniteLogit(logitsData[i], i);
             float y = requireBinaryTarget(targetsData[i]);
-            float probability = sigmoid(logitsData[i]);
+            float probability = sigmoid(logit);
             boolean positive = y > 0.5f;
             float pt = clampProbability(positive ? probability : 1.0f - probability);
             float alphaT = positive ? alpha : 1.0f - alpha;
@@ -183,6 +184,13 @@ public class BinaryFocalWithLogitsLoss {
             return 1.0f;
         }
         throw new IllegalArgumentException("targets must contain only 0.0 or 1.0, got: " + target);
+    }
+
+    private static float requireFiniteLogit(float logit, int index) {
+        if (!Float.isFinite(logit)) {
+            throw new IllegalArgumentException("logits must be finite, got " + logit + " at index " + index);
+        }
+        return logit;
     }
 
     private static float validateGamma(float gamma) {

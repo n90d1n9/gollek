@@ -413,6 +413,41 @@ class TrainersRuntimeTest {
     }
 
     @Test
+    void resumeRejectsMissingRuntimeCheckpointByDefault() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-trainer-checkpoint-missing");
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> Trainers.canonicalBuilder()
+                        .epochs(2)
+                        .checkpointDir(checkpointDir)
+                        .resumeFromCheckpoint()
+                        .build());
+        assertTrue(error.getMessage().contains("Missing canonical trainer checkpoint"));
+    }
+
+    @Test
+    void resumeCanFallbackToFreshStateWhenRuntimeCheckpointIsMissingAndGuardIsDisabled() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-trainer-checkpoint-missing-lenient");
+
+        CanonicalTrainerRuntime runtime = Trainers.canonicalBuilder()
+                .epochs(2)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .failOnCheckpointLoadError(false)
+                .trainEpochLoss((session, epoch, loader) -> 3.0)
+                .build();
+
+        runtime.fit(null, null);
+        TrainingSummary summary = runtime.summary();
+        assertEquals(2, summary.epochCount());
+        assertEquals(Boolean.FALSE, summary.metadata().get("resumedFromCheckpoint"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("checkpointMissingOnResume"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("checkpointLoadFailed"));
+        assertEquals("checkpoint-not-found", summary.metadata().get("checkpointLoadError"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("checkpointPresent"));
+    }
+
+    @Test
     void resumeRejectsUnsupportedCheckpointFormatByDefault() throws Exception {
         Path checkpointDir = Files.createTempDirectory("gollek-trainer-checkpoint-bad-version");
         Files.writeString(checkpointDir.resolve("canonical-runtime.state"),

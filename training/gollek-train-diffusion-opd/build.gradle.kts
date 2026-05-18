@@ -19,7 +19,12 @@ repositories {
 
 dependencies {
     api(project(":ml:gollek-ml-diffusion-api"))
+    implementation(project(":core:gollek-core"))
     implementation(project(":runner:gollek-diffusion"))
+    implementation(project(":runner:safetensor:gollek-runner-stable-diffusion"))
+    implementation(project(":runner:safetensor:gollek-safetensor-core"))
+    implementation(project(":backend:metal:gollek-backend-metal"))
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.16.1")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher", version = "1.10.2")
 }

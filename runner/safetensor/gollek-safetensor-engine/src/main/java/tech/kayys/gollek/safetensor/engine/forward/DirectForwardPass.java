@@ -21,9 +21,14 @@ import tech.kayys.gollek.safetensor.engine.generation.attention.FlashAttentionKe
 import tech.kayys.gollek.safetensor.engine.generation.moe.MoeForwardPass;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Full transformer forward pass using AccelTensor + Apple Accelerate.
@@ -43,6 +48,14 @@ public class DirectForwardPass {
             "gollek.safetensor.disable_experimental_metal_bf16_linear";
     private static final String PREFER_NATIVE_METAL_BF16_LINEAR_PROPERTY =
             "gollek.safetensor.prefer_native_metal_bf16_linear";
+    private static final String ENABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.enable_gemma4_metal_bf16_linear";
+    private static final String DISABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.disable_gemma4_metal_bf16_linear";
+    private static final String ENABLE_GEMMA4_BF16_TO_F16_LINEAR_PROPERTY =
+            "gollek.safetensor.enable_gemma4_bf16_to_f16_linear";
+    private static final String DISABLE_GEMMA4_BF16_TO_F16_LINEAR_PROPERTY =
+            "gollek.safetensor.disable_gemma4_bf16_to_f16_linear";
     private static final String METAL_F16_WEIGHT_CACHE_MAX_BYTES_PROPERTY =
             "gollek.safetensor.metal_f16_weight_cache_max_bytes";
     private static final long DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;
@@ -69,7 +82,9 @@ public class DirectForwardPass {
             DEFAULT_FFN_DOWN_LARGE_HALF_CACHE_PER_TENSOR_MAX_BYTES);
     private static final boolean EXPERIMENTAL_METAL_LINEAR_ENABLED =
             resolveExperimentalMetalLinearEnabled();
-    /** When true, Gemma 4 text keeps elementwise ops on CPU even if Metal is available. Default: false (use Metal). */
+    /** Gemma-4 Metal elementwise is opt-in until RMSNorm/add parity is proven. */
+    private static final String ENABLE_GEMMA4_METAL_ELEMENTWISE_PROPERTY =
+            "gollek.safetensor.enable_gemma4_metal_elementwise";
     private static final String DISABLE_METAL_GEMMA4_ELEMENTWISE_PROPERTY =
             "gollek.safetensor.disable_metal_gemma4_elementwise";
     private static final String METAL_ELEMENTWISE_MIN_SEQ_PROPERTY =
@@ -82,12 +97,29 @@ public class DirectForwardPass {
             "gollek.safetensor.enable_gemma4_layer_scalar";
     private static final String ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY =
             "gollek.safetensor.allow_gemma4_fused_half_ffn";
+    private static final String DISABLE_GEMMA4_FUSED_HALF_FFN_PROPERTY =
+            "gollek.safetensor.disable_gemma4_fused_half_ffn";
     private static final String DISABLE_METAL_FUSED_FFN_PROPERTY =
             "gollek.safetensor.disable_metal_fused_ffn";
     private static final String ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY =
             "gollek.safetensor.enable_metal_geglu_fused_ffn";
+    private static final String ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY =
+            "gollek.safetensor.enable_metal_fused_ffn_prefill";
+    private static final String ENABLE_METAL_GEGLU_MATVEC_FFN_PROPERTY =
+            "gollek.safetensor.enable_metal_geglu_matvec_ffn";
+    private static final String ENABLE_METAL_SWIGLU_MATVEC_FFN_PROPERTY =
+            "gollek.safetensor.enable_metal_swiglu_matvec_ffn";
+    private static final String DISABLE_METAL_MATVEC_FFN_PROPERTY =
+            "gollek.safetensor.disable_metal_matvec_ffn";
+    private static final String VALIDATE_METAL_MATVEC_FFN_PROPERTY =
+            "gollek.safetensor.validate_metal_matvec_ffn";
+    private static final String TRACE_FFN_FAST_PATH_PROPERTY =
+            "gollek.safetensor.trace_ffn_fast_path";
+    private static final Set<String> TRACED_FFN_FAST_PATH_DECISIONS = ConcurrentHashMap.newKeySet();
     private static final String REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY =
             "gollek.safetensor.reuse_ffn_projection_workspace";
+    private static final String DISABLE_REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY =
+            "gollek.safetensor.disable_ffn_projection_workspace_reuse";
     private static final String ENABLE_METAL_HALF_LINEAR_PAIR_PROPERTY =
             "gollek.safetensor.enable_metal_half_linear_pair";
     private static final String DISABLE_METAL_HALF_LINEAR_PAIR_PROPERTY =
@@ -115,6 +147,26 @@ public class DirectForwardPass {
     private static final String METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY =
             "gollek.safetensor.metal_half_matvec_max_output";
     private static final int DEFAULT_METAL_HALF_MATVEC_MAX_OUTPUT = 24576;
+    private static final String ENABLE_METAL_LOGITS_MPS_MATVEC_PROPERTY =
+            "gollek.safetensor.enable_metal_logits_mps_matvec";
+    private static final String DISABLE_METAL_LOGITS_MPS_MATVEC_PROPERTY =
+            "gollek.safetensor.disable_metal_logits_mps_matvec";
+    private static final String METAL_LOGITS_MPS_MATVEC_MIN_OUTPUT_PROPERTY =
+            "gollek.safetensor.metal_logits_mps_matvec_min_output";
+    private static final int DEFAULT_METAL_LOGITS_MPS_MATVEC_MIN_OUTPUT = 65536;
+    private static final String METAL_LOGITS_MPS_MATVEC_MAX_INPUT_PROPERTY =
+            "gollek.safetensor.metal_logits_mps_matvec_max_input";
+    private static final int DEFAULT_METAL_LOGITS_MPS_MATVEC_MAX_INPUT = 4096;
+    private static final String GEMMA4_LOGITS_METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY =
+            "gollek.safetensor.gemma4_logits_metal_half_matvec_max_output";
+    private static final int DEFAULT_GEMMA4_LOGITS_METAL_HALF_MATVEC_MAX_OUTPUT = 300000;
+    private static final String ENABLE_METAL_TRANSPOSED_HALF_MATVEC_PROPERTY =
+            "gollek.safetensor.enable_metal_transposed_half_matvec";
+    private static final String DISABLE_METAL_TRANSPOSED_HALF_MATVEC_PROPERTY =
+            "gollek.safetensor.disable_metal_transposed_half_matvec";
+    private static final String METAL_TRANSPOSED_HALF_MATVEC_MAX_OUTPUT_PROPERTY =
+            "gollek.safetensor.metal_transposed_half_matvec_max_output";
+    private static final int DEFAULT_METAL_TRANSPOSED_HALF_MATVEC_MAX_OUTPUT = 300000;
     private static final String ENABLE_METAL_POST_FFN_NORM_PROPERTY =
             "gollek.safetensor.enable_metal_post_ffn_norm";
     private static final String DISABLE_METAL_POST_FFN_NORM_PROPERTY =
@@ -278,6 +330,12 @@ public class DirectForwardPass {
 
     public AccelTensor decodeLogitsTensor(long tokenId, int startPos, Map<String, AccelTensor> weights,
             ModelConfig config, ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache) {
+        return decodeLogitsTensor(tokenId, startPos, weights, config, arch, kvCache, false);
+    }
+
+    public AccelTensor decodeLogitsTensor(long tokenId, int startPos, Map<String, AccelTensor> weights,
+            ModelConfig config, ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache,
+            boolean reuseLogitsOutput) {
         AccelTensor embedTable = weights.get(arch.embedTokensWeight());
         if (embedTable == null)
             throw new IllegalStateException("Missing embed tokens weight.");
@@ -335,8 +393,11 @@ public class DirectForwardPass {
                 throw new IllegalStateException(
                         "Missing lm_head weight. Safetensor file might be incomplete or config.tie_word_embeddings is missing.");
             }
+            AccelTensor logitsOutput = reuseLogitsOutput
+                    ? reusableLogitsOutputTensor(ws, normed.shape(), lmHeadW)
+                    : null;
             long tLogits0 = System.nanoTime();
-            AccelTensor logits = linear(normed, lmHeadW, null, "logits", config);
+            AccelTensor logits = linear(normed, lmHeadW, null, "logits", config, logitsOutput);
             DirectInferenceEngine.recordLogitsProjectionNanos(System.nanoTime() - tLogits0);
             if (normed.dataPtr() != ws.getNormedAttnSeg())
                 normed.close();
@@ -347,6 +408,18 @@ public class DirectForwardPass {
             if (!hidden.isClosed())
                 hidden.closeWithParent();
         }
+    }
+
+    private AccelTensor reusableLogitsOutputTensor(KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+                                                   long[] inputShape,
+                                                   AccelTensor lmHeadW) {
+        if (ws == null || inputShape == null || inputShape.length == 0 || lmHeadW == null || lmHeadW.shape().length != 2) {
+            return null;
+        }
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = lmHeadW.shape()[0];
+        ws.ensureLogitsCapacity(elementCount(outputShape));
+        return AccelTensor.view(ws.getLogitsSeg(), outputShape);
     }
 
     private float[] materializeLogits(AccelTensor logits) {
@@ -400,6 +473,7 @@ public class DirectForwardPass {
         long[] hiddenShape = new long[]{1, seqLen, config.hiddenSize()};
         boolean verboseLayers = Boolean.getBoolean(VERBOSE_LAYERS_PROPERTY);
         boolean useMetalElementwise = canUseMetalElementwise(config, seqLen);
+        boolean useNativeElementwiseAdd = canUseNativeElementwiseAdd(config, seqLen);
         
         // Attention norm
         java.lang.foreign.MemorySegment normedAttnSeg = ws.getNormedAttnSeg();
@@ -444,7 +518,7 @@ public class DirectForwardPass {
         }
 
         // First residual add after attention.
-        residualAdd(hiddenIn, attnOut, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useMetalElementwise);
+        residualAdd(hiddenIn, attnOut, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useNativeElementwiseAdd);
         attnOut.close();
         if (verboseLayers) {
             logSegmentStats(hiddenOut, hiddenShape, "layer " + layerIdx + " postAttnResidual");
@@ -471,10 +545,12 @@ public class DirectForwardPass {
         }
 
         long tFfn0 = System.nanoTime();
+        AccelTensor mlpOutputBuffer = AccelTensor.view(hiddenIn, hiddenShape);
         AccelTensor mlpOut = swigluFfn(AccelTensor.view(normedFfnSeg, hiddenShape), arch, config,
                 weights.get(arch.layerFfnGateWeight(layerIdx)), weights.get(arch.layerFfnGateBias(layerIdx)),
                 weights.get(arch.layerFfnUpWeight(layerIdx)), weights.get(arch.layerFfnUpBias(layerIdx)),
-                weights.get(arch.layerFfnDownWeight(layerIdx)), weights.get(arch.layerFfnDownBias(layerIdx)), ws);
+                weights.get(arch.layerFfnDownWeight(layerIdx)), weights.get(arch.layerFfnDownBias(layerIdx)), ws,
+                mlpOutputBuffer);
         DirectInferenceEngine.recordFfnNanos(System.nanoTime() - tFfn0);
         if (verboseLayers) {
             logTensorStats(mlpOut, "layer " + layerIdx + " mlpOut");
@@ -496,7 +572,7 @@ public class DirectForwardPass {
         }
 
         AccelTensor layerScalar = weights.get(arch.layerScalarWeight(layerIdx));
-        residualAdd(hiddenOut, mlpNormed, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useMetalElementwise);
+        residualAdd(hiddenOut, mlpNormed, hiddenOut, hiddenShape, seqLen, config.hiddenSize(), useNativeElementwiseAdd);
         mlpNormed.close();
         if (verboseLayers) {
             logSegmentStats(hiddenOut, hiddenShape, "layer " + layerIdx + " postFfnResidual");
@@ -576,7 +652,20 @@ public class DirectForwardPass {
 
     public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
             AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
-        AccelTensor metalFused = tryMetalFusedGatedFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB);
+        return swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, ws, null);
+    }
+
+    public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
+            AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+            AccelTensor downOutputBuffer) {
+        AccelTensor metalMatvecFfn = tryMetalMatvecGatedFfn(
+                x, arch, config, gateW, gateB, upW, upB, downW, downB, downOutputBuffer);
+        if (metalMatvecFfn != null) {
+            return metalMatvecFfn;
+        }
+
+        AccelTensor metalFused = tryMetalFusedGatedFfn(
+                x, arch, config, gateW, gateB, upW, upB, downW, downB, downOutputBuffer);
         if (metalFused != null) {
             return metalFused;
         }
@@ -592,7 +681,7 @@ public class DirectForwardPass {
                 combinedBuffer = AccelTensor.view(ws.getCombinedSeg(), new long[] { x.size(0), x.size(1), gateW.shape()[0] });
             }
         }
-        boolean preferSeparateMetalHalf = shouldPreferSeparateMetalHalfFfn(x, gateW, upW);
+        boolean preferSeparateMetalHalf = shouldPreferSeparateMetalHalfFfn(x, gateW, upW, config);
         boolean allowFusedHalfFfn = !isGemma4Text(config)
                 || Boolean.getBoolean(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY);
         AccelTensor fusedCombined = (preferSeparateMetalHalf || !allowFusedHalfFfn)
@@ -600,31 +689,36 @@ public class DirectForwardPass {
                 : tryFusedGatedHalfFfn(x, gateW, gateB, upW, upB,
                         arch.activationType() == FFNActivationType.GELU, combinedBuffer);
         if (fusedCombined != null) {
-            AccelTensor out = ffnDownLinear(fusedCombined, downW, downB, config, "ffn_down");
+            AccelTensor out = ffnDownLinear(fusedCombined, downW, downB, config, "ffn_down", downOutputBuffer);
             if (ws == null || fusedCombined.dataPtr() != ws.getCombinedSeg()) {
                 fusedCombined.close();
             }
             return out;
         }
 
-        LinearPair pairedGateUp = tryMetalHalfLinearPair(x, config, gateW, gateB, upW, upB);
+        long[] gateShape = new long[] { x.size(0), x.size(1), gateW.shape()[0] };
+        boolean reuseFfnProjectionWorkspace = canReuseFfnProjectionWorkspace();
+        if (reuseFfnProjectionWorkspace && ws != null) {
+            ws.ensureProjectionScratchCapacity(elementCount(gateShape) * Float.BYTES);
+        }
+        AccelTensor gateBuffer = reuseFfnProjectionWorkspace
+                ? reusableWorkspaceView(ws == null ? null : ws.getGateSeg(), gateShape)
+                : null;
+        AccelTensor upBuffer = reuseFfnProjectionWorkspace
+                ? reusableWorkspaceView(ws == null ? null : ws.getUpSeg(), gateShape)
+                : null;
+
+        LinearPair pairedGateUp = tryMetalHalfLinearPair(x, config, gateW, gateB, upW, upB, gateBuffer, upBuffer);
         AccelTensor gate;
         AccelTensor up;
         if (pairedGateUp != null) {
             gate = pairedGateUp.first();
             up = pairedGateUp.second();
         } else {
-            long[] gateShape = new long[] { x.size(0), x.size(1), gateW.shape()[0] };
-            boolean reuseFfnProjectionWorkspace = canReuseFfnProjectionWorkspace();
             if (reuseFfnProjectionWorkspace && ws != null) {
-                ws.ensureProjectionScratchCapacity(elementCount(gateShape) * Float.BYTES);
+                gateBuffer = reusableWorkspaceView(ws.getGateSeg(), gateShape);
+                upBuffer = reusableWorkspaceView(ws.getUpSeg(), gateShape);
             }
-            AccelTensor gateBuffer = reuseFfnProjectionWorkspace
-                    ? reusableWorkspaceView(ws == null ? null : ws.getGateSeg(), gateShape)
-                    : null;
-            AccelTensor upBuffer = reuseFfnProjectionWorkspace
-                    ? reusableWorkspaceView(ws == null ? null : ws.getUpSeg(), gateShape)
-                    : null;
             gate = linear(x, gateW, gateB, "ffn_gate", config, gateBuffer);
             up = linear(x, upW, upB, "ffn_up", config, upBuffer);
         }
@@ -669,7 +763,7 @@ public class DirectForwardPass {
 
         if (!gate.isClosed()) gate.close();
         up.close();
-        AccelTensor out = ffnDownLinear(combined, downW, downB, config, "ffn_down");
+        AccelTensor out = ffnDownLinear(combined, downW, downB, config, "ffn_down", downOutputBuffer);
         if (ws == null || combined.dataPtr() != ws.getCombinedSeg()) {
             combined.close();
         }
@@ -683,25 +777,47 @@ public class DirectForwardPass {
                                                AccelTensor gateB,
                                                AccelTensor upW,
                                                AccelTensor upB,
-                                               AccelTensor downW,
-                                               AccelTensor downB) {
+        AccelTensor downW,
+        AccelTensor downB,
+        AccelTensor outputBuffer) {
         boolean siluActivation = arch.activationType() == FFNActivationType.SILU;
         boolean geluActivation = arch.activationType() == FFNActivationType.GELU;
-        if (Boolean.getBoolean(DISABLE_METAL_FUSED_FFN_PROPERTY)
-                || (!siluActivation && !geluActivation)
-                || (geluActivation && !Boolean.getBoolean(ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY))
-                || (isGemma4Text(config) && !Boolean.getBoolean(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY))
-                || gateB != null
-                || upB != null
-                || downB != null
-                || !canUseExperimentalMetalLinear()
-                || metalBinding == null
-                || (siluActivation && !metalBinding.supportsSwigluFfnHalf())
-                || (geluActivation && !metalBinding.supportsGegluFfnHalf())
-                || !canUseMetalHalfLinearCandidate(input, gateW)
-                || !canUseMetalHalfLinearCandidate(input, upW)
-                || !canUseMetalHalfWeight(downW)) {
-            return null;
+        if (Boolean.getBoolean(DISABLE_METAL_FUSED_FFN_PROPERTY)) {
+            return rejectMetalFusedGatedFfn("disabled", config, input, gateW, upW, downW);
+        }
+        if (!siluActivation && !geluActivation) {
+            return rejectMetalFusedGatedFfn("unsupported_activation:" + arch.activationType(),
+                    config, input, gateW, upW, downW);
+        }
+        boolean gemma4Text = isGemma4Text(config);
+        if (geluActivation
+                && !gemma4Text
+                && !Boolean.getBoolean(ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY)) {
+            return rejectMetalFusedGatedFfn("geglu_flag_disabled", config, input, gateW, upW, downW);
+        }
+        if (gateB != null || upB != null || downB != null) {
+            return rejectMetalFusedGatedFfn("bias_present", config, input, gateW, upW, downW);
+        }
+        if (!canUseExperimentalMetalLinear()) {
+            return rejectMetalFusedGatedFfn("metal_linear_disabled", config, input, gateW, upW, downW);
+        }
+        if (metalBinding == null) {
+            return rejectMetalFusedGatedFfn("metal_binding_unavailable", config, input, gateW, upW, downW);
+        }
+        if (siluActivation && !metalBinding.supportsSwigluFfnHalf()) {
+            return rejectMetalFusedGatedFfn("swiglu_symbol_unavailable", config, input, gateW, upW, downW);
+        }
+        if (geluActivation && !metalBinding.supportsGegluFfnHalf()) {
+            return rejectMetalFusedGatedFfn("geglu_symbol_unavailable", config, input, gateW, upW, downW);
+        }
+        if (!canUseMetalHalfLinearCandidate(input, gateW, config)) {
+            return rejectMetalFusedGatedFfn("gate_candidate_ineligible", config, input, gateW, upW, downW);
+        }
+        if (!canUseMetalHalfLinearCandidate(input, upW, config)) {
+            return rejectMetalFusedGatedFfn("up_candidate_ineligible", config, input, gateW, upW, downW);
+        }
+        if (!canUseMetalHalfWeight(downW, config)) {
+            return rejectMetalFusedGatedFfn("down_weight_ineligible", config, input, gateW, upW, downW);
         }
 
         long[] gateShape = gateW.shape();
@@ -713,24 +829,34 @@ public class DirectForwardPass {
                 || gateShape[0] != upShape[0]
                 || gateShape[1] != upShape[1]
                 || downShape[1] != gateShape[0]) {
-            return null;
+            return rejectMetalFusedGatedFfn("shape_mismatch", config, input, gateW, upW, downW);
         }
 
         long[] inputShape = input.shape();
         long inputDim = inputShape[inputShape.length - 1];
         long rows = input.numel() / Math.max(1L, inputDim);
-        if (rows != 1L) {
-            return null;
+        if (rows <= 0L) {
+            return rejectMetalFusedGatedFfn("invalid_rows:" + rows, config, input, gateW, upW, downW);
+        }
+        if (gemma4Text && !allowGemma4FusedHalfFfn(rows, config)) {
+            return rejectMetalFusedGatedFfn(rows == 1L
+                    ? "gemma4_decode_flag_disabled"
+                    : "gemma4_prefill_flag_disabled",
+                    config, input, gateW, upW, downW);
+        }
+        if (rows != 1L && !shouldUseMetalFusedFfnPrefill(config)) {
+            return rejectMetalFusedGatedFfn("prefill_flag_disabled:rows=" + rows, config, input, gateW, upW, downW);
         }
 
-        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(gateW)
-                && shouldUseNativeMetalBf16Linear(upW)
-                && shouldUseNativeMetalBf16Linear(downW);
-        AccelTensor metalGateW = toMetalHalfWeight(gateW, nativeBf16Weights);
-        AccelTensor metalUpW = toMetalHalfWeight(upW, nativeBf16Weights);
-        AccelTensor metalDownW = toMetalHalfWeight(downW, nativeBf16Weights);
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(gateW, config)
+                && shouldUseNativeMetalBf16Linear(upW, config)
+                && shouldUseNativeMetalBf16Linear(downW, config);
+        AccelTensor metalGateW = toMetalHalfWeight(gateW, nativeBf16Weights, config);
+        AccelTensor metalUpW = toMetalHalfWeight(upW, nativeBf16Weights, config);
+        AccelTensor metalDownW = toMetalHalfWeight(downW, nativeBf16Weights, config);
         if (metalGateW == null || metalUpW == null || metalDownW == null) {
-            return null;
+            return rejectMetalFusedGatedFfn("weight_conversion_failed:native_bf16=" + nativeBf16Weights,
+                    config, input, gateW, upW, downW);
         }
 
         long t0 = System.nanoTime();
@@ -739,7 +865,7 @@ public class DirectForwardPass {
         long outputDim = metalDownW.shape()[0];
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = outputDim;
-        AccelTensor out = AccelTensor.zeros(outputShape);
+        AccelTensor out = reusableOutputTensor(outputBuffer, outputShape);
 
         try {
             int rc;
@@ -774,9 +900,15 @@ public class DirectForwardPass {
             DirectInferenceEngine.recordLinearNanos(
                     siluActivation ? "ffn_fused_metal" : "ffn_geglu_fused_metal",
                     System.nanoTime() - t0);
+            traceFfnFastPath("fused-gated-ffn", "accept:"
+                            + (siluActivation ? "swiglu" : "geglu")
+                            + ":native_bf16=" + nativeBf16Weights,
+                    config, input, gateW, upW, downW);
             return out;
         } catch (RuntimeException e) {
             out.close();
+            traceFfnFastPath("fused-gated-ffn", "reject:runtime_failure:" + e.getClass().getSimpleName(),
+                    config, input, gateW, upW, downW);
             log.debugf("Falling back from fused Metal gated FFN: %s", e.getMessage());
             return null;
         } finally {
@@ -786,16 +918,264 @@ public class DirectForwardPass {
         }
     }
 
-    private boolean canUseMetalHalfWeight(AccelTensor weight) {
+    private AccelTensor tryMetalMatvecGatedFfn(AccelTensor input,
+                                               ModelArchitecture arch,
+                                               ModelConfig config,
+                                               AccelTensor gateW,
+                                               AccelTensor gateB,
+                                               AccelTensor upW,
+                                               AccelTensor upB,
+                                               AccelTensor downW,
+                                               AccelTensor downB,
+                                               AccelTensor outputBuffer) {
+        boolean siluActivation = arch.activationType() == FFNActivationType.SILU;
+        boolean geluActivation = arch.activationType() == FFNActivationType.GELU;
+        if (geluActivation && !shouldUseMetalGegluMatvecFfn(config)) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:geglu_flag_disabled", config, input, gateW, upW, downW);
+            return null;
+        }
+        if (siluActivation && !shouldUseMetalSwigluMatvecFfn(config)) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:swiglu_flag_disabled", config, input, gateW, upW, downW);
+            return null;
+        }
+        if (!siluActivation && !geluActivation) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:unsupported_activation:" + arch.activationType(),
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+        if (gateB != null || upB != null || downB != null) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:bias_present", config, input, gateW, upW, downW);
+            return null;
+        }
+        if (!canUseExperimentalMetalLinear() || metalBinding == null) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:metal_unavailable", config, input, gateW, upW, downW);
+            return null;
+        }
+        if (!canUseMetalHalfLinearCandidate(input, gateW, config)
+                || !canUseMetalHalfLinearCandidate(input, upW, config)
+                || !canUseMetalHalfWeight(downW, config)) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:candidate_ineligible",
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+
+        long[] gateShape = gateW.shape();
+        long[] upShape = upW.shape();
+        long[] downShape = downW.shape();
+        if (gateShape.length != 2
+                || upShape.length != 2
+                || downShape.length != 2
+                || gateShape[0] != upShape[0]
+                || gateShape[1] != upShape[1]
+                || downShape[1] != gateShape[0]) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:shape_mismatch", config, input, gateW, upW, downW);
+            return null;
+        }
+
+        long[] inputShape = input.shape();
+        long inputDim = inputShape[inputShape.length - 1];
+        long rows = input.numel() / Math.max(1L, inputDim);
+        if (rows != 1L) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:not_single_token_rows:" + rows,
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(gateW, config)
+                && shouldUseNativeMetalBf16Linear(upW, config)
+                && shouldUseNativeMetalBf16Linear(downW, config);
+        if (nativeBf16Weights && siluActivation && !metalBinding.supportsSwigluFfnMatvecBf16()) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:swiglu_bf16_matvec_symbol_unavailable",
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+        if (nativeBf16Weights && geluActivation && !metalBinding.supportsGegluFfnMatvecBf16()) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:geglu_bf16_matvec_symbol_unavailable",
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+        if (!nativeBf16Weights && siluActivation && !metalBinding.supportsSwigluFfnMatvecHalf()) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:swiglu_matvec_symbol_unavailable",
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+        if (!nativeBf16Weights && geluActivation && !metalBinding.supportsGegluFfnMatvecHalf()) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:geglu_matvec_symbol_unavailable",
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+
+        AccelTensor metalGateW = toMetalHalfWeight(gateW, nativeBf16Weights, config);
+        AccelTensor metalUpW = toMetalHalfWeight(upW, nativeBf16Weights, config);
+        AccelTensor metalDownW = toMetalHalfWeight(downW, nativeBf16Weights, config);
+        if (metalGateW == null || metalUpW == null || metalDownW == null) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:weight_conversion_failed:native_bf16=" + nativeBf16Weights,
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+        AccelTensor.QuantType weightType = metalGateW.quantType();
+        if (metalUpW.quantType() != weightType
+                || metalDownW.quantType() != weightType
+                || (weightType != AccelTensor.QuantType.F16 && weightType != AccelTensor.QuantType.BF16)) {
+            traceFfnFastPath("matvec-gated-ffn", "reject:weight_type_mismatch:native_bf16=" + nativeBf16Weights,
+                    config, input, gateW, upW, downW);
+            return null;
+        }
+
+        long t0 = System.nanoTime();
+        AccelTensor contiguousInput = input.contiguous();
+        long intermediateDim = metalGateW.shape()[0];
+        long outputDim = metalDownW.shape()[0];
+        long[] outputShape = inputShape.clone();
+        outputShape[outputShape.length - 1] = outputDim;
+        AccelTensor out = reusableOutputTensor(outputBuffer, outputShape);
+
+        try {
+            int rc;
+            if (nativeBf16Weights && siluActivation) {
+                rc = metalBinding.swigluFfnMatvecBf16(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim));
+            } else if (nativeBf16Weights) {
+                rc = metalBinding.gegluFfnMatvecBf16(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim));
+            } else if (siluActivation) {
+                rc = metalBinding.swigluFfnMatvecHalf(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim));
+            } else {
+                rc = metalBinding.gegluFfnMatvecHalf(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalGateW.dataPtr(),
+                        metalUpW.dataPtr(),
+                        metalDownW.dataPtr(),
+                        Math.toIntExact(inputDim),
+                        Math.toIntExact(intermediateDim),
+                        Math.toIntExact(outputDim));
+            }
+            if (rc != 0) {
+                throw new IllegalStateException("Metal matvec gated FFN failed with code " + rc);
+            }
+            if (shouldValidateMetalMatvecFfn() && !allFinite(out)) {
+                throw new IllegalStateException("Metal matvec gated FFN produced non-finite output");
+            }
+            DirectInferenceEngine.recordLinearNanos(
+                    nativeBf16Weights
+                            ? (siluActivation ? "ffn_swiglu_matvec_bf16" : "ffn_geglu_matvec_bf16")
+                            : (siluActivation ? "ffn_swiglu_matvec_metal" : "ffn_geglu_matvec_metal"),
+                    System.nanoTime() - t0);
+            traceFfnFastPath("matvec-gated-ffn",
+                    "accept:" + (siluActivation ? "swiglu" : "geglu") + ":native_bf16=" + nativeBf16Weights,
+                    config, input, gateW, upW, downW);
+            return out;
+        } catch (RuntimeException e) {
+            out.close();
+            traceFfnFastPath("matvec-gated-ffn", "reject:runtime_failure:" + e.getClass().getSimpleName(),
+                    config, input, gateW, upW, downW);
+            log.debugf("Falling back from Metal matvec gated FFN: %s", e.getMessage());
+            return null;
+        } finally {
+            if (contiguousInput != input && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+        }
+    }
+
+    private AccelTensor rejectMetalFusedGatedFfn(String reason,
+                                                 ModelConfig config,
+                                                 AccelTensor input,
+                                                 AccelTensor gateW,
+                                                 AccelTensor upW,
+                                                 AccelTensor downW) {
+        traceFfnFastPath("fused-gated-ffn", "reject:" + reason, config, input, gateW, upW, downW);
+        return null;
+    }
+
+    private void traceFfnFastPath(String path,
+                                  String decision,
+                                  ModelConfig config,
+                                  AccelTensor input,
+                                  AccelTensor gateW,
+                                  AccelTensor upW,
+                                  AccelTensor downW) {
+        if (!Boolean.getBoolean(TRACE_FFN_FAST_PATH_PROPERTY)) {
+            return;
+        }
+        String key = path + "|" + decision + "|" + tensorSummary(input)
+                + "|" + tensorSummary(gateW) + "|" + tensorSummary(upW) + "|" + tensorSummary(downW);
+        if (!TRACED_FFN_FAST_PATH_DECISIONS.add(key)) {
+            return;
+        }
+        System.err.printf("[gollek-ffn] path=%s decision=%s model=%s input=%s gate=%s up=%s down=%s%n",
+                path,
+                decision,
+                config != null ? config.modelType() : "unknown",
+                tensorSummary(input),
+                tensorSummary(gateW),
+                tensorSummary(upW),
+                tensorSummary(downW));
+    }
+
+    private static String tensorSummary(AccelTensor tensor) {
+        if (tensor == null) {
+            return "null";
+        }
+        return tensor.quantType() + Arrays.toString(tensor.shape());
+    }
+
+    private static boolean allFinite(AccelTensor tensor) {
+        if (tensor == null || tensor.quantType() != AccelTensor.QuantType.F32) {
+            return false;
+        }
+        MemorySegment segment = tensor.dataPtr();
+        long n = tensor.numel();
+        for (long i = 0; i < n; i++) {
+            if (!Float.isFinite(segment.getAtIndex(ValueLayout.JAVA_FLOAT, i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean shouldValidateMetalMatvecFfn() {
+        return Boolean.getBoolean(VALIDATE_METAL_MATVEC_FFN_PROPERTY)
+                || Boolean.getBoolean(TRACE_FFN_FAST_PATH_PROPERTY);
+    }
+
+    private boolean canUseMetalHalfWeight(AccelTensor weight, ModelConfig config) {
         if (weight == null || weight.shape().length != 2 || !weight.isContiguous()) {
             return false;
         }
         AccelTensor.QuantType quantType = weight.quantType();
+        if (quantType == AccelTensor.QuantType.BF16 && isGemma4Text(config)) {
+            return shouldUseNativeMetalBf16Linear(weight, config)
+                    || allowGemma4Bf16ToF16Linear(config);
+        }
         return quantType == AccelTensor.QuantType.F16
-                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear());
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(config));
     }
 
-    private AccelTensor toMetalHalfWeight(AccelTensor weight, boolean nativeBf16) {
+    private AccelTensor toMetalHalfWeight(AccelTensor weight, boolean nativeBf16, ModelConfig config) {
         if (weight == null) {
             return null;
         }
@@ -805,15 +1185,84 @@ public class DirectForwardPass {
         if (nativeBf16 && weight.quantType() == AccelTensor.QuantType.BF16) {
             return weight;
         }
-        if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear()) {
+        if (weight.quantType() == AccelTensor.QuantType.BF16 && isGemma4Text(config)) {
+            return allowGemma4Bf16ToF16Linear(config)
+                    ? weight.toF16CachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES)
+                    : null;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(config)) {
             return weight.toF16CachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES);
         }
         return null;
     }
 
-    private boolean shouldPreferSeparateMetalHalfFfn(AccelTensor input, AccelTensor gateW, AccelTensor upW) {
-        return canUseMetalHalfLinearCandidate(input, gateW)
-                && canUseMetalHalfLinearCandidate(input, upW);
+    private boolean shouldPreferSeparateMetalHalfFfn(AccelTensor input, AccelTensor gateW, AccelTensor upW,
+            ModelConfig config) {
+        return canUseMetalHalfLinearCandidate(input, gateW, config)
+                && canUseMetalHalfLinearCandidate(input, upW, config);
+    }
+
+    private static boolean allowGemma4FusedHalfFfn() {
+        if (Boolean.getBoolean(DISABLE_GEMMA4_FUSED_HALF_FFN_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return false;
+    }
+
+    private boolean allowGemma4FusedHalfFfn(long rows, ModelConfig config) {
+        if (!isGemma4Text(config)) {
+            return true;
+        }
+        if (Boolean.getBoolean(DISABLE_GEMMA4_FUSED_HALF_FFN_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        String prefillExplicit = System.getProperty(ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY);
+        if (prefillExplicit != null && !prefillExplicit.isBlank()) {
+            return rows > 1L && Boolean.parseBoolean(prefillExplicit);
+        }
+        return rows > 1L && shouldUseMetalFusedFfnPrefill(config);
+    }
+
+    private boolean shouldUseMetalFusedFfnPrefill(ModelConfig config) {
+        String explicit = System.getProperty(ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        // Keep opt-in for now: on M4, the separate Metal pair/down path is
+        // faster for Gemma-4 BF16 prefill than the fused command buffer.
+        return false;
+    }
+
+    private boolean shouldUseMetalGegluMatvecFfn(ModelConfig config) {
+        if (Boolean.getBoolean(DISABLE_METAL_MATVEC_FFN_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_GEGLU_MATVEC_FFN_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        // The native BF16 matvec FFN is available for experiments, but the
+        // separate gate/up pair plus down projection wins on current M4 runs.
+        return false;
+    }
+
+    private boolean shouldUseMetalSwigluMatvecFfn(ModelConfig config) {
+        if (Boolean.getBoolean(DISABLE_METAL_MATVEC_FFN_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_SWIGLU_MATVEC_FFN_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return false;
     }
 
     private LinearPair tryMetalHalfLinearPair(AccelTensor input,
@@ -821,28 +1270,45 @@ public class DirectForwardPass {
                                               AccelTensor firstWeight,
                                               AccelTensor firstBias,
                                               AccelTensor secondWeight,
-                                              AccelTensor secondBias) {
-        if (!shouldUseMetalHalfLinearPair(config)) {
+                                              AccelTensor secondBias,
+                                              AccelTensor firstOutputBuffer,
+                                              AccelTensor secondOutputBuffer) {
+        if (!shouldUseMetalHalfLinearPair(config, input)) {
+            traceFfnFastPath("gate-up-pair", "reject:disabled", config, input, firstWeight, secondWeight, null);
             return null;
         }
-        if (!canUseMetalHalfLinearCandidate(input, firstWeight)
-                || !canUseMetalHalfLinearCandidate(input, secondWeight)
-                || !metalBinding.supportsMatmulTransposedRightHalfPair()) {
+        if (!canUseMetalHalfLinearCandidate(input, firstWeight, config)) {
+            traceFfnFastPath("gate-up-pair", "reject:first_candidate_ineligible",
+                    config, input, firstWeight, secondWeight, null);
+            return null;
+        }
+        if (!canUseMetalHalfLinearCandidate(input, secondWeight, config)) {
+            traceFfnFastPath("gate-up-pair", "reject:second_candidate_ineligible",
+                    config, input, firstWeight, secondWeight, null);
+            return null;
+        }
+        if (!metalBinding.supportsMatmulTransposedRightHalfPair()) {
+            traceFfnFastPath("gate-up-pair", "reject:pair_symbol_unavailable",
+                    config, input, firstWeight, secondWeight, null);
             return null;
         }
         if (firstWeight.shape()[0] != secondWeight.shape()[0]
                 || firstWeight.shape()[1] != secondWeight.shape()[1]) {
+            traceFfnFastPath("gate-up-pair", "reject:shape_mismatch",
+                    config, input, firstWeight, secondWeight, null);
             return null;
         }
 
-        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(firstWeight)
-                && shouldUseNativeMetalBf16Linear(secondWeight);
-        AccelTensor metalFirstWeight = toMetalHalfWeight(firstWeight, nativeBf16Weights);
-        AccelTensor metalSecondWeight = toMetalHalfWeight(secondWeight, nativeBf16Weights);
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(firstWeight, config)
+                && shouldUseNativeMetalBf16Linear(secondWeight, config);
+        AccelTensor metalFirstWeight = toMetalHalfWeight(firstWeight, nativeBf16Weights, config);
+        AccelTensor metalSecondWeight = toMetalHalfWeight(secondWeight, nativeBf16Weights, config);
         if (metalFirstWeight == null || metalSecondWeight == null
                 || metalFirstWeight.quantType() != metalSecondWeight.quantType()
                 || (metalFirstWeight.quantType() != AccelTensor.QuantType.F16
                         && metalFirstWeight.quantType() != AccelTensor.QuantType.BF16)) {
+            traceFfnFastPath("gate-up-pair", "reject:weight_conversion_failed:native_bf16=" + nativeBf16Weights,
+                    config, input, firstWeight, secondWeight, null);
             return null;
         }
 
@@ -851,8 +1317,8 @@ public class DirectForwardPass {
         AccelTensor contiguousInput = input.contiguous();
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = metalFirstWeight.shape()[0];
-        AccelTensor first = AccelTensor.zeros(outputShape);
-        AccelTensor second = AccelTensor.zeros(outputShape);
+        AccelTensor first = reusableOutputTensor(firstOutputBuffer, outputShape);
+        AccelTensor second = reusableOutputTensor(secondOutputBuffer, outputShape);
 
         try {
             long k = inputShape[inputShape.length - 1];
@@ -861,7 +1327,24 @@ public class DirectForwardPass {
             int kk = Math.toIntExact(k);
             int n = Math.toIntExact(metalFirstWeight.shape()[0]);
             int rc = -2;
+            String executionPath = "mps";
             if (m == 1
+                    && nativeBf16Weights
+                    && shouldUseMetalHalfMatvecPair(config, n)
+                    && metalBinding.supportsMatvecTransposedRightBf16Pair()) {
+                rc = metalBinding.matvecTransposedRightBf16Pair(
+                        first.dataPtr(),
+                        second.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalFirstWeight.dataPtr(),
+                        metalSecondWeight.dataPtr(),
+                        kk, n);
+                if (rc == 0) {
+                    executionPath = "bf16_matvec";
+                }
+            }
+            if (rc != 0
+                    && m == 1
                     && !nativeBf16Weights
                     && shouldUseMetalHalfMatvecPair(config, n)
                     && metalBinding.supportsMatvecTransposedRightHalfPair()) {
@@ -872,6 +1355,9 @@ public class DirectForwardPass {
                         metalFirstWeight.dataPtr(),
                         metalSecondWeight.dataPtr(),
                         kk, n);
+                if (rc == 0) {
+                    executionPath = "matvec";
+                }
             }
             if (rc != 0) {
                 rc = metalBinding.matmulTransposedRightHalfPair(
@@ -890,10 +1376,14 @@ public class DirectForwardPass {
             AccelTensor firstOut = addBiasIfNeeded(first, firstBias);
             AccelTensor secondOut = addBiasIfNeeded(second, secondBias);
             DirectInferenceEngine.recordLinearNanos("ffn_gate_up_pair", System.nanoTime() - t0);
+            traceFfnFastPath("gate-up-pair", "accept:" + executionPath + ":native_bf16=" + nativeBf16Weights,
+                    config, input, firstWeight, secondWeight, null);
             return new LinearPair(firstOut, secondOut);
         } catch (RuntimeException e) {
             first.close();
             second.close();
+            traceFfnFastPath("gate-up-pair", "reject:runtime_failure:" + e.getClass().getSimpleName(),
+                    config, input, firstWeight, secondWeight, null);
             log.debugf("Falling back from Metal half linear pair to separate linears: %s", e.getMessage());
             return null;
         } finally {
@@ -922,7 +1412,7 @@ public class DirectForwardPass {
         return true;
     }
 
-    private boolean shouldUseMetalHalfLinearPair(ModelConfig config) {
+    private boolean shouldUseMetalHalfLinearPair(ModelConfig config, AccelTensor input) {
         if (!METAL_HALF_LINEAR_PAIR_ENABLED) {
             return false;
         }
@@ -930,7 +1420,21 @@ public class DirectForwardPass {
         if (explicit != null && !explicit.isBlank()) {
             return Boolean.parseBoolean(explicit);
         }
-        return !isGemma4Text(config) && !hasGemma4StylePerLayerInputs(config);
+        if (isGemma4Text(config)) {
+            return isMultiRowLinearInput(input) || !allowGemma4FusedHalfFfn();
+        }
+        return !hasGemma4StylePerLayerInputs(config);
+    }
+
+    private static boolean isMultiRowLinearInput(AccelTensor input) {
+        if (input == null || input.shape().length == 0) {
+            return false;
+        }
+        long hidden = input.shape()[input.shape().length - 1];
+        if (hidden <= 0L) {
+            return false;
+        }
+        return input.numel() / hidden > 1L;
     }
 
     private AccelTensor addBiasIfNeeded(AccelTensor tensor, AccelTensor bias) {
@@ -1079,14 +1583,23 @@ public class DirectForwardPass {
                                       AccelTensor bias,
                                       ModelConfig config,
                                       String profileKey) {
+        return ffnDownLinear(input, weight, bias, config, profileKey, null);
+    }
+
+    private AccelTensor ffnDownLinear(AccelTensor input,
+                                      AccelTensor weight,
+                                      AccelTensor bias,
+                                      ModelConfig config,
+                                      String profileKey,
+                                      AccelTensor outputBuffer) {
         if (canUseExperimentalMetalLinear()) {
-            return linear(input, weight, bias, profileKey, config);
+            return linear(input, weight, bias, profileKey, config, outputBuffer);
         }
         AccelTensor cached = tryCachedFfnDownHalfLinear(input, weight, bias, config, profileKey);
         if (cached != null) {
             return cached;
         }
-        return linear(input, weight, bias, profileKey, config);
+        return linear(input, weight, bias, profileKey, config, outputBuffer);
     }
 
     private AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias, String profileKey) {
@@ -1113,7 +1626,7 @@ public class DirectForwardPass {
                 }
             }
         }
-        AccelTensor metalHalf = tryMetalHalfLinear(input, weight, bias, config, outputBuffer);
+        AccelTensor metalHalf = tryMetalHalfLinear(input, weight, bias, config, outputBuffer, profileKey);
         if (metalHalf != null) {
             if (profileKey != null) {
                 DirectInferenceEngine.recordLinearNanos(profileKey, System.nanoTime() - t0);
@@ -1243,21 +1756,49 @@ public class DirectForwardPass {
         if (explicit != null && !explicit.isBlank()) {
             return Boolean.parseBoolean(explicit);
         }
-        return true;
+        return false;
+    }
+
+    private boolean allowMetalBf16Linear(ModelConfig config) {
+        if (isGemma4Text(config)) {
+            if (Boolean.getBoolean(DISABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY)) {
+                return false;
+            }
+            String explicit = System.getProperty(ENABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY);
+            if (explicit != null && !explicit.isBlank()) {
+                return Boolean.parseBoolean(explicit);
+            }
+            return true;
+        }
+        return allowMetalBf16Linear();
     }
 
     private static boolean preferNativeMetalBf16Linear() {
         return Boolean.getBoolean(PREFER_NATIVE_METAL_BF16_LINEAR_PROPERTY);
     }
 
-    private static boolean shouldUseNativeMetalBf16Linear(AccelTensor weight) {
-        return preferNativeMetalBf16Linear()
-                && allowMetalBf16Linear()
+    private boolean preferNativeMetalBf16Linear(ModelConfig config) {
+        if (isGemma4Text(config)) {
+            if (allowGemma4Bf16ToF16Linear(config)) {
+                return false;
+            }
+            String explicit = System.getProperty(ENABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY);
+            if (explicit != null && !explicit.isBlank()) {
+                return Boolean.parseBoolean(explicit) && allowMetalBf16Linear(config);
+            }
+            return allowMetalBf16Linear(config);
+        }
+        return preferNativeMetalBf16Linear();
+    }
+
+    private boolean shouldUseNativeMetalBf16Linear(AccelTensor weight, ModelConfig config) {
+        return preferNativeMetalBf16Linear(config)
+                && allowMetalBf16Linear(config)
                 && weight != null
                 && weight.quantType() == AccelTensor.QuantType.BF16;
     }
 
-    private boolean canUseMetalHalfLinearCandidate(AccelTensor input, AccelTensor weight) {
+    private boolean canUseMetalHalfLinearCandidate(AccelTensor input, AccelTensor weight, ModelConfig config) {
         if (!canUseExperimentalMetalLinear()) {
             return false;
         }
@@ -1268,8 +1809,13 @@ public class DirectForwardPass {
             return false;
         }
         AccelTensor.QuantType quantType = weight.quantType();
+        if (quantType == AccelTensor.QuantType.BF16 && isGemma4Text(config)
+                && !shouldUseNativeMetalBf16Linear(weight, config)
+                && !allowGemma4Bf16ToF16Linear(config)) {
+            return false;
+        }
         if (quantType != AccelTensor.QuantType.F16
-                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear())) {
+                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear(config))) {
             return false;
         }
         if (!weight.isContiguous()) {
@@ -1288,6 +1834,14 @@ public class DirectForwardPass {
             batchProduct *= inputShape[i];
         }
         return batchProduct == 1L;
+    }
+
+    private boolean allowGemma4Bf16ToF16Linear(ModelConfig config) {
+        if (!isGemma4Text(config) || Boolean.getBoolean(DISABLE_GEMMA4_BF16_TO_F16_LINEAR_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_GEMMA4_BF16_TO_F16_LINEAR_PROPERTY);
+        return explicit != null && !explicit.isBlank() && Boolean.parseBoolean(explicit);
     }
 
     private boolean canUseMetalFloatLinearCandidate(AccelTensor input, AccelTensor weight) {
@@ -1320,16 +1874,21 @@ public class DirectForwardPass {
 
     private AccelTensor tryMetalHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias,
                                            ModelConfig config) {
-        return tryMetalHalfLinear(input, weight, bias, config, null);
+        return tryMetalHalfLinear(input, weight, bias, config, null, null);
     }
 
     private AccelTensor tryMetalHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias,
                                            ModelConfig config, AccelTensor outputBuffer) {
-        if (!canUseMetalHalfLinearCandidate(input, weight)) {
+        return tryMetalHalfLinear(input, weight, bias, config, outputBuffer, null);
+    }
+
+    private AccelTensor tryMetalHalfLinear(AccelTensor input, AccelTensor weight, AccelTensor bias,
+                                           ModelConfig config, AccelTensor outputBuffer, String profileKey) {
+        if (!canUseMetalHalfLinearCandidate(input, weight, config)) {
             return null;
         }
-        boolean nativeBf16Weight = shouldUseNativeMetalBf16Linear(weight);
-        AccelTensor metalWeight = toMetalHalfWeight(weight, nativeBf16Weight);
+        boolean nativeBf16Weight = shouldUseNativeMetalBf16Linear(weight, config);
+        AccelTensor metalWeight = toMetalHalfWeight(weight, nativeBf16Weight, config);
         if (metalWeight == null) {
             return null;
         }
@@ -1347,8 +1906,46 @@ public class DirectForwardPass {
             int n = Math.toIntExact(metalWeight.shape()[0]);
             int rc = -2;
             if (m == 1
+                    && nativeBf16Weight
+                    && shouldUseMetalHalfMatvec(config, n, profileKey)
+                    && metalBinding.supportsMatvecTransposedRightBf16()) {
+                rc = metalBinding.matvecTransposedRightBf16(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalWeight.dataPtr(),
+                        kk, n);
+            }
+            if (rc != 0
+                    && m == 1
                     && !nativeBf16Weight
-                    && shouldUseMetalHalfMatvec(config, n)
+                    && shouldUseMetalLogitsMpsMatvec(config, n, kk, profileKey)
+                    && metalBinding.supportsMatvecTransposedRightHalfMps()) {
+                rc = metalBinding.matvecTransposedRightHalfMps(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        metalWeight.dataPtr(),
+                        kk, n);
+            }
+            if (rc != 0
+                    && m == 1
+                    && !nativeBf16Weight
+                    && shouldUseMetalTransposedHalfMatvec(config, n, profileKey)
+                    && metalBinding.supportsMatvecTransposedWeightHalf()) {
+                AccelTensor transposedWeight = weight.toF16Transposed2dCachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES);
+                if (transposedWeight != null
+                        && transposedWeight.size(0) == k
+                        && transposedWeight.size(1) == metalWeight.shape()[0]) {
+                    rc = metalBinding.matvecTransposedWeightHalf(
+                            out.dataPtr(),
+                            contiguousInput.dataPtr(),
+                            transposedWeight.dataPtr(),
+                            kk, n);
+                }
+            }
+            if (rc != 0
+                    && m == 1
+                    && !nativeBf16Weight
+                    && shouldUseMetalHalfMatvec(config, n, profileKey)
                     && metalBinding.supportsMatvecTransposedRightHalf()) {
                 rc = metalBinding.matvecTransposedRightHalf(
                         out.dataPtr(),
@@ -1403,7 +2000,14 @@ public class DirectForwardPass {
     }
 
     private static boolean canReuseFfnProjectionWorkspace() {
-        return Boolean.getBoolean(REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY);
+        if (Boolean.getBoolean(DISABLE_REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(REUSE_FFN_PROJECTION_WORKSPACE_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return true;
     }
 
     private static boolean sameShape(long[] left, long[] right) {
@@ -1480,14 +2084,40 @@ public class DirectForwardPass {
     }
 
     private boolean canUseMetalElementwise(ModelConfig config, int seqLen) {
-        if (!canUseMetal()) {
+        if (Boolean.getBoolean(FORCE_CPU_FORWARD_PROPERTY)) {
             return false;
         }
-        int defaultMinSeq = isGemma4Text(config) ? 1 : 16;
+        boolean gemma4 = isGemma4Text(config);
+        if (gemma4) {
+            if (Boolean.getBoolean(DISABLE_METAL_GEMMA4_ELEMENTWISE_PROPERTY)) {
+                return false;
+            }
+            if (!canUseMetal()
+                    || metalBinding == null
+                    || !metalBinding.nativeElementwiseKernelsAvailable()) {
+                return false;
+            }
+        } else if (!canUseMetal() && !canUseNativeElementwiseFallback()) {
+            return false;
+        }
+        int defaultMinSeq = gemma4 ? 1 : 16;
         if (seqLen < Integer.getInteger(METAL_ELEMENTWISE_MIN_SEQ_PROPERTY, defaultMinSeq)) {
             return false;
         }
-        return !isGemma4Text(config) || !Boolean.getBoolean(DISABLE_METAL_GEMMA4_ELEMENTWISE_PROPERTY);
+        if (!gemma4) {
+            return true;
+        }
+        return Boolean.getBoolean(ENABLE_GEMMA4_METAL_ELEMENTWISE_PROPERTY)
+                || metalBinding.nativeElementwiseKernelsAvailable();
+    }
+
+    private boolean canUseNativeElementwiseFallback() {
+        return metalBinding != null && metalBinding.nativeElementwiseFallbackAvailable();
+    }
+
+    private boolean canUseNativeElementwiseAdd(ModelConfig config, int seqLen) {
+        return canUseMetalElementwise(config, seqLen)
+                && metalBinding.nativeElementwiseKernelsAvailable();
     }
 
     private boolean shouldUseMetalPostFfnNorm(ModelConfig config) {
@@ -1508,17 +2138,9 @@ public class DirectForwardPass {
 
     private void rmsNormRowsMetal(java.lang.foreign.MemorySegment out, java.lang.foreign.MemorySegment in,
             java.lang.foreign.MemorySegment weight, int rows, int hiddenSize, float eps, boolean addOne) {
-        long rowBytes = (long) hiddenSize * Float.BYTES;
-        for (int row = 0; row < rows; row++) {
-            long offset = (long) row * rowBytes;
-            int rc = metalBinding.rmsNorm(
-                    out.asSlice(offset, rowBytes),
-                    in.asSlice(offset, rowBytes),
-                    weight,
-                    hiddenSize, eps, addOne);
-            if (rc != 0) {
-                throw new IllegalStateException("Metal rmsNorm failed with code " + rc);
-            }
+        int rc = metalBinding.rmsNormRows(out, in, weight, rows, hiddenSize, eps, addOne);
+        if (rc != 0) {
+            throw new IllegalStateException("Metal rmsNormRows failed with code " + rc);
         }
     }
 
@@ -1600,6 +2222,18 @@ public class DirectForwardPass {
         combinedPle.close();
 
         AccelTensor[] layers = new AccelTensor[numLayers];
+        if (seqLen == 1) {
+            java.lang.foreign.MemorySegment packed = scaledPle.dataPtr();
+            long layerBytes = (long) pleDim * Float.BYTES;
+            for (int layer = 0; layer < numLayers; layer++) {
+                layers[layer] = AccelTensor.view(
+                        packed.asSlice((long) layer * layerBytes, layerBytes),
+                        new long[] { 1L, 1L, pleDim },
+                        scaledPle);
+            }
+            return layers;
+        }
+
         java.lang.foreign.MemorySegment src = scaledPle.dataPtr();
         for (int layer = 0; layer < numLayers; layer++) {
             AccelTensor layerTensor = AccelTensor.zeros(new long[] { 1L, seqLen, pleDim });
@@ -1633,6 +2267,7 @@ public class DirectForwardPass {
         AccelTensor hidden = AccelTensor.view(hiddenSeg, hiddenShape);
         AccelTensor gate = linear(hidden, gateWeight, null, "per_layer_gate", config);
         hidden.close();
+
         if (arch.activationType() == FFNActivationType.GELU) {
             AccelTensor activated = AccelOps.gelu(gate);
             gate.close();
@@ -1653,7 +2288,7 @@ public class DirectForwardPass {
         projected.close();
 
         residualAdd(hiddenSeg, normed, hiddenSeg, hiddenShape, seqLen, config.hiddenSize(),
-                canUseMetalElementwise(config, seqLen));
+                canUseNativeElementwiseAdd(config, seqLen));
         normed.close();
     }
 
@@ -1663,7 +2298,7 @@ public class DirectForwardPass {
         }
         for (AccelTensor perLayerInput : perLayerInputs) {
             if (perLayerInput != null) {
-                perLayerInput.close();
+                perLayerInput.closeWithParent();
             }
         }
     }
@@ -1731,14 +2366,19 @@ public class DirectForwardPass {
     }
 
     private boolean shouldUseMetalHalfMatvec(ModelConfig config, int outputDim) {
+        return shouldUseMetalHalfMatvec(config, outputDim, null);
+    }
+
+    private boolean shouldUseMetalHalfMatvec(ModelConfig config, int outputDim, String profileKey) {
         if (DISABLE_METAL_HALF_MATVEC_ENABLED) {
             return false;
         }
+        int maxOutput = metalHalfMatvecMaxOutput(config, profileKey);
         String explicit = ENABLE_METAL_HALF_MATVEC_VALUE;
         if (explicit != null && !explicit.isBlank()) {
-            return Boolean.parseBoolean(explicit) && outputDim <= metalHalfMatvecMaxOutput();
+            return Boolean.parseBoolean(explicit) && maxOutput > 0 && outputDim <= maxOutput;
         }
-        return shouldAutoUseMetalHalfMatvec(config, outputDim);
+        return shouldAutoUseMetalHalfMatvec(config, outputDim, maxOutput);
     }
 
     private boolean shouldUseMetalHalfMatvecPair(ModelConfig config, int outputDim) {
@@ -1752,9 +2392,34 @@ public class DirectForwardPass {
         return shouldAutoUseMetalHalfMatvec(config, outputDim);
     }
 
+    private boolean shouldUseMetalLogitsMpsMatvec(ModelConfig config, int outputDim, int inputDim, String profileKey) {
+        if (!"logits".equals(profileKey) || Boolean.getBoolean(DISABLE_METAL_LOGITS_MPS_MATVEC_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_LOGITS_MPS_MATVEC_PROPERTY);
+        if (explicit == null || explicit.isBlank() || !Boolean.parseBoolean(explicit)) {
+            return false;
+        }
+        if (isGemma4Text(config)) {
+            return false;
+        }
+        int minOutput = Integer.getInteger(
+                METAL_LOGITS_MPS_MATVEC_MIN_OUTPUT_PROPERTY,
+                DEFAULT_METAL_LOGITS_MPS_MATVEC_MIN_OUTPUT);
+        int maxInput = Integer.getInteger(
+                METAL_LOGITS_MPS_MATVEC_MAX_INPUT_PROPERTY,
+                DEFAULT_METAL_LOGITS_MPS_MATVEC_MAX_INPUT);
+        return outputDim >= minOutput && (maxInput <= 0 || inputDim <= maxInput);
+    }
+
     private boolean shouldAutoUseMetalHalfMatvec(ModelConfig config, int outputDim) {
+        return shouldAutoUseMetalHalfMatvec(config, outputDim, metalHalfMatvecMaxOutput());
+    }
+
+    private boolean shouldAutoUseMetalHalfMatvec(ModelConfig config, int outputDim, int maxOutput) {
         return AUTO_METAL_HALF_MATVEC_ENABLED
-                && outputDim <= metalHalfMatvecMaxOutput()
+                && maxOutput > 0
+                && outputDim <= maxOutput
                 && isMetalHalfMatvecAutoCandidate(config);
     }
 
@@ -1778,6 +2443,32 @@ public class DirectForwardPass {
 
     private static int metalHalfMatvecMaxOutput() {
         return Integer.getInteger(METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY, DEFAULT_METAL_HALF_MATVEC_MAX_OUTPUT);
+    }
+
+    private int metalHalfMatvecMaxOutput(ModelConfig config, String profileKey) {
+        if ("logits".equals(profileKey) && isGemma4Text(config)) {
+            return Integer.getInteger(
+                    GEMMA4_LOGITS_METAL_HALF_MATVEC_MAX_OUTPUT_PROPERTY,
+                    DEFAULT_GEMMA4_LOGITS_METAL_HALF_MATVEC_MAX_OUTPUT);
+        }
+        return metalHalfMatvecMaxOutput();
+    }
+
+    private boolean shouldUseMetalTransposedHalfMatvec(ModelConfig config, int outputDim, String profileKey) {
+        if (Boolean.getBoolean(DISABLE_METAL_TRANSPOSED_HALF_MATVEC_PROPERTY)) {
+            return false;
+        }
+        int maxOutput = Integer.getInteger(
+                METAL_TRANSPOSED_HALF_MATVEC_MAX_OUTPUT_PROPERTY,
+                DEFAULT_METAL_TRANSPOSED_HALF_MATVEC_MAX_OUTPUT);
+        if (maxOutput <= 0 || outputDim > maxOutput) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_TRANSPOSED_HALF_MATVEC_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        return "logits".equals(profileKey) && isGemma4Text(config);
     }
 
 }

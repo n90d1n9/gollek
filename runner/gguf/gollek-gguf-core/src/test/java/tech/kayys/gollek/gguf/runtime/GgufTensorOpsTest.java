@@ -249,6 +249,94 @@ class GgufTensorOpsTest {
     }
 
     @Test
+    void supportsQ2KRowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q2k.cache_min_rows");
+        System.setProperty("gollek.gguf.q2k.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 84);
+            writeQ2KBlock(segment.asSlice(0, 84), (byte) 0x01, (byte) 0x55);
+            writeQ2KBlock(segment.asSlice(84, 84), (byte) 0x01, (byte) 0xAA);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("q2_k", new long[]{256, 2}, 10, 0, 2L * 84);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(10));
+
+            float[] row = new float[256];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(256);
+            assertEquals(256.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(512.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(256.0f, output[0], 0.0f);
+            assertEquals(512.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q2KMatrixCacheSize(model));
+            assertEquals(768L, GgufTensorOps.q2KMatrixCacheBytes(model));
+
+            GgufTensorOps.Q2KMatrix first = GgufTensorOps.q2KMatrixCached(model, tensor);
+            GgufTensorOps.Q2KMatrix second = GgufTensorOps.q2KMatrixCached(model, tensor);
+            assertSame(first, second);
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(256.0f, preparedOutput[0], 0.0f);
+            assertEquals(512.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ2KMatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q2k.cache_min_rows", previous);
+        }
+    }
+
+    @Test
+    void supportsQ3KRowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q3k.cache_min_rows");
+        System.setProperty("gollek.gguf.q3k.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 110);
+            writeQ3KBlock(segment.asSlice(0, 110), 1, (byte) 0x55, (byte) 0xFF);
+            writeQ3KBlock(segment.asSlice(110, 110), 1, (byte) 0xAA, (byte) 0xFF);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("q3_k", new long[]{256, 2}, 11, 0, 2L * 110);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(11));
+
+            float[] row = new float[256];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(256);
+            assertEquals(256.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(512.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(256.0f, output[0], 0.0f);
+            assertEquals(512.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q3KMatrixCacheSize(model));
+            assertEquals(640L, GgufTensorOps.q3KMatrixCacheBytes(model));
+
+            GgufTensorOps.Q3KMatrix first = GgufTensorOps.q3KMatrixCached(model, tensor);
+            GgufTensorOps.Q3KMatrix second = GgufTensorOps.q3KMatrixCached(model, tensor);
+            assertSame(first, second);
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(256.0f, preparedOutput[0], 0.0f);
+            assertEquals(512.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ3KMatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q3k.cache_min_rows", previous);
+        }
+    }
+
+    @Test
     void supportsQ5KRowDotAndMatVec() {
         try (Arena arena = Arena.ofShared()) {
             MemorySegment segment = arena.allocate(176);
@@ -472,6 +560,22 @@ class GgufTensorOpsTest {
     }
 
     @Test
+    void usesTwoParallelChunksPerThreadByDefault() {
+        String previousThreads = System.getProperty("gollek.gguf.parallel_threads");
+        String previousChunks = System.getProperty("gollek.gguf.parallel_chunks_per_thread");
+        System.setProperty("gollek.gguf.parallel_threads", "3");
+        System.clearProperty("gollek.gguf.parallel_chunks_per_thread");
+        try {
+            assertEquals(6, GgufTensorOps.parallelChunkCount(64));
+            assertEquals(4, GgufTensorOps.parallelChunkCount(4));
+            assertEquals(1, GgufTensorOps.parallelChunkCount(1));
+        } finally {
+            restoreProperty("gollek.gguf.parallel_threads", previousThreads);
+            restoreProperty("gollek.gguf.parallel_chunks_per_thread", previousChunks);
+        }
+    }
+
+    @Test
     void computesQ4KMatVecRowsInParallel() {
         try (Arena arena = Arena.ofShared()) {
             MemorySegment segment = arena.allocate(2L * 144);
@@ -551,6 +655,51 @@ class GgufTensorOpsTest {
     }
 
     @Test
+    void supportsQ8_1RowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q8.cache_min_rows");
+        System.setProperty("gollek.gguf.q8.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 36);
+            writeQ8_1Block(segment.asSlice(0, 36), (short) 0x3c00, (byte) 1);
+            writeQ8_1Block(segment.asSlice(36, 36), (short) 0x3c00, (byte) 2);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("q8_1", new long[]{32, 2}, 9, 0, 2L * 36);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(9));
+
+            float[] row = new float[32];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(32);
+            assertEquals(32.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(64.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(32.0f, output[0], 0.0f);
+            assertEquals(64.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q8MatrixCacheSize(model));
+            assertEquals(72L, GgufTensorOps.q8MatrixCacheBytes(model));
+
+            GgufTensorOps.Q8Matrix first = GgufTensorOps.q8MatrixCached(model, tensor);
+            GgufTensorOps.Q8Matrix second = GgufTensorOps.q8MatrixCached(model, tensor);
+            assertSame(first, second);
+            assertEquals(32, first.blockSize());
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(32.0f, preparedOutput[0], 0.0f);
+            assertEquals(64.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ8MatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q8.cache_min_rows", previous);
+        }
+    }
+
+    @Test
     void boundsPreparedQ8MatrixCacheByEstimatedBytes() {
         String previous = System.getProperty("gollek.gguf.q8.cache_max_bytes");
         System.setProperty("gollek.gguf.q8.cache_max_bytes", "36");
@@ -576,6 +725,141 @@ class GgufTensorOpsTest {
             assertEquals(1, GgufTensorOps.clearQ8MatrixCache(model));
         } finally {
             restoreProperty("gollek.gguf.q8.cache_max_bytes", previous);
+        }
+    }
+
+    @Test
+    void supportsQ8KRowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q8.cache_min_rows");
+        System.setProperty("gollek.gguf.q8.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 292);
+            writeQ8KBlock(segment.asSlice(0, 292), 1.0f, (byte) 1);
+            writeQ8KBlock(segment.asSlice(292, 292), 1.0f, (byte) 2);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("q8_k", new long[]{256, 2}, 15, 0, 2L * 292);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(15));
+
+            float[] row = new float[256];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(256);
+            assertEquals(256.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(512.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(256.0f, output[0], 0.0f);
+            assertEquals(512.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q8MatrixCacheSize(model));
+            assertEquals(520L, GgufTensorOps.q8MatrixCacheBytes(model));
+
+            GgufTensorOps.Q8Matrix first = GgufTensorOps.q8MatrixCached(model, tensor);
+            GgufTensorOps.Q8Matrix second = GgufTensorOps.q8MatrixCached(model, tensor);
+            assertSame(first, second);
+            assertEquals(256, first.blockSize());
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(256.0f, preparedOutput[0], 0.0f);
+            assertEquals(512.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ8MatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q8.cache_min_rows", previous);
+        }
+    }
+
+    @Test
+    void supportsIQ4NLRowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q8.cache_min_rows");
+        System.setProperty("gollek.gguf.q8.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 18);
+            writeIQ4NLBlock(segment.asSlice(0, 18), (short) 0x3c00, (byte) 0x88);
+            writeIQ4NLBlock(segment.asSlice(18, 18), (short) 0x3c00, (byte) 0x99);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("iq4_nl", new long[]{32, 2}, 20, 0, 2L * 18);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(20));
+
+            float[] row = new float[32];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(32);
+            assertEquals(32.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(416.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(32.0f, output[0], 0.0f);
+            assertEquals(416.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q8MatrixCacheSize(model));
+            assertEquals(72L, GgufTensorOps.q8MatrixCacheBytes(model));
+
+            GgufTensorOps.Q8Matrix first = GgufTensorOps.q8MatrixCached(model, tensor);
+            GgufTensorOps.Q8Matrix second = GgufTensorOps.q8MatrixCached(model, tensor);
+            assertSame(first, second);
+            assertEquals(32, first.blockSize());
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(32.0f, preparedOutput[0], 0.0f);
+            assertEquals(416.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ8MatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q8.cache_min_rows", previous);
+        }
+    }
+
+    @Test
+    void supportsIQ4XSRowDotAndPreparedMatVec() {
+        String previous = System.getProperty("gollek.gguf.q8.cache_min_rows");
+        System.setProperty("gollek.gguf.q8.cache_min_rows", "1");
+        try (Arena arena = Arena.ofShared()) {
+            MemorySegment segment = arena.allocate(2L * 136);
+            writeIQ4XSBlock(segment.asSlice(0, 136), (short) 0x3c00, (byte) 0x88);
+            writeIQ4XSBlock(segment.asSlice(136, 136), (short) 0x3c00, (byte) 0x99);
+            GGUFTensorInfo tensor = new GGUFTensorInfo("iq4_xs", new long[]{256, 2}, 23, 0, 2L * 136);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            assertTrue(GgufTensorOps.supportsRowDotType(23));
+
+            float[] row = new float[256];
+            GgufTensorOps.dequantizeRow(model, tensor, 0, row);
+            for (float value : row) {
+                assertEquals(1.0f, value, 0.0f);
+            }
+
+            float[] vector = ones(256);
+            assertEquals(256.0f, GgufTensorOps.dotRow(model, tensor, 0, vector), 0.0f);
+            assertEquals(3328.0f, GgufTensorOps.dotRow(model, tensor, 1, vector), 0.0f);
+
+            float[] output = new float[2];
+            GgufTensorOps.matVecRows(model, tensor, vector, output, 2, true);
+            assertEquals(256.0f, output[0], 0.0f);
+            assertEquals(3328.0f, output[1], 0.0f);
+            assertEquals(1, GgufTensorOps.q8MatrixCacheSize(model));
+            assertEquals(576L, GgufTensorOps.q8MatrixCacheBytes(model));
+
+            GgufTensorOps.Q8Matrix first = GgufTensorOps.q8MatrixCached(model, tensor);
+            GgufTensorOps.Q8Matrix second = GgufTensorOps.q8MatrixCached(model, tensor);
+            assertSame(first, second);
+            assertEquals(32, first.blockSize());
+
+            float[] preparedOutput = new float[2];
+            GgufTensorOps.matVecRows(first, vector, preparedOutput, 2, true);
+            assertEquals(256.0f, preparedOutput[0], 0.0f);
+            assertEquals(3328.0f, preparedOutput[1], 0.0f);
+            assertEquals(1, GgufTensorOps.clearQ8MatrixCache(model));
+        } finally {
+            restoreProperty("gollek.gguf.q8.cache_min_rows", previous);
         }
     }
 
@@ -794,6 +1078,49 @@ class GgufTensorOpsTest {
         }
     }
 
+    private static void writeQ2KBlock(MemorySegment block, byte scale, byte packedQuant) {
+        for (int i = 0; i < 16; i++) {
+            block.set(ValueLayout.JAVA_BYTE, i, scale);
+        }
+        for (int i = 0; i < 64; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 16 + i, packedQuant);
+        }
+        block.set(LE_SHORT, 80, (short) 0x3c00);
+        block.set(LE_SHORT, 82, (short) 0);
+    }
+
+    private static void writeQ3KBlock(MemorySegment block, int signedScale, byte packedQuant, byte highMask) {
+        for (int i = 0; i < 32; i++) {
+            block.set(ValueLayout.JAVA_BYTE, i, highMask);
+        }
+        for (int i = 0; i < 64; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 32 + i, packedQuant);
+        }
+        writeQ3KScales(block, signedScale);
+        block.set(LE_SHORT, 108, (short) 0x3c00);
+    }
+
+    private static void writeQ3KScales(MemorySegment block, int signedScale) {
+        int encoded = Math.max(0, Math.min(63, signedScale + 32));
+        for (int group = 0; group < 16; group++) {
+            int low = encoded & 0x0F;
+            int high = (encoded >>> 4) & 0x03;
+            long lowOffset = 96L + (group < 8 ? group : group - 8);
+            int lowByte = block.get(ValueLayout.JAVA_BYTE, lowOffset) & 0xFF;
+            if (group < 8) {
+                lowByte = (lowByte & 0xF0) | low;
+            } else {
+                lowByte = (lowByte & 0x0F) | (low << 4);
+            }
+            block.set(ValueLayout.JAVA_BYTE, lowOffset, (byte) lowByte);
+
+            long highOffset = 96L + 8 + (group % 4);
+            int highByte = block.get(ValueLayout.JAVA_BYTE, highOffset) & 0xFF;
+            highByte |= high << (2 * (group / 4));
+            block.set(ValueLayout.JAVA_BYTE, highOffset, (byte) highByte);
+        }
+    }
+
     private static void writeQ4KBlockWithAllScalesAndMins(MemorySegment block) {
         block.set(LE_SHORT, 0, (short) 0x3c00);
         block.set(LE_SHORT, 2, (short) 0x3800);
@@ -848,6 +1175,43 @@ class GgufTensorOpsTest {
         block.set(LE_SHORT, 0, scale);
         for (int i = 0; i < 32; i++) {
             block.set(ValueLayout.JAVA_BYTE, 2 + i, quant);
+        }
+    }
+
+    private static void writeQ8_1Block(MemorySegment block, short scale, byte quant) {
+        block.set(LE_SHORT, 0, scale);
+        block.set(LE_SHORT, 2, (short) 0x7b00);
+        for (int i = 0; i < 32; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 4 + i, quant);
+        }
+    }
+
+    private static void writeQ8KBlock(MemorySegment block, float scale, byte quant) {
+        block.set(LE_FLOAT, 0, scale);
+        for (int i = 0; i < 256; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 4 + i, quant);
+        }
+        short groupSum = (short) (quant * 16);
+        for (int group = 0; group < 16; group++) {
+            block.set(LE_SHORT, 260 + group * 2L, groupSum);
+        }
+    }
+
+    private static void writeIQ4NLBlock(MemorySegment block, short scale, byte packedQuant) {
+        block.set(LE_SHORT, 0, scale);
+        for (int i = 0; i < 16; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 2 + i, packedQuant);
+        }
+    }
+
+    private static void writeIQ4XSBlock(MemorySegment block, short scale, byte packedQuant) {
+        block.set(LE_SHORT, 0, scale);
+        block.set(LE_SHORT, 2, (short) 0xAAAA);
+        for (int i = 0; i < 4; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 4 + i, (byte) 0x11);
+        }
+        for (int i = 0; i < 128; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 8 + i, packedQuant);
         }
     }
 

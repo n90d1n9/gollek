@@ -89,6 +89,8 @@ class ClassIndexLossValidationTest {
 
     private static void assertInvalidClassTargets(TargetedLoss loss) {
         assertThrows(IllegalArgumentException.class,
+                () -> loss.forward(GradTensor.of(new float[] {0f, 1f}, 2, 1)));
+        assertThrows(IllegalArgumentException.class,
                 () -> loss.forward(GradTensor.of(new float[] {0f, 1.5f}, 2)));
         assertThrows(IllegalArgumentException.class,
                 () -> loss.forward(GradTensor.of(new float[] {0f, Float.NaN}, 2)));

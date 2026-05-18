@@ -151,7 +151,7 @@ public class BCEWithLogitsLoss {
 
         // Compute sigmoid and BCE
         for (int i = 0; i < n; i++) {
-            float logit = lData[i];
+            float logit = requireFiniteLogit(lData[i], i);
             // Numerically stable sigmoid: σ(x) = 1/(1 + exp(-x))
             // Using: σ(x) = exp(x)/(1 + exp(x)) for x > 0, else 1/(1 + exp(-x))
             float sigmoid;
@@ -236,6 +236,13 @@ public class BCEWithLogitsLoss {
             return (float) Math.exp(value);
         }
         return (float) Math.log1p(Math.exp(value));
+    }
+
+    private static float requireFiniteLogit(float logit, int index) {
+        if (!Float.isFinite(logit)) {
+            throw new IllegalArgumentException("logits must be finite, got " + logit + " at index " + index);
+        }
+        return logit;
     }
 
     private static float requireBinaryTarget(float target) {

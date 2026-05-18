@@ -65,11 +65,8 @@ public final class LabelSmoothingLoss {
             throw new IllegalArgumentException(
                     "logits must have positive batch and class dimensions, got shape: " + Arrays.toString(s));
         }
-        float[] lg = logits.data(), lb = labels.data();
-        if (lb.length != N) {
-            throw new IllegalArgumentException(
-                    "labels batch size must match logits batch size, got: " + lb.length + " vs " + N);
-        }
+        float[] lg = logits.data();
+        float[] lb = ClassIndexTargets.requireVectorData(labels, N, "labels");
         float[] softmaxData = new float[lg.length];
         int[] targetClasses = new int[N];
         float totalLoss = 0.0f;
@@ -78,7 +75,7 @@ public final class LabelSmoothingLoss {
             // Log-softmax for numerical stability
             float max = Float.NEGATIVE_INFINITY;
             for (int c = 0; c < C; c++)
-                max = Math.max(max, lg[n * C + c]);
+                max = Math.max(max, requireFiniteLogit(lg[n * C + c], n * C + c));
             float sumExp = 0f;
             for (int c = 0; c < C; c++) {
                 int index = n * C + c;
@@ -125,5 +122,12 @@ public final class LabelSmoothingLoss {
             });
         }
         return out;
+    }
+
+    private static float requireFiniteLogit(float logit, int index) {
+        if (!Float.isFinite(logit)) {
+            throw new IllegalArgumentException("logits must be finite, got " + logit + " at index " + index);
+        }
+        return logit;
     }
 }

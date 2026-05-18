@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.Parameter;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -70,6 +71,89 @@ class OptimizerTest {
 
         assertNotEquals(1f, parameter.data().data()[0], 1e-6f);
         assertNotEquals(-2f, parameter.data().data()[1], 1e-6f);
+    }
+
+    @Test
+    void optimizersRejectInvalidHyperparameters() {
+        assertThrows(IllegalArgumentException.class,
+                () -> SGD.builder(List.of(parameter(new float[] {1f})), Float.NaN).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> SGD.builder(List.of(parameter(new float[] {1f})), 0.1f).momentum(Float.POSITIVE_INFINITY).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> SGD.builder(List.of(parameter(new float[] {1f})), 0.1f).weightDecay(-0.1f).build());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> Adam.builder(List.of(parameter(new float[] {1f})), 0.1f).betas(1.0f, 0.999f).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> Adam.builder(List.of(parameter(new float[] {1f})), 0.1f).eps(0.0f).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> AdamW.builder(List.of(parameter(new float[] {1f})), 0.1f).weightDecay(Float.NaN).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> RMSprop.builder(List.of(parameter(new float[] {1f})), 0.1f).alpha(1.0f).build());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new Adagrad(List.of(parameter(new float[] {1f})), 0.1f, Float.NaN, 0.0f));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Adadelta(List.of(parameter(new float[] {1f})), -0.1f, 0.95f, 1e-6f));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Lion(List.of(parameter(new float[] {1f})), 0.1f, -0.1f, 0.99f, 0.0f));
+        assertThrows(IllegalArgumentException.class,
+                () -> new LAMB(List.of(parameter(new float[] {1f})), 0.1f, 0.9f, 0.999f, 0.0f, 0.01f));
+    }
+
+    @Test
+    void optimizerStepsRejectNonFiniteGradientsWithoutMutatingState() {
+        Parameter parameter = parameter(new float[] {1f, -2f});
+        parameter.data().backward(GradTensor.of(new float[] {Float.NaN, 1f}, 2));
+        var optimizer = AdamW.builder(List.of(parameter), 0.001f).build();
+
+        assertThrows(IllegalStateException.class, optimizer::step);
+
+        assertArrayEquals(new float[] {1f, -2f}, parameter.data().data(), 1e-7f);
+        assertEquals(0, optimizer.stateDict().get("step"));
+    }
+
+    @Test
+    void adamWeightDecayDoesNotMutateGradientBuffer() {
+        Parameter parameter = parameter(new float[] {2f});
+        parameter.data().backward(GradTensor.of(new float[] {0.5f}, 1));
+        var optimizer = Adam.builder(List.of(parameter), 0.01f).weightDecay(0.1f).build();
+
+        optimizer.step();
+
+        assertEquals(0.5f, parameter.grad().data()[0], 1e-7f);
+        assertEquals(1.99f, parameter.data().data()[0], 1e-6f);
+    }
+
+    @Test
+    void adagradWeightDecayAppliesAcrossWholeTensor() {
+        float[] values = new float[32];
+        float[] zeroGrad = new float[32];
+        float[] expected = new float[32];
+        for (int i = 0; i < values.length; i++) {
+            values[i] = i + 1f;
+            expected[i] = values[i] - 0.1f;
+        }
+        Parameter parameter = parameter(values);
+        parameter.data().backward(GradTensor.of(zeroGrad, zeroGrad.length));
+        var optimizer = new Adagrad(List.of(parameter), 0.1f, 1e-8f, 0.1f);
+
+        optimizer.step();
+
+        assertArrayEquals(expected, parameter.data().data(), 1e-5f);
+    }
+
+    @Test
+    void gradientClipperRejectsInvalidBoundsAndNonFiniteGradients() {
+        Parameter parameter = parameter(new float[] {1f, -2f});
+        parameter.data().backward(GradTensor.of(new float[] {Float.POSITIVE_INFINITY, 1f}, 2));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> GradientClipper.clipByNorm(List.of(parameter), 0.0f));
+        assertThrows(IllegalArgumentException.class,
+                () -> GradientClipper.clipByValue(List.of(parameter), 1.0f, -1.0f));
+        assertThrows(IllegalStateException.class,
+                () -> GradientClipper.clipByNorm(List.of(parameter), 1.0f));
     }
 
     @Test
@@ -147,6 +231,42 @@ class OptimizerTest {
     }
 
     @Test
+    void schedulersRejectInvalidConfigurationAndCheckpointState() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new StepLR(optimizer(0.1f), 1, Float.NaN));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CosineAnnealingLR(optimizer(0.1f), 10, Float.NaN));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CosineAnnealingLR(optimizer(0.1f), 10, 0.2f));
+        assertThrows(IllegalArgumentException.class,
+                () -> new WarmupCosineScheduler(optimizer(0.1f), 1, 10, Float.POSITIVE_INFINITY, 0.0f));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ReduceLROnPlateau(
+                        optimizer(0.1f), ReduceLROnPlateau.Mode.MIN, Float.NaN, 1, 0.0, 0, 0.0f));
+
+        StepLR step = new StepLR(optimizer(0.1f), 2, 0.5f);
+        Map<String, Object> stepState = new HashMap<>(step.stateDict());
+        stepState.put("currentLr", Float.NaN);
+        assertThrows(IllegalArgumentException.class, () -> step.loadStateDict(stepState));
+
+        CosineAnnealingLR cosine = new CosineAnnealingLR(optimizer(0.1f), 10, 0.0f);
+        Map<String, Object> cosineState = new HashMap<>(cosine.stateDict());
+        cosineState.put("step", -1);
+        assertThrows(IllegalArgumentException.class, () -> cosine.loadStateDict(cosineState));
+
+        WarmupCosineScheduler warmup = new WarmupCosineScheduler(optimizer(0.1f), 2, 10, 0.1f, 0.0f);
+        Map<String, Object> warmupState = new HashMap<>(warmup.stateDict());
+        warmupState.put("currentStep", -1);
+        assertThrows(IllegalArgumentException.class, () -> warmup.loadStateDict(warmupState));
+
+        ReduceLROnPlateau plateau = new ReduceLROnPlateau(
+                optimizer(0.1f), ReduceLROnPlateau.Mode.MIN, 0.5f, 1, 0.0, 0, 0.0f);
+        Map<String, Object> plateauState = new HashMap<>(plateau.stateDict());
+        plateauState.put("bestMetric", Double.POSITIVE_INFINITY);
+        assertThrows(IllegalArgumentException.class, () -> plateau.loadStateDict(plateauState));
+    }
+
+    @Test
     void testWarmupCosineStartsAtZeroAndRestoresState() {
         Parameter parameter = parameter(new float[] {1f, -2f});
         var optimizer = SGD.builder(List.of(parameter), 0.1f).build();
@@ -198,5 +318,9 @@ class OptimizerTest {
 
     private static Parameter parameter(float[] values) {
         return new Parameter(GradTensor.of(values, values.length));
+    }
+
+    private static Optimizer optimizer(float lr) {
+        return SGD.builder(List.of(parameter(new float[] {1f})), lr).build();
     }
 }

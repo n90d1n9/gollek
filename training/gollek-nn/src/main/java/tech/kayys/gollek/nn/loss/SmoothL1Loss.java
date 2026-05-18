@@ -12,7 +12,7 @@ import tech.kayys.gollek.ml.autograd.Function;
  * <p>
  * The transition happens at a threshold (usually 1.0) controlled by the beta parameter.
  * <p>
- * {@code SmoothL1(x) = 0.5*x² if |x| < beta, else beta*(|x| - 0.5*beta)}
+ * {@code SmoothL1(x) = 0.5*x²/beta if |x| < beta, else |x| - 0.5*beta}
  * <p>
  * Equivalent to {@code torch.nn.SmoothL1Loss}.
  *
@@ -21,8 +21,8 @@ import tech.kayys.gollek.ml.autograd.Function;
  * For difference d = y_pred - y_true:
  *
  * SmoothL1(d) = {
- *   0.5 * d²,                    if |d| < beta
- *   beta * (|d| - 0.5 * beta),   otherwise
+ *   0.5 * d² / beta,    if |d| < beta
+ *   |d| - 0.5 * beta,   otherwise
  * }
  *
  * Loss = mean(SmoothL1(differences))
@@ -31,8 +31,8 @@ import tech.kayys.gollek.ml.autograd.Function;
  * <h3>Gradient</h3>
  * <pre>
  * dSmoothL1/dd = {
- *   d,                if |d| < beta
- *   beta * sign(d),   otherwise
+ *   d / beta,   if |d| < beta
+ *   sign(d),    otherwise
  * }
  * </pre>
  *
@@ -100,8 +100,8 @@ public class SmoothL1Loss {
      * @throws IllegalArgumentException if beta is non-positive
      */
     public SmoothL1Loss(float beta) {
-        if (beta <= 0) {
-            throw new IllegalArgumentException("beta must be positive, got: " + beta);
+        if (!Float.isFinite(beta) || beta <= 0) {
+            throw new IllegalArgumentException("beta must be finite and positive, got: " + beta);
         }
         this.beta = beta;
     }
@@ -116,27 +116,19 @@ public class SmoothL1Loss {
      * @throws IllegalArgumentException if shapes do not match
      */
     public GradTensor compute(GradTensor predictions, GradTensor targets) {
-        long[] pShape = predictions.shape();
-        long[] tShape = targets.shape();
-
-        if (!java.util.Arrays.equals(pShape, tShape)) {
-            throw new IllegalArgumentException(
-                "predictions and targets shapes must match, got: " + java.util.Arrays.toString(pShape) +
-                " vs " + java.util.Arrays.toString(tShape));
-        }
+        int n = RegressionLosses.requireSameFiniteNonEmpty(predictions, targets, "SmoothL1Loss");
 
         float[] pData = predictions.data();
         float[] tData = targets.data();
-        int n = pData.length;
 
         float totalLoss = 0;
         for (int i = 0; i < n; i++) {
             float diff = pData[i] - tData[i];
             float absDiff = Math.abs(diff);
             if (absDiff < beta) {
-                totalLoss += 0.5f * diff * diff;
+                totalLoss += 0.5f * diff * diff / beta;
             } else {
-                totalLoss += beta * (absDiff - 0.5f * beta);
+                totalLoss += absDiff - 0.5f * beta;
             }
         }
         float meanLoss = totalLoss / n;
@@ -153,9 +145,9 @@ public class SmoothL1Loss {
                         float diff = pData[i] - tData[i];
                         float absDiff = Math.abs(diff);
                         if (absDiff < beta) {
-                            grad[i] = diff * scale;
+                            grad[i] = diff * scale / beta;
                         } else {
-                            grad[i] = (diff > 0 ? 1 : -1) * beta * scale;
+                            grad[i] = (diff > 0 ? 1 : -1) * scale;
                         }
                     }
                     predictions.backward(GradTensor.of(grad, predictions.shape()));

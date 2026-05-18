@@ -16,8 +16,7 @@ import org.jboss.logging.Logger;
  * <p>
  * Loads the FA4 symbols ({@code gollek_metal_fa4_attention}, etc.) from
  * {@code libgollek_metal.dylib} — the same dylib as {@link MetalBinding},
- * compiled from both {@code gollek_metal_bridge.m} <em>and</em>
- * {@code gollek_metal_fa4.m}.
+ * compiled from the modular Metal sources, including {@code gollek_metal_fa4.m}.
  *
  * <h2>What "FA4 on Metal" means</h2>
  * <p>
@@ -110,8 +109,8 @@ public class MetalFlashAttentionBinding {
 
     /**
      * Load FA4 symbols from {@code libgollek_metal.dylib}.
-     * The dylib must be compiled from both {@code gollek_metal_bridge.m}
-     * and {@code gollek_metal_fa4.m}.
+     * The dylib must be compiled from the modular Metal sources, including
+     * {@code gollek_metal_fa4.m}.
      */
     /**
      * Automatically discover and initialize the Metal FA4 native bridge.

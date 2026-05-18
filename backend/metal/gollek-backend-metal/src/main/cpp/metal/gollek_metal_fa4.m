@@ -20,31 +20,23 @@
  * the FlashAttention tile-recompute strategy.
  *
  * Compilation:
- *   clang -arch arm64 -shared -fPIC -fobjc-arc \
- *         -framework Metal -framework MetalPerformanceShaders \
- *         -framework MetalPerformanceShadersGraph \
- *         -framework Foundation -framework Accelerate \
- *         -mmacosx-version-min=15.0 \
- *         -o libgollek_metal.dylib \
- *         gollek_metal_bridge.m gollek_metal_fa4.m
+ *   make
  *
- * NOTE: compile both files together into ONE dylib — they share the
- * globals g_device and g_queue from gollek_metal_bridge.m.
+ * NOTE: compile all Metal bridge modules into ONE dylib — they share the
+ * globals g_device and g_queue from gollek_metal_support.m, while CPU fallback
+ * kernels live in gollek_metal_cpu_fallback.m.
  */
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
-#import <Accelerate/Accelerate.h>
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
 
-// ── Shared globals from gollek_metal_bridge.m ─────────────────────────────────
-extern id<MTLDevice>       g_device;
-extern id<MTLCommandQueue> g_queue;
-extern BOOL                g_initialized;
+#import "gollek_metal_support.h"
+#import "gollek_metal_cpu_fallback.h"
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
 
@@ -351,11 +343,7 @@ int gollek_metal_fa4_attention(
             float* oPtr = oTransposed + ((((size_t) b * H) + h) * T * D);
 
             if (mps_matmul_tb_f32(scorePtr, qPtr, kPtr, T, D, S, scale) != 0) {
-                cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
-                            T, S, D, scale,
-                            qPtr, D,
-                            kPtr, D,
-                            0.0f, scorePtr, S);
+                gollek_metal_cpu_matmul_tb(scorePtr, qPtr, kPtr, T, D, S, scale, 0.0f);
             }
 
             // Causal mask + softmax per row
@@ -378,11 +366,7 @@ int gollek_metal_fa4_attention(
             // out[T, D] = score[T, S] × V[S, D]
             const float* vPtr = vTransposed + ((((size_t) b * H_kv) + hk) * S * D);
             if (mps_matmul_nn_f32(oPtr, scorePtr, vPtr, T, S, D, 1.0f) != 0) {
-                cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
-                            T, D, S, 1.0f,
-                            scorePtr, S,
-                            vPtr, D,
-                            0.0f, oPtr, D);
+                gollek_metal_cpu_matmul_nn(oPtr, scorePtr, vPtr, T, S, D, 1.0f, 0.0f);
             }
             free(scorePtr);
         }

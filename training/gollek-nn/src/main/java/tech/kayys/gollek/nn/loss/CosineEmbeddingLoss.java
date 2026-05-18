@@ -3,6 +3,8 @@ package tech.kayys.gollek.ml.nn.loss;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.Function;
 
+import java.util.Arrays;
+
 /**
  * Cosine Embedding Loss for similarity learning.
  * <p>
@@ -41,6 +43,9 @@ public class CosineEmbeddingLoss {
      *               loss is max(0, cos(x1, x2) - margin)
      */
     public CosineEmbeddingLoss(float margin) {
+        if (!Float.isFinite(margin) || margin < -1.0f || margin > 1.0f) {
+            throw new IllegalArgumentException("margin must be finite and within [-1, 1], got: " + margin);
+        }
         this.margin = margin;
     }
 
@@ -56,34 +61,27 @@ public class CosineEmbeddingLoss {
      * @throws IllegalArgumentException if target batch size does not match x1 batch size
      */
     public GradTensor compute(GradTensor x1, GradTensor x2, GradTensor target) {
-        // Validate inputs
-        long[] s1 = x1.shape(), s2 = x2.shape();
-        if (s1.length != 2 || s2.length != 2) {
-            throw new IllegalArgumentException(
-                "Expected x1 and x2 to be 2D tensors [batch, dim], got shapes: " +
-                java.util.Arrays.toString(s1) + " and " + java.util.Arrays.toString(s2));
-        }
-        if (s1[0] != s2[0] || s1[1] != s2[1]) {
-            throw new IllegalArgumentException(
-                "x1 and x2 must have same shape, got: " + java.util.Arrays.toString(s1) +
-                " vs " + java.util.Arrays.toString(s2));
-        }
-        if (target.shape()[0] != s1[0]) {
-            throw new IllegalArgumentException(
-                "target batch size must match x1 batch size, got: " + target.shape()[0] +
-                " vs " + s1[0]);
-        }
+        long[] s1 = x1.shape();
+        long[] s2 = x2.shape();
+        long[] targetShape = target.shape();
+        requireShapes(s1, s2, targetShape);
 
-        float[] d1 = x1.data(), d2 = x2.data(), t = target.data();
+        float[] d1 = x1.data(), d2 = x2.data();
+        float[] targetData = target.data();
         int batch = (int) s1[0];
         int dim = (int) s1[1];
 
         float[] losses = new float[batch];
+        float[] denominators = new float[batch];
+        float[] norm1Sqrts = new float[batch];
+        float[] norm2Sqrts = new float[batch];
+        float[] sanitizedTargets = new float[batch];
         float totalLoss = 0;
 
         // Forward pass: compute loss for each sample in batch
         for (int b = 0; b < batch; b++) {
             int off = b * dim;
+            float label = requireCosineTarget(targetData[b], b);
             float dot = 0, norm1 = 0, norm2 = 0;
 
             // Compute dot product and norms
@@ -98,10 +96,15 @@ public class CosineEmbeddingLoss {
             // Compute cosine similarity: cos(x1, x2) = dot / (||x1|| * ||x2||)
             float norm1Sqrt = (float) Math.sqrt(norm1);
             float norm2Sqrt = (float) Math.sqrt(norm2);
-            float cosine = dot / (norm1Sqrt * norm2Sqrt + 1e-8f);
+            float denominator = norm1Sqrt * norm2Sqrt + 1e-8f;
+            float cosine = dot / denominator;
+            sanitizedTargets[b] = label;
+            denominators[b] = denominator;
+            norm1Sqrts[b] = norm1Sqrt;
+            norm2Sqrts[b] = norm2Sqrt;
 
             // Compute loss: 1 - cos for positive pairs, max(0, cos - margin) for negative
-            if (t[b] > 0) {
+            if (label == 1.0f) {
                 losses[b] = 1 - cosine;
             } else {
                 losses[b] = Math.max(0, cosine - margin);
@@ -127,44 +130,34 @@ public class CosineEmbeddingLoss {
                     // Compute gradients for each sample
                     for (int b = 0; b < batch; b++) {
                         int off = b * dim;
-
-                        // Recompute norms and cosine for this sample
-                        float dot = 0, norm1 = 0, norm2 = 0;
+                        float dot = 0;
                         for (int i = 0; i < dim; i++) {
                             float v1 = d1[off + i];
                             float v2 = d2[off + i];
                             dot += v1 * v2;
-                            norm1 += v1 * v1;
-                            norm2 += v2 * v2;
                         }
 
-                        float norm1Sqrt = (float) Math.sqrt(norm1);
-                        float norm2Sqrt = (float) Math.sqrt(norm2);
-                        float eps = 1e-8f;
-
                         // Compute gradient only if loss is non-zero
-                        boolean isPositive = t[b] > 0;
+                        boolean isPositive = sanitizedTargets[b] == 1.0f;
                         boolean isActive = isPositive || (losses[b] > 0);
 
                         if (isActive) {
-                            // Derivative of cosine w.r.t x1 and x2
-                            float cosine = dot / (norm1Sqrt * norm2Sqrt + eps);
+                            float denominator = denominators[b];
+                            float denominatorSquared = denominator * denominator;
+                            float norm1Sqrt = norm1Sqrts[b];
+                            float norm2Sqrt = norm2Sqrts[b];
+                            float lossSign = isPositive ? -1.0f : 1.0f;
 
                             for (int i = 0; i < dim; i++) {
                                 float v1 = d1[off + i];
                                 float v2 = d2[off + i];
+                                float dDenomDx1 = norm1Sqrt == 0.0f ? 0.0f : norm2Sqrt * v1 / norm1Sqrt;
+                                float dDenomDx2 = norm2Sqrt == 0.0f ? 0.0f : norm1Sqrt * v2 / norm2Sqrt;
 
-                                // Gradient for x1
-                                float dCosine_dx1 = (v2 / (norm2Sqrt + eps) - cosine * v1 / (norm1Sqrt + eps)) /
-                                                   (norm1Sqrt + eps);
-                                float dLoss_dx1 = isPositive ? -dCosine_dx1 : dCosine_dx1;
-                                grad1[off + i] = scale * dLoss_dx1;
-
-                                // Gradient for x2
-                                float dCosine_dx2 = (v1 / (norm1Sqrt + eps) - cosine * v2 / (norm2Sqrt + eps)) /
-                                                   (norm2Sqrt + eps);
-                                float dLoss_dx2 = isPositive ? -dCosine_dx2 : dCosine_dx2;
-                                grad2[off + i] = scale * dLoss_dx2;
+                                float dCosineDx1 = (v2 * denominator - dot * dDenomDx1) / denominatorSquared;
+                                float dCosineDx2 = (v1 * denominator - dot * dDenomDx2) / denominatorSquared;
+                                grad1[off + i] = scale * lossSign * dCosineDx1;
+                                grad2[off + i] = scale * lossSign * dCosineDx2;
                             }
                         }
                     }
@@ -180,6 +173,39 @@ public class CosineEmbeddingLoss {
         }
 
         return out;
+    }
+
+    private static void requireShapes(long[] x1Shape, long[] x2Shape, long[] targetShape) {
+        if (x1Shape.length != 2 || x2Shape.length != 2) {
+            throw new IllegalArgumentException(
+                    "x1 and x2 must be 2D tensors [batch, dim], got: "
+                            + Arrays.toString(x1Shape) + " and " + Arrays.toString(x2Shape));
+        }
+        if (!Arrays.equals(x1Shape, x2Shape)) {
+            throw new IllegalArgumentException(
+                    "x1 and x2 shapes must match, got: "
+                            + Arrays.toString(x1Shape) + " vs " + Arrays.toString(x2Shape));
+        }
+        if (x1Shape[0] <= 0 || x1Shape[1] <= 0) {
+            throw new IllegalArgumentException(
+                    "x1 and x2 must have positive batch and dim, got: " + Arrays.toString(x1Shape));
+        }
+        if (targetShape.length != 1 || targetShape[0] != x1Shape[0]) {
+            throw new IllegalArgumentException(
+                    "target must be a 1D tensor [batch] matching embeddings, got: "
+                            + Arrays.toString(targetShape) + " for embeddings " + Arrays.toString(x1Shape));
+        }
+    }
+
+    private static float requireCosineTarget(float target, int index) {
+        if (Math.abs(target - 1.0f) <= 1e-6f) {
+            return 1.0f;
+        }
+        if (Math.abs(target + 1.0f) <= 1e-6f) {
+            return -1.0f;
+        }
+        throw new IllegalArgumentException(
+                "target must contain only 1.0 or -1.0, got " + target + " at index " + index);
     }
 
     /**

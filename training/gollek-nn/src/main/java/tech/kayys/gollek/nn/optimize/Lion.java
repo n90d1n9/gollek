@@ -63,15 +63,16 @@ public final class Lion implements Optimizer {
      */
     public Lion(List<Parameter> parameters, float lr,
             float beta1, float beta2, float weightDecay) {
-        this.parameters = parameters;
-        this.lr = lr;
-        this.beta1 = beta1;
-        this.beta2 = beta2;
-        this.weightDecay = weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(parameters);
+        this.lr = OptimizerValidation.learningRate(lr);
+        this.beta1 = OptimizerValidation.beta(beta1, "beta1");
+        this.beta2 = OptimizerValidation.beta(beta2, "beta2");
+        this.weightDecay = OptimizerValidation.weightDecay(weightDecay);
     }
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "Lion");
         for (Parameter p : parameters) {
             if (p.data().grad() == null)
                 continue;
@@ -108,6 +109,6 @@ public final class Lion implements Optimizer {
 
     @Override
     public void setLearningRate(float lr) {
-        this.lr = lr;
+        this.lr = OptimizerValidation.learningRate(lr);
     }
 }

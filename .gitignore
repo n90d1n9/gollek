@@ -135,6 +135,7 @@ out/
 **/cmake-build-*/
 **/CMakeCache.txt
 **/Makefile
+!backend/metal/gollek-backend-metal/src/main/cpp/metal/Makefile
 
 # Build logs and configuration
 **/CMakeConfigureLog.yaml

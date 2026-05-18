@@ -15,6 +15,14 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   canonical metrics such as MAE, MSE, RMSE, R2, accuracy, macro precision,
   macro recall, macro F1, and top-k accuracy to the one-call `fit(...)` path, with
   train/validation values returned in `TrainingSummary.metadata()`.
+- **Trainer Metric Contracts**: trainer metrics now have standalone
+  `TrainingMetric` and `DetailedTrainingMetric` contracts plus the
+  `TrainingMetrics` factory catalog. Built-in metric implementations live
+  outside `CanonicalTrainer` and are split by regression, binary,
+  multiclass, and multilabel families, so custom metrics and built-ins can be
+  used without coupling code to the trainer monolith. The legacy
+  `CanonicalTrainer.Metric`, `.DetailedMetric`, and `.Metrics` names remain as
+  source-compatible aliases.
 - **Robust Regression Preset**:
   `TrainingPreset.REGRESSION_HUBER_*` uses `Gollek.DL.huberLoss(...)` for
   outlier-tolerant regression with a real autograd backward path.
@@ -63,7 +71,16 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   writes `canonical-history.csv` beside the model/optimizer/scheduler
   checkpoints so learning curves survive the process and can be opened in
   spreadsheets or dashboard tooling. Resumed runs load existing rows first and
-  append later epochs instead of replacing earlier history.
+  append later epochs instead of replacing earlier history. Nested metric maps
+  and detailed diagnostics are stored as deterministic JSON cells, not Java
+  `Map.toString()` output, so tooling can parse confusion matrices and similar
+  payloads reliably across resume. Malformed structured history cells are
+  reported as `trainingHistoryLoadError`; strict resume fails closed instead of
+  trusting ambiguous history. Duplicate CSV headers, blank headers, and rows
+  with extra cells are also rejected so resume cannot overwrite or ignore
+  history values silently. The `epoch` column is required and must contain
+  unique non-negative integers, making it the stable key for resumed history
+  rows.
 - **Structured Training Report**: The same checkpoint directory now receives
   `canonical-report.json`, a dependency-free machine-readable report containing
   the final summary, epoch history, metrics, checkpoints, accelerator metadata,
@@ -75,6 +92,58 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   SGD, Adam, AdamW, and RMSprop, including momentum/velocity buffers and Adam
   moments, so resumed training follows the same numerical path as an
   uninterrupted run.
+- **Partial Resume Diagnostics**: trainer summaries now distinguish checkpoint
+  files present after training from artifacts that were missing at resume time,
+  covering model, optimizer, scheduler, GradScaler, history, and report outputs.
+  Strict resume fails closed when runtime state or required
+  model/optimizer/scheduler/scaler artifacts are missing;
+  `failOnCheckpointLoadError(false)` keeps best-effort fallback and records
+  `checkpointResumePartial` plus missing artifact names.
+- **Checkpoint Compatibility Metadata**: model checkpoints now write
+  `canonical-model.metadata` beside `canonical-model.safetensors`. Resume
+  validates the model class, parameter count, and named-parameter signature when
+  metadata is present. The same metadata records checkpoint byte size and
+  SHA-256, so corrupted or truncated model files fail fast by default and report
+  `checkpointResumeCompatibilityMismatches` in lenient mode.
+- **Checkpoint Manifest Integrity**: checkpoint directories now include
+  `canonical-checkpoints.metadata` with byte-size and SHA-256 entries for
+  runtime, optimizer, scheduler, GradScaler, history, report, and model
+  artifacts. Resume validates runtime-state files before deserializing them, so
+  tampered runtime, optimizer, or scheduler checkpoints fail closed by default
+  and stay visible in lenient `checkpointResumeCompatibilityMismatches`
+  diagnostics. Best-model restore-at-end uses the same manifest guard,
+  preventing corrupted `canonical-best-model.safetensors` from silently
+  replacing current weights.
+- **Batch Data Guard**: train and validation batches now validate non-null,
+  non-empty, sample-aligned input/label tensors before forward/loss execution.
+  NaN or Infinity in dataset values fails fast, records
+  `nonFinitePhase`/`nonFiniteKind`, skips optimizer mutation for train batches,
+  and still writes the structured failure report; malformed batches surface
+  `invalidBatchReason` before model code runs.
+- **Loss Shape Guard**: custom trainer losses must reduce to exactly one tensor
+  value before backward. Vector or matrix losses now fail before gradients are
+  propagated, report `invalidLossShape`, and avoid writing model/optimizer
+  checkpoints for failed train steps.
+- **Prediction Finite Guard**: model outputs are validated before loss and
+  metric evaluation. NaN or Infinity predictions now surface as
+  `nonFiniteKind=prediction`, preventing exploding activations from reaching
+  custom losses or validation metrics.
+- **Metric Finite Guard**: metrics are checked at train/validation reporting
+  boundaries after real batches have been observed. Duplicate metric names,
+  NaN or Infinity custom metrics, metric-value exceptions, and invalid
+  `DetailedMetric` payloads stop the run, mark the summary with
+  `invalidMetric*` metadata, and skip final model/optimizer checkpoint writes;
+  intentionally empty phases may still report undefined metrics without failing
+  compatibility flows.
+- **Optimizer Safety Guards**: SGD, Adam, AdamW, RMSprop, Adagrad, Adadelta,
+  Lion, LAMB, and `GradientClipper` now validate finite hyperparameters,
+  parameters, and gradients before mutating state; Adam L2 decay no longer
+  mutates gradient buffers, and Adagrad weight decay is applied to every tensor
+  element.
+- **Scheduler Resume Guards**: StepLR, CosineAnnealingLR,
+  WarmupCosineScheduler, and ReduceLROnPlateau validate finite configuration
+  and checkpoint state before restoring resumed learning rates, rejecting NaN
+  LRs, negative counters, and infinite plateau metrics.
 - **Real Post-Training Quantization Inputs**: `QuantizationEngine` now consumes
   explicit in-memory weight tensors or a simple text weight file, rejects
   missing/unsupported sources instead of inventing placeholder weights, and
@@ -82,7 +151,21 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
 - **Real Mixed-Precision Loss Scaling**: `GradScaler.scale(loss)` now returns a
   differentiable scaled loss, unscales `Optimizer`/`Parameter` gradients,
   skips optimizer steps on NaN/Inf gradients, and grows/backs off the scale
-  according to observed overflow.
+  according to observed overflow. Scaler state is checkpointable, validates
+  incompatible restore payloads, and avoids partially unscaling gradients when
+  overflow is detected.
+- **Scaler-Backed Trainer Mixed Precision**:
+  `CanonicalTrainer.Builder.mixedPrecision(true)`, `.gradScaler(...)`, and
+  `Gollek.DL.trainingOptions().mixedPrecision()` now execute the real
+  GradScaler path during training. Public training options also accept
+  `trainingOptions().gradScaler(customScaler)` /
+  `.mixedPrecision(customScaler)` for tuned initial scale and growth policy.
+  Overflowed scaled gradients skip optimizer and scheduler steps, back off the
+  loss scale, and save/resume `canonical-grad-scaler.state` beside
+  model/optimizer/scheduler checkpoints. Resume rejects incompatible scaler
+  policies by default; set lenient checkpoint loading only when you explicitly
+  want to continue with a freshly configured scaler and inspect the metadata
+  load error plus `gradScalerCheckpointFallbackUsed`.
 - **Composed Autograd Losses**: `GradTensor` now backpropagates through common
   Java-side training expressions such as view ops, `sum`/`mean`, `pow`,
   unary math/activations, and last-dimension `softmax`, so custom losses no
@@ -122,26 +205,58 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   weighted loss and gradients by the sum of selected sample weights rather than
   raw batch size, matching standard weighted-mean training semantics.
 - **Class Target Validation**: CrossEntropy, Focal, LabelSmoothing, ArcFace,
-  and CTC losses reject non-finite, fractional, or out-of-range class labels
-  before indexing logits or sequence probabilities.
+  and CTC losses reject wrongly-shaped, non-finite, fractional, or out-of-range
+  class labels before indexing logits or sequence probabilities.
+- **Focal Loss Guards**: `FocalLoss` and `BinaryFocalWithLogitsLoss` now
+  reject empty/non-finite logits before focal weighting, and binary focal
+  gradients are covered for positive-weighted binary and multi-label training.
+- **Regression Loss Guards**: `MSELoss`, `L1Loss`, `SmoothL1Loss`, and
+  `HuberLoss` now reject empty tensors and NaN/Inf predictions or targets
+  before computing losses; `SmoothL1Loss` uses standard beta-scaled loss and
+  gradient semantics.
 - **Label Smoothing Autograd**: `LabelSmoothingLoss` now preserves gradients
   with the standard `softmax - smoothedTarget` backward path, making it usable
   in real trainer loops instead of returning a detached scalar.
 - **Stable BCE With Logits**: `BCEWithLogitsLoss` now uses a stable softplus
   formulation, so confident wrong binary predictions retain their true large
-  loss instead of being capped by `log(sigmoid + epsilon)`, and NaN targets are
-  rejected before training.
+  loss instead of being capped by `log(sigmoid + epsilon)`, and non-finite
+  logits or invalid targets are rejected before training.
 - **Dice Loss Autograd**: `DiceLoss` now backpropagates the overlap objective
   for segmentation training and validates probability predictions, binary
   masks, matching shapes, and smoothing values before computing the ratio.
 - **IoU Loss Autograd**: `IoULoss` now backpropagates through predicted
   bounding boxes and validates `[batch, 4]` finite, ordered coordinates before
   computing object-detection overlap loss.
+- **Triplet Loss Autograd**: `TripletLoss` now backpropagates active margin
+  violations to anchor, positive, and negative embeddings and validates
+  matching `[batch, dim]` embedding tensors.
+- **Contrastive Loss Autograd**: `ContrastiveLoss` now backpropagates positive
+  pairs and active negative margin violations while validating binary labels
+  and matching `[batch, dim]` embedding tensors.
+- **Cosine Embedding Loss Autograd**: `CosineEmbeddingLoss` now
+  backpropagates positive and active negative cosine pairs while validating
+  strict `1.0`/`-1.0` labels, margin bounds, and matching `[batch, dim]`
+  embedding tensors.
+- **CTC Loss Autograd**: `CTCLoss` now backpropagates log-probability inputs
+  using log-space forward-backward posteriors and rejects blank/impossible
+  target alignments before training.
+- **ArcFace Loss Autograd**: `ArcFaceLoss` now backpropagates through feature
+  embeddings and learned class centers, including normalization and angular
+  margin derivatives for metric-learning training.
+- **Knowledge Distillation Gradients**: The distillation trainer now uses
+  teacher-to-student KL with a stable closed-form backward path and standard
+  CrossEntropy for hard labels, so student parameters receive gradients from
+  both branches while the teacher remains detached.
+- **CPU Backend Fallbacks**: The default NN backend now implements depthwise
+  convolution, image resize/crop/normalize, scaled dot-product attention, and
+  multi-head attention instead of returning null for these runtime paths.
 - **Version Guard**: Checkpoint resume validates schema version and fails fast
   by default on incompatible state (optional lenient mode via
   `failOnCheckpointLoadError(false)`).
 - **Auto Model Snapshots**: When `checkpointDir(...)` is set, canonical trainer
-  saves model weights to `canonical-model.safetensors` and reloads them on resume.
+  saves model weights to `canonical-model.safetensors`, writes
+  `canonical-model.metadata`, and reloads only compatible, integrity-checked
+  snapshots on resume.
 - **Best Model Snapshots**: Validation runs also write
   `canonical-best-model.safetensors` when the monitored validation signal
   improves. The default monitor is validation loss (`MIN`), while
@@ -173,8 +288,8 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   `Gollek.DL.confusionMatrixMetric()` records scalar
   `confusion_matrix_accuracy` plus structured matrix details under
   `latestTrainMetricDetails`, `latestValidationMetricDetails`, epoch history,
-  and `canonical-report.json`. Rows are actual classes and columns are
-  predicted classes.
+  `canonical-history.csv`, and `canonical-report.json`. Rows are actual
+  classes and columns are predicted classes.
 - **Classification Ranking Metrics**:
   `Gollek.DL.classificationMacroRocAucMetric()`,
   `.classificationMacroAveragePrecisionMetric()`, and
@@ -190,13 +305,15 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   `TrainingPreset.CLASSIFICATION_FOCAL_*` uses `Gollek.DL.focalLoss(...)`
   to down-weight easy examples and focus training on hard examples.
   `Gollek.DL.trainingOptions().focalGamma(...)`, `.focalAlpha(...)`, and
-  `.focalClassWeights(...)` configure the preset trainer path.
+  `.focalClassWeights(...)` configure the preset trainer path, while
+  non-finite logits fail before softmax/focal weighting.
 - **Binary Focal With Logits Preset**:
   `TrainingPreset.BINARY_FOCAL_WITH_LOGITS_*` uses
   `Gollek.DL.binaryFocalWithLogitsLoss(...)` for imbalanced binary and
   multi-label tasks. It accepts `.focalGamma(...)`, `.focalAlpha(...)`,
   and the existing `.bcePositiveWeight(...)` / `.bcePositiveWeights(...)`
-  imbalance controls.
+  imbalance controls, with finite-logit validation and tested gradients for
+  positive-weighted multi-label batches.
 - **Binary Classification Preset**:
   `Gollek.DL.binaryDataLoader(...)`, `.binaryTrainValidationSplit(...)`,
   `.binaryStratifiedTrainValidationSplit(...)`, and
@@ -223,7 +340,7 @@ The `gollek-ml-ml` module is the top-level aggregator for the Gollek ML framewor
   `.trainingOptions().binaryConfusionMatrixMetric(logitThreshold)` record
   scalar `binary_confusion_matrix_accuracy` plus TN/FP/FN/TP, specificity,
   balanced accuracy, and a structured `[[TN, FP], [FN, TP]]` matrix in
-  summary metadata, epoch history, evaluation summaries, and
+  summary metadata, epoch history, history CSV, evaluation summaries, and
   `canonical-report.json`.
 - **Binary Ranking Metrics**:
   `Gollek.DL.binaryRocAucMetric()`, `.binaryAveragePrecisionMetric()`, and

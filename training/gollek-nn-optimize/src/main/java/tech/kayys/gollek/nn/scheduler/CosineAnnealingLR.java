@@ -62,12 +62,13 @@ public class CosineAnnealingLR extends LRScheduler {
         if (tMax <= 0) {
             throw new IllegalArgumentException("tMax must be positive, got: " + tMax);
         }
-        if (minLr < 0) {
-            throw new IllegalArgumentException("minLr must be non-negative, got: " + minLr);
+        this.initialLr = SchedulerValidation.learningRate(optimizer.learningRate(), "initialLr");
+        this.minLr = SchedulerValidation.nonNegative(minLr, "minLr");
+        if (this.minLr > this.initialLr) {
+            throw new IllegalArgumentException(
+                    "minLr must be <= initialLr, got: " + this.minLr + " > " + this.initialLr);
         }
-        this.initialLr = optimizer.learningRate();
         this.tMax = tMax;
-        this.minLr = minLr;
     }
 
     /**
@@ -119,11 +120,15 @@ public class CosineAnnealingLR extends LRScheduler {
             throw new IllegalArgumentException(
                     "Checkpoint scheduler mismatch: expected CosineAnnealingLR but got " + name);
         }
-        requireFloatMatch(state.get("initialLr"), initialLr, "initialLr");
-        requireIntMatch(state.get("tMax"), tMax, "tMax");
-        requireFloatMatch(state.get("minLr"), minLr, "minLr");
-        this.step = Math.max(0, readInt(state.get("step"), step));
-        setLearningRate(readFloat(state.get("currentLr"), computeLearningRateForStep(this.step)));
+        SchedulerValidation.requireFloatMatch(
+                state.get("initialLr"), initialLr, "CosineAnnealingLR", "initialLr");
+        SchedulerValidation.requireIntMatch(state.get("tMax"), tMax, "CosineAnnealingLR", "tMax");
+        SchedulerValidation.requireFloatMatch(state.get("minLr"), minLr, "CosineAnnealingLR", "minLr");
+        this.step = SchedulerValidation.readNonNegativeInt(
+                state.get("step"), step, "CosineAnnealingLR", "step");
+        setLearningRate(SchedulerValidation.readLearningRate(
+                state.get("currentLr"), computeLearningRateForStep(this.step),
+                "CosineAnnealingLR", "currentLr"));
     }
 
     private float computeLearningRateForStep(int targetStep) {
@@ -132,58 +137,6 @@ public class CosineAnnealingLR extends LRScheduler {
         }
         float cosineDecay = (float) Math.cos(Math.PI * Math.max(0, targetStep) / tMax);
         return minLr + 0.5f * (initialLr - minLr) * (1 + cosineDecay);
-    }
-
-    private static void requireIntMatch(Object value, int expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        int loaded = readInt(value, expected);
-        if (loaded != expected) {
-            throw new IllegalArgumentException(
-                    "Invalid CosineAnnealingLR checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static void requireFloatMatch(Object value, float expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        float loaded = readFloat(value, expected);
-        if (Math.abs(loaded - expected) > 1e-7f) {
-            throw new IllegalArgumentException(
-                    "Invalid CosineAnnealingLR checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static int readInt(Object value, int fallback) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Integer.parseInt(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static float readFloat(Object value, float fallback) {
-        if (value instanceof Number number) {
-            return number.floatValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Float.parseFloat(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
     }
 
     @Override

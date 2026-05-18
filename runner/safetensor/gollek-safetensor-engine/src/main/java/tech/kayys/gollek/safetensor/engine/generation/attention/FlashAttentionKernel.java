@@ -34,6 +34,10 @@ public class FlashAttentionKernel {
             "gollek.safetensor.experimental_metal_bf16_linear";
     private static final String DISABLE_EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY =
             "gollek.safetensor.disable_experimental_metal_bf16_linear";
+    private static final String ENABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.enable_gemma4_metal_bf16_linear";
+    private static final String DISABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY =
+            "gollek.safetensor.disable_gemma4_metal_bf16_linear";
     private static final String METAL_F16_WEIGHT_CACHE_MAX_BYTES_PROPERTY =
             "gollek.safetensor.metal_f16_weight_cache_max_bytes";
     private static final long DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;
@@ -48,6 +52,20 @@ public class FlashAttentionKernel {
             "gollek.safetensor.disable_metal_gemma4_attention";
     private static final String ALLOW_LEGACY_METAL_ATTENTION_BRIDGE_PROPERTY =
             "gollek.safetensor.allow_legacy_metal_attention_bridge";
+    private static final String ENABLE_GEMMA4_SHARED_DECODE_PACKED_ATTENTION_PROPERTY =
+            "gollek.safetensor.enable_gemma4_shared_decode_packed_attention";
+    private static final String DISABLE_GEMMA4_SHARED_DECODE_PACKED_ATTENTION_PROPERTY =
+            "gollek.safetensor.disable_gemma4_shared_decode_packed_attention";
+    private static final String ENABLE_GEMMA4_PAGED_DECODE_ATTENTION_PROPERTY =
+            "gollek.safetensor.enable_gemma4_paged_decode_attention";
+    private static final String DISABLE_GEMMA4_PAGED_DECODE_ATTENTION_PROPERTY =
+            "gollek.safetensor.disable_gemma4_paged_decode_attention";
+    private static final String ENABLE_RAW_PAGED_SLIDING_DECODE_ATTENTION_PROPERTY =
+            "gollek.safetensor.enable_raw_paged_sliding_decode_attention";
+    private static final String ENABLE_GEMMA4_SLIDING_PREFILL_FA4_ATTENTION_PROPERTY =
+            "gollek.safetensor.enable_gemma4_sliding_prefill_fa4_attention";
+    private static final String DISABLE_GEMMA4_SLIDING_PREFILL_FA4_ATTENTION_PROPERTY =
+            "gollek.safetensor.disable_gemma4_sliding_prefill_fa4_attention";
     private static final String PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS_PROPERTY =
             "gollek.safetensor.prefer_paged_metal_attention_max_tokens";
     private static final int DEFAULT_PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS = 1024;
@@ -55,6 +73,10 @@ public class FlashAttentionKernel {
             "gollek.safetensor.disable_gemma4_v_norm";
     private static final String DISABLE_GEMMA4_QK_NORM_PROPERTY =
             "gollek.safetensor.disable_gemma4_qk_norm";
+    private static final String ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY =
+            "gollek.safetensor.enable_metal_per_head_rms_norm";
+    private static final String DISABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY =
+            "gollek.safetensor.disable_metal_per_head_rms_norm";
     private static final String EXPERIMENTAL_GEMMA4_SPLIT_HALF_ROPE_PROPERTY =
             "gollek.safetensor.experimental_gemma4_split_half_rope";
     private static final String LEGACY_INTERLEAVED_GEMMA4_ROPE_PROPERTY =
@@ -71,7 +93,7 @@ public class FlashAttentionKernel {
             "gollek.safetensor.disable_metal_mixed_half_linear_triple_matvec";
     private static final String METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT_PROPERTY =
             "gollek.safetensor.metal_mixed_half_linear_triple_matvec_max_output";
-    private static final int DEFAULT_METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT = 2048;
+    private static final int DEFAULT_METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT = 4096;
     private static final String ENABLE_METAL_HALF_MATVEC_PROPERTY =
             "gollek.safetensor.enable_metal_half_matvec";
     private static final String DISABLE_METAL_HALF_MATVEC_PROPERTY =
@@ -243,6 +265,11 @@ public class FlashAttentionKernel {
         public MemorySegment packedValueData() {
             ensurePackedBuffers();
             return packedValueBuffer.dataPtr();
+        }
+
+        public int packedCapacityTokens() {
+            ensurePackedBuffers();
+            return capacityTokens;
         }
 
         private void ensureCapacity(int requiredTokens) {
@@ -455,10 +482,10 @@ public class FlashAttentionKernel {
         // 1. Projections
         LinearTriple qkvTriple = (!sharedKv && !useDenseSharedKvState && !alternativeAttention)
                 ? tryMetalHalfLinearTripleMixed(
-                        in.x, in.qW, in.qB, in.kW, in.kB, in.vW, in.vB, "attn_qkv_proj_triple")
+                        in.x, in.qW, in.qB, in.kW, in.kB, in.vW, in.vB, "attn_qkv_proj_triple", config)
                 : null;
         LinearPair qkPair = qkvTriple == null && (!sharedKv && !useDenseSharedKvState)
-                ? tryMetalHalfLinearPairMixed(in.x, in.qW, in.qB, in.kW, in.kB, "attn_qk_proj_pair")
+                ? tryMetalHalfLinearPairMixed(in.x, in.qW, in.qB, in.kW, in.kB, "attn_qk_proj_pair", config)
                 : null;
         AccelTensor q = qkvTriple != null ? qkvTriple.first()
                 : (qkPair != null ? qkPair.first() : project(in.x, in.qW, in.qB, "attn_q_proj", config));
@@ -488,12 +515,18 @@ public class FlashAttentionKernel {
         boolean addOneRmsNorm = in.arch.addOneToRmsNormWeight() && !gemma4Text;
         boolean disableGemma4QkNorm = gemma4Text && Boolean.getBoolean(DISABLE_GEMMA4_QK_NORM_PROPERTY);
         if (!disableGemma4QkNorm && in.qNormW != null) {
-            AccelTensor qNormed = AccelOps.perHeadRmsNorm(q, in.qNormW, config.rmsNormEps(), addOneRmsNorm);
+            AccelTensor qNormed = tryMetalPerHeadRmsNorm(q, in.qNormW, config.rmsNormEps(), addOneRmsNorm, config);
+            if (qNormed == null) {
+                qNormed = AccelOps.perHeadRmsNorm(q, in.qNormW, config.rmsNormEps(), addOneRmsNorm);
+            }
             q.close();
             q = qNormed;
         }
         if (!disableGemma4QkNorm && !sharedKv && in.kNormW != null) {
-            AccelTensor kNormed = AccelOps.perHeadRmsNorm(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm);
+            AccelTensor kNormed = tryMetalPerHeadRmsNorm(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm, config);
+            if (kNormed == null) {
+                kNormed = AccelOps.perHeadRmsNorm(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm);
+            }
             k.close();
             k = kNormed;
         }
@@ -548,11 +581,14 @@ public class FlashAttentionKernel {
         if (useDenseSharedKvState) {
             AccelTensor metalSharedOut = denseSharedMetalAttention(q, k, v, sharedKvState, config, layerIdx, startPos, numQHeads,
                     numKVHeads, headDim, scale, in.isCausal, attnSoftCap);
+            DirectInferenceEngine.recordAttentionPath(
+                    metalSharedOut != null ? "dense_shared_metal" : "dense_shared_java");
             attnOut = metalSharedOut != null
                     ? metalSharedOut
                     : denseSharedAttention(q, k, v, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale,
                             in.isCausal, attnSoftCap);
         } else if (canUseDenseGemma4Attention(config, layerIdx) && !kvSession.isQuantized()) {
+            DirectInferenceEngine.recordAttentionPath("dense_gemma4_java");
             attnOut = denseCachedAttention(q, kvSession, kvLayerIdx, startPos, numQHeads, numKVHeads, headDim, scale,
                     in.isCausal, attnSoftCap, config, layerIdx);
         } else if (canUseFa4PagedAttention(config, layerIdx, kvSession, attnSoftCap)) {
@@ -561,10 +597,11 @@ public class FlashAttentionKernel {
         } else if (canUseSlidingDecodeMetalAttention(config, layerIdx, kvSession, seqLen)) {
             attnOut = slidingDecodeMetalAttention(q, kvSession, layerIdx, kvLayerIdx, startPos, numQHeads,
                     numKVHeads, headDim, scale, attnSoftCap, config);
-        } else if (canUseMetalAttention(config, layerIdx, kvSession)) {
+        } else if (canUseMetalAttention(config, layerIdx, kvSession, seqLen, startPos, attnSoftCap)) {
             attnOut = tiledAttention(q, kvSession, kvLayerIdx, startPos, numQHeads, numKVHeads, headDim, scale,
                     in.isCausal, attnSoftCap, config, layerIdx);
         } else {
+            DirectInferenceEngine.recordAttentionPath("paged_java");
             attnOut = PagedAttentionVectorAPI.compute(q, config, kvSession, layerIdx, kvLayerIdx, startPos, numQHeads,
                     numKVHeads, headDim, scale, in.isCausal, attnSoftCap);
         }
@@ -695,8 +732,9 @@ public class FlashAttentionKernel {
             return null;
         }
 
-        boolean useFa4 = canUseFa4Attention(softCap);
-        if (!useFa4 && !allowLegacyMetalAttentionBridge(config)) {
+        boolean usePackedSharedDecode = shouldUsePackedSharedDecodeAttention(config, seqLenQ, sharedKvState);
+        boolean useFa4 = canUseFa4Attention(softCap) && !usePackedSharedDecode;
+        if (!useFa4 && !usePackedSharedDecode && !allowLegacyMetalAttentionBridge(config)) {
             return null;
         }
         AccelTensor qContiguous = q.contiguous();
@@ -719,7 +757,9 @@ public class FlashAttentionKernel {
                 }
                 out.close();
             } else {
-                int blockSize = Math.max(1, totalTokens);
+                int blockSize = Math.max(1, sharedKvState != null
+                        ? sharedKvState.packedCapacityTokens()
+                        : totalTokens);
                 int maxBlocks = 1;
                 MemorySegment packedK;
                 MemorySegment packedV;
@@ -837,6 +877,93 @@ public class FlashAttentionKernel {
         return AccelOps.rmsNorm(x, w, eps, addOne);
     }
 
+    private AccelTensor tryMetalPerHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
+            ModelConfig config) {
+        if (!shouldUseMetalPerHeadRmsNorm(config) || x == null || weight == null) {
+            return null;
+        }
+        if (metalBinding == null || !metalBinding.nativeElementwiseKernelsAvailable()) {
+            return null;
+        }
+        if (x.quantType() != AccelTensor.QuantType.F32) {
+            return null;
+        }
+        long[] shape = x.shape();
+        if (shape.length < 2) {
+            return null;
+        }
+        int headDim = Math.toIntExact(shape[shape.length - 1]);
+        if (headDim <= 0 || weight.numel() != headDim) {
+            return null;
+        }
+
+        AccelTensor weightView = weight;
+        AccelTensor contiguousInput = null;
+        AccelTensor out = null;
+        try {
+            if (weight.quantType() != AccelTensor.QuantType.F32) {
+                weightView = weight.dequantize();
+            }
+            if (weightView.quantType() != AccelTensor.QuantType.F32 || weightView.numel() != headDim) {
+                return null;
+            }
+            contiguousInput = x.contiguous();
+            out = AccelTensor.zeros(shape);
+            int rows = Math.toIntExact(contiguousInput.numel() / headDim);
+            int rc = metalBinding.rmsNormRows(out.dataPtr(), contiguousInput.dataPtr(), weightView.dataPtr(),
+                    rows, headDim, (float) eps, addOne);
+            if (rc == 0) {
+                return out;
+            }
+            out.close();
+            out = null;
+            return null;
+        } catch (RuntimeException e) {
+            if (out != null && !out.isClosed()) {
+                out.close();
+            }
+            return null;
+        } finally {
+            if (contiguousInput != null && contiguousInput != x && !contiguousInput.isClosed()) {
+                contiguousInput.close();
+            }
+            if (weightView != weight && !weightView.isClosed()) {
+                weightView.close();
+            }
+        }
+    }
+
+    private boolean shouldUseMetalPerHeadRmsNorm(ModelConfig config) {
+        if (Boolean.getBoolean(DISABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY);
+        if (explicit != null && !explicit.isBlank()) {
+            return Boolean.parseBoolean(explicit);
+        }
+        // Gemma-4 performs Q/K per-head normalization on every layer. On M4 the
+        // native rows kernel consistently wins despite the extra launch cost.
+        return isGemma4Text(config);
+    }
+
+    private boolean shouldUsePackedSharedDecodeAttention(ModelConfig config, long seqLenQ,
+            SharedKvState sharedKvState) {
+        if (sharedKvState == null || seqLenQ != 1L) {
+            return false;
+        }
+        if (!isGemma4Text(config)
+                || Boolean.getBoolean(DISABLE_GEMMA4_SHARED_DECODE_PACKED_ATTENTION_PROPERTY)
+                || Boolean.getBoolean(DISABLE_METAL_GEMMA4_ATTENTION_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_GEMMA4_SHARED_DECODE_PACKED_ATTENTION_PROPERTY);
+        return explicit != null
+                && !explicit.isBlank()
+                && Boolean.parseBoolean(explicit)
+                && metalBinding != null
+                && metalBinding.isWindowedAttentionAvailable();
+    }
+
     private SharedKvState appendSharedKvState(SharedKvState existing, AccelTensor deltaKey, AccelTensor deltaValue) {
         if (existing == null) {
             return new SharedKvState(deltaKey, deltaValue);
@@ -866,7 +993,10 @@ public class FlashAttentionKernel {
     }
 
     private int resolveRotaryStorageDim(ModelConfig config, int layerIdx, int headDim) {
-        return resolveRotatedDim(config, layerIdx, headDim, headDim);
+        // Partial RoPE (Gemma-4 proportional full attention) still uses the
+        // full head layout. Only the first rotated span receives non-identity
+        // frequencies; the remaining split-half pairs must stay in place.
+        return headDim;
     }
 
     private int resolveRotatedDim(ModelConfig config, int layerIdx, int headDim, int storageDim) {
@@ -1070,6 +1200,18 @@ public class FlashAttentionKernel {
         boolean slidingLayer = config != null && config.isSlidingAttentionLayer(layerIdx) && config.hasSlidingWindow();
         boolean preferPagedMetalFirst = preferPagedMetalAttentionBeforeFa4(config, (int) seqLen, totalTokens);
 
+        if (preferPagedMetalFirst && !kvSession.isQuantized()) {
+            AccelTensor pagedOut = tryPagedMetalAttention(q, kvSession, blockManager, blocks, kvLayerIdx, startPos,
+                    numHeads, numKVHeads, headDim, scale, causal, softCap, config, layerIdx, totalTokens, batch,
+                    seqLen, slidingLayer, null);
+            if (pagedOut != null) {
+                DirectInferenceEngine.recordAttentionPath(slidingLayer
+                        ? "paged_metal_windowed_first"
+                        : "paged_metal_first");
+                return pagedOut;
+            }
+        }
+
         try (Arena arena = Arena.ofConfined()) {
             AccelTensor out = AccelTensor.zeros(q.shape());
             if (!preferPagedMetalFirst && canUseFa4Path && metalFa4 != null && metalFa4.isNativeAvailable()) {
@@ -1084,85 +1226,19 @@ public class FlashAttentionKernel {
                         (int) batch, (int) seqLen, totalTokens, numHeads, numKVHeads, headDim,
                         scale, causal, useBf16, softCap);
                 if (result == 0) {
+                    DirectInferenceEngine.recordAttentionPath("fa4_gathered");
                     return out;
                 }
                 out.close();
                 out = AccelTensor.zeros(q.shape());
             }
-            if (allowLegacyMetalAttentionBridge(config)
-                    && metalBinding != null
-                    && metalBinding.isNativeAvailable()
-                    && blocks != null
-                    && !blocks.isEmpty()) {
-                int maxBlocks = blocks.size();
-                MemorySegment kPool = kvSession.getRawKPool();
-                MemorySegment vPool = kvSession.getRawVPool();
-                int[] blockTable = new int[(int) batch * maxBlocks];
-                if (kvSession.isQuantized()) {
-                    MaterializedKvPools materialized = materializeKvBlocksForMetal(blockManager, kvSession, blocks,
-                            numKVHeads, headDim, arena);
-                    kPool = materialized.kPool();
-                    vPool = materialized.vPool();
-                    for (int b = 0; b < (int) batch; b++) {
-                        int base = b * maxBlocks;
-                        for (int i = 0; i < maxBlocks; i++) {
-                            blockTable[base + i] = i;
-                        }
-                    }
-                } else {
-                    for (int b = 0; b < (int) batch; b++) {
-                        int base = b * maxBlocks;
-                        for (int i = 0; i < maxBlocks; i++) {
-                            blockTable[base + i] = blocks.get(i);
-                        }
-                    }
-                }
-                MemorySegment blockTableSegment = arena.allocate(
-                        (long) blockTable.length * Integer.BYTES,
-                        Integer.BYTES);
-                for (int idx = 0; idx < blockTable.length; idx++) {
-                    blockTableSegment.setAtIndex(ValueLayout.JAVA_INT, idx, blockTable[idx]);
-                }
-
-                MemorySegment contextLensSegment = arena.allocate(
-                        (long) batch * Integer.BYTES,
-                        Integer.BYTES);
-                for (int b = 0; b < (int) batch; b++) {
-                    contextLensSegment.setAtIndex(ValueLayout.JAVA_INT, b, totalTokens);
-                }
-
-                int result = slidingLayer
-                        ? (numKVHeads == numHeads
-                                ? metalBinding.attentionWindowed(
-                                        out.dataPtr(), q.dataPtr(), kPool, vPool,
-                                        blockTableSegment, contextLensSegment,
-                                        (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
-                                        kvSession.tokensPerBlock(), maxBlocks,
-                                        scale, causal ? 1 : 0, startPos, config.slidingWindowSize(), softCap)
-                                : metalBinding.attentionGqaWindowed(
-                                        out.dataPtr(), q.dataPtr(), kPool, vPool,
-                                        blockTableSegment, contextLensSegment,
-                                        (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
-                                        kvSession.tokensPerBlock(), maxBlocks,
-                                        scale, causal ? 1 : 0, startPos, config.slidingWindowSize(), softCap))
-                        : (numKVHeads == numHeads
-                                ? metalBinding.attention(
-                                        out.dataPtr(), q.dataPtr(), kPool, vPool,
-                                        blockTableSegment, contextLensSegment,
-                                        (int) batch, (int) seqLen, numHeads, headDim,
-                                        kvSession.tokensPerBlock(), maxBlocks,
-                                        scale, causal ? 1 : 0, softCap)
-                                : metalBinding.attentionGqa(
-                                        out.dataPtr(), q.dataPtr(), kPool, vPool,
-                                        blockTableSegment, contextLensSegment,
-                                        (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
-                                        kvSession.tokensPerBlock(), maxBlocks,
-                                        scale, causal ? 1 : 0, softCap));
-                if (result == 0) {
-                    return out;
-                }
+            AccelTensor pagedOut = tryPagedMetalAttention(q, kvSession, blockManager, blocks, kvLayerIdx, startPos,
+                    numHeads, numKVHeads, headDim, scale, causal, softCap, config, layerIdx, totalTokens, batch,
+                    seqLen, slidingLayer, arena);
+            if (pagedOut != null) {
                 out.close();
-                out = AccelTensor.zeros(q.shape());
+                DirectInferenceEngine.recordAttentionPath(slidingLayer ? "paged_metal_windowed" : "paged_metal");
+                return pagedOut;
             }
             if (canUseFa4Path && metalFa4 != null && metalFa4.isNativeAvailable()) {
                 long gatherBytes = (long) totalTokens * numKVHeads * headDim * Float.BYTES;
@@ -1176,19 +1252,106 @@ public class FlashAttentionKernel {
                         (int) batch, (int) seqLen, totalTokens, numHeads, numKVHeads, headDim,
                         scale, causal, useBf16, softCap);
                 if (result == 0) {
+                    DirectInferenceEngine.recordAttentionPath("fa4_gathered_after_paged");
                     return out;
                 }
                 out.close();
             }
+            DirectInferenceEngine.recordAttentionPath("paged_java");
             return PagedAttentionVectorAPI.compute(q, null, kvSession, kvLayerIdx, kvLayerIdx, startPos, numHeads,
                     numKVHeads, headDim, scale, causal, softCap);
         }
     }
 
+    private AccelTensor tryPagedMetalAttention(AccelTensor q, KVCacheManager.KVCacheSession kvSession,
+            BlockManager blockManager, java.util.List<Integer> blocks, int kvLayerIdx, int startPos, int numHeads,
+            int numKVHeads, int headDim, float scale, boolean causal, float softCap, ModelConfig config, int layerIdx,
+            int totalTokens, long batch, long seqLen, boolean slidingLayer, Arena arena) {
+        if (!allowPagedMetalAttentionBridge(config, (int) seqLen, totalTokens)
+                || metalBinding == null
+                || !metalBinding.isNativeAvailable()
+                || blocks == null
+                || blocks.isEmpty()) {
+            return null;
+        }
+        if (kvSession.isQuantized() && arena == null) {
+            return null;
+        }
+        AccelTensor out = AccelTensor.zeros(q.shape());
+        try {
+            int maxBlocks = blocks.size();
+            int batchInt = Math.toIntExact(batch);
+            MemorySegment kPool = kvSession.getRawKPool();
+            MemorySegment vPool = kvSession.getRawVPool();
+            KVCacheManager.KVCacheSession.ForwardWorkspace ws = kvSession.getWorkspace();
+            ws.ensureAttentionMetadataCapacity(batchInt * maxBlocks, batchInt);
+            MemorySegment blockTableSegment = ws.getAttentionBlockTableSeg();
+            MemorySegment contextLensSegment = ws.getAttentionContextLensSeg();
+            if (kvSession.isQuantized()) {
+                MaterializedKvPools materialized = materializeKvBlocksForMetal(blockManager, kvSession, blocks,
+                        numKVHeads, headDim, arena);
+                kPool = materialized.kPool();
+                vPool = materialized.vPool();
+                for (int b = 0; b < batchInt; b++) {
+                    int base = b * maxBlocks;
+                    for (int i = 0; i < maxBlocks; i++) {
+                        blockTableSegment.setAtIndex(ValueLayout.JAVA_INT, base + i, i);
+                    }
+                }
+            } else {
+                for (int b = 0; b < batchInt; b++) {
+                    int base = b * maxBlocks;
+                    for (int i = 0; i < maxBlocks; i++) {
+                        blockTableSegment.setAtIndex(ValueLayout.JAVA_INT, base + i, blocks.get(i));
+                    }
+                }
+            }
+            for (int b = 0; b < batchInt; b++) {
+                contextLensSegment.setAtIndex(ValueLayout.JAVA_INT, b, totalTokens);
+            }
+
+            int result = slidingLayer
+                    ? (numKVHeads == numHeads
+                            ? metalBinding.attentionWindowed(
+                                    out.dataPtr(), q.dataPtr(), kPool, vPool,
+                                    blockTableSegment, contextLensSegment,
+                                    (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
+                                    kvSession.tokensPerBlock(), maxBlocks,
+                                    scale, causal ? 1 : 0, startPos, config.slidingWindowSize(), softCap)
+                            : metalBinding.attentionGqaWindowed(
+                                    out.dataPtr(), q.dataPtr(), kPool, vPool,
+                                    blockTableSegment, contextLensSegment,
+                                    (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
+                                    kvSession.tokensPerBlock(), maxBlocks,
+                                    scale, causal ? 1 : 0, startPos, config.slidingWindowSize(), softCap))
+                    : (numKVHeads == numHeads
+                            ? metalBinding.attention(
+                                    out.dataPtr(), q.dataPtr(), kPool, vPool,
+                                    blockTableSegment, contextLensSegment,
+                                    (int) batch, (int) seqLen, numHeads, headDim,
+                                    kvSession.tokensPerBlock(), maxBlocks,
+                                    scale, causal ? 1 : 0, softCap)
+                            : metalBinding.attentionGqa(
+                                    out.dataPtr(), q.dataPtr(), kPool, vPool,
+                                    blockTableSegment, contextLensSegment,
+                                    (int) batch, (int) seqLen, numHeads, numKVHeads, headDim,
+                                    kvSession.tokensPerBlock(), maxBlocks,
+                                    scale, causal ? 1 : 0, softCap));
+            if (result == 0) {
+                return out;
+            }
+        } catch (RuntimeException e) {
+            // Fall through to FA4/Java attention fallback below.
+        }
+        out.close();
+        return null;
+    }
+
     private AccelTensor slidingDecodeMetalAttention(AccelTensor q, KVCacheManager.KVCacheSession kvSession,
             int layerIdx, int kvLayerIdx, int startPos, int numHeads, int numKVHeads, int headDim, float scale,
             float softCap, ModelConfig config) {
-        if (!allowLegacyMetalAttentionBridge(config)) {
+        if (!allowSlidingDecodeMetalAttentionBridge(config, layerIdx, (int) q.size(1))) {
+            DirectInferenceEngine.recordAttentionPath("sliding_decode_java");
             return PagedAttentionVectorAPI.compute(q, config, kvSession, layerIdx, kvLayerIdx, startPos, numHeads,
                     numKVHeads, headDim, scale, true, softCap);
         }
@@ -1201,6 +1364,18 @@ public class FlashAttentionKernel {
         int blockSize = kvSession.tokensPerBlock();
         int maxBlocks = Math.max(1, (contextTokens + blockSize - 1) / blockSize);
         int poolElements = maxBlocks * numKVHeads * blockSize * headDim;
+        int batchInt = Math.toIntExact(batch);
+
+        if (Boolean.getBoolean(ENABLE_RAW_PAGED_SLIDING_DECODE_ATTENTION_PROPERTY)) {
+            AccelTensor rawPagedOut = tryPagedMetalAttention(q, kvSession, kvSession.blockManager(),
+                    kvSession.getBlockIndices(kvLayerIdx), kvLayerIdx, startPos,
+                    numHeads, numKVHeads, headDim, scale, true, softCap, config, layerIdx,
+                    totalTokens, batch, seqLen, true, null);
+            if (rawPagedOut != null) {
+                DirectInferenceEngine.recordAttentionPath("sliding_decode_paged_metal");
+                return rawPagedOut;
+            }
+        }
 
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment packedK = arena.allocate((long) poolElements * Float.BYTES, 64);
@@ -1208,15 +1383,17 @@ public class FlashAttentionKernel {
             packKvRangeIntoTemporaryPagedPool(kvSession.blockManager(), kvSession, kvLayerIdx, contextStart,
                     totalTokens, numKVHeads, headDim, blockSize, packedK, packedV);
 
-            MemorySegment blockTable = arena.allocate((long) batch * maxBlocks * Integer.BYTES, Integer.BYTES);
-            for (int b = 0; b < batch; b++) {
+            KVCacheManager.KVCacheSession.ForwardWorkspace ws = kvSession.getWorkspace();
+            ws.ensureAttentionMetadataCapacity(batchInt * maxBlocks, batchInt);
+            MemorySegment blockTable = ws.getAttentionBlockTableSeg();
+            MemorySegment contextLens = ws.getAttentionContextLensSeg();
+            for (int b = 0; b < batchInt; b++) {
                 for (int blk = 0; blk < maxBlocks; blk++) {
                     blockTable.setAtIndex(ValueLayout.JAVA_INT, (long) b * maxBlocks + blk, blk);
                 }
             }
 
-            MemorySegment contextLens = arena.allocate((long) batch * Integer.BYTES, Integer.BYTES);
-            for (int b = 0; b < batch; b++) {
+            for (int b = 0; b < batchInt; b++) {
                 contextLens.setAtIndex(ValueLayout.JAVA_INT, b, contextTokens);
             }
 
@@ -1235,9 +1412,11 @@ public class FlashAttentionKernel {
                             blockSize, maxBlocks,
                             scale, 0, softCap);
             if (result == 0) {
+                DirectInferenceEngine.recordAttentionPath("sliding_decode_metal");
                 return out;
             }
             out.close();
+            DirectInferenceEngine.recordAttentionPath("sliding_decode_java");
             return PagedAttentionVectorAPI.compute(q, config, kvSession, layerIdx, kvLayerIdx, startPos, numHeads,
                     numKVHeads, headDim, scale, true, softCap);
         }
@@ -1521,19 +1700,21 @@ public class FlashAttentionKernel {
                                                    AccelTensor firstBias,
                                                    AccelTensor secondWeight,
                                                    AccelTensor secondBias,
-                                                   String profileKey) {
+                                                   String profileKey,
+                                                   ModelConfig config) {
         if (!METAL_MIXED_HALF_LINEAR_PAIR_ENABLED
                 || !canUseExperimentalMetalLinear()
                 || !metalBinding.supportsMatmulTransposedRightHalfPairMixed()
                 || input == null
                 || input.quantType() != AccelTensor.QuantType.F32
-                || !canUseMixedHalfPairWeight(firstWeight)
-                || !canUseMixedHalfPairWeight(secondWeight)) {
+                || !canUseMixedHalfPairWeight(firstWeight, config)
+                || !canUseMixedHalfPairWeight(secondWeight, config)) {
             return null;
         }
 
-        AccelTensor firstMetalWeight = toMetalF16Weight(firstWeight);
-        AccelTensor secondMetalWeight = toMetalF16Weight(secondWeight);
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(config, firstWeight, secondWeight);
+        AccelTensor firstMetalWeight = toMetalHalfWeight(firstWeight, nativeBf16Weights, config);
+        AccelTensor secondMetalWeight = toMetalHalfWeight(secondWeight, nativeBf16Weights, config);
         if (firstMetalWeight == null || secondMetalWeight == null) {
             return null;
         }
@@ -1584,7 +1765,7 @@ public class FlashAttentionKernel {
                     Math.toIntExact(secondWeightShape[0]),
                     1.0f,
                     0.0f,
-                    false);
+                    nativeBf16Weights);
             if (rc != 0) {
                 throw new IllegalStateException("Metal matmulTransposedRightHalfPairMixed failed with code " + rc);
             }
@@ -1610,16 +1791,17 @@ public class FlashAttentionKernel {
                                                        AccelTensor secondBias,
                                                        AccelTensor thirdWeight,
                                                        AccelTensor thirdBias,
-                                                       String profileKey) {
+                                                       String profileKey,
+                                                       ModelConfig config) {
         if (Boolean.getBoolean(DISABLE_METAL_MIXED_HALF_LINEAR_TRIPLE_PROPERTY)
                 || !METAL_MIXED_HALF_LINEAR_PAIR_ENABLED
                 || !canUseExperimentalMetalLinear()
                 || !metalBinding.supportsMatmulTransposedRightHalfTripleMixed()
                 || input == null
                 || input.quantType() != AccelTensor.QuantType.F32
-                || !canUseMixedHalfPairWeight(firstWeight)
-                || !canUseMixedHalfPairWeight(secondWeight)
-                || !canUseMixedHalfPairWeight(thirdWeight)) {
+                || !canUseMixedHalfPairWeight(firstWeight, config)
+                || !canUseMixedHalfPairWeight(secondWeight, config)
+                || !canUseMixedHalfPairWeight(thirdWeight, config)) {
             return null;
         }
 
@@ -1641,9 +1823,10 @@ public class FlashAttentionKernel {
             return null;
         }
 
-        AccelTensor firstMetalWeight = toMetalF16Weight(firstWeight);
-        AccelTensor secondMetalWeight = toMetalF16Weight(secondWeight);
-        AccelTensor thirdMetalWeight = toMetalF16Weight(thirdWeight);
+        boolean nativeBf16Weights = shouldUseNativeMetalBf16Linear(config, firstWeight, secondWeight, thirdWeight);
+        AccelTensor firstMetalWeight = toMetalHalfWeight(firstWeight, nativeBf16Weights, config);
+        AccelTensor secondMetalWeight = toMetalHalfWeight(secondWeight, nativeBf16Weights, config);
+        AccelTensor thirdMetalWeight = toMetalHalfWeight(thirdWeight, nativeBf16Weights, config);
         if (firstMetalWeight == null || secondMetalWeight == null || thirdMetalWeight == null) {
             return null;
         }
@@ -1680,6 +1863,25 @@ public class FlashAttentionKernel {
             int n2 = Math.toIntExact(thirdWeightShape[0]);
             int rc = -2;
             if (m == 1
+                    && nativeBf16Weights
+                    && shouldUseMetalHalfTripleMatvec(n0, n1, n2)
+                    && metalBinding.supportsMatvecTransposedRightBf16TripleMixed()) {
+                rc = metalBinding.matvecTransposedRightBf16TripleMixed(
+                        first.dataPtr(),
+                        second.dataPtr(),
+                        third.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        firstMetalWeight.dataPtr(),
+                        secondMetalWeight.dataPtr(),
+                        thirdMetalWeight.dataPtr(),
+                        kk,
+                        n0,
+                        n1,
+                        n2);
+            }
+            if (rc != 0
+                    && m == 1
+                    && !nativeBf16Weights
                     && shouldUseMetalHalfTripleMatvec(n0, n1, n2)
                     && metalBinding.supportsMatvecTransposedRightHalfTripleMixed()) {
                 rc = metalBinding.matvecTransposedRightHalfTripleMixed(
@@ -1711,7 +1913,7 @@ public class FlashAttentionKernel {
                     n2,
                     1.0f,
                     0.0f,
-                    false);
+                    nativeBf16Weights);
             }
             if (rc != 0) {
                 throw new IllegalStateException("Metal matmulTransposedRightHalfTripleMixed failed with code " + rc);
@@ -1733,13 +1935,16 @@ public class FlashAttentionKernel {
         }
     }
 
-    private boolean canUseMixedHalfPairWeight(AccelTensor weight) {
+    private boolean canUseMixedHalfPairWeight(AccelTensor weight, ModelConfig config) {
         if (weight == null || !weight.isContiguous()) {
             return false;
         }
         AccelTensor.QuantType quantType = weight.quantType();
+        if (quantType == AccelTensor.QuantType.BF16 && isGemma4Text(config)) {
+            return shouldUseNativeMetalBf16Linear(config, weight);
+        }
         return quantType == AccelTensor.QuantType.F16
-                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear());
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(config));
     }
 
     private static boolean resolveMetalMixedHalfLinearPairEnabled() {
@@ -1753,10 +1958,23 @@ public class FlashAttentionKernel {
         return true;
     }
 
-    private AccelTensor toMetalF16Weight(AccelTensor weight) {
-        return weight.quantType() == AccelTensor.QuantType.BF16
-                ? weight.toF16CachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES)
-                : weight;
+    private AccelTensor toMetalHalfWeight(AccelTensor weight, boolean nativeBf16, ModelConfig config) {
+        if (weight == null) {
+            return null;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.F16) {
+            return weight;
+        }
+        if (nativeBf16 && weight.quantType() == AccelTensor.QuantType.BF16) {
+            return weight;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.BF16 && isGemma4Text(config)) {
+            return null;
+        }
+        if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(config)) {
+            return weight.toF16CachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES);
+        }
+        return null;
     }
 
     private AccelTensor addBiasIfNeeded(AccelTensor tensor, AccelTensor bias) {
@@ -1800,6 +2018,39 @@ public class FlashAttentionKernel {
         return true;
     }
 
+    private boolean allowMetalBf16Linear(ModelConfig config) {
+        if (isGemma4Text(config)) {
+            if (Boolean.getBoolean(DISABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY)) {
+                return false;
+            }
+            return allowMetalBf16Linear();
+        }
+        return allowMetalBf16Linear();
+    }
+
+    private boolean preferNativeMetalBf16Linear(ModelConfig config) {
+        if (isGemma4Text(config)) {
+            String explicit = System.getProperty(ENABLE_GEMMA4_METAL_BF16_LINEAR_PROPERTY);
+            if (explicit != null && !explicit.isBlank()) {
+                return Boolean.parseBoolean(explicit) && allowMetalBf16Linear(config);
+            }
+            return allowMetalBf16Linear(config);
+        }
+        return false;
+    }
+
+    private boolean shouldUseNativeMetalBf16Linear(ModelConfig config, AccelTensor... weights) {
+        if (!preferNativeMetalBf16Linear(config) || weights == null || weights.length == 0) {
+            return false;
+        }
+        for (AccelTensor weight : weights) {
+            if (weight == null || weight.quantType() != AccelTensor.QuantType.BF16) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static boolean resolveAutoMetalHalfMatvecEnabled() {
         String explicit = System.getProperty(AUTO_METAL_ATTENTION_HALF_MATVEC_PROPERTY);
         if (explicit != null && !explicit.isBlank()) {
@@ -1821,8 +2072,12 @@ public class FlashAttentionKernel {
             return null;
         }
         AccelTensor.QuantType quantType = weight.quantType();
+        boolean nativeBf16Weight = shouldUseNativeMetalBf16Linear(config, weight);
+        if (quantType == AccelTensor.QuantType.BF16 && isGemma4Text(config) && !nativeBf16Weight) {
+            return null;
+        }
         if (quantType != AccelTensor.QuantType.F16
-                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear())) {
+                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear(config))) {
             return null;
         }
         if (!weight.isContiguous()) {
@@ -1859,6 +2114,18 @@ public class FlashAttentionKernel {
             int n = Math.toIntExact(weightShape[0]);
             int rc = -2;
             if (m == 1
+                    && nativeBf16Weight
+                    && shouldUseMetalHalfMatvec(config, n)
+                    && metalBinding.supportsMatvecTransposedRightBf16()) {
+                rc = metalBinding.matvecTransposedRightBf16(
+                        out.dataPtr(),
+                        contiguousInput.dataPtr(),
+                        weight.dataPtr(),
+                        kk, n);
+            }
+            if (rc != 0
+                    && m == 1
+                    && !nativeBf16Weight
                     && shouldUseMetalTransposedHalfMatvec(n)
                     && metalBinding.supportsMatvecTransposedWeightHalf()) {
                 AccelTensor transposedWeight = weight.toF16Transposed2dCachedUpTo(METAL_F16_WEIGHT_CACHE_MAX_BYTES);
@@ -1874,12 +2141,13 @@ public class FlashAttentionKernel {
             }
             AccelTensor metalWeight = null;
             if (rc != 0) {
-                metalWeight = toMetalF16Weight(weight);
+                metalWeight = toMetalHalfWeight(weight, nativeBf16Weight, config);
                 if (metalWeight == null) {
                     return null;
                 }
             }
             if (m == 1
+                    && !nativeBf16Weight
                     && shouldUseMetalHalfMatvec(config, n)
                     && metalBinding.supportsMatvecTransposedRightHalf()) {
                 rc = metalBinding.matvecTransposedRightHalf(
@@ -1895,7 +2163,7 @@ public class FlashAttentionKernel {
                     metalWeight.dataPtr(),
                     m, kk, n,
                     1.0f, 0.0f,
-                    false);
+                    nativeBf16Weight);
             }
             if (rc != 0) {
                 throw new IllegalStateException("Metal matmulTransposedRightHalf failed with code " + rc);
@@ -1984,25 +2252,47 @@ public class FlashAttentionKernel {
         }
     }
 
-    private boolean canUseMetalAttention(ModelConfig config, int layerIdx, KVCacheManager.KVCacheSession kvSession) {
+    private boolean canUseMetalAttention(ModelConfig config, int layerIdx, KVCacheManager.KVCacheSession kvSession,
+            int seqLen, int startPos, float softCap) {
         if (!canUseMetal()) {
             return false;
         }
-        if (!allowLegacyMetalAttentionBridge(config) && isGemma4Text(config)) {
+        boolean gemma4Text = isGemma4Text(config);
+        if (!allowLegacyMetalAttentionBridge(config) && gemma4Text) {
+            return canUseGemma4SlidingPrefillFa4Attention(config, layerIdx, seqLen, startPos, softCap);
+        }
+        if (config != null && config.usesSharedKvCache(layerIdx)) {
             return false;
         }
         if (config != null && config.isSlidingAttentionLayer(layerIdx) && config.hasSlidingWindow()) {
             return metalBinding != null && metalBinding.isWindowedAttentionAvailable();
         }
-        if (isGemma4Text(config)
+        if (gemma4Text
                 && Boolean.getBoolean(DISABLE_METAL_GEMMA4_ATTENTION_PROPERTY)
                 && !Boolean.getBoolean(ALLOW_METAL_GEMMA4_ATTENTION_PROPERTY)) {
             return false;
         }
-        if (config != null && config.usesSharedKvCache(layerIdx)) {
+        return true;
+    }
+
+    private boolean canUseGemma4SlidingPrefillFa4Attention(ModelConfig config, int layerIdx,
+            int seqLen, int startPos, float softCap) {
+        if (config == null || !config.isSlidingAttentionLayer(layerIdx) || !config.hasSlidingWindow()) {
             return false;
         }
-        return true;
+        if (seqLen <= 1 || config.usesSharedKvCache(layerIdx)) {
+            return false;
+        }
+        if (Boolean.getBoolean(DISABLE_GEMMA4_SLIDING_PREFILL_FA4_ATTENTION_PROPERTY)
+                || Boolean.getBoolean(DISABLE_METAL_GEMMA4_ATTENTION_PROPERTY)) {
+            return false;
+        }
+        String explicit = System.getProperty(ENABLE_GEMMA4_SLIDING_PREFILL_FA4_ATTENTION_PROPERTY);
+        if (explicit != null && !explicit.isBlank() && !Boolean.parseBoolean(explicit)) {
+            return false;
+        }
+        int totalTokens = startPos + seqLen;
+        return totalTokens <= config.slidingWindowSize() && canUseFa4Attention(softCap);
     }
 
     private boolean canUseFa4PagedAttention(ModelConfig config, int layerIdx,
@@ -2027,16 +2317,13 @@ public class FlashAttentionKernel {
         if (!canUseMetal()) {
             return false;
         }
-        if (!allowLegacyMetalAttentionBridge(config) && isGemma4Text(config)) {
+        if (!allowSlidingDecodeMetalAttentionBridge(config, layerIdx, seqLen)) {
             return false;
         }
         if (seqLen != 1) {
             return false;
         }
         if (metalBinding == null || !metalBinding.isNativeAvailable()) {
-            return false;
-        }
-        if (config == null || !config.isSlidingAttentionLayer(layerIdx) || !config.hasSlidingWindow()) {
             return false;
         }
         if (config.slidingWindowSize() > MAX_PACKED_METAL_SLIDING_WINDOW) {
@@ -2048,6 +2335,23 @@ public class FlashAttentionKernel {
             return false;
         }
         return !config.usesSharedKvCache(layerIdx);
+    }
+
+    private boolean allowSlidingDecodeMetalAttentionBridge(ModelConfig config, int layerIdx, int seqLen) {
+        if (config == null || !config.isSlidingAttentionLayer(layerIdx) || !config.hasSlidingWindow()) {
+            return false;
+        }
+        if (allowLegacyMetalAttentionBridge(config)) {
+            return true;
+        }
+        if (!isGemma4Text(config) || seqLen != 1) {
+            return false;
+        }
+        if (config.slidingWindowSize() > MAX_PACKED_METAL_SLIDING_WINDOW) {
+            return false;
+        }
+        return !Boolean.getBoolean(DISABLE_METAL_GEMMA4_ATTENTION_PROPERTY)
+                || Boolean.getBoolean(ALLOW_METAL_GEMMA4_ATTENTION_PROPERTY);
     }
 
     private boolean canUseDenseGemma4Attention(ModelConfig config, int layerIdx) {
@@ -2063,12 +2367,30 @@ public class FlashAttentionKernel {
     }
 
     private boolean preferPagedMetalAttentionBeforeFa4(ModelConfig config, int seqLen, int totalTokens) {
-        if (!allowLegacyMetalAttentionBridge(config)) {
+        if (!allowPagedMetalAttentionBridge(config, seqLen, totalTokens)) {
             return false;
         }
         int maxTokens = Integer.getInteger(PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS_PROPERTY,
                 DEFAULT_PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS);
         return maxTokens > 0 && seqLen == 1 && totalTokens <= maxTokens;
+    }
+
+    private boolean allowPagedMetalAttentionBridge(ModelConfig config, int seqLen, int totalTokens) {
+        if (allowLegacyMetalAttentionBridge(config)) {
+            return true;
+        }
+        if (!isGemma4Text(config) || seqLen != 1) {
+            return false;
+        }
+        if (Boolean.getBoolean(DISABLE_GEMMA4_PAGED_DECODE_ATTENTION_PROPERTY)) {
+            return false;
+        }
+        if (Boolean.getBoolean(ENABLE_GEMMA4_PAGED_DECODE_ATTENTION_PROPERTY)) {
+            return true;
+        }
+        int maxTokens = Integer.getInteger(PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS_PROPERTY,
+                DEFAULT_PREFER_PAGED_METAL_ATTENTION_MAX_TOKENS);
+        return maxTokens > 0 && totalTokens <= maxTokens;
     }
 
     private boolean allowLegacyMetalAttentionBridge(ModelConfig config) {
@@ -2087,6 +2409,9 @@ public class FlashAttentionKernel {
                 DEFAULT_METAL_HALF_MATVEC_MAX_OUTPUT);
         if (explicit != null && !explicit.isBlank()) {
             return Boolean.parseBoolean(explicit) && outputDim <= maxOutput;
+        }
+        if (isGemma4Text(config)) {
+            return outputDim <= maxOutput;
         }
         return AUTO_METAL_HALF_MATVEC_ENABLED
                 && outputDim <= maxOutput

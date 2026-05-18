@@ -55,9 +55,6 @@ public final class ReduceLROnPlateau extends LRScheduler {
             int cooldown,
             float minLr) {
         super(optimizer);
-        if (factor <= 0.0f || factor >= 1.0f) {
-            throw new IllegalArgumentException("factor must be in (0, 1), got: " + factor);
-        }
         if (patience < 0) {
             throw new IllegalArgumentException("patience must be non-negative, got: " + patience);
         }
@@ -67,16 +64,13 @@ public final class ReduceLROnPlateau extends LRScheduler {
         if (cooldown < 0) {
             throw new IllegalArgumentException("cooldown must be non-negative, got: " + cooldown);
         }
-        if (minLr < 0.0f) {
-            throw new IllegalArgumentException("minLr must be non-negative, got: " + minLr);
-        }
         this.mode = mode == null ? Mode.MIN : mode;
-        this.factor = factor;
+        this.factor = SchedulerValidation.factor(factor, "factor");
         this.patience = patience;
         this.threshold = threshold;
         this.cooldown = cooldown;
-        this.minLr = minLr;
-        this.currentLr = optimizer.learningRate();
+        this.minLr = SchedulerValidation.nonNegative(minLr, "minLr");
+        this.currentLr = SchedulerValidation.learningRate(optimizer.learningRate(), "currentLr");
     }
 
     @Override
@@ -178,17 +172,25 @@ public final class ReduceLROnPlateau extends LRScheduler {
                     "Checkpoint scheduler mismatch: expected ReduceLROnPlateau but got " + name);
         }
         requireModeMatch(state.get("mode"));
-        requireFloatMatch(state.get("factor"), factor, "factor");
-        requireIntMatch(state.get("patience"), patience, "patience");
-        requireDoubleMatch(state.get("threshold"), threshold, "threshold");
-        requireIntMatch(state.get("cooldown"), cooldown, "cooldown");
-        requireFloatMatch(state.get("minLr"), minLr, "minLr");
-        stepCount = Math.max(0, readInt(state.get("stepCount"), stepCount));
-        badSteps = Math.max(0, readInt(state.get("badSteps"), badSteps));
-        cooldownRemaining = Math.max(0, readInt(state.get("cooldownRemaining"), cooldownRemaining));
-        reductionCount = Math.max(0, readInt(state.get("reductionCount"), reductionCount));
-        bestMetric = readDouble(state.get("bestMetric"), bestMetric);
-        currentLr = readFloat(state.get("currentLr"), currentLr);
+        SchedulerValidation.requireFloatMatch(state.get("factor"), factor, "ReduceLROnPlateau", "factor");
+        SchedulerValidation.requireIntMatch(state.get("patience"), patience, "ReduceLROnPlateau", "patience");
+        SchedulerValidation.requireDoubleMatch(
+                state.get("threshold"), threshold, "ReduceLROnPlateau", "threshold");
+        SchedulerValidation.requireIntMatch(state.get("cooldown"), cooldown, "ReduceLROnPlateau", "cooldown");
+        SchedulerValidation.requireFloatMatch(state.get("minLr"), minLr, "ReduceLROnPlateau", "minLr");
+        stepCount = SchedulerValidation.readNonNegativeInt(
+                state.get("stepCount"), stepCount, "ReduceLROnPlateau", "stepCount");
+        badSteps = SchedulerValidation.readNonNegativeInt(
+                state.get("badSteps"), badSteps, "ReduceLROnPlateau", "badSteps");
+        cooldownRemaining = SchedulerValidation.readNonNegativeInt(
+                state.get("cooldownRemaining"), cooldownRemaining,
+                "ReduceLROnPlateau", "cooldownRemaining");
+        reductionCount = SchedulerValidation.readNonNegativeInt(
+                state.get("reductionCount"), reductionCount, "ReduceLROnPlateau", "reductionCount");
+        bestMetric = SchedulerValidation.readFiniteOrNaNDouble(
+                state.get("bestMetric"), bestMetric, "ReduceLROnPlateau", "bestMetric");
+        currentLr = SchedulerValidation.readLearningRate(
+                state.get("currentLr"), currentLr, "ReduceLROnPlateau", "currentLr");
         setLearningRate(currentLr);
     }
 
@@ -204,81 +206,4 @@ public final class ReduceLROnPlateau extends LRScheduler {
         }
     }
 
-    private static void requireIntMatch(Object value, int expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        int loaded = readInt(value, expected);
-        if (loaded != expected) {
-            throw new IllegalArgumentException(
-                    "Invalid ReduceLROnPlateau checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static void requireFloatMatch(Object value, float expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        float loaded = readFloat(value, expected);
-        if (Math.abs(loaded - expected) > 1e-7f) {
-            throw new IllegalArgumentException(
-                    "Invalid ReduceLROnPlateau checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static void requireDoubleMatch(Object value, double expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        double loaded = readDouble(value, expected);
-        if (Math.abs(loaded - expected) > 1e-12) {
-            throw new IllegalArgumentException(
-                    "Invalid ReduceLROnPlateau checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static int readInt(Object value, int fallback) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Integer.parseInt(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static float readFloat(Object value, float fallback) {
-        if (value instanceof Number number) {
-            return number.floatValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Float.parseFloat(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static double readDouble(Object value, double fallback) {
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Double.parseDouble(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
 }

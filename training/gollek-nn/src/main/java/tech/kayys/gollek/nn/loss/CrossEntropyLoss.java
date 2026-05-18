@@ -134,14 +134,13 @@ public class CrossEntropyLoss {
 
         int batch = (int) s[0];
         int numClasses = (int) s[1];
+        if (batch <= 0 || numClasses <= 0) {
+            throw new IllegalArgumentException(
+                    "logits must have positive batch and class dimensions, got shape: " + Arrays.toString(s));
+        }
         requireClassWeightShape(numClasses);
         float[] logitsData = logits.data();
-        float[] targetsData = targets.data();
-
-        if (targetsData.length != batch) {
-            throw new IllegalArgumentException(
-                "targets batch size must match logits batch size, got: " + targetsData.length + " vs " + batch);
-        }
+        float[] targetsData = ClassIndexTargets.requireVectorData(targets, batch, "targets");
 
         // Compute log-softmax and NLL
         float totalLoss = 0;
@@ -157,7 +156,7 @@ public class CrossEntropyLoss {
             // Log-sum-exp trick: subtract max for numerical stability
             float max = Float.NEGATIVE_INFINITY;
             for (int c = 0; c < numClasses; c++) {
-                max = Math.max(max, logitsData[off + c]);
+                max = Math.max(max, requireFiniteLogit(logitsData[off + c], off + c));
             }
 
             // Compute softmax with numerical stability
@@ -239,6 +238,13 @@ public class CrossEntropyLoss {
             }
         }
         return copy;
+    }
+
+    private static float requireFiniteLogit(float logit, int index) {
+        if (!Float.isFinite(logit)) {
+            throw new IllegalArgumentException("logits must be finite, got " + logit + " at index " + index);
+        }
+        return logit;
     }
 
     @Override

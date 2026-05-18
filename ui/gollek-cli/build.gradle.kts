@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":core:plugin:gollek-plugin-kernel-core"))
     implementation(project(":core:plugin:gollek-plugin-runner-core"))
+    implementation(project(":core:plugin:gollek-plugin-runner-gguf"))
     implementation(project(":core:gollek-model-repo-hf"))
     implementation(project(":models:gollek-model-gemma"))
     implementation(project(":models:gollek-model-llama"))

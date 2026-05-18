@@ -17,6 +17,7 @@ import tech.kayys.gollek.cli.commands.ListCommand;
 import tech.kayys.gollek.cli.commands.McpCommand;
 import tech.kayys.gollek.cli.commands.ProvidersCommand;
 import tech.kayys.gollek.cli.commands.PullCommand;
+import tech.kayys.gollek.cli.commands.PrewarmCommand;
 import tech.kayys.gollek.cli.commands.RunCommand;
 import tech.kayys.gollek.cli.commands.SafetensorsCommand;
 import tech.kayys.gollek.cli.commands.ShowCommand;
@@ -43,6 +44,7 @@ import picocli.CommandLine.Option;
         ChatCommand.class,
         PullCommand.class,
         PrepareCommand.class,
+        PrewarmCommand.class,
         ListCommand.class,
         McpCommand.class,
         ShowCommand.class,
@@ -106,6 +108,10 @@ public class GollekCommand implements Runnable {
             "--use-cpu" }, description = "Use CPU instead of GPU (disable GPU acceleration)", scope = CommandLine.ScopeType.INHERIT)
     boolean useCpu;
 
+    public boolean isUseCpu() {
+        return useCpu;
+    }
+
     @Option(names = {
             "--enable-cpu" }, description = "Enable CPU fallback (use CPU if GPU not available)", scope = CommandLine.ScopeType.INHERIT)
     boolean enableCpu;
@@ -113,6 +119,10 @@ public class GollekCommand implements Runnable {
     @Option(names = {
             "--platform" }, description = "Force specific kernel platform (metal, cuda, rocm, directml, cpu)", scope = CommandLine.ScopeType.INHERIT)
     String platform;
+
+    public String platform() {
+        return platform;
+    }
 
     public GollekCommand() {
     }

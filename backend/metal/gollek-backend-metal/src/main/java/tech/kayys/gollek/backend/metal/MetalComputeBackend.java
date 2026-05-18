@@ -88,7 +88,7 @@ public class MetalComputeBackend implements ComputeBackend, AdvancedMetalOps {
 
         this.metalBinding = MetalBinding.getInstance();
         this.metalBinding.init();
-        this.isNative = metalBinding.isNativeAvailable();
+        this.isNative = metalBinding.isRuntimeActive();
 
         // Fallback for ops not implemented in Metal (like log, exp, pow)
         this.cpuFallback = new CpuBackend();

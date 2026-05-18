@@ -53,9 +53,16 @@ public class KVCacheManager {
             private java.lang.foreign.MemorySegment combinedSeg;
             private java.lang.foreign.MemorySegment hiddenASeg;
             private java.lang.foreign.MemorySegment hiddenBSeg;
+            private java.lang.foreign.MemorySegment logitsSeg;
+            private java.lang.foreign.Arena attentionMetadataArena;
+            private java.lang.foreign.MemorySegment attentionBlockTableSeg;
+            private java.lang.foreign.MemorySegment attentionContextLensSeg;
             private long hiddenCap = 0;
             private long combinedCap = 0;
             private long projectionCap = 0;
+            private long logitsCap = 0;
+            private long attentionBlockTableCap = 0;
+            private long attentionContextLensCap = 0;
 
             public void ensureCapacity(long totalElements, long hiddenSize, long intermediateSize) {
                 long needed = Math.max(hiddenSize, totalElements) * 4; // float = 4 bytes
@@ -68,17 +75,29 @@ public class KVCacheManager {
                 long combinedElements = Math.max(intermediateSize, tokenSlots * intermediateSize);
                 long combinedNeeded = combinedElements * 4L;
                 long paddedCombined = (combinedNeeded + 4095) & ~4095;
-                if (normedAttnSeg == null || hiddenCap < paddedNeeded || combinedCap < paddedCombined) {
-                    close();
+                if (normedAttnSeg == null || hiddenCap < paddedNeeded) {
                     java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
                     // Explicitly request 4096-byte alignment
                     normedAttnSeg = arena.allocate(paddedNeeded, 4096);
                     normedFfnSeg = arena.allocate(paddedNeeded, 4096);
-                    combinedSeg = arena.allocate(paddedCombined, 4096);
                     hiddenASeg = arena.allocate(paddedNeeded, 4096);
                     hiddenBSeg = arena.allocate(paddedNeeded, 4096);
                     hiddenCap = paddedNeeded;
+                }
+                if (combinedSeg == null || combinedCap < paddedCombined) {
+                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+                    combinedSeg = arena.allocate(paddedCombined, 4096);
                     combinedCap = paddedCombined;
+                }
+            }
+
+            public void ensureLogitsCapacity(long requiredElements) {
+                long needed = Math.max(1L, requiredElements) * Float.BYTES;
+                long padded = (needed + 4095) & ~4095;
+                if (logitsSeg == null || logitsCap < padded) {
+                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+                    logitsSeg = arena.allocate(padded, 4096);
+                    logitsCap = padded;
                 }
             }
 
@@ -91,6 +110,23 @@ public class KVCacheManager {
                     projectionCap = padded;
                 }
             }
+
+            public void ensureAttentionMetadataCapacity(int blockTableEntries, int batch) {
+                long blockTableBytes = (long) Math.max(1, blockTableEntries) * Integer.BYTES;
+                long contextLensBytes = (long) Math.max(1, batch) * Integer.BYTES;
+                if (attentionMetadataArena == null
+                        || attentionBlockTableCap < blockTableBytes
+                        || attentionContextLensCap < contextLensBytes) {
+                    if (attentionMetadataArena != null) {
+                        attentionMetadataArena.close();
+                    }
+                    attentionMetadataArena = java.lang.foreign.Arena.ofShared();
+                    attentionBlockTableSeg = attentionMetadataArena.allocate(blockTableBytes, Integer.BYTES);
+                    attentionContextLensSeg = attentionMetadataArena.allocate(contextLensBytes, Integer.BYTES);
+                    attentionBlockTableCap = blockTableBytes;
+                    attentionContextLensCap = contextLensBytes;
+                }
+            }
             
             public java.lang.foreign.MemorySegment getNormedAttnSeg() { return normedAttnSeg; }
             public java.lang.foreign.MemorySegment getNormedFfnSeg() { return normedFfnSeg; }
@@ -99,10 +135,16 @@ public class KVCacheManager {
             public java.lang.foreign.MemorySegment getCombinedSeg() { return combinedSeg; }
             public java.lang.foreign.MemorySegment getHiddenASeg() { return hiddenASeg; }
             public java.lang.foreign.MemorySegment getHiddenBSeg() { return hiddenBSeg; }
+            public java.lang.foreign.MemorySegment getLogitsSeg() { return logitsSeg; }
+            public java.lang.foreign.MemorySegment getAttentionBlockTableSeg() { return attentionBlockTableSeg; }
+            public java.lang.foreign.MemorySegment getAttentionContextLensSeg() { return attentionContextLensSeg; }
 
             @Override
             public void close() {
-                // ofAuto handles cleanup
+                if (attentionMetadataArena != null) {
+                    attentionMetadataArena.close();
+                }
+                // The primary tensor workspaces use ofAuto and are reclaimed by the JVM.
                 normedAttnSeg = null;
                 normedFfnSeg = null;
                 gateSeg = null;
@@ -110,9 +152,16 @@ public class KVCacheManager {
                 combinedSeg = null;
                 hiddenASeg = null;
                 hiddenBSeg = null;
+                logitsSeg = null;
+                attentionMetadataArena = null;
+                attentionBlockTableSeg = null;
+                attentionContextLensSeg = null;
                 hiddenCap = 0;
                 combinedCap = 0;
                 projectionCap = 0;
+                logitsCap = 0;
+                attentionBlockTableCap = 0;
+                attentionContextLensCap = 0;
             }
         }
 

@@ -10,6 +10,7 @@ public final class GGUFConstants {
     public static final int GGML_TYPE_Q5_0 = 6;
     public static final int GGML_TYPE_Q5_1 = 7;
     public static final int GGML_TYPE_Q8_0 = 8;
+    public static final int GGML_TYPE_Q8_1 = 9;
     public static final int GGML_TYPE_Q2_K = 10;
     public static final int GGML_TYPE_Q3_K = 11;
     public static final int GGML_TYPE_Q4_K = 12;
@@ -25,6 +26,7 @@ public final class GGUFConstants {
             case GGML_TYPE_Q5_0 -> (n / 32) * 22;
             case GGML_TYPE_Q5_1 -> (n / 32) * 24;
             case GGML_TYPE_Q8_0 -> (n / 32) * 34;
+            case GGML_TYPE_Q8_1 -> (n / 32) * 36;
             case GGML_TYPE_Q2_K -> (n / 256) * 84;
             case GGML_TYPE_Q3_K -> (n / 256) * 110;
             case GGML_TYPE_Q4_K -> (n / 256) * 144;

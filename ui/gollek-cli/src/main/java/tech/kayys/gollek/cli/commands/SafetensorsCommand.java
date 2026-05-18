@@ -12,9 +12,11 @@ import tech.kayys.gollek.sdk.util.GollekHome;
 import java.io.StringReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,12 +25,13 @@ import java.util.Map;
 @Unremovable
 @Command(name = "safetensors", mixinStandardHelpOptions = true, description = "Inspect safetensors metadata")
 public class SafetensorsCommand implements Runnable {
+    private static final long MAX_HEADER_BYTES = 256L * 1024L * 1024L;
 
     @Option(names = { "--path" }, description = "Path to .safetensors file")
     String path;
 
     @Option(names = {
-            "--model" }, description = "Model ID under ~/.gollek/models/libtorchscript")
+            "--model" }, description = "Model ID under ~/.gollek/models/safetensors or legacy libtorchscript")
     String modelId;
 
     @Option(names = { "--limit" }, description = "Maximum tensors to print", defaultValue = "30")
@@ -88,53 +91,76 @@ public class SafetensorsCommand implements Runnable {
             return null;
         }
 
-        Path base = GollekHome.path("models", "libtorchscript");
-        Path direct = base.resolve(modelId + ".safetensors");
-        if (Files.exists(direct)) {
-            return direct;
-        }
-
-        Path nested = base.resolve(modelId).resolve("model.safetensors");
-        if (Files.exists(nested)) {
-            return nested;
-        }
-
-        String normalized = modelId.replace("/", "_");
-        Path normalizedPath = base.resolve(normalized + ".safetensors");
-        if (Files.exists(normalizedPath)) {
-            return normalizedPath;
-        }
-
-        // fallback: first safetensors under model dir
-        Path modelDir = base.resolve(modelId);
-        if (Files.isDirectory(modelDir)) {
-            try (var stream = Files.walk(modelDir, 2)) {
-                return stream
-                        .filter(Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().endsWith(".safetensors"))
-                        .findFirst()
-                        .orElse(direct);
-            } catch (Exception ignored) {
+        Path fallback = null;
+        for (Path base : new Path[] {
+                GollekHome.path("models", "safetensors"),
+                GollekHome.path("models", "libtorchscript")
+        }) {
+            Path direct = base.resolve(modelId + ".safetensors");
+            if (fallback == null) {
+                fallback = direct;
+            }
+            if (Files.exists(direct)) {
                 return direct;
             }
+
+            Path nested = base.resolve(modelId).resolve("model.safetensors");
+            if (Files.exists(nested)) {
+                return nested;
+            }
+
+            String normalized = modelId.replace("/", "_");
+            Path normalizedPath = base.resolve(normalized + ".safetensors");
+            if (Files.exists(normalizedPath)) {
+                return normalizedPath;
+            }
+
+            Path modelDir = base.resolve(modelId);
+            if (Files.isDirectory(modelDir)) {
+                try (var stream = Files.walk(modelDir, 2)) {
+                    Path found = stream
+                            .filter(Files::isRegularFile)
+                            .filter(p -> p.getFileName().toString().endsWith(".safetensors"))
+                            .findFirst()
+                            .orElse(null);
+                    if (found != null) {
+                        return found;
+                    }
+                } catch (Exception ignored) {
+                    // Continue with the next cache layout.
+                }
+            }
         }
-        return direct;
+        return fallback;
     }
 
     private Map<String, TensorMetadata> parse(Path path) throws Exception {
-        byte[] all = Files.readAllBytes(path);
-        if (all.length < 8) {
+        long fileSize = Files.size(path);
+        if (fileSize < Long.BYTES) {
             throw new IllegalArgumentException("File too small to be safetensors");
         }
 
-        ByteBuffer bb = ByteBuffer.wrap(all, 0, 8).order(ByteOrder.LITTLE_ENDIAN);
-        long headerLength = bb.getLong();
-        if (headerLength <= 0 || headerLength > all.length - 8) {
-            throw new IllegalArgumentException("Invalid safetensors header length: " + headerLength);
+        String headerJson;
+        long headerLength;
+        try (SeekableByteChannel channel = Files.newByteChannel(path, StandardOpenOption.READ)) {
+            ByteBuffer prefix = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+            readFully(channel, prefix);
+            prefix.flip();
+            headerLength = prefix.getLong();
+            if (headerLength <= 0 || headerLength > fileSize - Long.BYTES || headerLength > MAX_HEADER_BYTES) {
+                throw new IllegalArgumentException("Invalid safetensors header length: " + headerLength);
+            }
+            if (headerLength > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("Safetensors header too large for CLI inspection: " + headerLength);
+            }
+
+            ByteBuffer header = ByteBuffer.allocate((int) headerLength);
+            readFully(channel, header);
+            header.flip();
+            headerJson = StandardCharsets.UTF_8.decode(header).toString();
         }
 
-        String headerJson = new String(all, 8, (int) headerLength, StandardCharsets.UTF_8);
-        long baseOffset = 8 + headerLength;
+        long baseOffset = Long.BYTES + headerLength;
 
         Map<String, TensorMetadata> out = new HashMap<>();
         try (JsonReader reader = Json.createReader(new StringReader(headerJson))) {
@@ -156,6 +182,15 @@ public class SafetensorsCommand implements Runnable {
             }
         }
         return out;
+    }
+
+    private static void readFully(SeekableByteChannel channel, ByteBuffer buffer) throws java.io.IOException {
+        while (buffer.hasRemaining()) {
+            int read = channel.read(buffer);
+            if (read < 0) {
+                throw new java.io.EOFException("Unexpected end of safetensors file");
+            }
+        }
     }
 
     private record TensorMetadata(String dtype, long[] shape, long absoluteStart, long length) {

@@ -1,12 +1,14 @@
 package tech.kayys.gollek.ml.optimize;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.autograd.VectorOps;
 import tech.kayys.gollek.ml.data.DataLoader;
 import tech.kayys.gollek.ml.nn.NNModule;
+import tech.kayys.gollek.ml.nn.loss.CrossEntropyLoss;
 import tech.kayys.gollek.ml.optim.Optimizer;
 
-import java.util.List;
+import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * Knowledge Distillation trainer — trains a small student model to mimic
@@ -14,11 +16,12 @@ import java.util.List;
  *
  * <p>Based on <em>"Distilling the Knowledge in a Neural Network"</em> (Hinton et al., 2015).
  *
- * <p>The combined loss blends hard-label cross-entropy with soft-target KL divergence:
+ * <p>The combined loss blends soft-target KL divergence with hard-label cross-entropy:
  * <pre>
- *   L = α · L_CE(student, labels) + (1-α) · T² · L_KL(softmax(student/T), softmax(teacher/T))
+ *   L = α · T² · KL(softmax(teacher/T) || softmax(student/T)) + (1-α) · CE(student, labels)
  * </pre>
- * where {@code T} is the temperature (higher = softer distributions).
+ * where {@code T} is the temperature (higher = softer distributions) and
+ * {@code α} is the soft-loss weight.
  *
  * <h3>Example</h3>
  * <pre>{@code
@@ -44,12 +47,12 @@ public final class KnowledgeDistillation {
     private final int     epochs;
 
     private KnowledgeDistillation(Builder b) {
-        this.teacher     = b.teacher;
-        this.student     = b.student;
-        this.optimizer   = b.optimizer;
-        this.temperature = b.temperature;
-        this.alpha       = b.alpha;
-        this.epochs      = b.epochs;
+        this.teacher     = Objects.requireNonNull(b.teacher, "teacher model must not be null");
+        this.student     = Objects.requireNonNull(b.student, "student model must not be null");
+        this.optimizer   = Objects.requireNonNull(b.optimizer, "optimizer must not be null");
+        this.temperature = requirePositiveFinite(b.temperature, "temperature");
+        this.alpha       = requireProbability(b.alpha, "alpha");
+        this.epochs      = requireNonNegative(b.epochs, "epochs");
     }
 
     /**
@@ -68,11 +71,9 @@ public final class KnowledgeDistillation {
         student.train();
         GradTensor studentLogits = student.forward(inputs);
 
-        // Soft loss: KL(softmax(student/T) || softmax(teacher/T))
-        GradTensor softStudent = scaledSoftmax(studentLogits, temperature);
-        GradTensor softTeacher = scaledSoftmax(teacherLogits, temperature);
-        GradTensor softLoss    = klDivergence(softStudent, softTeacher)
-                                     .mul(temperature * temperature);
+        // Soft loss: KL(softmax(teacher/T) || softmax(student/T)).
+        GradTensor softLoss = teacherStudentKl(studentLogits, teacherLogits, temperature)
+                .mul(temperature * temperature);
 
         // Hard loss: cross-entropy(student, labels)
         GradTensor hardLoss = crossEntropy(studentLogits, labels);
@@ -106,28 +107,90 @@ public final class KnowledgeDistillation {
     // ── Loss helpers ──────────────────────────────────────────────────────
 
     /**
-     * Softmax with temperature scaling: {@code softmax(logits / T)}.
+     * Teacher-to-student KL divergence averaged over batch.
      *
-     * @param logits raw logits {@code [N, C]}
-     * @param T      temperature (> 0)
-     * @return soft probabilities {@code [N, C]}
+     * <p>The teacher branch is treated as a fixed target distribution. The
+     * backward path for student logits is the stable closed form
+     * {@code (softmax(student/T) - softmax(teacher/T)) / (N*T)}.
      */
-    private static GradTensor scaledSoftmax(GradTensor logits, float T) {
-        return logits.mul(1f / T).softmax();
-    }
+    private static GradTensor teacherStudentKl(
+            GradTensor studentLogits,
+            GradTensor teacherLogits,
+            float temperature) {
+        long[] studentShape = studentLogits.shape();
+        long[] teacherShape = teacherLogits.shape();
+        if (!Arrays.equals(studentShape, teacherShape)) {
+            throw new IllegalArgumentException(
+                    "student and teacher logits must have identical shape, got "
+                            + Arrays.toString(studentShape) + " vs " + Arrays.toString(teacherShape));
+        }
+        if (studentShape.length != 2) {
+            throw new IllegalArgumentException(
+                    "distillation logits must be 2D [batch, classes], got "
+                            + Arrays.toString(studentShape));
+        }
+        int batch = Math.toIntExact(studentShape[0]);
+        int classes = Math.toIntExact(studentShape[1]);
+        if (batch <= 0 || classes <= 0) {
+            throw new IllegalArgumentException(
+                    "distillation logits must have positive batch and class dimensions, got "
+                            + Arrays.toString(studentShape));
+        }
 
-    /**
-     * KL divergence: {@code Σ p * log(p/q)} averaged over batch.
-     *
-     * @param p student soft probabilities {@code [N, C]}
-     * @param q teacher soft probabilities {@code [N, C]}
-     * @return scalar KL divergence
-     */
-    private static GradTensor klDivergence(GradTensor p, GradTensor q) {
-        // KL(p||q) = Σ p * (log p - log q)
-        GradTensor logP = p.log();
-        GradTensor logQ = q.log();
-        return p.mul(logP.sub(logQ)).mean();
+        float[] studentData = studentLogits.data();
+        float[] teacherData = teacherLogits.data();
+        float[] studentProb = new float[studentData.length];
+        float[] teacherProb = new float[teacherData.length];
+        float total = 0.0f;
+
+        for (int row = 0; row < batch; row++) {
+            int base = row * classes;
+            float studentMax = Float.NEGATIVE_INFINITY;
+            float teacherMax = Float.NEGATIVE_INFINITY;
+            for (int c = 0; c < classes; c++) {
+                studentMax = Math.max(studentMax, studentData[base + c] / temperature);
+                teacherMax = Math.max(teacherMax, teacherData[base + c] / temperature);
+            }
+
+            float studentSum = 0.0f;
+            float teacherSum = 0.0f;
+            for (int c = 0; c < classes; c++) {
+                float studentExp = (float) Math.exp(studentData[base + c] / temperature - studentMax);
+                float teacherExp = (float) Math.exp(teacherData[base + c] / temperature - teacherMax);
+                studentProb[base + c] = studentExp;
+                teacherProb[base + c] = teacherExp;
+                studentSum += studentExp;
+                teacherSum += teacherExp;
+            }
+
+            float logStudentDenom = studentMax + (float) Math.log(studentSum);
+            float logTeacherDenom = teacherMax + (float) Math.log(teacherSum);
+            for (int c = 0; c < classes; c++) {
+                int idx = base + c;
+                studentProb[idx] /= studentSum;
+                teacherProb[idx] /= teacherSum;
+                float logStudent = studentData[idx] / temperature - logStudentDenom;
+                float logTeacher = teacherData[idx] / temperature - logTeacherDenom;
+                total += teacherProb[idx] * (logTeacher - logStudent);
+            }
+        }
+
+        GradTensor out = GradTensor.scalar(total / batch);
+        if (studentLogits.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("KnowledgeDistillationKL") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float scale = upstream.item() / (batch * temperature);
+                    float[] grad = new float[studentData.length];
+                    for (int i = 0; i < grad.length; i++) {
+                        grad[i] = (studentProb[i] - teacherProb[i]) * scale;
+                    }
+                    studentLogits.backward(GradTensor.of(grad, studentLogits.shape()));
+                }
+            });
+        }
+        return out;
     }
 
     /**
@@ -138,20 +201,28 @@ public final class KnowledgeDistillation {
      * @return scalar cross-entropy loss
      */
     private static GradTensor crossEntropy(GradTensor logits, GradTensor labels) {
-        long[] s = logits.shape();
-        int N = (int) s[0], C = (int) s[1];
-        float[] lg = logits.data(), lb = labels.data();
-        float[] losses = new float[N];
-        for (int n = 0; n < N; n++) {
-            // log-sum-exp for numerical stability
-            float max = Float.NEGATIVE_INFINITY;
-            for (int c = 0; c < C; c++) max = Math.max(max, lg[n * C + c]);
-            float sumExp = 0;
-            for (int c = 0; c < C; c++) sumExp += Math.exp(lg[n * C + c] - max);
-            int cls = (int) lb[n];
-            losses[n] = -(lg[n * C + cls] - max - (float) Math.log(sumExp));
+        return new CrossEntropyLoss().compute(logits, labels);
+    }
+
+    private static float requirePositiveFinite(float value, String name) {
+        if (!Float.isFinite(value) || value <= 0.0f) {
+            throw new IllegalArgumentException(name + " must be finite and > 0, got: " + value);
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / N);
+        return value;
+    }
+
+    private static float requireProbability(float value, String name) {
+        if (!Float.isFinite(value) || value < 0.0f || value > 1.0f) {
+            throw new IllegalArgumentException(name + " must be finite and within [0, 1], got: " + value);
+        }
+        return value;
+    }
+
+    private static int requireNonNegative(int value, String name) {
+        if (value < 0) {
+            throw new IllegalArgumentException(name + " must be non-negative, got: " + value);
+        }
+        return value;
     }
 
     /** @return a new builder */

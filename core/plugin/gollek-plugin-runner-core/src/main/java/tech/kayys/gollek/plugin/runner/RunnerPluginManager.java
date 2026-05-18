@@ -19,9 +19,12 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ServiceConfigurationError;
+import java.util.ServiceLoader;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -39,7 +42,7 @@ public class RunnerPluginManager {
     private volatile boolean initialized = false;
 
     private RunnerPluginManager() {
-        // Singleton
+        discoverServiceLoaderPlugins();
     }
 
     /**
@@ -84,6 +87,7 @@ public class RunnerPluginManager {
             return;
         }
 
+        discoverServiceLoaderPlugins();
         LOG.info("Initializing runner plugins");
 
         for (RunnerPlugin plugin : plugins.values()) {
@@ -219,5 +223,29 @@ public class RunnerPluginManager {
             return (Map<String, Object>) pluginConfig;
         }
         return Map.of();
+    }
+
+    private void discoverServiceLoaderPlugins() {
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        if (loader == null) {
+            loader = RunnerPlugin.class.getClassLoader();
+        }
+
+        Iterator<RunnerPlugin> iterator = ServiceLoader.load(RunnerPlugin.class, loader).iterator();
+        while (true) {
+            RunnerPlugin plugin;
+            try {
+                if (!iterator.hasNext()) {
+                    return;
+                }
+                plugin = iterator.next();
+            } catch (ServiceConfigurationError e) {
+                LOG.errorf("Failed to discover runner plugin via ServiceLoader: %s", e.getMessage());
+                continue;
+            }
+            if (plugins.putIfAbsent(plugin.id(), plugin) == null) {
+                LOG.infof("Discovered runner plugin: %s (version %s)", plugin.id(), plugin.version());
+            }
+        }
     }
 }

@@ -9,11 +9,14 @@ import picocli.CommandLine.Option;
 import tech.kayys.gollek.spi.provider.ProviderInfo;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.plugin.runner.RunnerPlugin;
+import tech.kayys.gollek.plugin.runner.RunnerPluginManager;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.plugin.kernel.KernelPlatformDetector;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -146,7 +149,8 @@ public class ExtensionsCommand implements Runnable {
     private void printRunnerPlugins() {
         System.out.println(BOLD + "=== Runner Plugins ===" + RESET);
         try {
-            if (runnerPluginInstances == null || runnerPluginInstances.isUnsatisfied()) {
+            Map<String, RunnerPlugin> plugins = collectRunnerPlugins();
+            if (plugins.isEmpty()) {
                 System.out.println("  No runner plugins discovered.");
                 return;
             }
@@ -155,7 +159,7 @@ public class ExtensionsCommand implements Runnable {
             System.out.println("  " + "-".repeat(44));
 
             int count = 0;
-            for (RunnerPlugin plugin : runnerPluginInstances) {
+            for (RunnerPlugin plugin : plugins.values()) {
                 String id = plugin.id();
                 String format = plugin.format() != null ? plugin.format() : "unknown";
                 String status = GREEN + "active" + RESET;
@@ -171,6 +175,19 @@ public class ExtensionsCommand implements Runnable {
         } catch (Exception e) {
             System.out.println("  " + YELLOW + "Failed to enumerate runner plugins: " + e.getMessage() + RESET);
         }
+    }
+
+    private Map<String, RunnerPlugin> collectRunnerPlugins() {
+        Map<String, RunnerPlugin> plugins = new LinkedHashMap<>();
+        if (runnerPluginInstances != null && !runnerPluginInstances.isUnsatisfied()) {
+            for (RunnerPlugin plugin : runnerPluginInstances) {
+                plugins.putIfAbsent(plugin.id(), plugin);
+            }
+        }
+        for (RunnerPlugin plugin : RunnerPluginManager.getInstance().getAvailablePlugins()) {
+            plugins.putIfAbsent(plugin.id(), plugin);
+        }
+        return plugins;
     }
 
     private void printDynamicPlugins() {

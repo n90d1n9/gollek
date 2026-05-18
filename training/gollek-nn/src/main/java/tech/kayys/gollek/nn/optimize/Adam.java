@@ -56,12 +56,12 @@ public class Adam implements Optimizer {
     private int step = 0;
 
     private Adam(Builder builder) {
-        this.parameters = builder.parameters;
-        this.learningRate = builder.lr;
-        this.beta1 = builder.beta1;
-        this.beta2 = builder.beta2;
-        this.epsilon = builder.eps;
-        this.weightDecay = builder.weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(builder.parameters);
+        this.learningRate = OptimizerValidation.learningRate(builder.lr);
+        this.beta1 = OptimizerValidation.beta(builder.beta1, "beta1");
+        this.beta2 = OptimizerValidation.beta(builder.beta2, "beta2");
+        this.epsilon = OptimizerValidation.epsilon(builder.eps);
+        this.weightDecay = OptimizerValidation.weightDecay(builder.weightDecay);
         this.amsgrad = builder.amsgrad;
 
         for (Parameter param : parameters) {
@@ -80,6 +80,7 @@ public class Adam implements Optimizer {
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "Adam");
         step++;
         float bc1 = (float) (1.0 - Math.pow(beta1, step));
         float bc2 = (float) (1.0 - Math.pow(beta2, step));
@@ -92,16 +93,10 @@ public class Adam implements Optimizer {
             float[] m_t = m.get(param);
             float[] v_t = v.get(param);
 
-            // Traditional weight decay (L2 penalty)
-            if (weightDecay != 0) {
-                for (int i = 0; i < data.length; i++) {
-                    grad[i] += weightDecay * data[i];
-                }
-            }
-
             for (int i = 0; i < data.length; i++) {
-                m_t[i] = beta1 * m_t[i] + (1 - beta1) * grad[i];
-                v_t[i] = beta2 * v_t[i] + (1 - beta2) * grad[i] * grad[i];
+                float g = weightDecay == 0.0f ? grad[i] : grad[i] + weightDecay * data[i];
+                m_t[i] = beta1 * m_t[i] + (1 - beta1) * g;
+                v_t[i] = beta2 * v_t[i] + (1 - beta2) * g * g;
 
                 float mHat = m_t[i] / bc1;
                 float vHat = v_t[i] / bc2;
@@ -127,8 +122,7 @@ public class Adam implements Optimizer {
 
     @Override
     public void setLearningRate(float lr) {
-        if (lr < 0) throw new IllegalArgumentException("LR must be non-negative");
-        this.learningRate = lr;
+        this.learningRate = OptimizerValidation.learningRate(lr);
     }
 
     @Override
@@ -176,7 +170,7 @@ public class Adam implements Optimizer {
         requireFloatMatch(state.get("weightDecay"), weightDecay, "weightDecay");
         requireBooleanMatch(state.get("amsgrad"), amsgrad, "amsgrad");
         this.step = Math.max(0, readInt(state.get("step"), step));
-        this.learningRate = readFloat(state.get("learningRate"), learningRate);
+        this.learningRate = OptimizerValidation.learningRate(readFloat(state.get("learningRate"), learningRate));
 
         Object mState = state.get("m");
         if (mState == null) {

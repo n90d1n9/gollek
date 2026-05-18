@@ -34,11 +34,38 @@ Current trainer modules:
   - canonical runtime supports checkpoint persistence and resume using
     `checkpointDir(...)` + `resumeFromCheckpoint(...)`
   - checkpoint resume is schema-version guarded and fails fast by default on
-    incompatible checkpoint formats, with an opt-out
+    missing runtime checkpoints or incompatible checkpoint formats, with an opt-out
     `failOnCheckpointLoadError(false)` when best-effort fallback is preferred
   - typed `CanonicalTrainer` in `training/gollek-train-api` layers model-weight
     snapshots (`canonical-model.safetensors`) on top of runtime checkpoints
     so resume can restore both trainer state and model parameters
+  - typed model snapshots now include `canonical-model.metadata`; strict resume
+    validates model class, parameter signatures, byte size, and SHA-256 before
+    loading weights, while lenient mode reports
+    `checkpointResumeCompatibilityMismatches`
+  - typed checkpoints also write `canonical-checkpoints.metadata`, a manifest
+    with byte-size/SHA-256 integrity entries for runtime, optimizer, scheduler,
+    GradScaler, history, report, and model artifacts before resume trusts those
+    files; best-model restore-at-end is guarded by the same manifest checks
+  - typed batches validate non-null, non-empty, sample-aligned, finite inputs
+    and labels before forward/loss execution, so malformed or NaN/Infinity
+    dataset values fail before optimizer mutation and surface through
+    structured summary metadata
+  - typed custom losses must return a single-value tensor; vector/matrix losses
+    fail before backward so trainer summaries and gradients cannot disagree
+  - typed trainer paths validate prediction tensors before loss/metric
+    evaluation, surfacing exploding activations as `nonFiniteKind=prediction`
+  - typed trainer metric snapshots validate finite metric values after real
+    train/validation batches have run, surfacing duplicate names, broken or
+    throwing custom metrics, and invalid `DetailedMetric` payloads through
+    `invalidMetric*` metadata while preserving empty-phase compatibility
+  - typed history CSV now keeps metric maps and `DetailedMetric` diagnostics as
+    deterministic JSON cells and restores them during resume, making the
+    checkpoint history usable by dashboards and spreadsheet workflows; malformed
+    structured cells are reported as history load errors and rejected by strict
+    resume, and ambiguous CSV shapes such as duplicate headers or extra row
+    cells are rejected before values can be overwritten or ignored; epoch is a
+    required unique non-negative integer key
   - when no custom loss evaluator is wired, canonical runtime keeps synthetic
     fallback behavior for compatibility
 

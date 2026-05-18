@@ -10,6 +10,18 @@ A fully native Java implementation that:
 3. **No external native dependency** — no ONNX Runtime library needed
 4. **Integrates with existing gollek modules** — quantizer, optimization plugins
 
+## Training Alignment
+
+This runner is also being aligned with Gollek's Java diffusion training stack.
+In particular:
+
+1. `PNDMScheduler` now exposes an integer timestep array and alpha-cumprod copy
+2. runner metadata declares scheduler-family and latent-shape hints
+3. scheduler/timestep semantics are kept close to the Java diffusion OPD APIs
+
+That makes `gollek-runner-stable-diffusion` a better future bridge target for
+`gollek-train-diffusion-opd` without introducing Python orchestration.
+
 ## Architecture
 
 ```mermaid

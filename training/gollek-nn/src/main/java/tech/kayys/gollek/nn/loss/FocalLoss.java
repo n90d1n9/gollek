@@ -67,22 +67,21 @@ public class FocalLoss {
         }
         int batch = (int) shape[0];
         int classes = (int) shape[1];
+        if (batch <= 0 || classes <= 0) {
+            throw new IllegalArgumentException(
+                    "logits must have positive batch and class dimensions, got shape: " + Arrays.toString(shape));
+        }
         requireClassWeightShape(classes);
 
         float[] logitsData = logits.data();
-        float[] targetsData = targets.data();
-        if (targetsData.length != batch) {
-            throw new IllegalArgumentException(
-                    "targets batch size must match logits batch size, got: "
-                            + targetsData.length + " vs " + batch);
-        }
+        float[] targetsData = ClassIndexTargets.requireVectorData(targets, batch, "targets");
 
         // Softmax per sample
         float[] probs = new float[batch * classes];
         for (int n = 0; n < batch; n++) {
             float max = Float.NEGATIVE_INFINITY;
             for (int c = 0; c < classes; c++) {
-                max = Math.max(max, logitsData[n * classes + c]);
+                max = Math.max(max, requireFiniteLogit(logitsData[n * classes + c], n * classes + c));
             }
             float sum = 0;
             for (int c = 0; c < classes; c++) {
@@ -180,6 +179,13 @@ public class FocalLoss {
             throw new IllegalArgumentException(name + " must be finite and positive, got: " + alpha);
         }
         return alpha;
+    }
+
+    private static float requireFiniteLogit(float logit, int index) {
+        if (!Float.isFinite(logit)) {
+            throw new IllegalArgumentException("logits must be finite, got " + logit + " at index " + index);
+        }
+        return logit;
     }
 
     private static float[] validateClassWeights(float[] weights) {

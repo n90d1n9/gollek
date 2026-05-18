@@ -9,11 +9,14 @@ package tech.kayys.gollek.cli.util;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.spi.provider.ProviderRegistry;
 import tech.kayys.gollek.plugin.runner.RunnerPlugin;
+import tech.kayys.gollek.plugin.runner.RunnerPluginManager;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -63,7 +66,7 @@ public class PluginAvailabilityChecker {
      */
     public boolean hasRunnerPlugins() {
         try {
-            return runnerPlugins != null && !runnerPlugins.isUnsatisfied();
+            return !getRunnerPluginIds().isEmpty();
         } catch (Exception e) {
             LOG.debugf("Error checking runner plugins: %s", e.getMessage());
             return false;
@@ -74,14 +77,26 @@ public class PluginAvailabilityChecker {
      * Get a list of all discovered runner plugin IDs.
      */
     public List<String> getRunnerPluginIds() {
+        Set<String> ids = new LinkedHashSet<>();
         try {
-            return runnerPlugins.stream()
-                .map(RunnerPlugin::id)
-                .collect(Collectors.toList());
+            if (runnerPlugins != null && !runnerPlugins.isUnsatisfied()) {
+                ids.addAll(runnerPlugins.stream()
+                        .map(RunnerPlugin::id)
+                        .collect(Collectors.toList()));
+            }
         } catch (Exception e) {
-            LOG.debugf("Error listing runner plugins: %s", e.getMessage());
-            return List.of();
+            LOG.debugf("Error listing CDI runner plugins: %s", e.getMessage());
         }
+
+        try {
+            ids.addAll(RunnerPluginManager.getInstance().getAvailablePlugins().stream()
+                    .map(RunnerPlugin::id)
+                    .collect(Collectors.toList()));
+        } catch (Exception e) {
+            LOG.debugf("Error listing ServiceLoader runner plugins: %s", e.getMessage());
+        }
+
+        return List.copyOf(ids);
     }
 
     /**

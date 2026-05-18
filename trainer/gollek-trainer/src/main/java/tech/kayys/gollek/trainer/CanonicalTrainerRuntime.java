@@ -72,6 +72,10 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
                 ? loadCheckpointState(checkpointStateFile, config.epochs())
                 : CheckpointLoadReport.notRequested();
         this.initialCheckpointState = checkpointLoadReport.state();
+        if (checkpointLoadReport.missing() && failOnCheckpointLoadError && checkpointStateFile != null) {
+            throw new IllegalStateException(
+                    "Missing canonical trainer checkpoint for resume: " + checkpointStateFile);
+        }
         if (checkpointLoadReport.failed() && failOnCheckpointLoadError) {
             String message = "Failed to resume canonical trainer checkpoint at "
                     + checkpointStateFile + ": " + checkpointLoadReport.error();
@@ -220,6 +224,8 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
         metadata.put("checkpointFormatVersion", CHECKPOINT_FORMAT_VERSION);
         metadata.put("checkpointResumeRequested", resumeFromCheckpoint);
         metadata.put("resumedFromCheckpoint", resumedFromCheckpoint);
+        metadata.put("checkpointPresent", checkpointStateFile != null && Files.isRegularFile(checkpointStateFile));
+        metadata.put("checkpointMissingOnResume", checkpointLoadReport.missing());
         metadata.put("checkpointLoadFailed", checkpointLoadReport.failed());
         metadata.put("checkpointMigratedFromLegacy", checkpointLoadReport.migratedFromLegacy());
         if (checkpointLoadReport.detectedFormatVersion() != null) {
@@ -338,7 +344,10 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
     }
 
     private static CheckpointLoadReport loadCheckpointState(Path checkpointFile, int maxEpochs) {
-        if (checkpointFile == null || !Files.isRegularFile(checkpointFile)) {
+        if (checkpointFile == null) {
+            return CheckpointLoadReport.notConfigured();
+        }
+        if (!Files.isRegularFile(checkpointFile)) {
             return CheckpointLoadReport.notFound();
         }
 
@@ -641,27 +650,32 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
 
     private record CheckpointLoadReport(
             CheckpointState state,
+            boolean missing,
             boolean failed,
             boolean migratedFromLegacy,
             String detectedFormatVersion,
             String error) {
         private static CheckpointLoadReport notRequested() {
-            return new CheckpointLoadReport(null, false, false, null, null);
+            return new CheckpointLoadReport(null, false, false, false, null, null);
+        }
+
+        private static CheckpointLoadReport notConfigured() {
+            return new CheckpointLoadReport(null, false, false, false, null, null);
         }
 
         private static CheckpointLoadReport notFound() {
-            return new CheckpointLoadReport(null, false, false, null, null);
+            return new CheckpointLoadReport(null, true, false, false, null, "checkpoint-not-found");
         }
 
         private static CheckpointLoadReport loaded(
                 CheckpointState state,
                 String detectedFormatVersion,
                 boolean migratedFromLegacy) {
-            return new CheckpointLoadReport(state, false, migratedFromLegacy, detectedFormatVersion, null);
+            return new CheckpointLoadReport(state, false, false, migratedFromLegacy, detectedFormatVersion, null);
         }
 
         private static CheckpointLoadReport failed(String error, String detectedFormatVersion) {
-            return new CheckpointLoadReport(null, true, false, detectedFormatVersion, error);
+            return new CheckpointLoadReport(null, false, true, false, detectedFormatVersion, error);
         }
     }
 

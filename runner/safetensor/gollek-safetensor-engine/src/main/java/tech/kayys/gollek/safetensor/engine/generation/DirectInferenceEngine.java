@@ -78,8 +78,12 @@ public class DirectInferenceEngine implements SafetensorEngine {
         return thread;
     };
     private static final String PROFILE_PROPERTY = "gollek.profile";
+    private static final String DISABLE_NATIVE_GREEDY_ARGMAX_PROPERTY =
+            "gollek.safetensor.disable_native_greedy_argmax";
     private static final String DISABLE_METAL_F16_DISK_CACHE_PROPERTY =
             "gollek.safetensor.disable_metal_f16_disk_cache";
+    private static final String ENABLE_GEMMA4_METAL_F16_DISK_CACHE_PROPERTY =
+            "gollek.safetensor.enable_gemma4_metal_f16_disk_cache";
     private static final String METAL_F16_DISK_CACHE_MAX_BYTES_PROPERTY =
             "gollek.safetensor.metal_f16_disk_cache_max_bytes";
     private static final String METAL_F16_DISK_CACHE_MIN_FREE_BYTES_PROPERTY =
@@ -132,6 +136,16 @@ public class DirectInferenceEngine implements SafetensorEngine {
             profile.attentionNanos += nanos;
     }
 
+    public static void recordAttentionPath(String path) {
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        InferenceProfile profile = ACTIVE_PROFILE.get();
+        if (profile != null && profile.detailed) {
+            profile.attentionPathCounts.merge(path, 1, Integer::sum);
+        }
+    }
+
     public static void recordFfnNanos(long nanos) {
         InferenceProfile profile = ACTIVE_PROFILE.get();
         if (profile != null && profile.detailed)
@@ -167,7 +181,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
     /** Prints verbose timing breakdown only when {@code -Dgollek.profile=true}. */
     private static void maybePrintProfileSummary(InferenceProfile profile, String backend) {
         if (profile != null && profilingEnabled()) {
-            System.out.println("[PROFILE] " + profile.summary(backend));
+            System.out.println("\n[PROFILE] " + profile.summary(backend));
             System.out.flush();
         }
     }
@@ -378,6 +392,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
         long logitsProjectionNanos;
         long logitsMaterializationNanos;
         final Map<String, Long> linearNanosByOperation = new LinkedHashMap<>();
+        final Map<String, Integer> attentionPathCounts = new LinkedHashMap<>();
         int decodeSteps;
 
         private InferenceProfile(String mode, boolean detailed) {
@@ -417,21 +432,28 @@ public class DirectInferenceEngine implements SafetensorEngine {
             metadata.put("profile_logits_materialization_ms", roundMillis(logitsMaterializationNanos));
             linearNanosByOperation.forEach((operation, nanos) -> metadata
                     .put("profile_linear_" + sanitizeMetricKey(operation) + "_ms", roundMillis(nanos)));
+            attentionPathCounts.forEach((path, count) -> metadata
+                    .put("profile_attention_path_" + sanitizeMetricKey(path) + "_count", count));
             metadata.put("profile_decode_steps", decodeSteps);
             metadata.put("profile_summary", summary(backend));
             if (promptTokens >= 0) {
                 metadata.put("tokens.input", promptTokens);
                 metadata.put("tokens.output", Math.max(0, completionTokens));
+                metadata.put("tokens.decode", Math.max(0, decodeSteps));
                 double prefillSec = prefillNanos / 1_000_000_000.0;
                 double decodeSec = decodeNanos / 1_000_000_000.0;
                 if (promptTokens > 0 && prefillSec > 1e-12) {
                     metadata.put("bench.prefill_tps", promptTokens / prefillSec);
+                    metadata.put("bench.prefill_ms_per_token", roundMillis(prefillNanos) / promptTokens);
                 }
                 if (completionTokens > 0 && decodeSec > 1e-12) {
                     metadata.put("bench.generation_tps", completionTokens / decodeSec);
                 }
                 if (decodeSteps > 0 && decodeNanos > 0L) {
-                    metadata.put("bench.tpot_ms", roundMillis(decodeNanos) / decodeSteps);
+                    double decodeMsPerToken = roundMillis(decodeNanos) / decodeSteps;
+                    metadata.put("bench.decode_tps", decodeSteps / decodeSec);
+                    metadata.put("bench.decode_ms_per_token", decodeMsPerToken);
+                    metadata.put("bench.tpot_ms", decodeMsPerToken);
                 }
             }
             return metadata;
@@ -439,7 +461,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
         String summary(String backend) {
             return String.format(Locale.ROOT,
-                    "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s",
+                    "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s",
                     backend, mode,
                     roundMillis(modelLoadNanos),
                     roundMillis(tokenizeNanos),
@@ -454,7 +476,8 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     roundMillis(logitsProjectionNanos),
                     roundMillis(logitsMaterializationNanos),
                     decodeSteps,
-                    linearSummarySuffix());
+                    linearSummarySuffix(),
+                    attentionPathSummarySuffix());
         }
 
         private static double roundMillis(long nanos) {
@@ -481,6 +504,24 @@ public class DirectInferenceEngine implements SafetensorEngine {
             return sb.toString();
         }
 
+        private String attentionPathSummarySuffix() {
+            if (attentionPathCounts.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder(" attention_paths={");
+            attentionPathCounts.entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
+                    .limit(8)
+                    .forEachOrdered(entry -> {
+                        if (sb.length() > " attention_paths={".length()) {
+                            sb.append(", ");
+                        }
+                        sb.append(entry.getKey()).append('=').append(entry.getValue());
+                    });
+            sb.append('}');
+            return sb.toString();
+        }
+
         private static String sanitizeMetricKey(String raw) {
             StringBuilder out = new StringBuilder(raw.length());
             for (int i = 0; i < raw.length(); i++) {
@@ -495,6 +536,58 @@ public class DirectInferenceEngine implements SafetensorEngine {
             }
             return out.toString();
         }
+    }
+
+    private static void putGenerationBenchMetadata(Map<String, Object> metadata,
+                                                   int promptTokens,
+                                                   int completionTokens,
+                                                   long sessionAllocateNanos,
+                                                   long prefillNanos,
+                                                   long decodeNanos,
+                                                   long samplingNanos,
+                                                   long firstTokenNanos,
+                                                   int decodeSteps) {
+        if (metadata == null) {
+            return;
+        }
+        int outputTokens = Math.max(0, completionTokens);
+        int measuredDecodeSteps = Math.max(0, decodeSteps);
+        metadata.put("tokens.input", Math.max(0, promptTokens));
+        metadata.put("tokens.output", outputTokens);
+        metadata.put("tokens.decode", measuredDecodeSteps);
+        if (sessionAllocateNanos > 0L) {
+            metadata.put("bench.session_allocate_ms", nanosToMillis(sessionAllocateNanos));
+        }
+        if (firstTokenNanos > 0L) {
+            metadata.put("bench.ttft_ms", nanosToMillis(firstTokenNanos));
+        }
+        if (promptTokens > 0 && prefillNanos > 0L) {
+            double prefillSec = prefillNanos / 1_000_000_000.0;
+            metadata.put("bench.prefill_tps", promptTokens / prefillSec);
+            metadata.put("bench.prefill_ms_per_token", nanosToMillis(prefillNanos) / promptTokens);
+            metadata.put("bench.prefill_ms", nanosToMillis(prefillNanos));
+        }
+        if (samplingNanos > 0L) {
+            metadata.put("bench.sampling_ms", nanosToMillis(samplingNanos));
+        }
+        if (measuredDecodeSteps > 0 && decodeNanos > 0L) {
+            double decodeSec = decodeNanos / 1_000_000_000.0;
+            double decodeMsPerToken = nanosToMillis(decodeNanos) / measuredDecodeSteps;
+            metadata.put("bench.decode_tps", measuredDecodeSteps / decodeSec);
+            metadata.put("bench.decode_ms_per_token", decodeMsPerToken);
+            metadata.put("bench.decode_ms", nanosToMillis(decodeNanos));
+            metadata.put("bench.tpot_ms", decodeMsPerToken);
+        }
+        if (outputTokens > 0) {
+            long generationNanos = prefillNanos + decodeNanos + samplingNanos;
+            if (generationNanos > 0L) {
+                metadata.put("bench.generation_tps", outputTokens / (generationNanos / 1_000_000_000.0));
+            }
+        }
+    }
+
+    private static double nanosToMillis(long nanos) {
+        return nanos / 1_000_000.0;
     }
 
     public record DirectGenerationTrace(
@@ -631,7 +724,8 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     resolved.getFileName(), quantStrategy);
 
             Arena weightArena = Arena.ofAuto();
-            WeightLoadResult weightLoadResult = loadWeights(resolved, quantStrategy);
+            ModelConfig config = loadConfig(resolved);
+            WeightLoadResult weightLoadResult = loadWeights(resolved, quantStrategy, config);
             Map<String, AccelTensor> weights = weightLoadResult.weights();
 
             Tokenizer tokenizer;
@@ -641,8 +735,6 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 log.warnf("Failed to load tokenizer for [%s]", resolved);
                 throw new RuntimeException("Tokenizer loading failed", e);
             }
-
-            ModelConfig config = loadConfig(resolved);
 
             String key = quantStrategy == QuantizationEngine.QuantStrategy.NONE
                     ? resolved.getFileName().toString()
@@ -670,6 +762,12 @@ public class DirectInferenceEngine implements SafetensorEngine {
             int completionTokens = 0;
             InferenceProfile profile = startProfile("sync");
             String backend = backendLabel(metalBackend);
+            long benchSessionAllocateNanos = 0L;
+            long benchPrefillNanos = 0L;
+            long benchDecodeNanos = 0L;
+            long benchSamplingNanos = 0L;
+            long benchFirstTokenNanos = 0L;
+            int benchDecodeSteps = 0;
 
             try {
                 String metalDevice = metalDeviceLabel(metalBackend);
@@ -749,8 +847,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     }
                     long tAlloc0 = System.nanoTime();
                     session.allocate(config, cfg);
+                    benchSessionAllocateNanos += System.nanoTime() - tAlloc0;
                     if (profile != null)
-                        profile.sessionAllocateNanos += System.nanoTime() - tAlloc0;
+                        profile.sessionAllocateNanos += benchSessionAllocateNanos;
 
                     if (verbose) {
                         System.out.println("[DEBUG] 8: prefill");
@@ -768,28 +867,36 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     if (directGreedy) {
                         AccelTensor logits = forwardPass().prefillLogitsTensor(inputIds, model.weights(), config, arch,
                                 session);
+                        long prefillElapsed = System.nanoTime() - tPrefill0;
+                        benchPrefillNanos += prefillElapsed;
                         if (profile != null)
-                            profile.prefillNanos += System.nanoTime() - tPrefill0;
+                            profile.prefillNanos += prefillElapsed;
                         if (verbose) {
                             System.out.println("[DEBUG] 9: prefill done");
                             System.out.flush();
                         }
                         long tSample0 = System.nanoTime();
                         next = sampleGreedyFromTensor(logits, config, tokenizer, true, stops, greedyMasks);
+                        long sampleElapsed = System.nanoTime() - tSample0;
+                        benchSamplingNanos += sampleElapsed;
                         if (profile != null)
-                            profile.samplingNanos += System.nanoTime() - tSample0;
+                            profile.samplingNanos += sampleElapsed;
                     } else {
                         float[] logits = forwardPass().prefill(inputIds, model.weights(), config, arch, session);
+                        long prefillElapsed = System.nanoTime() - tPrefill0;
+                        benchPrefillNanos += prefillElapsed;
                         if (profile != null)
-                            profile.prefillNanos += System.nanoTime() - tPrefill0;
+                            profile.prefillNanos += prefillElapsed;
                         if (verbose) {
                             System.out.println("[DEBUG] 9: prefill done");
                             System.out.flush();
                         }
                         long tSample0 = System.nanoTime();
                         next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, true, stops);
+                        long sampleElapsed = System.nanoTime() - tSample0;
+                        benchSamplingNanos += sampleElapsed;
                         if (profile != null)
-                            profile.samplingNanos += System.nanoTime() - tSample0;
+                            profile.samplingNanos += sampleElapsed;
                     }
                     if (verbose) {
                         debugChosenToken(tokenizer, next, 0);
@@ -801,6 +908,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (stops.contains(next))
                             break;
 
+                        if (benchFirstTokenNanos == 0L) {
+                            benchFirstTokenNanos = System.nanoTime() - requestStartNanos;
+                        }
                         markFirstToken(profile, requestStartNanos);
                         String delta = decoder.decodeNext((long) next);
 
@@ -827,27 +937,37 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().decodeLogitsTensor(next, inputIds.length + step,
                                     model.weights(),
-                                    config, arch, session);
+                                    config, arch, session, true);
+                            long decodeElapsed = System.nanoTime() - tDecode0;
+                            benchDecodeNanos += decodeElapsed;
+                            benchDecodeSteps++;
                             if (profile != null) {
-                                profile.decodeNanos += System.nanoTime() - tDecode0;
+                                profile.decodeNanos += decodeElapsed;
                                 profile.decodeSteps++;
                             }
                             long tSample0 = System.nanoTime();
                             next = sampleGreedyFromTensor(logits, config, tokenizer, false, stops, greedyMasks);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         } else {
                             float[] logits = forwardPass().decode(next, inputIds.length + step, model.weights(), config,
                                     arch,
                                     session);
+                            long decodeElapsed = System.nanoTime() - tDecode0;
+                            benchDecodeNanos += decodeElapsed;
+                            benchDecodeSteps++;
                             if (profile != null) {
-                                profile.decodeNanos += System.nanoTime() - tDecode0;
+                                profile.decodeNanos += decodeElapsed;
                                 profile.decodeSteps++;
                             }
                             long tSample0 = System.nanoTime();
                             next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, false, stops);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         }
                         if (verbose) {
                             debugChosenToken(tokenizer, next, step + 1);
@@ -864,11 +984,15 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         .durationMs(java.time.Duration.between(t0, Instant.now()).toMillis())
                         .finishReason(InferenceResponse.FinishReason.STOP)
                         .metadata("backend", "accelerate-safetensor");
+                Map<String, Object> benchMetadata = new LinkedHashMap<>();
                 if (profile != null) {
-                    Map<String, Object> metadata = profile.metadata(backend, inputLen, completionTokens);
-                    metadata.forEach(builder::metadata);
+                    benchMetadata.putAll(profile.metadata(backend, inputLen, completionTokens));
                     maybePrintProfileSummary(profile, backend);
                 }
+                putGenerationBenchMetadata(benchMetadata, inputLen, completionTokens,
+                        benchSessionAllocateNanos, benchPrefillNanos, benchDecodeNanos,
+                        benchSamplingNanos, benchFirstTokenNanos, benchDecodeSteps);
+                benchMetadata.forEach(builder::metadata);
                 return builder.build();
             } catch (Exception e) {
                 log.error("Generation failed", e);
@@ -992,7 +1116,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().decodeLogitsTensor(next, inputIds.length + step,
                                     model.weights(),
-                                    config, arch, session);
+                                    config, arch, session, true);
                             if (profile != null) {
                                 profile.decodeNanos += System.nanoTime() - tDecode0;
                                 profile.decodeSteps++;
@@ -1160,7 +1284,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     if (directGreedy) {
                         AccelTensor logits = forwardPass().decodeLogitsTensor(next, inputIds.length + step,
                                 model.weights(),
-                                config, arch, session);
+                                config, arch, session, true);
                         if (profile != null) {
                             profile.decodeNanos += System.nanoTime() - tDecode0;
                             profile.decodeSteps++;
@@ -1357,7 +1481,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     int decodeStartPos = fullInputIds.length + step;
                     if (directGreedy) {
                         AccelTensor logits = forwardPass().decodeLogitsTensor(next, decodeStartPos, model.weights(),
-                                config, arch, session);
+                                config, arch, session, true);
                         if (profile != null) {
                             profile.decodeNanos += System.nanoTime() - tDecode0;
                             profile.decodeSteps++;
@@ -1525,7 +1649,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().decodeLogitsTensor(next, decodeStartPos, model.weights(),
                                     config, arch,
-                                    session);
+                                    session, true);
                             if (profile != null) {
                                 profile.decodeNanos += System.nanoTime() - tDecode0;
                                 profile.decodeSteps++;
@@ -1750,7 +1874,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         long tDecode0 = System.nanoTime();
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().decodeLogitsTensor(next, decodeStartPos, model.weights(),
-                                    config, arch, session);
+                                    config, arch, session, true);
                             if (profile != null) {
                                 profile.decodeNanos += System.nanoTime() - tDecode0;
                                 profile.decodeSteps++;
@@ -1829,6 +1953,12 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 int inputLen = 0;
                 InferenceProfile profile = startProfile("stream");
                 String backend = backendLabel(metalBackend);
+                long benchSessionAllocateNanos = 0L;
+                long benchPrefillNanos = 0L;
+                long benchDecodeNanos = 0L;
+                long benchSamplingNanos = 0L;
+                long benchFirstTokenNanos = 0L;
+                int benchDecodeSteps = 0;
 
                 try {
                     boolean verbose = "true".equals(System.getProperty("gollek.verbose"));
@@ -1865,6 +1995,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
 
                     if (verbose) {
                         System.out.println("[DEBUG-S] 5: tokenize");
+                        System.out.printf("[DEBUG-PROMPT-TEXT] %s%n", printableDebugText(prompt));
                         System.out.flush();
                     }
                     long tTokenize0 = System.nanoTime();
@@ -1874,6 +2005,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                     inputLen = inputIds.length;
                     if (verbose) {
                         System.out.printf("[DEBUG-S] 6: tokens=%d\n", inputLen);
+                        debugTokenSequence(tokenizer, inputIds, "prompt");
                         System.out.flush();
                     }
 
@@ -1892,8 +2024,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         }
                         long tAlloc0 = System.nanoTime();
                         session.allocate(config, cfg);
+                        benchSessionAllocateNanos += System.nanoTime() - tAlloc0;
                         if (profile != null)
-                            profile.sessionAllocateNanos += System.nanoTime() - tAlloc0;
+                            profile.sessionAllocateNanos += benchSessionAllocateNanos;
 
                         if (verbose) {
                             System.out.println("[DEBUG-S] 8: prefill");
@@ -1911,28 +2044,36 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().prefillLogitsTensor(inputIds, model.weights(), config,
                                     arch, session);
+                            long prefillElapsed = System.nanoTime() - tPrefill0;
+                            benchPrefillNanos += prefillElapsed;
                             if (profile != null)
-                                profile.prefillNanos += System.nanoTime() - tPrefill0;
+                                profile.prefillNanos += prefillElapsed;
                             if (verbose) {
                                 System.out.println("[DEBUG-S] 9: prefill done");
                                 System.out.flush();
                             }
                             long tSample0 = System.nanoTime();
                             next = sampleGreedyFromTensor(logits, config, tokenizer, true, stops, greedyMasks);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         } else {
                             float[] logits = forwardPass().prefill(inputIds, model.weights(), config, arch, session);
+                            long prefillElapsed = System.nanoTime() - tPrefill0;
+                            benchPrefillNanos += prefillElapsed;
                             if (profile != null)
-                                profile.prefillNanos += System.nanoTime() - tPrefill0;
+                                profile.prefillNanos += prefillElapsed;
                             if (verbose) {
                                 System.out.println("[DEBUG-S] 9: prefill done");
                                 System.out.flush();
                             }
                             long tSample0 = System.nanoTime();
                             next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, true, stops);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         }
 
                         StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
@@ -1943,6 +2084,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                                 break;
                             }
 
+                            if (benchFirstTokenNanos == 0L) {
+                                benchFirstTokenNanos = System.nanoTime() - requestStartNanos;
+                            }
                             markFirstToken(profile, requestStartNanos);
                             completionTokens++;
 
@@ -1983,27 +2127,37 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             if (directGreedy) {
                                 AccelTensor logits = forwardPass().decodeLogitsTensor(next, decodeStartPos,
                                         model.weights(), config, arch,
-                                        session);
+                                        session, true);
+                                long decodeElapsed = System.nanoTime() - tDecode0;
+                                benchDecodeNanos += decodeElapsed;
+                                benchDecodeSteps++;
                                 if (profile != null) {
-                                    profile.decodeNanos += System.nanoTime() - tDecode0;
+                                    profile.decodeNanos += decodeElapsed;
                                     profile.decodeSteps++;
                                 }
                                 long tSample0 = System.nanoTime();
                                 next = sampleGreedyFromTensor(logits, config, tokenizer, false, stops, greedyMasks);
+                                long sampleElapsed = System.nanoTime() - tSample0;
+                                benchSamplingNanos += sampleElapsed;
                                 if (profile != null)
-                                    profile.samplingNanos += System.nanoTime() - tSample0;
+                                    profile.samplingNanos += sampleElapsed;
                             } else {
                                 float[] logits = forwardPass().decode(next, decodeStartPos, model.weights(), config,
                                         arch,
                                         session);
+                                long decodeElapsed = System.nanoTime() - tDecode0;
+                                benchDecodeNanos += decodeElapsed;
+                                benchDecodeSteps++;
                                 if (profile != null) {
-                                    profile.decodeNanos += System.nanoTime() - tDecode0;
+                                    profile.decodeNanos += decodeElapsed;
                                     profile.decodeSteps++;
                                 }
                                 long tSample0 = System.nanoTime();
                                 next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, false, stops);
+                                long sampleElapsed = System.nanoTime() - tSample0;
+                                benchSamplingNanos += sampleElapsed;
                                 if (profile != null)
-                                    profile.samplingNanos += System.nanoTime() - tSample0;
+                                    profile.samplingNanos += sampleElapsed;
                             }
                         }
                     }
@@ -2016,11 +2170,15 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             .finishReason(InferenceResponse.FinishReason.STOP)
                             .inputTokens(inputLen)
                             .metadata("backend", "accelerate-safetensor");
+                    Map<String, Object> benchMetadata = new LinkedHashMap<>();
                     if (profile != null) {
-                        Map<String, Object> metadata = profile.metadata(backend, inputLen, completionTokens);
-                        metadata.forEach(builder::metadata);
+                        benchMetadata.putAll(profile.metadata(backend, inputLen, completionTokens));
                         maybePrintProfileSummary(profile, backend);
                     }
+                    putGenerationBenchMetadata(benchMetadata, inputLen, completionTokens,
+                            benchSessionAllocateNanos, benchPrefillNanos, benchDecodeNanos,
+                            benchSamplingNanos, benchFirstTokenNanos, benchDecodeSteps);
+                    benchMetadata.forEach(builder::metadata);
                     emitter.emit(builder.build());
 
                 } catch (Throwable t) {
@@ -2058,6 +2216,12 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 int inputLen = 0;
                 InferenceProfile profile = startProfile("stream");
                 String backend = backendLabel(metalBackend);
+                long benchSessionAllocateNanos = 0L;
+                long benchPrefillNanos = 0L;
+                long benchDecodeNanos = 0L;
+                long benchSamplingNanos = 0L;
+                long benchFirstTokenNanos = 0L;
+                int benchDecodeSteps = 0;
 
                 try {
                     LoadedModel model = requireLoadedModel(modelPath);
@@ -2072,8 +2236,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             .createSession(cfg.maxKvCacheTokens())) {
                         long tAlloc0 = System.nanoTime();
                         session.allocate(config, cfg);
+                        benchSessionAllocateNanos += System.nanoTime() - tAlloc0;
                         if (profile != null)
-                            profile.sessionAllocateNanos += System.nanoTime() - tAlloc0;
+                            profile.sessionAllocateNanos += benchSessionAllocateNanos;
 
                         Set<Integer> stops = new HashSet<>();
                         for (int id : tokenizer.allStopTokenIds())
@@ -2093,20 +2258,28 @@ public class DirectInferenceEngine implements SafetensorEngine {
                         if (directGreedy) {
                             AccelTensor logits = forwardPass().prefillLogitsTensor(inputIds, model.weights(), config,
                                     arch, session);
+                            long prefillElapsed = System.nanoTime() - tPrefill0;
+                            benchPrefillNanos += prefillElapsed;
                             if (profile != null)
-                                profile.prefillNanos += System.nanoTime() - tPrefill0;
+                                profile.prefillNanos += prefillElapsed;
                             long tSample0 = System.nanoTime();
                             next = sampleGreedyFromTensor(logits, config, tokenizer, true, stops, greedyMasks);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         } else {
                             float[] logits = forwardPass().prefill(inputIds, model.weights(), config, arch, session);
+                            long prefillElapsed = System.nanoTime() - tPrefill0;
+                            benchPrefillNanos += prefillElapsed;
                             if (profile != null)
-                                profile.prefillNanos += System.nanoTime() - tPrefill0;
+                                profile.prefillNanos += prefillElapsed;
                             long tSample0 = System.nanoTime();
                             next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, true, stops);
+                            long sampleElapsed = System.nanoTime() - tSample0;
+                            benchSamplingNanos += sampleElapsed;
                             if (profile != null)
-                                profile.samplingNanos += System.nanoTime() - tSample0;
+                                profile.samplingNanos += sampleElapsed;
                         }
 
                         StreamingDecoder decoder = new StreamingDecoder(tokenizer, DecodeOptions.defaultOptions());
@@ -2117,6 +2290,9 @@ public class DirectInferenceEngine implements SafetensorEngine {
                                 break;
                             }
 
+                            if (benchFirstTokenNanos == 0L) {
+                                benchFirstTokenNanos = System.nanoTime() - requestStartNanos;
+                            }
                             markFirstToken(profile, requestStartNanos);
                             completionTokens++;
 
@@ -2158,27 +2334,37 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             if (directGreedy) {
                                 AccelTensor logits = forwardPass().decodeLogitsTensor(next, decodeStartPos,
                                         model.weights(), config, arch,
-                                        session);
+                                        session, true);
+                                long decodeElapsed = System.nanoTime() - tDecode0;
+                                benchDecodeNanos += decodeElapsed;
+                                benchDecodeSteps++;
                                 if (profile != null) {
-                                    profile.decodeNanos += System.nanoTime() - tDecode0;
+                                    profile.decodeNanos += decodeElapsed;
                                     profile.decodeSteps++;
                                 }
                                 long tSample0 = System.nanoTime();
                                 next = sampleGreedyFromTensor(logits, config, tokenizer, false, stops, greedyMasks);
+                                long sampleElapsed = System.nanoTime() - tSample0;
+                                benchSamplingNanos += sampleElapsed;
                                 if (profile != null)
-                                    profile.samplingNanos += System.nanoTime() - tSample0;
+                                    profile.samplingNanos += sampleElapsed;
                             } else {
                                 float[] logits = forwardPass().decode(next, decodeStartPos, model.weights(), config,
                                         arch,
                                         session);
+                                long decodeElapsed = System.nanoTime() - tDecode0;
+                                benchDecodeNanos += decodeElapsed;
+                                benchDecodeSteps++;
                                 if (profile != null) {
-                                    profile.decodeNanos += System.nanoTime() - tDecode0;
+                                    profile.decodeNanos += decodeElapsed;
                                     profile.decodeSteps++;
                                 }
                                 long tSample0 = System.nanoTime();
                                 next = sampleNextToken(logits, tokenizer, cfg, config, freq, rng, false, stops);
+                                long sampleElapsed = System.nanoTime() - tSample0;
+                                benchSamplingNanos += sampleElapsed;
                                 if (profile != null)
-                                    profile.samplingNanos += System.nanoTime() - tSample0;
+                                    profile.samplingNanos += sampleElapsed;
                             }
                         }
                     }
@@ -2192,11 +2378,15 @@ public class DirectInferenceEngine implements SafetensorEngine {
                             .inputTokens(inputLen)
                             .metadata("backend", "accelerate-safetensor")
                             .metadata("prompt_token_source", "pretokenized");
+                    Map<String, Object> benchMetadata = new LinkedHashMap<>();
                     if (profile != null) {
-                        Map<String, Object> metadata = profile.metadata(backend, inputLen, completionTokens);
-                        metadata.forEach(builder::metadata);
+                        benchMetadata.putAll(profile.metadata(backend, inputLen, completionTokens));
                         maybePrintProfileSummary(profile, backend);
                     }
+                    putGenerationBenchMetadata(benchMetadata, inputLen, completionTokens,
+                            benchSessionAllocateNanos, benchPrefillNanos, benchDecodeNanos,
+                            benchSamplingNanos, benchFirstTokenNanos, benchDecodeSteps);
+                    benchMetadata.forEach(builder::metadata);
                     emitter.emit(builder.build());
 
                 } catch (Throwable t) {
@@ -2312,7 +2502,8 @@ public class DirectInferenceEngine implements SafetensorEngine {
     // Weight loading — pure AccelTensor, no LibTorch
     // ─────────────────────────────────────────────────────────────────────────
 
-    private WeightLoadResult loadWeights(Path modelPath, QuantizationEngine.QuantStrategy quantStrategy) {
+    private WeightLoadResult loadWeights(Path modelPath, QuantizationEngine.QuantStrategy quantStrategy,
+            ModelConfig config) {
         log.debugf("DirectInferenceEngine: opening weights from [%s]", modelPath);
 
         Map<String, AccelTensor> weights;
@@ -2326,7 +2517,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
         String quantCacheState = "off";
         Path quantCachePath = null;
         if (quantStrategy == null || quantStrategy == QuantizationEngine.QuantStrategy.NONE) {
-            weights = maybeUseMetalF16DiskCache(modelPath, weights);
+            weights = maybeUseMetalF16DiskCache(modelPath, weights, config);
         }
         if (quantStrategy != null && quantStrategy != QuantizationEngine.QuantStrategy.NONE) {
             QuantizationEngine.InferenceQuantizationResult quantizationResult = getQuantizationEngine()
@@ -2342,8 +2533,13 @@ public class DirectInferenceEngine implements SafetensorEngine {
         return new WeightLoadResult(weights, quantCacheState, quantCachePath);
     }
 
-    private Map<String, AccelTensor> maybeUseMetalF16DiskCache(Path modelPath, Map<String, AccelTensor> weights) {
+    private Map<String, AccelTensor> maybeUseMetalF16DiskCache(Path modelPath, Map<String, AccelTensor> weights,
+            ModelConfig config) {
         if (Boolean.getBoolean(DISABLE_METAL_F16_DISK_CACHE_PROPERTY) || !isNativeMetalRuntimeActive()) {
+            return weights;
+        }
+        if (isGemma4Text(config) && !Boolean.getBoolean(ENABLE_GEMMA4_METAL_F16_DISK_CACHE_PROPERTY)) {
+            log.debugf("Skipping Metal F16 weight cache for Gemma-4 text; BF16->F16 parity is experimental.");
             return weights;
         }
         long cacheMaxBytes = Long.getLong(
@@ -2899,19 +3095,7 @@ public class DirectInferenceEngine implements SafetensorEngine {
                 if (attempt == 0) {
                     debugTopGreedyCandidates(seg, vocab, softCap, tokenizer, config, firstStep, stops, 8);
                 }
-                int best = -1;
-                float bestVal = Float.NEGATIVE_INFINITY;
-                for (int i = 0; i < vocab; i++) {
-                    if (rejectedCount > 0 && containsRejectedCandidate(rejectedCandidates, rejectedCount, i)) {
-                        continue;
-                    }
-                    // Logit softcap is monotonic, so it cannot change greedy argmax ordering.
-                    float value = seg.getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i);
-                    if (value > bestVal) {
-                        bestVal = value;
-                        best = i;
-                    }
-                }
+                int best = greedyArgmax(seg, vocab, rejectedCandidates, rejectedCount);
                 if (best < 0) {
                     break;
                 }
@@ -2929,6 +3113,77 @@ public class DirectInferenceEngine implements SafetensorEngine {
         } finally {
             logits.close();
         }
+    }
+
+    private static final int NATIVE_ARGMAX_UNAVAILABLE = Integer.MIN_VALUE;
+
+    private static int greedyArgmax(java.lang.foreign.MemorySegment seg,
+            long vocab,
+            int[] rejectedCandidates,
+            int rejectedCount) {
+        int nativeBest = tryNativeGreedyArgmax(seg, vocab, rejectedCandidates, rejectedCount);
+        if (nativeBest != NATIVE_ARGMAX_UNAVAILABLE) {
+            return nativeBest;
+        }
+        return javaGreedyArgmax(seg, vocab, rejectedCandidates, rejectedCount);
+    }
+
+    private static int tryNativeGreedyArgmax(java.lang.foreign.MemorySegment seg,
+            long vocab,
+            int[] rejectedCandidates,
+            int rejectedCount) {
+        if (Boolean.getBoolean(DISABLE_NATIVE_GREEDY_ARGMAX_PROPERTY) || vocab > Integer.MAX_VALUE) {
+            return NATIVE_ARGMAX_UNAVAILABLE;
+        }
+        try {
+            MetalBinding binding = MetalBinding.getInstance();
+            if (binding == null || !binding.supportsArgmaxF32()) {
+                return NATIVE_ARGMAX_UNAVAILABLE;
+            }
+            return binding.argmaxF32(
+                    seg,
+                    (int) vocab,
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 0),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 1),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 2),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 3),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 4),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 5),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 6),
+                    rejectedCandidateAt(rejectedCandidates, rejectedCount, 7));
+        } catch (Throwable ignored) {
+            return NATIVE_ARGMAX_UNAVAILABLE;
+        }
+    }
+
+    private static int javaGreedyArgmax(java.lang.foreign.MemorySegment seg,
+            long vocab,
+            int[] rejectedCandidates,
+            int rejectedCount) {
+        int best = -1;
+        float bestVal = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < vocab; i++) {
+            if (rejectedCount > 0 && containsRejectedCandidate(rejectedCandidates, rejectedCount, i)) {
+                continue;
+            }
+            // Logit softcap is monotonic, so it cannot change greedy argmax ordering.
+            float value = seg.getAtIndex(java.lang.foreign.ValueLayout.JAVA_FLOAT, i);
+            if (Float.isNaN(value)) {
+                continue;
+            }
+            if (value > bestVal) {
+                bestVal = value;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static int rejectedCandidateAt(int[] rejectedCandidates, int rejectedCount, int index) {
+        if (rejectedCandidates == null || index >= rejectedCount) {
+            return -1;
+        }
+        return rejectedCandidates[index];
     }
 
     private static boolean isGreedyCandidateRejected(int tokenId,
@@ -3176,6 +3431,13 @@ public class DirectInferenceEngine implements SafetensorEngine {
         }
         System.out.println();
         System.out.flush();
+    }
+
+    private static String printableDebugText(String text) {
+        if (text == null) {
+            return "<null>";
+        }
+        return text.replace("\n", "\\n");
     }
 
     private static void debugChosenToken(Tokenizer tokenizer, int tokenId, int step) {

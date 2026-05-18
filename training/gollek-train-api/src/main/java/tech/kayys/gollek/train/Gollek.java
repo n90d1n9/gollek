@@ -45,6 +45,7 @@ import tech.kayys.gollek.ml.feature.PolynomialFeatures;
 import tech.kayys.gollek.ml.model_selection.*;
 import tech.kayys.gollek.ml.base.BaseEstimator;
 import tech.kayys.gollek.ml.base.BaseTransformer;
+import tech.kayys.gollek.ml.train.TrainingLossFunction;
 import tech.kayys.gollek.ml.util.*;
 
 import java.io.IOException;
@@ -72,6 +73,7 @@ public final class Gollek {
     // Deep Learning (PyTorch Style)
     // ══════════════════════════════════════════════════════════════════════
 
+    @SuppressWarnings("deprecation")
     public static class DL {
         public enum TrainingPreset {
             REGRESSION_MSE_ADAMW,
@@ -914,7 +916,7 @@ public final class Gollek {
         public static EvaluationSummary evaluate(
                 NNModule model,
                 Iterable<Batch> loader,
-                CanonicalTrainer.LossFunction loss,
+                TrainingLossFunction loss,
                 java.util.function.Supplier<? extends CanonicalTrainer.Metric>... metrics) {
             return evaluate(model, loader, loss, "auto", metrics);
         }
@@ -923,7 +925,7 @@ public final class Gollek {
         public static EvaluationSummary evaluate(
                 NNModule model,
                 Iterable<Batch> loader,
-                CanonicalTrainer.LossFunction loss,
+                TrainingLossFunction loss,
                 String deviceId,
                 java.util.function.Supplier<? extends CanonicalTrainer.Metric>... metrics) {
             List<java.util.function.Supplier<? extends CanonicalTrainer.Metric>> metricFactories =
@@ -934,7 +936,7 @@ public final class Gollek {
         public static EvaluationSummary evaluate(
                 NNModule model,
                 Iterable<Batch> loader,
-                CanonicalTrainer.LossFunction loss,
+                TrainingLossFunction loss,
                 String deviceId,
                 List<java.util.function.Supplier<? extends CanonicalTrainer.Metric>> metricFactories) {
             Objects.requireNonNull(model, "model must not be null");
@@ -1116,6 +1118,8 @@ public final class Gollek {
                     resolvedOptions.bestModelMonitorMetric(),
                     resolvedOptions.bestModelMonitorMode(),
                     resolvedOptions.gradientAccumulationSteps(),
+                    resolvedOptions.mixedPrecision(),
+                    resolvedOptions.gradScaler(),
                     resolvedOptions.device(),
                     resolvedOptions.metricFactories(),
                     resolvedOptions.schedulerFactory(),
@@ -1279,6 +1283,8 @@ public final class Gollek {
                     null,
                     CanonicalTrainer.BestModelMonitorMode.MIN,
                     gradientAccumulationSteps,
+                    false,
+                    null,
                     deviceId,
                     List.of(),
                     null,
@@ -1311,6 +1317,8 @@ public final class Gollek {
                 String bestModelMonitorMetric,
                 CanonicalTrainer.BestModelMonitorMode bestModelMonitorMode,
                 int gradientAccumulationSteps,
+                boolean mixedPrecision,
+                GradScaler gradScaler,
                 String deviceId,
                 List<java.util.function.Supplier<? extends CanonicalTrainer.Metric>> metricFactories,
                 SchedulerFactory schedulerFactory,
@@ -1327,7 +1335,7 @@ public final class Gollek {
 
             float lr = learningRate > 0 ? learningRate : 1e-3f;
             Optimizer optimizer = presetOptimizer(model, lr, preset);
-            CanonicalTrainer.LossFunction loss = presetLoss(
+            TrainingLossFunction loss = presetLoss(
                     preset,
                     crossEntropyClassWeights,
                     focalGamma,
@@ -1353,6 +1361,11 @@ public final class Gollek {
                     .restoreBestModelAtEnd(restoreBestModelAtEnd)
                     .schedulerMonitorMetric(schedulerMonitorMetric)
                     .device(deviceId);
+            if (gradScaler != null) {
+                trainerBuilder.gradScaler(gradScaler);
+            } else {
+                trainerBuilder.mixedPrecision(mixedPrecision);
+            }
             if (bestModelMonitorMetric == null) {
                 trainerBuilder.bestModelMonitorValidationLoss(bestModelMonitorMode);
             } else {
@@ -1388,6 +1401,8 @@ public final class Gollek {
                 String bestModelMonitorMetric,
                 CanonicalTrainer.BestModelMonitorMode bestModelMonitorMode,
                 int gradientAccumulationSteps,
+                boolean mixedPrecision,
+                GradScaler gradScaler,
                 String device,
                 List<java.util.function.Supplier<? extends CanonicalTrainer.Metric>> metricFactories,
                 SchedulerFactory schedulerFactory,
@@ -1423,6 +1438,9 @@ public final class Gollek {
                 focalAlpha = normalizeFocalAlpha(focalAlpha);
                 focalClassWeights = normalizeFocalClassWeights(focalClassWeights);
                 bcePositiveWeights = normalizeBcePositiveWeights(bcePositiveWeights);
+                if (gradScaler != null) {
+                    mixedPrecision = true;
+                }
             }
 
             public TrainingOptions(
@@ -1448,6 +1466,8 @@ public final class Gollek {
                         null,
                         CanonicalTrainer.BestModelMonitorMode.MIN,
                         gradientAccumulationSteps,
+                        false,
+                        null,
                         device,
                         List.of(),
                         null,
@@ -1480,6 +1500,8 @@ public final class Gollek {
                 private CanonicalTrainer.BestModelMonitorMode bestModelMonitorMode =
                         CanonicalTrainer.BestModelMonitorMode.MIN;
                 private int gradientAccumulationSteps = 1;
+                private boolean mixedPrecision = false;
+                private GradScaler gradScaler;
                 private String device = "auto";
                 private final List<java.util.function.Supplier<? extends CanonicalTrainer.Metric>> metricFactories =
                         new ArrayList<>();
@@ -1594,6 +1616,28 @@ public final class Gollek {
                 public Builder gradientAccumulationSteps(int gradientAccumulationSteps) {
                     this.gradientAccumulationSteps = Math.max(1, gradientAccumulationSteps);
                     return this;
+                }
+
+                public Builder mixedPrecision() {
+                    return mixedPrecision(true);
+                }
+
+                public Builder mixedPrecision(boolean mixedPrecision) {
+                    this.mixedPrecision = mixedPrecision;
+                    if (!mixedPrecision) {
+                        this.gradScaler = null;
+                    }
+                    return this;
+                }
+
+                public Builder gradScaler(GradScaler gradScaler) {
+                    this.gradScaler = Objects.requireNonNull(gradScaler, "gradScaler must not be null");
+                    this.mixedPrecision = true;
+                    return this;
+                }
+
+                public Builder mixedPrecision(GradScaler gradScaler) {
+                    return gradScaler(gradScaler);
                 }
 
                 public Builder device(String device) {
@@ -2128,6 +2172,8 @@ public final class Gollek {
                             bestModelMonitorMetric,
                             bestModelMonitorMode,
                             gradientAccumulationSteps,
+                            mixedPrecision,
+                            gradScaler,
                             device,
                             metricFactories,
                             schedulerFactory,
@@ -2197,11 +2243,11 @@ public final class Gollek {
             };
         }
 
-        private static CanonicalTrainer.LossFunction presetLoss(TrainingPreset preset) {
+        private static TrainingLossFunction presetLoss(TrainingPreset preset) {
             return presetLoss(preset, null, null, null, null, null);
         }
 
-        private static CanonicalTrainer.LossFunction presetLoss(
+        private static TrainingLossFunction presetLoss(
                 TrainingPreset preset,
                 float[] crossEntropyClassWeights,
                 Float focalGamma,

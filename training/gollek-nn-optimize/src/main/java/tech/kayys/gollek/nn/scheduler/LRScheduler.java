@@ -77,7 +77,7 @@ public abstract class LRScheduler {
      * @return current learning rate
      */
     protected float getLearningRate() {
-        return optimizer.learningRate();
+        return SchedulerValidation.learningRate(optimizer.learningRate(), "learningRate");
     }
 
     /**
@@ -86,7 +86,7 @@ public abstract class LRScheduler {
      * @param lr new learning rate
      */
     protected void setLearningRate(float lr) {
-        optimizer.setLearningRate(lr);
+        optimizer.setLearningRate(SchedulerValidation.learningRate(lr, "learningRate"));
     }
 
     /**

@@ -13,6 +13,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -414,6 +416,110 @@ public class ModelConfig {
     }
 
     /**
+     * Build a direct-engine config from GGUF metadata.
+     *
+     * <p>GGUF exports store the same architectural facts as HuggingFace
+     * {@code config.json}, but under architecture-prefixed keys such as
+     * {@code llama.embedding_length} or {@code gemma4.attention.head_count}.
+     * This mapper keeps the Java-native GGUF path from using constructor
+     * defaults that accidentally describe a different model.</p>
+     */
+    public static ModelConfig fromGgufMetadata(Map<String, Object> metadata) {
+        Map<String, Object> meta = metadata != null ? metadata : Map.of();
+        String arch = metadataString(meta, "general.architecture")
+                .orElse("llama")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        if (arch.isBlank()) {
+            arch = "llama";
+        }
+
+        ModelConfig cfg = new ModelConfig();
+        cfg.modelType = arch;
+        cfg.architectures = List.of(ggufArchitectureClassName(arch));
+        cfg.maxPositionEmbeddings = metadataInt(meta, cfg.maxPositionEmbeddings,
+                arch + ".context_length",
+                "general.context_length");
+        cfg.hiddenSize = metadataInt(meta, cfg.hiddenSize,
+                arch + ".embedding_length",
+                "general.embedding_length");
+        cfg.numHiddenLayers = metadataInt(meta, cfg.numHiddenLayers,
+                arch + ".block_count",
+                "general.block_count");
+        cfg.intermediateSize = metadataMaxInt(meta, cfg.intermediateSize,
+                arch + ".feed_forward_length",
+                "general.feed_forward_length");
+        cfg.numAttentionHeads = metadataInt(meta, cfg.numAttentionHeads,
+                arch + ".attention.head_count",
+                "general.attention.head_count");
+        cfg.numKeyValueHeads = metadataInt(meta, cfg.numAttentionHeads,
+                arch + ".attention.head_count_kv",
+                "general.attention.head_count_kv");
+        cfg.vocabSize = metadataInt(meta,
+                metadataTokenCount(meta).orElse(cfg.vocabSize),
+                arch + ".vocab_size",
+                "general.vocab_size");
+        cfg.rmsNormEps = metadataDouble(meta, cfg.rmsNormEps,
+                arch + ".attention.layer_norm_rms_epsilon",
+                "general.attention.layer_norm_rms_epsilon");
+        cfg.ropeTheta = metadataDouble(meta, cfg.ropeTheta,
+                arch + ".rope.freq_base",
+                "general.rope.freq_base");
+        cfg.ropeThetaFull = cfg.ropeTheta;
+
+        Integer localHeadDim = metadataIntOptional(meta,
+                arch + ".attention.head_dim",
+                arch + ".attention.key_length_swa",
+                arch + ".rope.dimension_count_swa",
+                "general.attention.head_dim").orElse(null);
+        Integer globalHeadDim = metadataIntOptional(meta,
+                arch + ".attention.key_length",
+                arch + ".rope.dimension_count").orElse(null);
+        if (localHeadDim == null) {
+            localHeadDim = globalHeadDim != null
+                    ? globalHeadDim
+                    : (cfg.numAttentionHeads > 0 ? cfg.hiddenSize / cfg.numAttentionHeads : 0);
+        }
+        cfg.headDim = localHeadDim != null && localHeadDim > 0 ? localHeadDim : null;
+        if (globalHeadDim != null && globalHeadDim > 0 && !globalHeadDim.equals(cfg.headDim)) {
+            cfg.globalHeadDim = globalHeadDim;
+        }
+
+        metadataIntOptional(meta, arch + ".attention.sliding_window")
+                .ifPresent(value -> {
+                    cfg.slidingWindow = value;
+                    cfg.useSlidingWindow = value > 0;
+                });
+        metadataIntOptional(meta, arch + ".attention.shared_kv_layers")
+                .ifPresent(value -> cfg.numKvSharedLayers = value);
+        metadataIntOptional(meta, arch + ".embedding_length_per_layer_input")
+                .ifPresent(value -> cfg.hiddenSizePerLayerInput = value);
+        metadataDoubleOptional(meta, arch + ".rope.freq_base_swa")
+                .ifPresent(value -> {
+                    cfg.ropeLocalBaseFreq = value;
+                    cfg.ropeThetaSliding = value;
+                });
+        metadataDoubleOptional(meta, arch + ".final_logit_softcapping")
+                .ifPresent(value -> cfg.finalLogitSoftcapping = value);
+        metadataIntOptional(meta, "tokenizer.ggml.bos_token_id")
+                .ifPresent(value -> cfg.bosTokenId = value);
+        metadataIntOptional(meta, "tokenizer.ggml.eos_token_id")
+                .ifPresent(value -> {
+                    cfg.eosTokenId = value;
+                    cfg.eosTokenIds = List.of(value);
+                });
+        metadataIntOptional(meta, "tokenizer.ggml.padding_token_id")
+                .or(() -> metadataIntOptional(meta, "tokenizer.ggml.pad_token_id"))
+                .ifPresent(value -> cfg.padTokenId = value);
+
+        List<String> layerTypes = metadataLayerTypes(meta, arch + ".attention.sliding_window_pattern");
+        if (!layerTypes.isEmpty()) {
+            cfg.layerTypes = layerTypes;
+        }
+        return cfg;
+    }
+
+    /**
      * Check whether a model directory has a config.json.
      */
     public static boolean exists(Path modelDir) {
@@ -628,6 +734,160 @@ public class ModelConfig {
             values.add(node.asInt());
         }
         return values;
+    }
+
+    private static String ggufArchitectureClassName(String arch) {
+        String normalized = arch == null ? "" : arch.toLowerCase(Locale.ROOT);
+        if (normalized.contains("gemma4")) {
+            return "Gemma4ForConditionalGeneration";
+        }
+        if (normalized.contains("gemma3")) {
+            return "Gemma3ForCausalLM";
+        }
+        if (normalized.contains("gemma2")) {
+            return "Gemma2ForCausalLM";
+        }
+        if (normalized.contains("gemma")) {
+            return "GemmaForCausalLM";
+        }
+        if (normalized.contains("qwen3")) {
+            return "Qwen3ForCausalLM";
+        }
+        if (normalized.contains("qwen")) {
+            return "Qwen2ForCausalLM";
+        }
+        if (normalized.contains("mixtral")) {
+            return "MixtralForCausalLM";
+        }
+        if (normalized.contains("mistral")) {
+            return "MistralForCausalLM";
+        }
+        if (normalized.contains("phi3")) {
+            return "Phi3ForCausalLM";
+        }
+        if (normalized.contains("phi")) {
+            return "PhiForCausalLM";
+        }
+        return "LlamaForCausalLM";
+    }
+
+    private static Optional<String> metadataString(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        if (value == null) {
+            return Optional.empty();
+        }
+        String text = value.toString().trim();
+        return text.isEmpty() ? Optional.empty() : Optional.of(text);
+    }
+
+    private static int metadataInt(Map<String, Object> metadata, int fallback, String... keys) {
+        return metadataIntOptional(metadata, keys).orElse(fallback);
+    }
+
+    private static Optional<Integer> metadataIntOptional(Map<String, Object> metadata, String... keys) {
+        for (String key : keys) {
+            Optional<Integer> value = firstNumericInt(metadata.get(key));
+            if (value.isPresent()) {
+                return value;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static int metadataMaxInt(Map<String, Object> metadata, int fallback, String... keys) {
+        for (String key : keys) {
+            Optional<Integer> value = maxNumericInt(metadata.get(key));
+            if (value.isPresent()) {
+                return value.get();
+            }
+        }
+        return fallback;
+    }
+
+    private static double metadataDouble(Map<String, Object> metadata, double fallback, String... keys) {
+        return metadataDoubleOptional(metadata, keys).orElse(fallback);
+    }
+
+    private static Optional<Double> metadataDoubleOptional(Map<String, Object> metadata, String... keys) {
+        for (String key : keys) {
+            Optional<Double> value = firstNumericDouble(metadata.get(key));
+            if (value.isPresent()) {
+                return value;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Integer> metadataTokenCount(Map<String, Object> metadata) {
+        Object tokens = metadata.get("tokenizer.ggml.tokens");
+        if (tokens instanceof List<?> list) {
+            return list.isEmpty() ? Optional.empty() : Optional.of(list.size());
+        }
+        if (tokens != null && tokens.getClass().isArray()) {
+            return Optional.of(java.lang.reflect.Array.getLength(tokens));
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Integer> firstNumericInt(Object value) {
+        if (value instanceof Number number) {
+            return Optional.of(number.intValue());
+        }
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                Optional<Integer> numeric = firstNumericInt(item);
+                if (numeric.isPresent()) {
+                    return numeric;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Integer> maxNumericInt(Object value) {
+        if (value instanceof Number number) {
+            return Optional.of(number.intValue());
+        }
+        if (value instanceof List<?> list) {
+            Integer max = null;
+            for (Object item : list) {
+                Optional<Integer> numeric = firstNumericInt(item);
+                if (numeric.isPresent()) {
+                    max = max == null ? numeric.get() : Math.max(max, numeric.get());
+                }
+            }
+            return Optional.ofNullable(max);
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Double> firstNumericDouble(Object value) {
+        if (value instanceof Number number) {
+            return Optional.of(number.doubleValue());
+        }
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                Optional<Double> numeric = firstNumericDouble(item);
+                if (numeric.isPresent()) {
+                    return numeric;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static List<String> metadataLayerTypes(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        if (!(value instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(list.size());
+        for (Object item : list) {
+            if (item instanceof Boolean sliding) {
+                out.add(sliding ? "sliding_attention" : "full_attention");
+            }
+        }
+        return out.size() == list.size() ? List.copyOf(out) : List.of();
     }
 
     /** Resolved number of KV heads — defaults to numAttentionHeads if not set. */

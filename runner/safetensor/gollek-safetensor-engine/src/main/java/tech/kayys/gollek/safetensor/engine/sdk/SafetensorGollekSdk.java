@@ -171,7 +171,21 @@ public class SafetensorGollekSdk implements GollekSdk {
                         int idx = index.getAndIncrement();
                         boolean isFinal = response.getFinishReason() != null;
                         if (isFinal) {
-                            return StreamingInferenceChunk.finalChunk(requestId, idx, content);
+                            StreamingInferenceChunk.ChunkUsage usage = new StreamingInferenceChunk.ChunkUsage(
+                                    response.getInputTokens(),
+                                    response.getOutputTokens(),
+                                    response.getDurationMs());
+                            return new StreamingInferenceChunk(
+                                    requestId,
+                                    idx,
+                                    tech.kayys.gollek.spi.model.ModalityType.TEXT,
+                                    content,
+                                    null,
+                                    true,
+                                    "stop",
+                                    usage,
+                                    java.time.Instant.now(),
+                                    response.getMetadata());
                         }
                         return StreamingInferenceChunk.textDelta(requestId, idx, content);
                     });

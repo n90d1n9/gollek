@@ -215,6 +215,21 @@ public class RunCommand implements Runnable {
     @Option(names = { "--plugin" }, description = "Explicit plugin/engine to use (e.g. llamacpp, java, bnb)")
     public String pluginId;
 
+    @Option(names = { "--engine", "--gguf-engine" }, description = "GGUF engine mode: auto, java, llamacpp, benchmark")
+    String ggufEngine;
+
+    @Option(names = { "--backend" }, description = "GGUF backend to use for local fast path (metal or cpu)")
+    String ggufBackend;
+
+    @Option(names = { "--java-native" }, description = "Use the Java-native GGUF loader/probe path")
+    boolean javaNativeGguf;
+
+    @Option(names = { "--llamacpp", "--llama-cpp" }, description = "Use the llama.cpp GGUF engine")
+    boolean llamaCppGguf;
+
+    @Option(names = { "--benchmark", "--bench" }, description = "Compare Java-native GGUF probe with llama.cpp fallback")
+    boolean benchmarkGguf;
+
     @Override
     public void run() {
         try {
@@ -225,6 +240,10 @@ public class RunCommand implements Runnable {
             providerId = normalizeRequestedProvider(providerId);
             boolean providerExplicit = providerId != null && !providerId.isBlank();
             ensureBuiltinProviderRegistration();
+
+            if (tryStandaloneGgufFastPath()) {
+                return;
+            }
 
             // Check plugin availability first
             if (!pluginChecker.hasProviders() && !pluginChecker.hasRunnerPlugins()) {
@@ -590,6 +609,7 @@ public class RunCommand implements Runnable {
                 java.util.concurrent.atomic.AtomicReference<java.util.Map<String, Object>> metricsRef = new java.util.concurrent.atomic.AtomicReference<>();
                 java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
                 java.util.concurrent.atomic.AtomicLong firstTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
+                java.util.concurrent.atomic.AtomicLong lastTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
                 long streamStartTime = System.currentTimeMillis();
                 
                 sdk.streamCompletion(request)
@@ -623,7 +643,9 @@ public class RunCommand implements Runnable {
                                     if (delta != null) {
                                         boolean progressDelta = delta.startsWith("[") && delta.contains("]");
                                         if (!progressDelta && !delta.isEmpty()) {
-                                            firstTokenTime.compareAndSet(0, System.currentTimeMillis());
+                                            long now = System.currentTimeMillis();
+                                            firstTokenTime.compareAndSet(0, now);
+                                            lastTokenTime.set(now);
                                         }
                                         if (progressDelta) {
                                             if (!enableJsonSse) {
@@ -645,15 +667,18 @@ public class RunCommand implements Runnable {
                                     latch.countDown();
                                 },
                                 () -> {
-                                    long duration = System.currentTimeMillis() - streamStartTime;
+                                    long duration = observedStreamDurationMillis(
+                                            streamStartTime, System.currentTimeMillis(), lastTokenTime);
                                     handleOutputs(imageBuffer, audioBuffer);
                                     double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
+                                    Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
+                                    Map<String, Object> streamMetrics = observedStreamMetrics(
+                                            metricsRef.get(), tokenCount.get(), duration, ttftMs);
                                     if (enableJsonSse) {
                                         printOpenAiSseFinal(request.getRequestId(), request.getModel());
                                     } else {
-                                        uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps,
-                                                ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime), false);
-                                        uiRenderer.printBenchmarks(metricsRef.get(), false);
+                                        uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps, ttftMs, false);
+                                        uiRenderer.printBenchmarks(streamMetrics, false);
                                     }
                                     latch.countDown();
                                 });
@@ -1211,6 +1236,155 @@ public class RunCommand implements Runnable {
         return providerId != null && "mcp".equalsIgnoreCase(providerId.trim());
     }
 
+    boolean shouldTryStandaloneGgufFastPath() {
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        if (providerId != null && !providerId.isBlank() && !isGgufProviderAlias(providerId)) {
+            return false;
+        }
+        return isGgufProviderAlias(providerId)
+                || isGgufPluginAlias(pluginId)
+                || hasExplicitGgufEngine()
+                || forceGguf
+                || isGgufFormat(format)
+                || looksLikeGgufPath(modelFile)
+                || looksLikeGgufPath(modelPath)
+                || looksLikeGgufPath(modelId);
+    }
+
+    String[] buildStandaloneGgufFastRunArgs() {
+        List<String> args = new java.util.ArrayList<>();
+        args.add("run");
+        if (modelFile != null && !modelFile.isBlank()) {
+            args.add("--modelFile");
+            args.add(modelFile);
+        } else if (modelPath != null && !modelPath.isBlank()) {
+            args.add("--model-path");
+            args.add(modelPath);
+        } else if (modelId != null && !modelId.isBlank()) {
+            args.add("--model");
+            args.add(modelId);
+        }
+        if (prompt != null) {
+            args.add("--prompt");
+            args.add(prompt);
+        }
+        args.add("--max-tokens");
+        args.add(Integer.toString(maxTokens));
+        args.add("--temperature");
+        args.add(Double.toString(temperature));
+        args.add("--top-k");
+        args.add(Integer.toString(topK));
+        args.add("--top-p");
+        args.add(Double.toString(topP));
+
+        String engine = requestedGgufEngine();
+        if (engine != null && !engine.isBlank()) {
+            args.add("--engine");
+            args.add(engine);
+        }
+        String backend = requestedGgufBackend();
+        if (backend != null && !backend.isBlank()) {
+            args.add("--backend");
+            args.add(backend);
+        }
+        if (providerId != null && !providerId.isBlank()) {
+            args.add("--provider");
+            args.add(providerId);
+        } else {
+            args.add("--provider");
+            args.add("gguf");
+        }
+        return args.toArray(String[]::new);
+    }
+
+    private boolean tryStandaloneGgufFastPath() {
+        if (!shouldTryStandaloneGgufFastPath()) {
+            return false;
+        }
+        int status = GgufFastRun.run(buildStandaloneGgufFastRunArgs());
+        if (GgufFastRun.isFallbackToFullCliStatus(status)) {
+            return false;
+        }
+        if (status == 0) {
+            if (GgufFastRun.hardExitAfterRun()) {
+                GgufFastRun.hardExitProcess(0);
+            }
+            requestProcessExit();
+            return true;
+        }
+        System.exit(status);
+        return true;
+    }
+
+    private boolean hasExplicitGgufEngine() {
+        return javaNativeGguf
+                || llamaCppGguf
+                || benchmarkGguf
+                || (ggufEngine != null && !ggufEngine.isBlank());
+    }
+
+    private String requestedGgufEngine() {
+        if (benchmarkGguf) {
+            return "benchmark";
+        }
+        if (javaNativeGguf) {
+            return "java";
+        }
+        if (llamaCppGguf) {
+            return "llamacpp";
+        }
+        return ggufEngine == null ? null : ggufEngine.trim();
+    }
+
+    private String requestedGgufBackend() {
+        if (ggufBackend != null && !ggufBackend.isBlank()) {
+            return ggufBackend.trim();
+        }
+        if (parentCommand != null && parentCommand.isUseCpu()) {
+            return "cpu";
+        }
+        if (parentCommand != null && parentCommand.platform() != null && !parentCommand.platform().isBlank()) {
+            return parentCommand.platform().trim();
+        }
+        return null;
+    }
+
+    private boolean isGgufProviderAlias(String provider) {
+        if (provider == null || provider.isBlank()) {
+            return false;
+        }
+        String normalized = provider.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("gguf")
+                || normalized.equals("llamacpp")
+                || normalized.equals("llama.cpp")
+                || normalized.equals("llama-cpp")
+                || normalized.equals("java")
+                || normalized.equals("java-native")
+                || normalized.equals("jvm");
+    }
+
+    private boolean isGgufPluginAlias(String plugin) {
+        if (plugin == null || plugin.isBlank()) {
+            return false;
+        }
+        String normalized = plugin.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("gguf")
+                || normalized.equals("gguf-runner")
+                || normalized.equals("llamacpp")
+                || normalized.equals("llama.cpp")
+                || normalized.equals("llama-cpp");
+    }
+
+    private boolean isGgufFormat(String value) {
+        return value != null && value.trim().equalsIgnoreCase("gguf");
+    }
+
+    private boolean looksLikeGgufPath(String value) {
+        return value != null && value.trim().toLowerCase(Locale.ROOT).endsWith(".gguf");
+    }
+
     private String normalizeRequestedProvider(String rawProviderId) {
         if (rawProviderId == null) {
             return null;
@@ -1652,6 +1826,41 @@ public class RunCommand implements Runnable {
         return (double) (first - streamStartTimeMs);
     }
 
+    private static Map<String, Object> observedStreamMetrics(
+            Map<String, Object> metadata,
+            int outputTokens,
+            long durationMs,
+            Double ttftMs) {
+        Map<String, Object> metrics = metadata == null || metadata.isEmpty()
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(metadata);
+        if (outputTokens > 0) {
+            metrics.putIfAbsent("tokens.output", outputTokens);
+            double durationSeconds = Math.max(durationMs / 1000.0, 0.001);
+            metrics.putIfAbsent("bench.generation_tps", outputTokens / durationSeconds);
+            if (ttftMs != null) {
+                metrics.putIfAbsent("bench.ttft_ms", ttftMs);
+                if (outputTokens > 1 && durationMs > ttftMs) {
+                    metrics.putIfAbsent("bench.tpot_ms", (durationMs - ttftMs) / (outputTokens - 1));
+                }
+            }
+        } else if (ttftMs != null) {
+            metrics.putIfAbsent("bench.ttft_ms", ttftMs);
+        }
+        return metrics;
+    }
+
+    private static long observedStreamDurationMillis(
+            long streamStartTimeMs,
+            long completionTimeMs,
+            java.util.concurrent.atomic.AtomicLong lastTokenTimeMs) {
+        long last = lastTokenTimeMs != null ? lastTokenTimeMs.get() : 0L;
+        if (last >= streamStartTimeMs) {
+            return Math.max(1L, last - streamStartTimeMs);
+        }
+        return Math.max(1L, completionTimeMs - streamStartTimeMs);
+    }
+
     private static Double metadataDouble(Map<String, Object> metadata, String key) {
         if (metadata == null || metadata.isEmpty()) {
             return null;
@@ -1854,6 +2063,7 @@ public class RunCommand implements Runnable {
         java.util.concurrent.atomic.AtomicInteger tokenCount = new java.util.concurrent.atomic.AtomicInteger(0);
         java.util.concurrent.atomic.AtomicBoolean routePrinted = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicLong firstTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
+        java.util.concurrent.atomic.AtomicLong lastTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
         long streamStartTime = System.currentTimeMillis();
 
         streamingProvider.inferStream(providerRequest)
@@ -1890,7 +2100,9 @@ public class RunCommand implements Runnable {
                             if (delta != null) {
                                 boolean progressDelta = delta.startsWith("[") && delta.contains("]");
                                 if (!progressDelta && !delta.isEmpty()) {
-                                    firstTokenTime.compareAndSet(0, System.currentTimeMillis());
+                                    long now = System.currentTimeMillis();
+                                    firstTokenTime.compareAndSet(0, now);
+                                    lastTokenTime.set(now);
                                 }
                                 if (progressDelta) {
                                     if (!enableJsonSse) {
@@ -1908,15 +2120,18 @@ public class RunCommand implements Runnable {
                         },
                         error -> {
                             if (shouldIgnoreDirectProviderError(error, tokenCount.get())) {
-                                long duration = System.currentTimeMillis() - streamStartTime;
+                                long duration = observedStreamDurationMillis(
+                                        streamStartTime, System.currentTimeMillis(), lastTokenTime);
                                 handleOutputs(imageBuffer, audioBuffer);
                                 double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
+                                Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
+                                Map<String, Object> streamMetrics = observedStreamMetrics(
+                                        metricsRef.get(), tokenCount.get(), duration, ttftMs);
                                 if (!enableJsonSse) {
                                     System.err.println();
                                     System.err.println("Warning: ignored native provider shutdown bug after streaming output.");
-                                    uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps,
-                                            ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime), false);
-                                    uiRenderer.printBenchmarks(metricsRef.get(), false);
+                                    uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps, ttftMs, false);
+                                    uiRenderer.printBenchmarks(streamMetrics, false);
                                 }
                                 latch.countDown();
                                 return;
@@ -1926,15 +2141,18 @@ public class RunCommand implements Runnable {
                             latch.countDown();
                         },
                         () -> {
-                            long duration = System.currentTimeMillis() - streamStartTime;
+                            long duration = observedStreamDurationMillis(
+                                    streamStartTime, System.currentTimeMillis(), lastTokenTime);
                             handleOutputs(imageBuffer, audioBuffer);
                             double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
+                            Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
+                            Map<String, Object> streamMetrics = observedStreamMetrics(
+                                    metricsRef.get(), tokenCount.get(), duration, ttftMs);
                             if (enableJsonSse) {
                                 printOpenAiSseFinal(request.getRequestId(), request.getModel());
                             } else {
-                                uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps,
-                                        ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime), false);
-                                uiRenderer.printBenchmarks(metricsRef.get(), false);
+                                uiRenderer.printStats(tokenCount.get(), duration / 1000.0, tps, ttftMs, false);
+                                uiRenderer.printBenchmarks(streamMetrics, false);
                             }
                             latch.countDown();
                         });

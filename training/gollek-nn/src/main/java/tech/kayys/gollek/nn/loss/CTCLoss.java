@@ -1,5 +1,6 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
 
@@ -72,9 +73,14 @@ public final class CTCLoss {
                     "logProbs must be 3D [time, batch, classes], got shape: " + Arrays.toString(s));
         }
         int T = (int) s[0], N = (int) s[1], C = (int) s[2];
+        if (T <= 0 || N <= 0 || C <= 0) {
+            throw new IllegalArgumentException(
+                    "logProbs dimensions must be positive [time, batch, classes], got shape: " + Arrays.toString(s));
+        }
         if (blank >= C) {
             throw new IllegalArgumentException("blank index " + blank + " out of range [0, " + (C - 1) + "]");
         }
+        requireValidLogProbs(logProbs.data());
         long[] targetShape = targets.shape();
         if (targetShape.length != 2) {
             throw new IllegalArgumentException(
@@ -90,6 +96,7 @@ public final class CTCLoss {
         }
         float[] lp = logProbs.data(), tg = targets.data();
         float[] losses = new float[N];
+        float[] logProbGrad = logProbs.requiresGrad() ? new float[lp.length] : null;
         int maxTargetLength = (int) targetShape[1];
 
         for (int n = 0; n < N; n++) {
@@ -105,21 +112,51 @@ public final class CTCLoss {
                                 + maxTargetLength + "], got: " + tLen);
             }
             int[] target = new int[tLen];
-            for (int i = 0; i < tLen; i++)
-                target[i] = ClassIndexTargets.require(
+            for (int i = 0; i < tLen; i++) {
+                int label = ClassIndexTargets.require(
                         tg[n * maxTargetLength + i], C, "sample " + n + " target " + i);
+                if (label == blank) {
+                    throw new IllegalArgumentException(
+                            "CTC targets must not contain the blank label " + blank
+                                    + " at sample " + n + " target " + i);
+                }
+                target[i] = label;
+            }
+            int minimumInputLength = minimumInputLength(target);
+            if (minimumInputLength > iLen) {
+                throw new IllegalArgumentException(
+                        "target at sample " + n + " requires at least " + minimumInputLength
+                                + " input steps for CTC alignment, got input length " + iLen);
+            }
 
-            losses[n] = ctcForward(lp, n, N, C, iLen, target, tLen);
+            losses[n] = ctcForwardBackward(lp, n, N, C, iLen, target, logProbGrad);
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / N);
+        GradTensor out = GradTensor.scalar(VectorOps.sum(losses) / N);
+        if (logProbs.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("CTCLoss") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float scale = upstream.item() / N;
+                    float[] grad = new float[logProbGrad.length];
+                    for (int i = 0; i < grad.length; i++) {
+                        grad[i] = logProbGrad[i] * scale;
+                    }
+                    logProbs.backward(GradTensor.of(grad, logProbs.shape()));
+                }
+            });
+        }
+        return out;
     }
 
     /**
-     * CTC forward algorithm for a single sample using log-space computation.
-     * Returns the negative log-likelihood.
+     * CTC forward-backward algorithm for a single sample using log-space
+     * computation. Returns the negative log-likelihood and optionally accumulates
+     * gradients w.r.t. log probabilities.
      */
-    private float ctcForward(float[] lp, int n, int N, int C, int T,
-            int[] target, int S) {
+    private float ctcForwardBackward(float[] lp, int n, int N, int C, int T,
+            int[] target, float[] logProbGrad) {
+        int S = target.length;
         // Extended target with blanks: b t1 b t2 b ... tS b
         int L = 2 * S + 1;
         int[] ext = new int[L];
@@ -152,7 +189,83 @@ public final class CTCLoss {
         float logProb = alpha[(T - 1) * L + L - 1];
         if (L >= 2)
             logProb = logSumExp(logProb, alpha[(T - 1) * L + L - 2]);
+        if (logProb == NEG_INF) {
+            throw new IllegalArgumentException(
+                    "CTC target has no valid alignment for sample " + n + " and input length " + T);
+        }
+        if (logProbGrad != null) {
+            accumulateLogProbGradient(lp, logProbGrad, n, N, C, T, ext, alpha, logProb);
+        }
         return -logProb;
+    }
+
+    private void accumulateLogProbGradient(float[] lp, float[] logProbGrad, int n, int N, int C, int T,
+            int[] ext, float[] alpha, float logProb) {
+        int L = ext.length;
+        float[] beta = new float[T * L];
+        Arrays.fill(beta, NEG_INF);
+
+        beta[(T - 1) * L + L - 1] = 0.0f;
+        if (L >= 2) {
+            beta[(T - 1) * L + L - 2] = 0.0f;
+        }
+
+        for (int t = T - 2; t >= 0; t--) {
+            for (int s = 0; s < L; s++) {
+                float next = addEmission(beta[(t + 1) * L + s], lp[(t + 1) * N * C + n * C + ext[s]]);
+                if (s + 1 < L) {
+                    next = logSumExp(next,
+                            addEmission(beta[(t + 1) * L + s + 1],
+                                    lp[(t + 1) * N * C + n * C + ext[s + 1]]));
+                }
+                if (s + 2 < L && ext[s + 2] != blank && ext[s + 2] != ext[s]) {
+                    next = logSumExp(next,
+                            addEmission(beta[(t + 1) * L + s + 2],
+                                    lp[(t + 1) * N * C + n * C + ext[s + 2]]));
+                }
+                beta[t * L + s] = next;
+            }
+        }
+
+        for (int t = 0; t < T; t++) {
+            for (int s = 0; s < L; s++) {
+                float a = alpha[t * L + s];
+                float b = beta[t * L + s];
+                if (a == NEG_INF || b == NEG_INF) {
+                    continue;
+                }
+                int label = ext[s];
+                float posterior = (float) Math.exp(a + b - logProb);
+                logProbGrad[t * N * C + n * C + label] -= posterior;
+            }
+        }
+    }
+
+    private static float addEmission(float suffix, float logProbability) {
+        if (suffix == NEG_INF || logProbability == NEG_INF) {
+            return NEG_INF;
+        }
+        return suffix + logProbability;
+    }
+
+    private static int minimumInputLength(int[] target) {
+        int minimum = target.length;
+        for (int i = 1; i < target.length; i++) {
+            if (target[i] == target[i - 1]) {
+                minimum++;
+            }
+        }
+        return minimum;
+    }
+
+    private static void requireValidLogProbs(float[] logProbs) {
+        for (int i = 0; i < logProbs.length; i++) {
+            if (Float.isNaN(logProbs[i]) || logProbs[i] == Float.POSITIVE_INFINITY) {
+                throw new IllegalArgumentException(
+                        "logProbs must contain finite values or -Infinity, got "
+                                + logProbs[i] + " at index " + i);
+            }
+        }
     }
 
     private static float logSumExp(float a, float b) {

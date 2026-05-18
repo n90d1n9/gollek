@@ -62,7 +62,7 @@ public class MetalComputeKernel implements ComputeKernel {
 
     @Override
     public boolean isAvailable() {
-        return binding.isNativeAvailable();
+        return binding.isRuntimeActive();
     }
 
     // ── Memory Management ───────────────────────────────────────────────
@@ -262,6 +262,9 @@ public class MetalComputeKernel implements ComputeKernel {
             int result = binding.init();
             if (result != 0) {
                 throw new RuntimeException("Metal initialization failed with error code: " + result);
+            }
+            if (!binding.isRuntimeActive()) {
+                throw new RuntimeException("Metal initialization did not activate the native runtime");
             }
             initialized = true;
         }

@@ -1,6 +1,5 @@
 package tech.kayys.gollek.ml.nn.loss;
 
-import java.util.Arrays;
 import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 
@@ -66,15 +65,10 @@ public final class HuberLoss {
      * @return scalar mean Huber loss
      */
     public GradTensor compute(GradTensor pred, GradTensor target) {
-        if (!Arrays.equals(pred.shape(), target.shape())) {
-            throw new IllegalArgumentException(
-                    "predictions and targets shapes must match, got: " + Arrays.toString(pred.shape())
-                            + " vs " + Arrays.toString(target.shape()));
-        }
-
+        int n = RegressionLosses.requireSameFiniteNonEmpty(pred, target, "HuberLoss");
         float[] p = pred.data(), t = target.data();
-        float[] losses = new float[p.length];
-        for (int i = 0; i < p.length; i++) {
+        float[] losses = new float[n];
+        for (int i = 0; i < n; i++) {
             float diff = Math.abs(p[i] - t[i]);
             losses[i] = diff <= delta
                     ? 0.5f * diff * diff
@@ -85,15 +79,15 @@ public final class HuberLoss {
             total += loss;
         }
 
-        GradTensor out = GradTensor.scalar(total / p.length);
+        GradTensor out = GradTensor.scalar(total / n);
         if (pred.requiresGrad()) {
             out.requiresGrad(true);
             out.setGradFn(new Function.Context("HuberLoss") {
                 @Override
                 public void backward(GradTensor upstream) {
-                    float scale = upstream.item() / p.length;
-                    float[] grad = new float[p.length];
-                    for (int i = 0; i < p.length; i++) {
+                    float scale = upstream.item() / n;
+                    float[] grad = new float[n];
+                    for (int i = 0; i < n; i++) {
                         float diff = p[i] - t[i];
                         float absDiff = Math.abs(diff);
                         if (absDiff <= delta) {

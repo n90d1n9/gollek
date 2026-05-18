@@ -53,12 +53,12 @@ public class AdamW implements Optimizer {
     private int step = 0;
 
     private AdamW(Builder builder) {
-        this.parameters = builder.parameters;
-        this.learningRate = builder.lr;
-        this.beta1 = builder.beta1;
-        this.beta2 = builder.beta2;
-        this.epsilon = builder.eps;
-        this.weightDecay = builder.weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(builder.parameters);
+        this.learningRate = OptimizerValidation.learningRate(builder.lr);
+        this.beta1 = OptimizerValidation.beta(builder.beta1, "beta1");
+        this.beta2 = OptimizerValidation.beta(builder.beta2, "beta2");
+        this.epsilon = OptimizerValidation.epsilon(builder.eps);
+        this.weightDecay = OptimizerValidation.weightDecay(builder.weightDecay);
         this.amsgrad = builder.amsgrad;
 
         for (Parameter param : parameters) {
@@ -77,6 +77,7 @@ public class AdamW implements Optimizer {
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "AdamW");
         step++;
         float bc1 = (float) (1.0 - Math.pow(beta1, step));
         float bc2 = (float) (1.0 - Math.pow(beta2, step));
@@ -123,7 +124,7 @@ public class AdamW implements Optimizer {
     public float learningRate() { return learningRate; }
 
     @Override
-    public void setLearningRate(float lr) { this.learningRate = lr; }
+    public void setLearningRate(float lr) { this.learningRate = OptimizerValidation.learningRate(lr); }
 
     @Override
     public List<Parameter> parameters() { return parameters; }
@@ -170,7 +171,7 @@ public class AdamW implements Optimizer {
         requireFloatMatch(state.get("weightDecay"), weightDecay, "weightDecay");
         requireBooleanMatch(state.get("amsgrad"), amsgrad, "amsgrad");
         this.step = Math.max(0, readInt(state.get("step"), step));
-        this.learningRate = readFloat(state.get("learningRate"), learningRate);
+        this.learningRate = OptimizerValidation.learningRate(readFloat(state.get("learningRate"), learningRate));
 
         Object mState = state.get("m");
         if (mState == null) {

@@ -50,6 +50,8 @@ public final class GradientClipper {
      * @return the pre-clipping total gradient norm
      */
     public static float clipByNorm(List<Parameter> params, float maxNorm) {
+        OptimizerValidation.finitePositive(maxNorm, "maxNorm");
+        OptimizerValidation.requireStepInputs(params, "GradientClipper");
         // Compute total squared norm using VectorOps dot-product
         float totalSq = 0f;
         for (Parameter p : params) {
@@ -87,6 +89,12 @@ public final class GradientClipper {
      * @param maxVal maximum allowed gradient value
      */
     public static void clipByValue(List<Parameter> params, float minVal, float maxVal) {
+        OptimizerValidation.requireParameters(params);
+        if (!Float.isFinite(minVal) || !Float.isFinite(maxVal) || minVal > maxVal) {
+            throw new IllegalArgumentException(
+                    "clip range must be finite and ordered, got [" + minVal + ", " + maxVal + "]");
+        }
+        OptimizerValidation.requireStepInputs(params, "GradientClipper");
         for (Parameter p : params) {
             if (p.data().grad() == null)
                 continue;

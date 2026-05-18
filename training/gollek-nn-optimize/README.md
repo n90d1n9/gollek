@@ -10,6 +10,10 @@ Complete optimizer suite for neural network training with Adam, AdamW, SGD, and 
 - ✅ **RMSprop** - Root Mean Square Propagation
 - ✅ **Gradient Clipping** - By norm and by value
 - ✅ **Weight Decay** - L2 regularization (Adam/AdamW style)
+- ✅ **Optimizer Safety** - Finite hyperparameter, parameter, and gradient
+  checks before mutating optimizer state
+- ✅ **Knowledge Distillation** - Teacher-to-student KL plus hard-label cross
+  entropy with real gradients into student parameters
 - ✅ **Builder Pattern** - Fluent API for configuration
 
 ## Quick Start
@@ -77,6 +81,25 @@ Optimizer optimizer = RMSprop.builder(parameters, 0.01)
     .build();
 ```
 
+### Knowledge Distillation
+
+```java
+KnowledgeDistillation distiller = KnowledgeDistillation.builder()
+    .teacher(teacherModel)
+    .student(studentModel)
+    .optimizer(SGD.builder(studentModel.parameters(), 0.01f).build())
+    .temperature(4.0f)
+    .alpha(0.7f)  // soft KL weight; hard CE weight is 0.3
+    .epochs(5)
+    .build();
+
+distiller.fit(trainLoader);
+```
+
+The distillation loss uses `KL(softmax(teacher/T) || softmax(student/T)) * T^2`
+for the soft branch and standard CrossEntropy for hard labels. The teacher is
+detached, while the student receives gradients from both branches.
+
 ## Gradient Clipping
 
 Prevent exploding gradients:
@@ -88,6 +111,18 @@ optimizer.clipGradNorm(1.0);
 // Clip by value
 optimizer.clipGradValue(-5.0, 5.0);
 ```
+
+Optimizers and clippers fail fast on NaN/Inf gradients, invalid learning
+rates, invalid beta/momentum/epsilon values, and unordered clip ranges before
+updating parameters or optimizer moments. Adam's L2 weight decay leaves the
+original gradient buffer untouched, and Adagrad applies weight decay uniformly
+across the whole tensor.
+
+Learning-rate schedulers also validate finite configuration and checkpoint
+state before restoring. `StepLR`, `CosineAnnealingLR`,
+`WarmupCosineScheduler`, and `ReduceLROnPlateau` reject NaN learning rates,
+negative step counters, infinite plateau metrics, and mismatched scheduler
+payloads during resume.
 
 ## Optimizer Comparison
 

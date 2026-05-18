@@ -89,6 +89,7 @@ Gradle module paths, artifactIds, and package roots converge on the existing
 | `training:gollek-nn-cnn` | `gollek-ml-cnn` | `ml:gollek-ml-cnn` | `gollek-ml-cnn` | `tech.kayys.gollek.ml.cnn` | CNN family |
 | `training:gollek-train-transformer` | none consistent | `ml:gollek-ml-preprocessing` | `gollek-ml-preprocessing` | `tech.kayys.gollek.ml.preprocessing` | Current code is preprocessing / feature engineering, not transformer runtime |
 | split from `training:gollek-nn` | mixed in `gollek-ml-nn` | `ml:gollek-ml-transformer` | `gollek-ml-transformer` | `tech.kayys.gollek.ml.transformer` | Move transformer classes out of `gollek-nn` |
+| new family | none yet | `ml:gollek-ml-byte-latent` | `gollek-ml-byte-latent` | `tech.kayys.gollek.ml.bytelatent` | Byte-latent language modeling family for Fast Byte Latent Transformer style architectures; keep separate from diffusion OPD |
 
 ### Domain Packs
 

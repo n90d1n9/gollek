@@ -63,14 +63,15 @@ public final class Adadelta implements Optimizer {
      * @param eps        numerical stability constant (default 1e-6)
      */
     public Adadelta(List<Parameter> parameters, float lr, float rho, float eps) {
-        this.parameters = parameters;
-        this.lr = lr;
-        this.rho = rho;
-        this.eps = eps;
+        this.parameters = OptimizerValidation.requireParameters(parameters);
+        this.lr = OptimizerValidation.learningRate(lr);
+        this.rho = OptimizerValidation.beta(rho, "rho");
+        this.eps = OptimizerValidation.epsilon(eps);
     }
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "Adadelta");
         for (Parameter p : parameters) {
             if (p.data().grad() == null)
                 continue;
@@ -108,6 +109,6 @@ public final class Adadelta implements Optimizer {
 
     @Override
     public void setLearningRate(float lr) {
-        this.lr = lr;
+        this.lr = OptimizerValidation.learningRate(lr);
     }
 }

@@ -63,18 +63,26 @@ public final class CliMetalRuntime {
                 // Device name is diagnostic only.
             }
 
-            boolean nativeAvailable = false;
+            boolean nativeActive = false;
             try {
-                Method nativeMethod = binding.getClass().getMethod("isNativeAvailable");
+                Method nativeMethod = binding.getClass().getMethod("isRuntimeActive");
                 Object nativeValue = nativeMethod.invoke(binding);
                 if (nativeValue instanceof Boolean b) {
-                    nativeAvailable = b;
+                    nativeActive = b;
                 }
             } catch (NoSuchMethodException ignored) {
-                nativeAvailable = false;
+                try {
+                    Method nativeMethod = binding.getClass().getMethod("isNativeAvailable");
+                    Object nativeValue = nativeMethod.invoke(binding);
+                    if (nativeValue instanceof Boolean b) {
+                        nativeActive = b;
+                    }
+                } catch (NoSuchMethodException ignoredAgain) {
+                    nativeActive = false;
+                }
             }
 
-            return new NativeStatus(nativeAvailable, device, null);
+            return new NativeStatus(nativeActive, device, null);
         } catch (Throwable t) {
             String message = t.getMessage();
             return new NativeStatus(false, "unknown", message == null ? t.getClass().getSimpleName() : message);

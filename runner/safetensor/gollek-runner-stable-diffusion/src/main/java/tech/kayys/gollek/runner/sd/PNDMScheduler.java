@@ -9,6 +9,7 @@ import java.util.List;
  * PNDM Scheduler implementation in pure Java.
  */
 public class PNDMScheduler {
+    public static final String FAMILY = "pndm";
     private final int numTrainTimesteps = 1000;
     private final float betaStart = 0.00085f;
     private final float betaEnd = 0.012f;
@@ -43,6 +44,30 @@ public class PNDMScheduler {
 
     public List<Long> getTimesteps() {
         return timesteps;
+    }
+
+    public int[] timestepsArray() {
+        int[] values = new int[timesteps.size()];
+        for (int i = 0; i < timesteps.size(); i++) {
+            values[i] = timesteps.get(i).intValue();
+        }
+        return values;
+    }
+
+    public int stepCount() {
+        return timesteps.size();
+    }
+
+    public int trainingTimestepCount() {
+        return numTrainTimesteps;
+    }
+
+    public float[] alphasCumprod() {
+        return alphasCumprod.clone();
+    }
+
+    public String family() {
+        return FAMILY;
     }
 
     public AccelTensor step(AccelTensor modelOutput, long timestep, AccelTensor sample) {

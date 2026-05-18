@@ -33,6 +33,31 @@ class CrossEntropyLossTest {
         }, logits.grad().data(), 1e-6f);
     }
 
+    @Test
+    void crossEntropyRejectsInvalidConfigurationAndInputs() {
+        assertThrows(IllegalArgumentException.class, () -> new CrossEntropyLoss(new float[0]));
+        assertThrows(IllegalArgumentException.class, () -> new CrossEntropyLoss(new float[] {1.0f, 0.0f}));
+
+        CrossEntropyLoss loss = new CrossEntropyLoss();
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(3), GradTensor.zeros(3)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(0, 3), GradTensor.zeros(0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(1, 0), GradTensor.zeros(1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(2, 3), GradTensor.zeros(2, 1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(2, 3), GradTensor.zeros(3)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(
+                        GradTensor.of(new float[] {0.0f, Float.POSITIVE_INFINITY, 1.0f}, 1, 3),
+                        GradTensor.of(new float[] {0.0f}, 1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CrossEntropyLoss(new float[] {1.0f, 2.0f})
+                        .compute(GradTensor.zeros(1, 3), GradTensor.zeros(1)));
+    }
+
     private static float[] finiteDifferenceGradient(CrossEntropyLoss loss, float[] logitsData, GradTensor targets) {
         float[] grad = new float[logitsData.length];
         float eps = 1e-3f;

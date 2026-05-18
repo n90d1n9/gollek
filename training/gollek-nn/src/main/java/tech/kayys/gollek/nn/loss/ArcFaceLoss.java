@@ -1,5 +1,6 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import tech.kayys.gollek.ml.autograd.Function;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
 import tech.kayys.gollek.ml.nn.NNModule;
@@ -87,19 +88,18 @@ public final class ArcFaceLoss extends NNModule {
             throw new IllegalArgumentException(
                     "features featureDim " + D + " must match ArcFace weight featureDim " + weightShape[1]);
         }
-        float[] lb = labels.data();
-        if (lb.length != N) {
-            throw new IllegalArgumentException(
-                    "labels batch size must match features batch size, got: " + lb.length + " vs " + N);
-        }
+        float[] lb = ClassIndexTargets.requireVectorData(labels, N, "labels");
         int[] targetClasses = new int[N];
         for (int n = 0; n < N; n++) {
             targetClasses[n] = ClassIndexTargets.require(lb[n], C, n);
         }
 
         // Normalize weight vectors
-        float[] wn = normalizeRows(weight.data().data(), C, D);
-        float[] fn = normalizeRows(features.data(), N, D);
+        GradTensor weightTensor = weight.data();
+        float[] featureData = features.data();
+        float[] weightData = weightTensor.data();
+        float[] wn = normalizeRows(weightData, C, D);
+        float[] fn = normalizeRows(featureData, N, D);
 
         // Cosine similarity: [N, C]
         float[] cosTheta = VectorOps.matmul(fn, transpose(wn, C, D), N, D, C);
@@ -116,17 +116,84 @@ public final class ArcFaceLoss extends NNModule {
 
         // Scale and cross-entropy
         float[] losses = new float[N];
+        float[] softmax = new float[N * C];
         for (int n = 0; n < N; n++) {
             float max = Float.NEGATIVE_INFINITY;
             for (int c = 0; c < C; c++)
                 max = Math.max(max, scale * logits[n * C + c]);
             float sumExp = 0;
-            for (int c = 0; c < C; c++)
-                sumExp += Math.exp(scale * logits[n * C + c] - max);
+            for (int c = 0; c < C; c++) {
+                softmax[n * C + c] = (float) Math.exp(scale * logits[n * C + c] - max);
+                sumExp += softmax[n * C + c];
+            }
+            for (int c = 0; c < C; c++) {
+                softmax[n * C + c] /= sumExp;
+            }
             int cls = targetClasses[n];
             losses[n] = -(scale * logits[n * C + cls] - max - (float) Math.log(sumExp));
         }
-        return GradTensor.scalar(VectorOps.sum(losses) / N);
+        GradTensor out = GradTensor.scalar(VectorOps.sum(losses) / N);
+        if (features.requiresGrad() || weightTensor.requiresGrad()) {
+            out.requiresGrad(true);
+            out.setGradFn(new Function.Context("ArcFaceLoss") {
+                @Override
+                public void backward(GradTensor upstream) {
+                    float sampleScale = upstream.item() / N;
+                    float[] gradCos = new float[N * C];
+
+                    for (int n = 0; n < N; n++) {
+                        int targetClass = targetClasses[n];
+                        for (int c = 0; c < C; c++) {
+                            float grad = softmax[n * C + c];
+                            if (c == targetClass) {
+                                grad -= 1.0f;
+                            }
+                            grad *= scale * sampleScale;
+
+                            if (c == targetClass) {
+                                float cos = cosTheta[n * C + c];
+                                float sin = (float) Math.sqrt(Math.max(0.0f, 1.0f - cos * cos));
+                                float safeSin = Math.max(sin, 1e-6f);
+                                grad *= cosMargin + (cos * sinMargin / safeSin);
+                            }
+                            gradCos[n * C + c] = grad;
+                        }
+                    }
+
+                    float[] gradFn = new float[N * D];
+                    for (int n = 0; n < N; n++) {
+                        for (int d = 0; d < D; d++) {
+                            float grad = 0.0f;
+                            for (int c = 0; c < C; c++) {
+                                grad += gradCos[n * C + c] * wn[c * D + d];
+                            }
+                            gradFn[n * D + d] = grad;
+                        }
+                    }
+
+                    float[] gradWn = new float[C * D];
+                    for (int c = 0; c < C; c++) {
+                        for (int d = 0; d < D; d++) {
+                            float grad = 0.0f;
+                            for (int n = 0; n < N; n++) {
+                                grad += gradCos[n * C + c] * fn[n * D + d];
+                            }
+                            gradWn[c * D + d] = grad;
+                        }
+                    }
+
+                    if (features.requiresGrad()) {
+                        features.backward(GradTensor.of(denormalizeRowGradient(gradFn, featureData, N, D),
+                                features.shape()));
+                    }
+                    if (weightTensor.requiresGrad()) {
+                        weightTensor.backward(GradTensor.of(denormalizeRowGradient(gradWn, weightData, C, D),
+                                weightTensor.shape()));
+                    }
+                }
+            });
+        }
+        return out;
     }
 
     @Override
@@ -145,6 +212,30 @@ public final class ArcFaceLoss extends NNModule {
                 out[r * cols + c] = m[r * cols + c] / norm;
         }
         return out;
+    }
+
+    private static float[] denormalizeRowGradient(float[] gradNormalized, float[] raw, int rows, int cols) {
+        float[] gradRaw = new float[rows * cols];
+        for (int r = 0; r < rows; r++) {
+            int base = r * cols;
+            float squaredNorm = 0.0f;
+            float dot = 0.0f;
+            for (int c = 0; c < cols; c++) {
+                float value = raw[base + c];
+                squaredNorm += value * value;
+                dot += gradNormalized[base + c] * value;
+            }
+            float normWithoutEps = (float) Math.sqrt(squaredNorm);
+            float norm = normWithoutEps + 1e-8f;
+            for (int c = 0; c < cols; c++) {
+                float grad = gradNormalized[base + c] / norm;
+                if (normWithoutEps > 1e-12f) {
+                    grad -= raw[base + c] * dot / (normWithoutEps * norm * norm);
+                }
+                gradRaw[base + c] = grad;
+            }
+        }
+        return gradRaw;
     }
 
     private static float[] transpose(float[] m, int rows, int cols) {

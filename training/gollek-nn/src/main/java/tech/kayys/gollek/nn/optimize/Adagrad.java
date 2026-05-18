@@ -59,14 +59,15 @@ public final class Adagrad implements Optimizer {
      * @param weightDecay L2 regularization coefficient
      */
     public Adagrad(List<Parameter> parameters, float lr, float eps, float weightDecay) {
-        this.parameters = parameters;
-        this.lr = lr;
-        this.eps = eps;
-        this.weightDecay = weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(parameters);
+        this.lr = OptimizerValidation.learningRate(lr);
+        this.eps = OptimizerValidation.epsilon(eps);
+        this.weightDecay = OptimizerValidation.weightDecay(weightDecay);
     }
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "Adagrad");
         for (Parameter p : parameters) {
             if (p.data().grad() == null)
                 continue;
@@ -75,22 +76,8 @@ public final class Adagrad implements Optimizer {
             int len = theta.length;
             float[] G = sumSq.computeIfAbsent(p, k -> new float[len]);
 
-            // G += g² then θ -= lr / (√G + ε) * g — vectorized
-            int i = 0;
-            int bound = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED.loopBound(len);
-            var SPECIES = jdk.incubator.vector.FloatVector.SPECIES_PREFERRED;
-            var lrV = jdk.incubator.vector.FloatVector.broadcast(SPECIES, lr);
-            var epsV = jdk.incubator.vector.FloatVector.broadcast(SPECIES, eps);
-
-            for (; i < bound; i += SPECIES.length()) {
-                var g = jdk.incubator.vector.FloatVector.fromArray(SPECIES, grad, i);
-                var Gi = jdk.incubator.vector.FloatVector.fromArray(SPECIES, G, i);
-                var newG = Gi.add(g.mul(g));
-                newG.intoArray(G, i);
-                var d = jdk.incubator.vector.FloatVector.fromArray(SPECIES, theta, i);
-                d.sub(lrV.mul(g).div(newG.sqrt().add(epsV))).intoArray(theta, i);
-            }
-            for (; i < len; i++) {
+            // Keep weight decay consistent for every element instead of only the scalar tail.
+            for (int i = 0; i < len; i++) {
                 float g = grad[i] + weightDecay * theta[i];
                 G[i] += g * g;
                 theta[i] -= lr / ((float) Math.sqrt(G[i]) + eps) * g;
@@ -115,6 +102,6 @@ public final class Adagrad implements Optimizer {
 
     @Override
     public void setLearningRate(float lr) {
-        this.lr = lr;
+        this.lr = OptimizerValidation.learningRate(lr);
     }
 }

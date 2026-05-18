@@ -1,8 +1,22 @@
 package tech.kayys.gollek.ml.nn.loss;
 
+import tech.kayys.gollek.ml.autograd.GradTensor;
+
+import java.util.Arrays;
+
 final class ClassIndexTargets {
 
     private ClassIndexTargets() {
+    }
+
+    static float[] requireVectorData(GradTensor targets, int batch, String name) {
+        long[] shape = targets.shape();
+        if (shape.length != 1 || shape[0] != batch) {
+            throw new IllegalArgumentException(
+                    name + " must be a 1D class-index tensor with shape [" + batch + "], got shape: "
+                            + Arrays.toString(shape));
+        }
+        return targets.data();
     }
 
     static int require(float value, int numClasses, int sampleIndex) {

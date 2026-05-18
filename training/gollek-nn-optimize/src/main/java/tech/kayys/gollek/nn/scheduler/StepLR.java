@@ -56,12 +56,9 @@ public class StepLR extends LRScheduler {
         if (stepSize <= 0) {
             throw new IllegalArgumentException("stepSize must be positive, got: " + stepSize);
         }
-        if (gamma <= 0) {
-            throw new IllegalArgumentException("gamma must be positive, got: " + gamma);
-        }
-        this.initialLr = optimizer.learningRate();
+        this.initialLr = SchedulerValidation.learningRate(optimizer.learningRate(), "initialLr");
         this.stepSize = stepSize;
-        this.gamma = gamma;
+        this.gamma = SchedulerValidation.positive(gamma, "gamma");
     }
 
     /**
@@ -110,11 +107,12 @@ public class StepLR extends LRScheduler {
             throw new IllegalArgumentException(
                     "Checkpoint scheduler mismatch: expected StepLR but got " + name);
         }
-        requireFloatMatch(state.get("initialLr"), initialLr, "initialLr");
-        requireIntMatch(state.get("stepSize"), stepSize, "stepSize");
-        requireFloatMatch(state.get("gamma"), gamma, "gamma");
-        this.step = Math.max(0, readInt(state.get("step"), step));
-        setLearningRate(readFloat(state.get("currentLr"), computeLearningRateForStep(this.step)));
+        SchedulerValidation.requireFloatMatch(state.get("initialLr"), initialLr, "StepLR", "initialLr");
+        SchedulerValidation.requireIntMatch(state.get("stepSize"), stepSize, "StepLR", "stepSize");
+        SchedulerValidation.requireFloatMatch(state.get("gamma"), gamma, "StepLR", "gamma");
+        this.step = SchedulerValidation.readNonNegativeInt(state.get("step"), step, "StepLR", "step");
+        setLearningRate(SchedulerValidation.readLearningRate(
+                state.get("currentLr"), computeLearningRateForStep(this.step), "StepLR", "currentLr"));
     }
 
     private float computeLearningRateForStep(int targetStep) {
@@ -124,58 +122,6 @@ public class StepLR extends LRScheduler {
             newLr *= gamma;
         }
         return newLr;
-    }
-
-    private static void requireIntMatch(Object value, int expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        int loaded = readInt(value, expected);
-        if (loaded != expected) {
-            throw new IllegalArgumentException(
-                    "Invalid StepLR checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static void requireFloatMatch(Object value, float expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        float loaded = readFloat(value, expected);
-        if (Math.abs(loaded - expected) > 1e-7f) {
-            throw new IllegalArgumentException(
-                    "Invalid StepLR checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static int readInt(Object value, int fallback) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Integer.parseInt(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static float readFloat(Object value, float fallback) {
-        if (value instanceof Number number) {
-            return number.floatValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Float.parseFloat(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
     }
 
     @Override

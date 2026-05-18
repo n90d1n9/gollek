@@ -66,7 +66,7 @@ import java.util.Map;
  * <h2>Unified Memory Architecture</h2>
  * <p>On Apple Silicon all {@link MemorySegment} allocations ({@link Arena#ofShared()} or
  * {@link FileChannel#map}) land in unified DRAM shared by CPU and GPU. The
- * {@code gollek_metal_bridge.m} bridge calls {@code newBufferWithBytesNoCopy}
+ * {@code gollek_metal_buffers.m} wraps pointers with {@code newBufferWithBytesNoCopy}
  * to give Metal a {@code MTLStorageModeShared} view — <b>zero copy</b>.
  * Gollek's K/V pool ({@link tech.kayys.gollek.kvcache.PhysicalBlockPool#rawKPool()})
  * is already in off-heap memory, so KV cache accesses are zero-copy too.
@@ -88,7 +88,7 @@ import java.util.Map;
  * <h3>Build the Metal bridge</h3>
  * <pre>
  *   make -C src/main/cpp/metal
- *   # Compiles gollek_metal_bridge.m + gollek_metal_fa4.m into one dylib
+ *   # Compiles the modular Metal runtime, matvec, attention, and FA4 sources into one dylib
  * </pre>
  */
 @ApplicationScoped
@@ -223,6 +223,9 @@ public class MetalRunner extends AbstractGollekRunner {
             if (err != 0) throw new RunnerInitializationException(
                     ErrorCode.INIT_NATIVE_LIBRARY_FAILED.name(),
                     "gollek_metal_init() returned " + err);
+            if (!metal.isRuntimeActive()) throw new RunnerInitializationException(
+                    ErrorCode.INIT_NATIVE_LIBRARY_FAILED.name(),
+                    "gollek_metal_init() fell back to CPU; native Metal runtime is not active");
         }
 
         log.infof("[Metal] Device: %s — unified=%s UMA=%.1f GB sdpa=%s bf16=%s mode=%s",

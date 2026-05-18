@@ -78,18 +78,10 @@ public class L1Loss {
      * @throws IllegalArgumentException if shapes do not match
      */
     public GradTensor compute(GradTensor predictions, GradTensor targets) {
-        long[] pShape = predictions.shape();
-        long[] tShape = targets.shape();
-
-        if (!java.util.Arrays.equals(pShape, tShape)) {
-            throw new IllegalArgumentException(
-                "predictions and targets shapes must match, got: " + java.util.Arrays.toString(pShape) +
-                " vs " + java.util.Arrays.toString(tShape));
-        }
+        int n = RegressionLosses.requireSameFiniteNonEmpty(predictions, targets, "L1Loss");
 
         float[] pData = predictions.data();
         float[] tData = targets.data();
-        int n = pData.length;
 
         float totalLoss = 0;
         for (int i = 0; i < n; i++) {

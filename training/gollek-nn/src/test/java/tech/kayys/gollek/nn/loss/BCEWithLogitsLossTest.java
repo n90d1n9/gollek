@@ -42,10 +42,26 @@ class BCEWithLogitsLossTest {
     }
 
     @Test
-    void bceWithLogitsRejectsNonBinaryOrNonFiniteTargets() {
+    void bceWithLogitsRejectsInvalidConfigurationAndInputs() {
+        assertThrows(IllegalArgumentException.class, () -> new BCEWithLogitsLoss(Float.NaN));
+        assertThrows(IllegalArgumentException.class, () -> new BCEWithLogitsLoss(0.0f));
+        assertThrows(IllegalArgumentException.class, () -> new BCEWithLogitsLoss(new float[0]));
+        assertThrows(IllegalArgumentException.class, () -> new BCEWithLogitsLoss(new float[] {1.0f, -1.0f}));
+
         BCEWithLogitsLoss loss = new BCEWithLogitsLoss();
         GradTensor logits = GradTensor.zeros(2);
 
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(logits, GradTensor.zeros(1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(GradTensor.zeros(0), GradTensor.zeros(0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new BCEWithLogitsLoss(new float[] {1.0f, 2.0f})
+                        .compute(GradTensor.zeros(2, 3), GradTensor.zeros(2, 3)));
+        assertThrows(IllegalArgumentException.class,
+                () -> loss.compute(
+                        GradTensor.of(new float[] {0f, Float.POSITIVE_INFINITY}, 2),
+                        GradTensor.of(new float[] {0f, 1f}, 2)));
         assertThrows(IllegalArgumentException.class,
                 () -> loss.compute(logits, GradTensor.of(new float[] {0f, 0.5f}, 2)));
         assertThrows(IllegalArgumentException.class,

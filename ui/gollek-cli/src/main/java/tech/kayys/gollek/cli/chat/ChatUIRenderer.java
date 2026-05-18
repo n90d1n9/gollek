@@ -108,25 +108,71 @@ public class ChatUIRenderer {
 
         Double loadMs = metaDouble(metadata, "bench.load_ms");
         Double prefillTps = metaDouble(metadata, "bench.prefill_tps");
+        Double prefillMsPerToken = metaDouble(metadata, "bench.prefill_ms_per_token");
         Double genTps = metaDouble(metadata, "bench.generation_tps");
+        Double decodeTps = metaDouble(metadata, "bench.decode_tps");
         Double ttftMs = metaDouble(metadata, "bench.ttft_ms");
         Double tpotMs = metaDouble(metadata, "bench.tpot_ms");
         Integer inputTokens = metaInt(metadata, "tokens.input");
         Integer outputTokens = metaInt(metadata, "tokens.output");
+        Integer decodeTokens = metaInt(metadata, "tokens.decode");
 
         if (loadMs != null)
             System.out.printf(DIM + "  load time      = %9.2f ms" + RESET + "%n", loadMs);
         if (prefillTps != null && inputTokens != null) {
-            System.out.printf(DIM + "  prompt eval    = %9.2f t/s (%d tokens)" + RESET + "%n", prefillTps, inputTokens);
+            if (prefillMsPerToken != null) {
+                System.out.printf(DIM + "  prompt eval    = %9.2f t/s (%d tokens, %.2f ms/tok)" + RESET + "%n",
+                        prefillTps, inputTokens, prefillMsPerToken);
+            } else {
+                System.out.printf(DIM + "  prompt eval    = %9.2f t/s (%d tokens)" + RESET + "%n", prefillTps, inputTokens);
+            }
         }
         if (genTps != null && outputTokens != null) {
             System.out.printf(DIM + "  generation     = %9.2f t/s (%d tokens)" + RESET + "%n", genTps, outputTokens);
+        }
+        if (decodeTps != null && decodeTokens != null) {
+            System.out.printf(DIM + "  decode         = %9.2f t/s (%d steps)" + RESET + "%n", decodeTps, decodeTokens);
         }
         if (ttftMs != null)
             System.out.printf(DIM + "  latency (ttft) = %9.2f ms" + RESET + "%n", ttftMs);
         if (tpotMs != null)
             System.out.printf(DIM + "  token latency  = %9.2f ms/token" + RESET + "%n", tpotMs);
+        if (Boolean.getBoolean("gollek.profile")) {
+            printProfileBreakdown(metadata);
+        }
         System.out.println();
+    }
+
+    private void printProfileBreakdown(Map<String, Object> metadata) {
+        Double prefillMs = metaDouble(metadata, "profile_prefill_ms");
+        Double decodeMs = metaDouble(metadata, "profile_decode_ms");
+        Double samplingMs = metaDouble(metadata, "profile_sampling_ms");
+        Double attentionMs = metaDouble(metadata, "profile_attention_ms");
+        Double ffnMs = metaDouble(metadata, "profile_ffn_ms");
+        Double logitsMs = metaDouble(metadata, "profile_logits_ms");
+        Double logitsCopyMs = metaDouble(metadata, "profile_logits_materialization_ms");
+
+        boolean hasBreakdown = prefillMs != null || decodeMs != null || samplingMs != null
+                || attentionMs != null || ffnMs != null || logitsMs != null || logitsCopyMs != null;
+        if (!hasBreakdown) {
+            return;
+        }
+
+        System.out.println(DIM + "  profile:" + RESET);
+        if (prefillMs != null)
+            System.out.printf(DIM + "    prefill       = %9.2f ms" + RESET + "%n", prefillMs);
+        if (decodeMs != null)
+            System.out.printf(DIM + "    decode        = %9.2f ms" + RESET + "%n", decodeMs);
+        if (samplingMs != null)
+            System.out.printf(DIM + "    sampling      = %9.2f ms" + RESET + "%n", samplingMs);
+        if (attentionMs != null)
+            System.out.printf(DIM + "    attention     = %9.2f ms" + RESET + "%n", attentionMs);
+        if (ffnMs != null)
+            System.out.printf(DIM + "    ffn           = %9.2f ms" + RESET + "%n", ffnMs);
+        if (logitsMs != null)
+            System.out.printf(DIM + "    logits        = %9.2f ms" + RESET + "%n", logitsMs);
+        if (logitsCopyMs != null)
+            System.out.printf(DIM + "    logits copy   = %9.2f ms" + RESET + "%n", logitsCopyMs);
     }
 
     private static Double metaDouble(Map<String, Object> metadata, String key) {

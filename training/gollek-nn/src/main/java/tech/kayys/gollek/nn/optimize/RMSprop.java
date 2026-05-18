@@ -47,12 +47,12 @@ public class RMSprop implements Optimizer {
     private final Map<Parameter, float[]> velocity = new HashMap<>();
 
     private RMSprop(Builder builder) {
-        this.parameters = builder.parameters;
-        this.learningRate = builder.lr;
-        this.alpha = builder.alpha;
-        this.epsilon = builder.eps;
-        this.weightDecay = builder.weightDecay;
-        this.momentum = builder.momentum;
+        this.parameters = OptimizerValidation.requireParameters(builder.parameters);
+        this.learningRate = OptimizerValidation.learningRate(builder.lr);
+        this.alpha = OptimizerValidation.beta(builder.alpha, "alpha");
+        this.epsilon = OptimizerValidation.epsilon(builder.eps);
+        this.weightDecay = OptimizerValidation.weightDecay(builder.weightDecay);
+        this.momentum = OptimizerValidation.momentum(builder.momentum);
 
         for (Parameter param : parameters) {
             int size = (int) param.data().numel();
@@ -69,6 +69,7 @@ public class RMSprop implements Optimizer {
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "RMSprop");
         for (Parameter param : parameters) {
             if (param.grad() == null) continue;
 
@@ -100,7 +101,7 @@ public class RMSprop implements Optimizer {
     }
 
     @Override public float learningRate() { return learningRate; }
-    @Override public void setLearningRate(float lr) { this.learningRate = lr; }
+    @Override public void setLearningRate(float lr) { this.learningRate = OptimizerValidation.learningRate(lr); }
     @Override public List<Parameter> parameters() { return parameters; }
 
     @Override
@@ -140,7 +141,7 @@ public class RMSprop implements Optimizer {
         requireFloatMatch(state.get("epsilon"), epsilon, "epsilon");
         requireFloatMatch(state.get("weightDecay"), weightDecay, "weightDecay");
         requireFloatMatch(state.get("momentum"), momentum, "momentum");
-        this.learningRate = readFloat(state.get("learningRate"), learningRate);
+        this.learningRate = OptimizerValidation.learningRate(readFloat(state.get("learningRate"), learningRate));
 
         Object squareAvgState = state.get("squareAvg");
         if (squareAvgState == null) {

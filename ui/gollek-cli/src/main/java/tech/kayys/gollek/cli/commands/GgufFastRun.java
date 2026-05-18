@@ -47,30 +47,45 @@ public final class GgufFastRun {
     private static final int COMMAND_ERROR = 2;
     private static final String DAEMON_MAGIC = "GOLLEK_GGUF_FAST_DAEMON_V1";
     private static final String DAEMON_STOP_MAGIC = "GOLLEK_GGUF_FAST_DAEMON_STOP_V1";
+    private static final String DAEMON_PREWARM_MAGIC = "GOLLEK_GGUF_FAST_DAEMON_PREWARM_V1";
     private static final ThreadLocal<Boolean> REQUEST_TIMING = new ThreadLocal<>();
 
     private GgufFastRun() {
     }
 
+    static boolean isFallbackToFullCliStatus(int status) {
+        return status == FALLBACK_TO_FULL_CLI;
+    }
+
     public static void main(String[] args) {
         if (args.length > 0 && "__daemon".equals(args[0])) {
-            Runtime.getRuntime().halt(runDaemon());
+            hardExitProcess(runDaemon());
             return;
         }
         if (args.length > 0 && ("__daemon-stop".equals(args[0]) || "__gguf-daemon-stop".equals(args[0]))) {
             System.exit(stopDaemon());
             return;
         }
+        if (args.length > 0 && isPrewarmCommand(args[0])) {
+            System.exit(prewarm(args));
+            return;
+        }
         int status = run(args);
         if (status != 0) {
             System.exit(status);
         }
+        if (hardExitAfterRun()) {
+            hardExitProcess(0);
+        }
     }
 
-    private static int run(String[] args) {
+    static int run(String[] args) {
         try {
             FastArgs parsed = FastArgs.parse(args);
             if (!parsed.supported()) {
+                return FALLBACK_TO_FULL_CLI;
+            }
+            if (hasKnownNonGgufTarget(parsed)) {
                 return FALLBACK_TO_FULL_CLI;
             }
             Optional<Path> modelPath = resolveGgufModel(parsed);
@@ -91,6 +106,160 @@ public final class GgufFastRun {
             }
             return FALLBACK_TO_FULL_CLI;
         }
+    }
+
+    static int prewarm(String[] args) {
+        try {
+            if (isHelpRequest(args)) {
+                printPrewarmUsage(System.out);
+                return 0;
+            }
+            String[] runArgs = prewarmRunArgs(args);
+            FastArgs parsed = FastArgs.parse(runArgs);
+            if (parsed.hasNonGgufProvider()) {
+                return FALLBACK_TO_FULL_CLI;
+            }
+            if (!parsed.supported()) {
+                printPrewarmUsage(System.err);
+                return COMMAND_ERROR;
+            }
+            EngineMode engine = parsed.engineMode();
+            if (engine == EngineMode.JAVA || engine == EngineMode.BENCHMARK) {
+                System.err.println("GGUF daemon prewarm requires the llama.cpp fast path.");
+                return COMMAND_ERROR;
+            }
+            if (resolveGgufModel(parsed).isEmpty()) {
+                if (hasKnownNonGgufTarget(parsed)) {
+                    return FALLBACK_TO_FULL_CLI;
+                }
+                System.err.println("GGUF daemon prewarm could not resolve a GGUF model.");
+                return COMMAND_ERROR;
+            }
+            OptionalInt status = requestDaemonPrewarm(runArgs);
+            return status.orElse(COMMAND_ERROR);
+        } catch (Throwable throwable) {
+            System.err.println("GGUF daemon prewarm failed: " + briefMessage(throwable));
+            if (Boolean.getBoolean("gollek.gguf.fast_run.debug")) {
+                throwable.printStackTrace(System.err);
+            }
+            return COMMAND_ERROR;
+        }
+    }
+
+    private static boolean hasKnownNonGgufTarget(FastArgs args) {
+        if (args.modelFile != null && hasNonGgufExtension(args.modelFile)) {
+            return true;
+        }
+        if (args.model != null && hasNonGgufExtension(args.model)) {
+            return true;
+        }
+        if (args.model != null) {
+            Optional<Path> direct = resolvePath(Path.of(args.model));
+            if (direct.isPresent()) {
+                return false;
+            }
+            try {
+                Optional<LocalModelIndex.Entry> indexed = LocalModelIndex.find(args.model);
+                if (indexed.isPresent()) {
+                    String format = indexed.get().format;
+                    return format != null && !format.isBlank() && !"gguf".equals(format.trim().toLowerCase(Locale.ROOT));
+                }
+            } catch (Throwable ignored) {
+                // The full CLI can still resolve unknown references after this lightweight fallback.
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNonGgufExtension(String value) {
+        String normalized = value.replace('\\', '/').toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".litertlm")
+                || normalized.endsWith(".task")
+                || normalized.endsWith(".tflite")
+                || normalized.endsWith(".safetensors")
+                || normalized.endsWith(".safetensor")
+                || normalized.endsWith(".onnx")
+                || normalized.endsWith(".pt")
+                || normalized.endsWith(".pth")
+                || normalized.endsWith(".bin");
+    }
+
+    private static void printPrewarmUsage(PrintStream out) {
+        out.println("Usage: gollek prewarm --model MODEL [--prompt TEXT] [--max-tokens N] [--backend metal|cpu]");
+        out.println("       gollek warmup  --model MODEL [--prompt TEXT] [--max-tokens N] [--backend metal|cpu]");
+        out.println();
+        out.println("Preloads the local llama.cpp GGUF daemon and builds the first prompt cache so the next");
+        out.println("matching gollek run can reuse the Metal/CPU session instead of paying cold-start cost.");
+    }
+
+    private static boolean isHelpRequest(String[] args) {
+        for (String arg : args) {
+            if ("--help".equals(arg) || "-h".equals(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String[] prewarmRunArgs(String[] args) {
+        List<String> normalized = new ArrayList<>();
+        int startIndex = 0;
+        if (args.length > 0 && ("run".equals(args[0]) || isPrewarmCommand(args[0]))) {
+            startIndex = 1;
+        }
+        normalized.add("run");
+        boolean hasPrompt = false;
+        boolean hasMaxTokens = false;
+        boolean hasProvider = false;
+        boolean hasEngine = false;
+        for (int i = startIndex; i < args.length; i++) {
+            String arg = args[i];
+            normalized.add(arg);
+            String option = arg;
+            int eq = arg.indexOf('=');
+            if (arg.startsWith("--") && eq > 0) {
+                option = arg.substring(0, eq);
+            }
+            if (option.equals("--prompt") || option.equals("-p")) {
+                hasPrompt = true;
+            } else if (option.equals("--max-tokens")) {
+                hasMaxTokens = true;
+            } else if (option.equals("--provider")) {
+                hasProvider = true;
+            } else if (option.equals("--engine") || option.equals("--gguf-engine")
+                    || option.equals("--llamacpp") || option.equals("--llama-cpp")) {
+                hasEngine = true;
+            }
+        }
+        if (!hasPrompt) {
+            normalized.add("--prompt");
+            normalized.add(firstNonBlank(
+                    System.getProperty("gollek.gguf.fast_run.prewarm_prompt"),
+                    System.getenv("GOLLEK_GGUF_FAST_PREWARM_PROMPT"),
+                    "where is jakarta"));
+        }
+        if (!hasMaxTokens) {
+            normalized.add("--max-tokens");
+            normalized.add(firstNonBlank(
+                    System.getProperty("gollek.gguf.fast_run.prewarm_context_tokens"),
+                    System.getenv("GOLLEK_GGUF_FAST_PREWARM_CONTEXT_TOKENS"),
+                    "10"));
+        }
+        if (!hasProvider) {
+            normalized.add("--provider");
+            normalized.add("gguf");
+        }
+        if (!hasEngine) {
+            normalized.add("--engine");
+            normalized.add("auto");
+        }
+        return normalized.toArray(String[]::new);
+    }
+
+    private static boolean isPrewarmCommand(String arg) {
+        return "__gguf-daemon-prewarm".equals(arg)
+                || "prewarm".equals(arg)
+                || "warmup".equals(arg);
     }
 
     private static Optional<Path> resolveGgufModel(FastArgs args) {
@@ -272,6 +441,132 @@ public final class GgufFastRun {
         }
     }
 
+    private static int prewarmWithLlamaCpp(
+            Path modelPath,
+            FastArgs args,
+            PrintStream out,
+            PrintStream err,
+            GgufSessionCache sessionCache) throws Throwable {
+        long startNanos = System.nanoTime();
+        String requestedBackend = normalizedBackend(args.backend);
+        int nGpuLayers = "cpu".equals(requestedBackend)
+                ? 0
+                : Integer.getInteger("gollek.gguf.fast_run.gpu_layers", -1);
+        int threads = Integer.getInteger("gollek.gguf.fast_run.threads", defaultThreads());
+        int batchThreads = Integer.getInteger("gollek.gguf.fast_run.batch_threads", threads);
+        String prompt = formatPromptForModel(args.prompt, modelPath);
+        int context = fastRunContext(prompt, args.maxTokens);
+        int batch = boundedBatch("gollek.gguf.fast_run.batch", Math.min(context, 1024), context);
+        int microBatch = boundedBatch("gollek.gguf.fast_run.ubatch", Math.min(batch, 512), batch);
+        boolean swaFull = fastRunSwaFull();
+
+        try {
+            prewarmWithLlamaCppSession(
+                    modelPath,
+                    args,
+                    startNanos,
+                    context,
+                    batch,
+                    microBatch,
+                    threads,
+                    batchThreads,
+                    nGpuLayers,
+                    swaFull,
+                    prompt,
+                    false,
+                    out,
+                    err,
+                    sessionCache);
+            return 0;
+        } catch (Throwable throwable) {
+            if (nGpuLayers == 0 || !fastRunCpuFallback()) {
+                throw throwable;
+            }
+            err.printf("WARN: GGUF Metal prewarm failed (%s); retrying with CPU fallback.%n",
+                    briefMessage(throwable));
+            prewarmWithLlamaCppSession(
+                    modelPath,
+                    args,
+                    startNanos,
+                    context,
+                    batch,
+                    microBatch,
+                    threads,
+                    batchThreads,
+                    0,
+                    swaFull,
+                    prompt,
+                    true,
+                    out,
+                    err,
+                    sessionCache);
+            return 0;
+        }
+    }
+
+    private static void prewarmWithLlamaCppSession(
+            Path modelPath,
+            FastArgs args,
+            long startNanos,
+            int context,
+            int batch,
+            int microBatch,
+            int threads,
+            int batchThreads,
+            int nGpuLayers,
+            boolean swaFull,
+            String prompt,
+            boolean cpuFallback,
+            PrintStream out,
+            PrintStream err,
+            GgufSessionCache sessionCache) throws Throwable {
+        long openStartNanos = System.nanoTime();
+        boolean useMmap = Boolean.parseBoolean(System.getProperty("gollek.gguf.fast_run.mmap", "true"));
+        boolean useMlock = Boolean.parseBoolean(System.getProperty("gollek.gguf.fast_run.mlock", "false"));
+        SessionLease opened = sessionCache == null
+                ? SessionLease.open(modelPath, context, batch, microBatch, threads, batchThreads, nGpuLayers,
+                        useMmap, useMlock, swaFull)
+                : sessionCache.acquire(modelPath, context, batch, microBatch, threads, batchThreads, nGpuLayers,
+                        useMmap, useMlock, swaFull);
+        long openNanos = System.nanoTime() - openStartNanos;
+        try (SessionLease lease = opened) {
+            NativeGgufSession session = lease.session();
+            int tokens = prewarmTokenCount();
+            long generateStartNanos = System.nanoTime();
+            session.generate(prompt, tokens, 0.0d, 1, 1.0d);
+            long generateNanos = System.nanoTime() - generateStartNanos;
+            long durationMs = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+            out.printf("Prewarmed llama.cpp GGUF daemon for %s "
+                            + "(backend=%s, nGpuLayers=%d, threads=%d, context=%d, batch=%d, ubatch=%d, "
+                            + "tokens=%d, warmSession=%s, cpuFallback=%s).%n",
+                    modelPath.getFileName(),
+                    session.backendName(),
+                    nGpuLayers,
+                    threads,
+                    context,
+                    batch,
+                    microBatch,
+                    tokens,
+                    lease.reused(),
+                    cpuFallback);
+            out.printf("[GGUF daemon prewarm, Duration: %.2fs]%n", durationMs / 1000.0d);
+            if (fastRunTiming()) {
+                String nativeMetrics = session.metrics().map(metrics -> ", native={" + metrics + "}").orElse("");
+                err.printf("GGUF timing: open=%.3fms, generateCall=%.3fms%s%n",
+                        openNanos / 1_000_000.0d,
+                        generateNanos / 1_000_000.0d,
+                        nativeMetrics);
+            }
+            if (shouldHardExitAfterNativeRun(sessionCache != null)) {
+                hardExitProcess(0);
+            }
+        }
+    }
+
+    static int prewarmTokenCount() {
+        return Math.max(1, Integer.getInteger("gollek.gguf.fast_run.prewarm_tokens", 1));
+    }
+
     private static void generateWithLlamaCppSession(
             Path modelPath,
             FastArgs args,
@@ -379,6 +674,44 @@ public final class GgufFastRun {
                 profile.requiredDecoderTensorCount(),
                 profile.compactTypeSummary(4),
                 profile.javaStatus());
+        if (!profile.missingDecoderTensorExamples().isEmpty()) {
+            System.out.printf(
+                    "%s missing decoder tensors: count=%d, examples=%s.%n",
+                    label,
+                    profile.missingDecoderTensorCount(),
+                    String.join(", ", profile.missingDecoderTensorExamples()));
+        }
+        if (!profile.malformedDecoderTensorExamples().isEmpty()) {
+            System.out.printf(
+                    "%s invalid decoder tensor shapes: count=%d, examples=%s.%n",
+                    label,
+                    profile.malformedDecoderTensorCount(),
+                    String.join(", ", profile.malformedDecoderTensorExamples()));
+        }
+        System.out.printf("%s readiness: %s.%n", label, javaReadinessSummary(profile));
+        if (profile.modelConfig() != null) {
+            System.out.printf(
+                    "%s config: type=%s, layers=%d, hidden=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d.%n",
+                    label,
+                    profile.modelConfig().modelType(),
+                    profile.modelConfig().numHiddenLayers(),
+                    profile.modelConfig().hiddenSize(),
+                    profile.modelConfig().numAttentionHeads(),
+                    profile.modelConfig().resolvedNumKvHeads(),
+                    profile.modelConfig().resolvedHeadDim(),
+                    profile.modelConfig().maxPositionEmbeddings(),
+                    profile.modelConfig().vocabSize());
+        }
+    }
+
+    static String javaReadinessSummary(GgufRuntimeProfile profile) {
+        boolean loaderReady = profile != null && profile.knownTensorTypeRatio() > 0.0d;
+        boolean decoderTensorsReady = profile != null && profile.decoderTensorSetComplete();
+        boolean rowDotReady = profile != null && profile.rowDotPrimitivesReady();
+        return "loaderReady=" + loaderReady
+                + ", decoderTensorsReady=" + decoderTensorsReady
+                + ", rowDotReady=" + rowDotReady
+                + ", generationReady=false";
     }
 
     private static void printRowDotProbe(String label, GgufRuntimeProbe probe) {
@@ -386,25 +719,7 @@ public final class GgufFastRun {
             System.out.printf("%s row-dot probe: unavailable, no supported matrix tensor.%n", label);
             return;
         }
-        System.out.printf(
-                "%s tensor probe: tensor=%s, type=%s, rows=%d, cols=%d, sampledRows=%d, "
-                        + "dot=%.3fms, dotChecksum=%.6g, matVecRows=%d, cache=%.3fms, "
-                        + "parallelMatVec=%.3fms, matVecChecksum=%.6g, cachedGenericMatVec=%.3fms, "
-                        + "cachedChecksum=%.6g.%n",
-                label,
-                probe.tensorName(),
-                probe.tensorType(),
-                probe.rows(),
-                probe.columns(),
-                probe.sampledRows(),
-                probe.rowDotMillis(),
-                probe.rowDotChecksum(),
-                probe.matVecRows(),
-                probe.matrixCacheMillis(),
-                probe.matVecMillis(),
-                probe.matVecChecksum(),
-                probe.cachedMatVecMillis(),
-                probe.cachedMatVecChecksum());
+        System.out.printf("%s tensor probe: %s.%n", label, probe.compactSummary());
     }
 
     static String formatPromptForModel(String prompt, Path modelPath) {
@@ -867,17 +1182,47 @@ public final class GgufFastRun {
     }
 
     private static OptionalInt requestDaemon(String[] rawArgs) {
-        OptionalInt status = sendDaemonRequest(rawArgs);
+        OptionalInt status = sendDaemonRequestWithRetries(rawArgs, DAEMON_MAGIC, daemonRequestRetryMillis());
         if (status.isPresent()) {
             return status;
         }
         if (!startDaemon()) {
             return OptionalInt.empty();
         }
-        return sendDaemonRequest(rawArgs);
+        return sendDaemonRequestWithRetries(rawArgs, DAEMON_MAGIC, daemonStartTimeoutMillis());
     }
 
-    private static OptionalInt sendDaemonRequest(String[] rawArgs) {
+    private static OptionalInt requestDaemonPrewarm(String[] rawArgs) {
+        OptionalInt status = sendDaemonRequestWithRetries(rawArgs, DAEMON_PREWARM_MAGIC, daemonRequestRetryMillis());
+        if (status.isPresent()) {
+            return status;
+        }
+        if (!startDaemon()) {
+            return OptionalInt.empty();
+        }
+        return sendDaemonRequestWithRetries(rawArgs, DAEMON_PREWARM_MAGIC, daemonStartTimeoutMillis());
+    }
+
+    private static OptionalInt sendDaemonRequestWithRetries(String[] rawArgs, String magic, long retryMillis) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, retryMillis));
+        while (true) {
+            OptionalInt status = sendDaemonRequest(rawArgs, magic);
+            if (status.isPresent()) {
+                return status;
+            }
+            if (readDaemonInfo().isEmpty() || System.nanoTime() >= deadlineNanos) {
+                return OptionalInt.empty();
+            }
+            try {
+                Thread.sleep(daemonRequestRetrySleepMillis());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return OptionalInt.empty();
+            }
+        }
+    }
+
+    private static OptionalInt sendDaemonRequest(String[] rawArgs, String magic) {
         OptionalInt port = readDaemonPort();
         if (port.isEmpty()) {
             return OptionalInt.empty();
@@ -888,7 +1233,7 @@ public final class GgufFastRun {
             socket.setSoTimeout((int) Math.min(Integer.MAX_VALUE, timeoutMillis()));
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
             DataInputStream in = new DataInputStream(socket.getInputStream());
-            writeString(out, DAEMON_MAGIC);
+            writeString(out, magic);
             out.writeInt(rawArgs.length);
             for (String arg : rawArgs) {
                 writeString(out, arg);
@@ -961,9 +1306,10 @@ public final class GgufFastRun {
     }
 
     private static boolean startDetachedDaemon(List<String> command) throws IOException, InterruptedException {
-        String launcher = System.getProperty("gollek.gguf.fast_run.daemon_launcher", "auto")
-                .trim()
-                .toLowerCase(Locale.ROOT);
+        String launcher = daemonLauncherMode();
+        if (Boolean.getBoolean("gollek.gguf.fast_run.debug")) {
+            System.err.println("GGUF daemon launcher: " + launcher);
+        }
         if (launcher.equals("launchctl")) {
             return isMacOs() && startDetachedDaemonWithLaunchctl(command);
         }
@@ -971,6 +1317,21 @@ public final class GgufFastRun {
             return true;
         }
         return startDetachedDaemonWithNohup(command);
+    }
+
+    static String daemonLauncherMode() {
+        String defaultLauncher = defaultDaemonLauncherMode();
+        String launcher = System.getProperty("gollek.gguf.fast_run.daemon_launcher", defaultLauncher)
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        return switch (launcher) {
+            case "auto", "launchctl", "nohup" -> launcher;
+            default -> defaultLauncher;
+        };
+    }
+
+    static String defaultDaemonLauncherMode() {
+        return isMacOs() ? "launchctl" : "nohup";
     }
 
     private static boolean startDetachedDaemonWithLaunchctl(List<String> command) throws IOException, InterruptedException {
@@ -1091,7 +1452,8 @@ public final class GgufFastRun {
                 daemonLog("daemon stop requested");
                 return true;
             }
-            if (!DAEMON_MAGIC.equals(magic)) {
+            boolean prewarmRequest = DAEMON_PREWARM_MAGIC.equals(magic);
+            if (!DAEMON_MAGIC.equals(magic) && !prewarmRequest) {
                 writeStatusFrame(framed, FALLBACK_TO_FULL_CLI);
                 return false;
             }
@@ -1117,6 +1479,8 @@ public final class GgufFastRun {
                     Optional<Path> modelPath = resolveGgufModel(parsed);
                     if (modelPath.isEmpty()) {
                         status = FALLBACK_TO_FULL_CLI;
+                    } else if (prewarmRequest) {
+                        status = prewarmWithLlamaCpp(modelPath.get(), parsed, out, err, sessionCache);
                     } else {
                         status = generate(modelPath.get(), parsed, out, err, sessionCache, "daemon");
                     }
@@ -1192,7 +1556,11 @@ public final class GgufFastRun {
         if (info.isEmpty()) {
             return OptionalInt.empty();
         }
-        if (!daemonKey().equals(info.get().key()) || !isProcessAlive(info.get().pid())) {
+        if (!isProcessAlive(info.get().pid())) {
+            discardStaleDaemon(info.get());
+            return OptionalInt.empty();
+        }
+        if (strictDaemonKey() && !daemonKey().equals(info.get().key())) {
             discardStaleDaemon(info.get());
             return OptionalInt.empty();
         }
@@ -1281,23 +1649,52 @@ public final class GgufFastRun {
 
     private static void discardStaleDaemon(DaemonInfo info) {
         deleteDaemonPortFile();
-        removeLaunchctlDaemon();
-        if (!isProcessAlive(info.pid())) {
+        try {
+            terminateStaleDaemonProcess(info.pid());
+        } catch (Exception ignored) {
+        } finally {
+            removeLaunchctlDaemon();
+        }
+    }
+
+    private static void terminateStaleDaemonProcess(long pid) {
+        if (!isProcessAlive(pid)) {
             return;
         }
         try {
-            ProcessHandle process = ProcessHandle.of(info.pid()).orElse(null);
+            ProcessHandle process = ProcessHandle.of(pid).orElse(null);
             if (process == null || !process.isAlive()) {
                 return;
             }
-            process.destroy();
-            try {
-                process.onExit().get(2, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
+            if (staleDaemonForceKill()) {
                 process.destroyForcibly();
+            } else {
+                process.destroy();
             }
+            process.onExit().get(staleDaemonKillWaitMillis(), TimeUnit.MILLISECONDS);
         } catch (Exception ignored) {
+            ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
         }
+    }
+
+    static boolean staleDaemonForceKill() {
+        return Boolean.parseBoolean(System.getProperty("gollek.gguf.fast_run.stale_daemon_force_kill", "true"));
+    }
+
+    static long staleDaemonKillWaitMillis() {
+        return Math.max(100L, Long.getLong("gollek.gguf.fast_run.stale_daemon_kill_wait_ms", 2000L));
+    }
+
+    static boolean strictDaemonKey() {
+        return Boolean.parseBoolean(System.getProperty("gollek.gguf.fast_run.strict_daemon_key", "false"));
+    }
+
+    static boolean hardExitAfterRun() {
+        return Boolean.parseBoolean(System.getProperty("gollek.gguf.fast_run.hard_exit_after_run", "true"));
+    }
+
+    static boolean shouldHardExitAfterNativeRun(boolean daemonSession) {
+        return !daemonSession && hardExitAfterRun();
     }
 
     private static void daemonLog(String message) {
@@ -1310,6 +1707,10 @@ public final class GgufFastRun {
 
     private static void hardExitDaemon(int status, int port) {
         deleteDaemonPortFileIfPort(port);
+        hardExitProcess(status);
+    }
+
+    static void hardExitProcess(int status) {
         System.out.flush();
         System.err.flush();
         try {
@@ -1367,11 +1768,19 @@ public final class GgufFastRun {
     }
 
     private static int daemonConnectTimeoutMillis() {
-        return Integer.getInteger("gollek.gguf.fast_run.daemon_connect_timeout_ms", 250);
+        return Integer.getInteger("gollek.gguf.fast_run.daemon_connect_timeout_ms", 1000);
     }
 
     private static int daemonStartTimeoutMillis() {
         return Integer.getInteger("gollek.gguf.fast_run.daemon_start_timeout_ms", 20_000);
+    }
+
+    static long daemonRequestRetryMillis() {
+        return Math.max(0L, Long.getLong("gollek.gguf.fast_run.daemon_request_retry_ms", 2_000L));
+    }
+
+    static long daemonRequestRetrySleepMillis() {
+        return Math.max(10L, Long.getLong("gollek.gguf.fast_run.daemon_request_retry_sleep_ms", 75L));
     }
 
     private static long timeoutMillis() {
@@ -1482,6 +1891,13 @@ public final class GgufFastRun {
                     || normalized.equals("java")
                     || normalized.equals("java-native")
                     || normalized.equals("jvm");
+        }
+
+        private boolean hasNonGgufProvider() {
+            if (provider == null || provider.isBlank()) {
+                return false;
+            }
+            return !supported();
         }
 
         private EngineMode engineMode() {

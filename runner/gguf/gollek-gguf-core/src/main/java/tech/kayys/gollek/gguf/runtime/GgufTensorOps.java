@@ -29,7 +29,17 @@ public final class GgufTensorOps {
     private static final int Q5_1_BLOCK_BYTES = 24;
     private static final int Q8_0_BLOCK_SIZE = 32;
     private static final int Q8_0_BLOCK_BYTES = 34;
+    private static final int Q8_1_BLOCK_SIZE = 32;
+    private static final int Q8_1_BLOCK_BYTES = 36;
+    private static final int IQ4_NL_BLOCK_SIZE = 32;
+    private static final int IQ4_NL_BLOCK_BYTES = 18;
     private static final int QK_K = 256;
+    private static final int Q8_K_BLOCK_BYTES = 292;
+    private static final int IQ4_XS_BLOCK_BYTES = 136;
+    private static final int IQ4_XS_GROUP_SIZE = 32;
+    private static final int IQ4_XS_GROUPS = QK_K / IQ4_XS_GROUP_SIZE;
+    private static final int Q2_K_BLOCK_BYTES = 84;
+    private static final int Q3_K_BLOCK_BYTES = 110;
     private static final int Q4_K_BLOCK_BYTES = 144;
     private static final int Q5_K_BLOCK_BYTES = 176;
     private static final int Q6_K_BLOCK_BYTES = 210;
@@ -42,9 +52,15 @@ public final class GgufTensorOps {
                     System.getProperty("gollek.gguf.q4k.vector_dot", "false")));
     private static final boolean SIGNED_BYTE_DOT_VECTOR_ENABLED =
             Boolean.parseBoolean(System.getProperty("gollek.gguf.signed_byte.vector_dot", "true"));
+    private static final byte[] IQ4_NL_VALUES = {
+            -127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113
+    };
     private static final long DEFAULT_Q4K_CACHE_MAX_BYTES = 512L * 1024L * 1024L;
     private static final long DEFAULT_PARALLEL_MIN_OPS = 131_072L;
+    private static final int DEFAULT_PARALLEL_CHUNKS_PER_THREAD = 2;
     private static final Map<GGUFModel, Q32ModelCache> Q32_MATRIX_CACHE = new WeakHashMap<>();
+    private static final Map<GGUFModel, Q2KModelCache> Q2K_MATRIX_CACHE = new WeakHashMap<>();
+    private static final Map<GGUFModel, Q3KModelCache> Q3K_MATRIX_CACHE = new WeakHashMap<>();
     private static final Map<GGUFModel, Q4KModelCache> Q4K_MATRIX_CACHE = new WeakHashMap<>();
     private static final Map<GGUFModel, Q5KModelCache> Q5K_MATRIX_CACHE = new WeakHashMap<>();
     private static final Map<GGUFModel, Q6KModelCache> Q6K_MATRIX_CACHE = new WeakHashMap<>();
@@ -96,6 +112,37 @@ public final class GgufTensorOps {
         }
     }
 
+    public record Q2KMatrix(
+            int columns,
+            int rows,
+            int blocksPerRow,
+            /**
+             * Unpacked Q2 values, one unsigned two-bit value per byte, grouped in Q2_K's 16-value scale groups.
+             */
+            byte[] quants,
+            float[] groupScales,
+            float[] groupMins) {
+        public long estimatedBytes() {
+            return (long) quants.length
+                    + (long) groupScales.length * Float.BYTES
+                    + (long) groupMins.length * Float.BYTES;
+        }
+    }
+
+    public record Q3KMatrix(
+            int columns,
+            int rows,
+            int blocksPerRow,
+            /**
+             * Unpacked signed Q3 values, one value per byte, grouped in Q3_K's 16-value scale groups.
+             */
+            byte[] quants,
+            float[] groupScales) {
+        public long estimatedBytes() {
+            return (long) quants.length + (long) groupScales.length * Float.BYTES;
+        }
+    }
+
     public record Q5KMatrix(
             int columns,
             int rows,
@@ -131,6 +178,7 @@ public final class GgufTensorOps {
             int columns,
             int rows,
             int blocksPerRow,
+            int blockSize,
             byte[] quants,
             float[] blockScales) {
         public long estimatedBytes() {
@@ -215,9 +263,15 @@ public final class GgufTensorOps {
                 || typeId == GgmlType.Q5_0.id
                 || typeId == GgmlType.Q5_1.id
                 || typeId == GgmlType.Q8_0.id
+                || typeId == GgmlType.Q8_1.id
+                || typeId == GgmlType.Q2_K.id
+                || typeId == GgmlType.Q3_K.id
                 || typeId == GgmlType.Q4_K.id
                 || typeId == GgmlType.Q5_K.id
-                || typeId == GgmlType.Q6_K.id;
+                || typeId == GgmlType.Q6_K.id
+                || typeId == GgmlType.Q8_K.id
+                || typeId == GgmlType.IQ4_NL.id
+                || typeId == GgmlType.IQ4_XS.id;
     }
 
     public static void dequantizeRow(GGUFModel model, GGUFTensorInfo tensor, long row, float[] dst) {
@@ -270,6 +324,14 @@ public final class GgufTensorOps {
             matVecRows(q32MatrixCached(model, tensor), vector, output, rowCount, parallel);
             return;
         }
+        if (typeId == GgmlType.Q2_K.id && rowCount >= q2KCacheMinRows()) {
+            matVecRows(q2KMatrixCached(model, tensor), vector, output, rowCount, parallel);
+            return;
+        }
+        if (typeId == GgmlType.Q3_K.id && rowCount >= q3KCacheMinRows()) {
+            matVecRows(q3KMatrixCached(model, tensor), vector, output, rowCount, parallel);
+            return;
+        }
         if (typeId == GgmlType.Q4_K.id) {
             if (rowCount >= q4KCacheMinRows()) {
                 matVecRows(q4KMatrixCached(model, tensor), vector, output, rowCount, parallel);
@@ -288,7 +350,9 @@ public final class GgufTensorOps {
             matVecRows(q6KMatrixCached(model, tensor), vector, output, rowCount, parallel);
             return;
         }
-        if (typeId == GgmlType.Q8_0.id && rowCount >= q8CacheMinRows()) {
+        if ((typeId == GgmlType.Q8_0.id || typeId == GgmlType.Q8_1.id || typeId == GgmlType.Q8_K.id
+                || typeId == GgmlType.IQ4_NL.id || typeId == GgmlType.IQ4_XS.id)
+                && rowCount >= q8CacheMinRows()) {
             matVecRows(q8MatrixCached(model, tensor), vector, output, rowCount, parallel);
             return;
         }
@@ -319,6 +383,14 @@ public final class GgufTensorOps {
 
     private static int q4KCacheMinRows() {
         return Math.max(1, Integer.getInteger("gollek.gguf.q4k.cache_min_rows", 32));
+    }
+
+    private static int q2KCacheMinRows() {
+        return Math.max(1, Integer.getInteger("gollek.gguf.q2k.cache_min_rows", 32));
+    }
+
+    private static int q3KCacheMinRows() {
+        return Math.max(1, Integer.getInteger("gollek.gguf.q3k.cache_min_rows", 32));
     }
 
     private static int q5KCacheMinRows() {
@@ -401,6 +473,82 @@ public final class GgufTensorOps {
         synchronized (Q4K_MATRIX_CACHE) {
             Q4KModelCache modelCache = Q4K_MATRIX_CACHE.computeIfAbsent(model, ignored -> new Q4KModelCache());
             Q4KMatrix cached = modelCache.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            modelCache.put(key, prepared, maxBytes);
+            return prepared;
+        }
+    }
+
+    public static Q2KMatrix q2KMatrixCached(GGUFModel model, GGUFTensorInfo tensor) {
+        Objects.requireNonNull(model, "model");
+        Objects.requireNonNull(tensor, "tensor");
+        long maxBytes = q2KCacheMaxBytes();
+        if (maxBytes <= 0) {
+            synchronized (Q2K_MATRIX_CACHE) {
+                Q2K_MATRIX_CACHE.remove(model);
+            }
+            return q2KMatrix(model, tensor);
+        }
+        Q2KMatrixKey key = q2KMatrixKey(tensor);
+        synchronized (Q2K_MATRIX_CACHE) {
+            Q2KModelCache modelCache = Q2K_MATRIX_CACHE.get(model);
+            if (modelCache != null) {
+                modelCache.evictTo(maxBytes);
+                Q2KMatrix cached = modelCache.get(key);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+        }
+
+        Q2KMatrix prepared = q2KMatrix(model, tensor);
+        if (prepared.estimatedBytes() > maxBytes) {
+            return prepared;
+        }
+
+        synchronized (Q2K_MATRIX_CACHE) {
+            Q2KModelCache modelCache = Q2K_MATRIX_CACHE.computeIfAbsent(model, ignored -> new Q2KModelCache());
+            Q2KMatrix cached = modelCache.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            modelCache.put(key, prepared, maxBytes);
+            return prepared;
+        }
+    }
+
+    public static Q3KMatrix q3KMatrixCached(GGUFModel model, GGUFTensorInfo tensor) {
+        Objects.requireNonNull(model, "model");
+        Objects.requireNonNull(tensor, "tensor");
+        long maxBytes = q3KCacheMaxBytes();
+        if (maxBytes <= 0) {
+            synchronized (Q3K_MATRIX_CACHE) {
+                Q3K_MATRIX_CACHE.remove(model);
+            }
+            return q3KMatrix(model, tensor);
+        }
+        Q3KMatrixKey key = q3KMatrixKey(tensor);
+        synchronized (Q3K_MATRIX_CACHE) {
+            Q3KModelCache modelCache = Q3K_MATRIX_CACHE.get(model);
+            if (modelCache != null) {
+                modelCache.evictTo(maxBytes);
+                Q3KMatrix cached = modelCache.get(key);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+        }
+
+        Q3KMatrix prepared = q3KMatrix(model, tensor);
+        if (prepared.estimatedBytes() > maxBytes) {
+            return prepared;
+        }
+
+        synchronized (Q3K_MATRIX_CACHE) {
+            Q3KModelCache modelCache = Q3K_MATRIX_CACHE.computeIfAbsent(model, ignored -> new Q3KModelCache());
+            Q3KMatrix cached = modelCache.get(key);
             if (cached != null) {
                 return cached;
             }
@@ -523,6 +671,22 @@ public final class GgufTensorOps {
         }
     }
 
+    public static int clearQ2KMatrixCache(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q2K_MATRIX_CACHE) {
+            Q2KModelCache removed = Q2K_MATRIX_CACHE.remove(model);
+            return removed == null ? 0 : removed.size();
+        }
+    }
+
+    public static int clearQ3KMatrixCache(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q3K_MATRIX_CACHE) {
+            Q3KModelCache removed = Q3K_MATRIX_CACHE.remove(model);
+            return removed == null ? 0 : removed.size();
+        }
+    }
+
     public static int clearQ4KMatrixCache(GGUFModel model) {
         Objects.requireNonNull(model, "model");
         synchronized (Q4K_MATRIX_CACHE) {
@@ -563,6 +727,22 @@ public final class GgufTensorOps {
         }
     }
 
+    public static int q2KMatrixCacheSize(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q2K_MATRIX_CACHE) {
+            Q2KModelCache modelCache = Q2K_MATRIX_CACHE.get(model);
+            return modelCache == null ? 0 : modelCache.size();
+        }
+    }
+
+    public static int q3KMatrixCacheSize(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q3K_MATRIX_CACHE) {
+            Q3KModelCache modelCache = Q3K_MATRIX_CACHE.get(model);
+            return modelCache == null ? 0 : modelCache.size();
+        }
+    }
+
     public static int q4KMatrixCacheSize(GGUFModel model) {
         Objects.requireNonNull(model, "model");
         synchronized (Q4K_MATRIX_CACHE) {
@@ -600,6 +780,22 @@ public final class GgufTensorOps {
         synchronized (Q8_MATRIX_CACHE) {
             Q8ModelCache modelCache = Q8_MATRIX_CACHE.get(model);
             return modelCache == null ? 0 : modelCache.size();
+        }
+    }
+
+    public static long q2KMatrixCacheBytes(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q2K_MATRIX_CACHE) {
+            Q2KModelCache modelCache = Q2K_MATRIX_CACHE.get(model);
+            return modelCache == null ? 0L : modelCache.bytes();
+        }
+    }
+
+    public static long q3KMatrixCacheBytes(GGUFModel model) {
+        Objects.requireNonNull(model, "model");
+        synchronized (Q3K_MATRIX_CACHE) {
+            Q3KModelCache modelCache = Q3K_MATRIX_CACHE.get(model);
+            return modelCache == null ? 0L : modelCache.bytes();
         }
     }
 
@@ -645,6 +841,14 @@ public final class GgufTensorOps {
 
     private static long q4KCacheMaxBytes() {
         return cacheMaxBytes("gollek.gguf.q4k.cache_max_bytes");
+    }
+
+    private static long q2KCacheMaxBytes() {
+        return cacheMaxBytes("gollek.gguf.q2k.cache_max_bytes");
+    }
+
+    private static long q3KCacheMaxBytes() {
+        return cacheMaxBytes("gollek.gguf.q3k.cache_max_bytes");
     }
 
     private static long q32CacheMaxBytes() {
@@ -704,7 +908,9 @@ public final class GgufTensorOps {
         }
         int threads = Math.max(1,
                 Integer.getInteger("gollek.gguf.parallel_threads", Runtime.getRuntime().availableProcessors()));
-        int chunksPerThread = Math.max(1, Integer.getInteger("gollek.gguf.parallel_chunks_per_thread", 1));
+        int chunksPerThread = Math.max(1, Integer.getInteger(
+                "gollek.gguf.parallel_chunks_per_thread",
+                DEFAULT_PARALLEL_CHUNKS_PER_THREAD));
         long chunks = Math.min((long) rowCount, (long) threads * chunksPerThread);
         return (int) Math.max(1L, chunks);
     }
@@ -745,6 +951,109 @@ public final class GgufTensorOps {
             }
         }
         return new Q32Matrix(columns, rows, blocksPerRow, quants, blockScales, blockBiases);
+    }
+
+    public static Q2KMatrix q2KMatrix(GGUFModel model, GGUFTensorInfo tensor) {
+        Objects.requireNonNull(model, "model");
+        Objects.requireNonNull(tensor, "tensor");
+        if (tensor.typeId() != GgmlType.Q2_K.id) {
+            throw new IllegalArgumentException("Tensor is not Q2_K: " + tensor.name());
+        }
+        int columns = checkedColumns(tensor, Integer.MAX_VALUE);
+        int rows = checkedRows(tensor);
+        int blocksPerRow = columns / QK_K;
+        int totalBlocks = Math.multiplyExact(rows, blocksPerRow);
+        byte[] source = tensorData(model, tensor).toArray(ValueLayout.JAVA_BYTE);
+        byte[] quants = new byte[Math.multiplyExact(totalBlocks, QK_K)];
+        float[] groupScales = new float[Math.multiplyExact(totalBlocks, 16)];
+        float[] groupMins = new float[groupScales.length];
+
+        for (int block = 0; block < totalBlocks; block++) {
+            int blockOffset = block * Q2_K_BLOCK_BYTES;
+            float d = f16ToF32(leShort(source, blockOffset + 80));
+            float dMin = f16ToF32(leShort(source, blockOffset + 82));
+            int scalesOffset = blockOffset;
+            int quantsOffset = blockOffset + 16;
+            int scaleIndex = 0;
+            int groupBase = block * 16;
+            int unpackedBase = block * QK_K;
+
+            for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+                int packedBase = quantsOffset + superBlockOffset / 4;
+                int shift = 0;
+                for (int pair = 0; pair < 4; pair++) {
+                    int firstScale = source[scalesOffset + scaleIndex] & 0xFF;
+                    int secondScale = source[scalesOffset + scaleIndex + 1] & 0xFF;
+                    int groupIndex = groupBase + scaleIndex;
+                    groupScales[groupIndex] = d * (firstScale & 0x0F);
+                    groupMins[groupIndex] = dMin * (firstScale >>> 4);
+                    groupScales[groupIndex + 1] = d * (secondScale & 0x0F);
+                    groupMins[groupIndex + 1] = dMin * (secondScale >>> 4);
+
+                    int outBase = unpackedBase + superBlockOffset + pair * 32;
+                    for (int i = 0; i < 16; i++) {
+                        int firstQuant = source[packedBase + i] & 0xFF;
+                        int secondQuant = source[packedBase + 16 + i] & 0xFF;
+                        quants[outBase + i] = (byte) ((firstQuant >>> shift) & 0x03);
+                        quants[outBase + 16 + i] = (byte) ((secondQuant >>> shift) & 0x03);
+                    }
+                    scaleIndex += 2;
+                    shift += 2;
+                }
+            }
+        }
+        return new Q2KMatrix(columns, rows, blocksPerRow, quants, groupScales, groupMins);
+    }
+
+    public static Q3KMatrix q3KMatrix(GGUFModel model, GGUFTensorInfo tensor) {
+        Objects.requireNonNull(model, "model");
+        Objects.requireNonNull(tensor, "tensor");
+        if (tensor.typeId() != GgmlType.Q3_K.id) {
+            throw new IllegalArgumentException("Tensor is not Q3_K: " + tensor.name());
+        }
+        int columns = checkedColumns(tensor, Integer.MAX_VALUE);
+        int rows = checkedRows(tensor);
+        int blocksPerRow = columns / QK_K;
+        int totalBlocks = Math.multiplyExact(rows, blocksPerRow);
+        byte[] source = tensorData(model, tensor).toArray(ValueLayout.JAVA_BYTE);
+        byte[] quants = new byte[Math.multiplyExact(totalBlocks, QK_K)];
+        float[] groupScales = new float[Math.multiplyExact(totalBlocks, 16)];
+        int[] unpackedScales = new int[16];
+
+        for (int block = 0; block < totalBlocks; block++) {
+            int blockOffset = block * Q3_K_BLOCK_BYTES;
+            float d = f16ToF32(leShort(source, blockOffset + 108));
+            int hmaskOffset = blockOffset;
+            int quantsOffset = blockOffset + 32;
+            unpackQ3KScales(source, blockOffset + 96, unpackedScales);
+            int scaleIndex = 0;
+            int groupBase = block * 16;
+            int unpackedBase = block * QK_K;
+            int highMask = 1;
+
+            for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+                int packedBase = quantsOffset + superBlockOffset / 4;
+                int shift = 0;
+                for (int pair = 0; pair < 4; pair++) {
+                    groupScales[groupBase + scaleIndex] = d * unpackedScales[scaleIndex];
+                    groupScales[groupBase + scaleIndex + 1] = d * unpackedScales[scaleIndex + 1];
+
+                    int outBase = unpackedBase + superBlockOffset + pair * 32;
+                    for (int i = 0; i < 16; i++) {
+                        int firstQuant = ((source[packedBase + i] & 0xFF) >>> shift) & 0x03;
+                        int secondQuant = ((source[packedBase + 16 + i] & 0xFF) >>> shift) & 0x03;
+                        int firstHigh = source[hmaskOffset + i] & highMask;
+                        int secondHigh = source[hmaskOffset + 16 + i] & highMask;
+                        quants[outBase + i] = (byte) (firstQuant - (firstHigh != 0 ? 0 : 4));
+                        quants[outBase + 16 + i] = (byte) (secondQuant - (secondHigh != 0 ? 0 : 4));
+                    }
+                    scaleIndex += 2;
+                    shift += 2;
+                    highMask <<= 1;
+                }
+            }
+        }
+        return new Q3KMatrix(columns, rows, blocksPerRow, quants, groupScales);
     }
 
     public static Q4KMatrix q4KMatrix(GGUFModel model, GGUFTensorInfo tensor) {
@@ -897,28 +1206,84 @@ public final class GgufTensorOps {
     public static Q8Matrix q8Matrix(GGUFModel model, GGUFTensorInfo tensor) {
         Objects.requireNonNull(model, "model");
         Objects.requireNonNull(tensor, "tensor");
-        if (tensor.typeId() != GgmlType.Q8_0.id) {
-            throw new IllegalArgumentException("Tensor is not Q8_0: " + tensor.name());
+        int typeId = tensor.typeId();
+        if (typeId != GgmlType.Q8_0.id && typeId != GgmlType.Q8_1.id && typeId != GgmlType.Q8_K.id
+                && typeId != GgmlType.IQ4_NL.id && typeId != GgmlType.IQ4_XS.id) {
+            throw new IllegalArgumentException("Tensor is not Q8_0/Q8_1/Q8_K/IQ4_NL/IQ4_XS: " + tensor.name());
+        }
+        if (typeId == GgmlType.IQ4_XS.id) {
+            return iq4XSMatrix(model, tensor);
         }
         int columns = checkedColumns(tensor, Integer.MAX_VALUE);
         int rows = checkedRows(tensor);
-        int blocksPerRow = columns / Q8_0_BLOCK_SIZE;
+        int blockSize = q8BlockSize(typeId);
+        int blockBytes = q8BlockBytes(typeId);
+        int blocksPerRow = columns / blockSize;
         int totalBlocks = Math.multiplyExact(rows, blocksPerRow);
         byte[] source = tensorData(model, tensor).toArray(ValueLayout.JAVA_BYTE);
-        byte[] quants = new byte[Math.multiplyExact(totalBlocks, Q8_0_BLOCK_SIZE)];
+        byte[] quants = new byte[Math.multiplyExact(totalBlocks, blockSize)];
         float[] blockScales = new float[totalBlocks];
 
         for (int block = 0; block < totalBlocks; block++) {
-            int sourceOffset = block * Q8_0_BLOCK_BYTES;
-            blockScales[block] = f16ToF32(leShort(source, sourceOffset));
-            System.arraycopy(
-                    source,
-                    sourceOffset + 2,
-                    quants,
-                    block * Q8_0_BLOCK_SIZE,
-                    Q8_0_BLOCK_SIZE);
+            int sourceOffset = block * blockBytes;
+            int quantsOffset;
+            if (typeId == GgmlType.Q8_0.id || typeId == GgmlType.Q8_1.id) {
+                blockScales[block] = f16ToF32(leShort(source, sourceOffset));
+                quantsOffset = sourceOffset + (typeId == GgmlType.Q8_1.id ? 4 : 2);
+                System.arraycopy(
+                        source,
+                        quantsOffset,
+                        quants,
+                        block * blockSize,
+                        blockSize);
+            } else if (typeId == GgmlType.Q8_K.id) {
+                blockScales[block] = leFloat(source, sourceOffset);
+                quantsOffset = sourceOffset + Float.BYTES;
+                System.arraycopy(
+                        source,
+                        quantsOffset,
+                        quants,
+                        block * blockSize,
+                        blockSize);
+            } else {
+                blockScales[block] = f16ToF32(leShort(source, sourceOffset));
+                unpackIQ4NLPrepared(source, sourceOffset + 2, quants, block * blockSize);
+            }
         }
-        return new Q8Matrix(columns, rows, blocksPerRow, quants, blockScales);
+        return new Q8Matrix(columns, rows, blocksPerRow, blockSize, quants, blockScales);
+    }
+
+    private static Q8Matrix iq4XSMatrix(GGUFModel model, GGUFTensorInfo tensor) {
+        int columns = checkedColumns(tensor, Integer.MAX_VALUE);
+        int rows = checkedRows(tensor);
+        int groupsPerRow = columns / IQ4_XS_GROUP_SIZE;
+        int kBlocksPerRow = columns / QK_K;
+        int totalGroups = Math.multiplyExact(rows, groupsPerRow);
+        byte[] source = tensorData(model, tensor).toArray(ValueLayout.JAVA_BYTE);
+        byte[] quants = new byte[Math.multiplyExact(totalGroups, IQ4_XS_GROUP_SIZE)];
+        float[] blockScales = new float[totalGroups];
+
+        for (int row = 0; row < rows; row++) {
+            for (int kBlock = 0; kBlock < kBlocksPerRow; kBlock++) {
+                int sourceOffset = (row * kBlocksPerRow + kBlock) * IQ4_XS_BLOCK_BYTES;
+                float d = f16ToF32(leShort(source, sourceOffset));
+                int scalesH = leShort(source, sourceOffset + 2) & 0xFFFF;
+                int scalesLOffset = sourceOffset + 4;
+                int quantsOffset = sourceOffset + 8;
+                int matrixGroupBase = row * groupsPerRow + kBlock * IQ4_XS_GROUPS;
+
+                for (int group = 0; group < IQ4_XS_GROUPS; group++) {
+                    int matrixGroup = matrixGroupBase + group;
+                    blockScales[matrixGroup] = d * (iq4XSScale(scalesH, source, scalesLOffset, group) - 32);
+                    unpackIQ4NLPrepared(
+                            source,
+                            quantsOffset + group * (IQ4_XS_GROUP_SIZE / 2),
+                            quants,
+                            matrixGroup * IQ4_XS_GROUP_SIZE);
+                }
+            }
+        }
+        return new Q8Matrix(columns, rows, groupsPerRow, IQ4_XS_GROUP_SIZE, quants, blockScales);
     }
 
     private static Q4KMatrixKey q4KMatrixKey(GGUFTensorInfo tensor) {
@@ -933,6 +1298,26 @@ public final class GgufTensorOps {
 
     private static Q32MatrixKey q32MatrixKey(GGUFTensorInfo tensor) {
         return new Q32MatrixKey(
+                tensor.name(),
+                tensor.typeId(),
+                tensor.offset(),
+                tensor.sizeInBytes(),
+                matrixColumns(tensor),
+                matrixRows(tensor));
+    }
+
+    private static Q2KMatrixKey q2KMatrixKey(GGUFTensorInfo tensor) {
+        return new Q2KMatrixKey(
+                tensor.name(),
+                tensor.typeId(),
+                tensor.offset(),
+                tensor.sizeInBytes(),
+                matrixColumns(tensor),
+                matrixRows(tensor));
+    }
+
+    private static Q3KMatrixKey q3KMatrixKey(GGUFTensorInfo tensor) {
+        return new Q3KMatrixKey(
                 tensor.name(),
                 tensor.typeId(),
                 tensor.offset(),
@@ -973,6 +1358,69 @@ public final class GgufTensorOps {
 
     public static void matVecRows(Q4KMatrix matrix, float[] vector, float[] output, int rowCount, boolean parallel) {
         matVecRows(matrix, vector, output, rowCount, parallel, Q4K_WORK_BUFFER.get());
+    }
+
+    public static void matVecRows(Q2KMatrix matrix, float[] vector, float[] output, int rowCount, boolean parallel) {
+        Objects.requireNonNull(matrix, "matrix");
+        Objects.requireNonNull(vector, "vector");
+        Objects.requireNonNull(output, "output");
+        if (vector.length < matrix.columns()) {
+            throw new IllegalArgumentException(
+                    "Vector length " + vector.length + " is smaller than columns " + matrix.columns());
+        }
+        if (rowCount < 0 || rowCount > matrix.rows()) {
+            throw new IllegalArgumentException(
+                    "Requested row count " + rowCount + " is outside tensor rows " + matrix.rows());
+        }
+        if (output.length < rowCount) {
+            throw new IllegalArgumentException(
+                    "Output length " + output.length + " is smaller than requested rows " + rowCount);
+        }
+
+        float[] vectorGroupSums = vector16GroupSums(vector, matrix.columns(), Q4K_WORK_BUFFER.get());
+        if (shouldParallelize(parallel, rowCount, matrix.columns())) {
+            int chunks = parallelChunkCount(rowCount);
+            IntStream.range(0, chunks)
+                    .parallel()
+                    .forEach(chunk -> {
+                        int start = (int) ((long) chunk * rowCount / chunks);
+                        int end = (int) ((long) (chunk + 1) * rowCount / chunks);
+                        fillMatVecRowsQ2K(matrix, vector, vectorGroupSums, output, start, end);
+                    });
+            return;
+        }
+        fillMatVecRowsQ2K(matrix, vector, vectorGroupSums, output, 0, rowCount);
+    }
+
+    public static void matVecRows(Q3KMatrix matrix, float[] vector, float[] output, int rowCount, boolean parallel) {
+        Objects.requireNonNull(matrix, "matrix");
+        Objects.requireNonNull(vector, "vector");
+        Objects.requireNonNull(output, "output");
+        if (vector.length < matrix.columns()) {
+            throw new IllegalArgumentException(
+                    "Vector length " + vector.length + " is smaller than columns " + matrix.columns());
+        }
+        if (rowCount < 0 || rowCount > matrix.rows()) {
+            throw new IllegalArgumentException(
+                    "Requested row count " + rowCount + " is outside tensor rows " + matrix.rows());
+        }
+        if (output.length < rowCount) {
+            throw new IllegalArgumentException(
+                    "Output length " + output.length + " is smaller than requested rows " + rowCount);
+        }
+
+        if (shouldParallelize(parallel, rowCount, matrix.columns())) {
+            int chunks = parallelChunkCount(rowCount);
+            IntStream.range(0, chunks)
+                    .parallel()
+                    .forEach(chunk -> {
+                        int start = (int) ((long) chunk * rowCount / chunks);
+                        int end = (int) ((long) (chunk + 1) * rowCount / chunks);
+                        fillMatVecRowsQ3K(matrix, vector, output, start, end);
+                    });
+            return;
+        }
+        fillMatVecRowsQ3K(matrix, vector, output, 0, rowCount);
     }
 
     public static void matVecRows(Q32Matrix matrix, float[] vector, float[] output, int rowCount, boolean parallel) {
@@ -1248,6 +1696,66 @@ public final class GgufTensorOps {
         }
     }
 
+    static void dequantizeQ2KBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
+        float d = f16ToF32(segment.get(LE_SHORT, blockOffset + 80));
+        float dMin = f16ToF32(segment.get(LE_SHORT, blockOffset + 82));
+        long scalesOffset = blockOffset;
+        long quantsOffset = blockOffset + 16;
+        int scaleIndex = 0;
+
+        for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+            long packedBase = quantsOffset + superBlockOffset / 4L;
+            int shift = 0;
+            for (int pair = 0; pair < 4; pair++) {
+                int firstScale = u8(segment, scalesOffset + scaleIndex++);
+                float firstD = d * (firstScale & 0x0F);
+                float firstMin = dMin * (firstScale >>> 4);
+                int secondScale = u8(segment, scalesOffset + scaleIndex++);
+                float secondD = d * (secondScale & 0x0F);
+                float secondMin = dMin * (secondScale >>> 4);
+                int outBase = dstOffset + superBlockOffset + pair * 32;
+
+                for (int i = 0; i < 16; i++) {
+                    int firstQuant = u8(segment, packedBase + i);
+                    int secondQuant = u8(segment, packedBase + 16 + i);
+                    dst[outBase + i] = firstD * ((firstQuant >>> shift) & 0x03) - firstMin;
+                    dst[outBase + 16 + i] = secondD * ((secondQuant >>> shift) & 0x03) - secondMin;
+                }
+                shift += 2;
+            }
+        }
+    }
+
+    static void dequantizeQ3KBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
+        float d = f16ToF32(segment.get(LE_SHORT, blockOffset + 108));
+        long hmaskOffset = blockOffset;
+        long quantsOffset = blockOffset + 32;
+        int[] scales = q3KScales(segment, blockOffset + 96);
+        int scaleIndex = 0;
+        int highMask = 1;
+
+        for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+            long packedBase = quantsOffset + superBlockOffset / 4L;
+            int shift = 0;
+            for (int pair = 0; pair < 4; pair++) {
+                float firstD = d * scales[scaleIndex++];
+                float secondD = d * scales[scaleIndex++];
+                int outBase = dstOffset + superBlockOffset + pair * 32;
+
+                for (int i = 0; i < 16; i++) {
+                    int firstQuant = (u8(segment, packedBase + i) >>> shift) & 0x03;
+                    int secondQuant = (u8(segment, packedBase + 16 + i) >>> shift) & 0x03;
+                    int firstHigh = u8(segment, hmaskOffset + i) & highMask;
+                    int secondHigh = u8(segment, hmaskOffset + 16 + i) & highMask;
+                    dst[outBase + i] = firstD * (firstQuant - (firstHigh != 0 ? 0 : 4));
+                    dst[outBase + 16 + i] = secondD * (secondQuant - (secondHigh != 0 ? 0 : 4));
+                }
+                shift += 2;
+                highMask <<= 1;
+            }
+        }
+    }
+
     static void dequantizeQ6KBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
         float d = f16ToF32(segment.get(LE_SHORT, blockOffset + 208));
         long lowBitsOffset = blockOffset;
@@ -1275,6 +1783,41 @@ public final class GgufTensorOps {
                         d * segment.get(ValueLayout.JAVA_BYTE, scalesOffset + scaleIndex + 4) * q3;
                 dst[dstOffset + superBlockOffset + 96 + i] =
                         d * segment.get(ValueLayout.JAVA_BYTE, scalesOffset + scaleIndex + 6) * q4;
+            }
+        }
+    }
+
+    static void dequantizeQ8KBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
+        float d = segment.get(LE_FLOAT, blockOffset);
+        long quantsOffset = blockOffset + Float.BYTES;
+        for (int i = 0; i < QK_K; i++) {
+            dst[dstOffset + i] = segment.get(ValueLayout.JAVA_BYTE, quantsOffset + i) * d;
+        }
+    }
+
+    static void dequantizeIQ4NLBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
+        float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+        long quantsOffset = blockOffset + 2;
+        for (int i = 0; i < IQ4_NL_BLOCK_SIZE / 2; i++) {
+            int quant = u8(segment, quantsOffset + i);
+            dst[dstOffset + i] = d * IQ4_NL_VALUES[quant & 0x0F];
+            dst[dstOffset + IQ4_NL_BLOCK_SIZE / 2 + i] = d * IQ4_NL_VALUES[quant >>> 4];
+        }
+    }
+
+    static void dequantizeIQ4XSBlock(MemorySegment segment, long blockOffset, float[] dst, int dstOffset) {
+        float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+        int scalesH = segment.get(LE_SHORT, blockOffset + 2) & 0xFFFF;
+        long scalesLOffset = blockOffset + 4;
+        long quantsOffset = blockOffset + 8;
+        for (int group = 0; group < IQ4_XS_GROUPS; group++) {
+            float dl = d * (iq4XSScale(scalesH, segment, scalesLOffset, group) - 32);
+            int outBase = dstOffset + group * IQ4_XS_GROUP_SIZE;
+            long groupQuantsOffset = quantsOffset + group * (IQ4_XS_GROUP_SIZE / 2L);
+            for (int i = 0; i < IQ4_XS_GROUP_SIZE / 2; i++) {
+                int quant = u8(segment, groupQuantsOffset + i);
+                dst[outBase + i] = dl * IQ4_NL_VALUES[quant & 0x0F];
+                dst[outBase + IQ4_XS_GROUP_SIZE / 2 + i] = dl * IQ4_NL_VALUES[quant >>> 4];
             }
         }
     }
@@ -1355,6 +1898,51 @@ public final class GgufTensorOps {
             }
             return;
         }
+        if (typeId == GgmlType.Q8_1.id) {
+            for (int block = 0; block < columns / Q8_1_BLOCK_SIZE; block++) {
+                long blockOffset = rowOffset + block * (long) Q8_1_BLOCK_BYTES;
+                float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+                for (int i = 0; i < Q8_1_BLOCK_SIZE; i++) {
+                    dst[dstOffset + block * Q8_1_BLOCK_SIZE + i] =
+                            segment.get(ValueLayout.JAVA_BYTE, blockOffset + 4 + i) * d;
+                }
+            }
+            return;
+        }
+        if (typeId == GgmlType.Q8_K.id) {
+            for (int block = 0; block < columns / QK_K; block++) {
+                dequantizeQ8KBlock(segment, rowOffset + block * Q8_K_BLOCK_BYTES, dst, dstOffset + block * QK_K);
+            }
+            return;
+        }
+        if (typeId == GgmlType.IQ4_NL.id) {
+            for (int block = 0; block < columns / IQ4_NL_BLOCK_SIZE; block++) {
+                dequantizeIQ4NLBlock(
+                        segment,
+                        rowOffset + block * (long) IQ4_NL_BLOCK_BYTES,
+                        dst,
+                        dstOffset + block * IQ4_NL_BLOCK_SIZE);
+            }
+            return;
+        }
+        if (typeId == GgmlType.IQ4_XS.id) {
+            for (int block = 0; block < columns / QK_K; block++) {
+                dequantizeIQ4XSBlock(segment, rowOffset + block * IQ4_XS_BLOCK_BYTES, dst, dstOffset + block * QK_K);
+            }
+            return;
+        }
+        if (typeId == GgmlType.Q2_K.id) {
+            for (int block = 0; block < columns / QK_K; block++) {
+                dequantizeQ2KBlock(segment, rowOffset + block * Q2_K_BLOCK_BYTES, dst, dstOffset + block * QK_K);
+            }
+            return;
+        }
+        if (typeId == GgmlType.Q3_K.id) {
+            for (int block = 0; block < columns / QK_K; block++) {
+                dequantizeQ3KBlock(segment, rowOffset + block * Q3_K_BLOCK_BYTES, dst, dstOffset + block * QK_K);
+            }
+            return;
+        }
         if (typeId == GgmlType.Q4_K.id) {
             for (int block = 0; block < columns / QK_K; block++) {
                 dequantizeQ4KBlock(segment, rowOffset + block * Q4_K_BLOCK_BYTES, dst, dstOffset + block * QK_K);
@@ -1428,6 +2016,33 @@ public final class GgufTensorOps {
                 }
             }
             return sum;
+        }
+        if (typeId == GgmlType.Q8_1.id) {
+            float sum = 0.0f;
+            for (int block = 0; block < columns / Q8_1_BLOCK_SIZE; block++) {
+                long blockOffset = rowOffset + block * (long) Q8_1_BLOCK_BYTES;
+                float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+                int vectorBase = vectorOffset + block * Q8_1_BLOCK_SIZE;
+                for (int i = 0; i < Q8_1_BLOCK_SIZE; i++) {
+                    sum += segment.get(ValueLayout.JAVA_BYTE, blockOffset + 4 + i) * d * vector[vectorBase + i];
+                }
+            }
+            return sum;
+        }
+        if (typeId == GgmlType.Q8_K.id) {
+            return dotRowQ8K(segment, rowOffset, columns, vector, vectorOffset);
+        }
+        if (typeId == GgmlType.IQ4_NL.id) {
+            return dotRowIQ4NL(segment, rowOffset, columns, vector, vectorOffset);
+        }
+        if (typeId == GgmlType.IQ4_XS.id) {
+            return dotRowIQ4XS(segment, rowOffset, columns, vector, vectorOffset);
+        }
+        if (typeId == GgmlType.Q2_K.id) {
+            return dotRowQ2K(segment, rowOffset, columns, vector, vectorOffset);
+        }
+        if (typeId == GgmlType.Q3_K.id) {
+            return dotRowQ3K(segment, rowOffset, columns, vector, vectorOffset);
         }
         if (typeId == GgmlType.Q4_K.id) {
             return dotRowQ4K(segment, rowOffset, columns, vector, vectorOffset);
@@ -1543,6 +2158,100 @@ public final class GgufTensorOps {
                 vectorSum += first + second;
             }
             sum += d * quantDot + m * vectorSum;
+        }
+        return sum;
+    }
+
+    private static float dotRowQ2K(
+            MemorySegment segment,
+            long rowOffset,
+            int columns,
+            float[] vector,
+            int vectorOffset) {
+        float sum = 0.0f;
+        for (int block = 0; block < columns / QK_K; block++) {
+            long blockOffset = rowOffset + block * (long) Q2_K_BLOCK_BYTES;
+            float d = f16ToF32(segment.get(LE_SHORT, blockOffset + 80));
+            float dMin = f16ToF32(segment.get(LE_SHORT, blockOffset + 82));
+            long scalesOffset = blockOffset;
+            long quantsOffset = blockOffset + 16;
+            int vectorBase = vectorOffset + block * QK_K;
+            int scaleIndex = 0;
+
+            for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+                long packedBase = quantsOffset + superBlockOffset / 4L;
+                int shift = 0;
+                for (int pair = 0; pair < 4; pair++) {
+                    int firstScale = u8(segment, scalesOffset + scaleIndex++);
+                    float firstD = d * (firstScale & 0x0F);
+                    float firstMin = dMin * (firstScale >>> 4);
+                    int secondScale = u8(segment, scalesOffset + scaleIndex++);
+                    float secondD = d * (secondScale & 0x0F);
+                    float secondMin = dMin * (secondScale >>> 4);
+                    int groupBase = vectorBase + superBlockOffset + pair * 32;
+
+                    float firstQuantDot = 0.0f;
+                    float firstVectorSum = 0.0f;
+                    float secondQuantDot = 0.0f;
+                    float secondVectorSum = 0.0f;
+                    for (int i = 0; i < 16; i++) {
+                        float firstVector = vector[groupBase + i];
+                        float secondVector = vector[groupBase + 16 + i];
+                        firstQuantDot += ((u8(segment, packedBase + i) >>> shift) & 0x03) * firstVector;
+                        secondQuantDot += ((u8(segment, packedBase + 16 + i) >>> shift) & 0x03) * secondVector;
+                        firstVectorSum += firstVector;
+                        secondVectorSum += secondVector;
+                    }
+                    sum += firstD * firstQuantDot - firstMin * firstVectorSum
+                            + secondD * secondQuantDot - secondMin * secondVectorSum;
+                    shift += 2;
+                }
+            }
+        }
+        return sum;
+    }
+
+    private static float dotRowQ3K(
+            MemorySegment segment,
+            long rowOffset,
+            int columns,
+            float[] vector,
+            int vectorOffset) {
+        float sum = 0.0f;
+        for (int block = 0; block < columns / QK_K; block++) {
+            long blockOffset = rowOffset + block * (long) Q3_K_BLOCK_BYTES;
+            float d = f16ToF32(segment.get(LE_SHORT, blockOffset + 108));
+            long hmaskOffset = blockOffset;
+            long quantsOffset = blockOffset + 32;
+            int[] scales = q3KScales(segment, blockOffset + 96);
+            int vectorBase = vectorOffset + block * QK_K;
+            int scaleIndex = 0;
+            int highMask = 1;
+
+            for (int superBlockOffset = 0; superBlockOffset < QK_K; superBlockOffset += 128) {
+                long packedBase = quantsOffset + superBlockOffset / 4L;
+                int shift = 0;
+                for (int pair = 0; pair < 4; pair++) {
+                    float firstD = d * scales[scaleIndex++];
+                    float secondD = d * scales[scaleIndex++];
+                    int groupBase = vectorBase + superBlockOffset + pair * 32;
+
+                    float firstQuantDot = 0.0f;
+                    float secondQuantDot = 0.0f;
+                    for (int i = 0; i < 16; i++) {
+                        int firstQuant = (u8(segment, packedBase + i) >>> shift) & 0x03;
+                        int secondQuant = (u8(segment, packedBase + 16 + i) >>> shift) & 0x03;
+                        int firstHigh = u8(segment, hmaskOffset + i) & highMask;
+                        int secondHigh = u8(segment, hmaskOffset + 16 + i) & highMask;
+                        firstQuantDot += (firstQuant - (firstHigh != 0 ? 0 : 4)) * vector[groupBase + i];
+                        secondQuantDot += (secondQuant - (secondHigh != 0 ? 0 : 4))
+                                * vector[groupBase + 16 + i];
+                    }
+                    sum += firstD * firstQuantDot + secondD * secondQuantDot;
+                    shift += 2;
+                    highMask <<= 1;
+                }
+            }
         }
         return sum;
     }
@@ -1687,6 +2396,81 @@ public final class GgufTensorOps {
         return sum;
     }
 
+    private static float dotRowQ8K(
+            MemorySegment segment,
+            long rowOffset,
+            int columns,
+            float[] vector,
+            int vectorOffset) {
+        float sum = 0.0f;
+        for (int block = 0; block < columns / QK_K; block++) {
+            long blockOffset = rowOffset + block * (long) Q8_K_BLOCK_BYTES;
+            float d = segment.get(LE_FLOAT, blockOffset);
+            long quantsOffset = blockOffset + Float.BYTES;
+            int vectorBase = vectorOffset + block * QK_K;
+            float quantDot = 0.0f;
+            for (int i = 0; i < QK_K; i++) {
+                quantDot += segment.get(ValueLayout.JAVA_BYTE, quantsOffset + i) * vector[vectorBase + i];
+            }
+            sum += d * quantDot;
+        }
+        return sum;
+    }
+
+    private static float dotRowIQ4NL(
+            MemorySegment segment,
+            long rowOffset,
+            int columns,
+            float[] vector,
+            int vectorOffset) {
+        float sum = 0.0f;
+        for (int block = 0; block < columns / IQ4_NL_BLOCK_SIZE; block++) {
+            long blockOffset = rowOffset + block * (long) IQ4_NL_BLOCK_BYTES;
+            float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+            int vectorBase = vectorOffset + block * IQ4_NL_BLOCK_SIZE;
+            long quantsOffset = blockOffset + 2;
+            float quantDot = 0.0f;
+            for (int i = 0; i < IQ4_NL_BLOCK_SIZE / 2; i++) {
+                int quant = u8(segment, quantsOffset + i);
+                quantDot += IQ4_NL_VALUES[quant & 0x0F] * vector[vectorBase + i]
+                        + IQ4_NL_VALUES[quant >>> 4] * vector[vectorBase + IQ4_NL_BLOCK_SIZE / 2 + i];
+            }
+            sum += d * quantDot;
+        }
+        return sum;
+    }
+
+    private static float dotRowIQ4XS(
+            MemorySegment segment,
+            long rowOffset,
+            int columns,
+            float[] vector,
+            int vectorOffset) {
+        float sum = 0.0f;
+        for (int block = 0; block < columns / QK_K; block++) {
+            long blockOffset = rowOffset + block * (long) IQ4_XS_BLOCK_BYTES;
+            float d = f16ToF32(segment.get(LE_SHORT, blockOffset));
+            int scalesH = segment.get(LE_SHORT, blockOffset + 2) & 0xFFFF;
+            long scalesLOffset = blockOffset + 4;
+            long quantsOffset = blockOffset + 8;
+            int vectorBase = vectorOffset + block * QK_K;
+
+            for (int group = 0; group < IQ4_XS_GROUPS; group++) {
+                float dl = d * (iq4XSScale(scalesH, segment, scalesLOffset, group) - 32);
+                int groupVectorBase = vectorBase + group * IQ4_XS_GROUP_SIZE;
+                long groupQuantsOffset = quantsOffset + group * (IQ4_XS_GROUP_SIZE / 2L);
+                float quantDot = 0.0f;
+                for (int i = 0; i < IQ4_XS_GROUP_SIZE / 2; i++) {
+                    int quant = u8(segment, groupQuantsOffset + i);
+                    quantDot += IQ4_NL_VALUES[quant & 0x0F] * vector[groupVectorBase + i]
+                            + IQ4_NL_VALUES[quant >>> 4] * vector[groupVectorBase + IQ4_XS_GROUP_SIZE / 2 + i];
+                }
+                sum += dl * quantDot;
+            }
+        }
+        return sum;
+    }
+
     private static float dotRowQ4KWithGroupSums(
             MemorySegment segment,
             long rowOffset,
@@ -1791,6 +2575,43 @@ public final class GgufTensorOps {
         }
     }
 
+    private static void fillMatVecRowsQ2K(
+            Q2KMatrix matrix,
+            float[] vector,
+            float[] vectorGroupSums,
+            float[] output,
+            int startRow,
+            int endRow) {
+        int blocksPerRow = matrix.blocksPerRow();
+        byte[] quants = matrix.quants();
+        float[] groupScales = matrix.groupScales();
+        float[] groupMins = matrix.groupMins();
+        for (int row = startRow; row < endRow; row++) {
+            output[row] = dotRowQ2KPrepared(
+                    blocksPerRow,
+                    quants,
+                    groupScales,
+                    groupMins,
+                    row,
+                    vector,
+                    vectorGroupSums);
+        }
+    }
+
+    private static void fillMatVecRowsQ3K(
+            Q3KMatrix matrix,
+            float[] vector,
+            float[] output,
+            int startRow,
+            int endRow) {
+        int blocksPerRow = matrix.blocksPerRow();
+        byte[] quants = matrix.quants();
+        float[] groupScales = matrix.groupScales();
+        for (int row = startRow; row < endRow; row++) {
+            output[row] = dotRowQ3KPrepared(blocksPerRow, quants, groupScales, row, vector);
+        }
+    }
+
     private static void fillMatVecRowsQ4K(
             Q4KMatrix matrix,
             float[] vector,
@@ -1858,15 +2679,17 @@ public final class GgufTensorOps {
             int startRow,
             int endRow) {
         int blocksPerRow = matrix.blocksPerRow();
+        int blockSize = matrix.blockSize();
         byte[] quants = matrix.quants();
         float[] blockScales = matrix.blockScales();
         for (int row = startRow; row < endRow; row++) {
-            output[row] = dotRowQ8Prepared(blocksPerRow, quants, blockScales, row, vector);
+            output[row] = dotRowQ8Prepared(blocksPerRow, blockSize, quants, blockScales, row, vector);
         }
     }
 
     private static float dotRowQ8Prepared(
             int blocksPerRow,
+            int blockSize,
             byte[] quants,
             float[] blockScales,
             int row,
@@ -1874,9 +2697,9 @@ public final class GgufTensorOps {
         float sum = 0.0f;
         for (int block = 0; block < blocksPerRow; block++) {
             int matrixBlock = row * blocksPerRow + block;
-            int qBase = matrixBlock * Q8_0_BLOCK_SIZE;
-            int vBase = block * Q8_0_BLOCK_SIZE;
-            sum += blockScales[matrixBlock] * dotQ8Block(quants, qBase, vector, vBase);
+            int qBase = matrixBlock * blockSize;
+            int vBase = block * blockSize;
+            sum += blockScales[matrixBlock] * dotQ8Block(quants, qBase, vector, vBase, blockSize);
         }
         return sum;
     }
@@ -1897,6 +2720,57 @@ public final class GgufTensorOps {
             float quantDot = dotQ4Group(quants, qBase, vector, vBase);
             sum += blockScales[matrixBlock] * quantDot
                     + blockBiases[matrixBlock] * vectorGroupSums[block];
+        }
+        return sum;
+    }
+
+    private static float dotRowQ2KPrepared(
+            int blocksPerRow,
+            byte[] quants,
+            float[] groupScales,
+            float[] groupMins,
+            int row,
+            float[] vector,
+            float[] vectorGroupSums) {
+        float sum = 0.0f;
+        for (int block = 0; block < blocksPerRow; block++) {
+            int matrixBlock = row * blocksPerRow + block;
+            int quantsOffset = matrixBlock * QK_K;
+            int matrixGroupBase = matrixBlock * 16;
+            int vectorGroupBase = block * 16;
+            int vectorBase = block * QK_K;
+
+            for (int group = 0; group < 16; group++) {
+                int matrixGroup = matrixGroupBase + group;
+                int vectorGroup = vectorGroupBase + group;
+                int qBase = quantsOffset + group * 16;
+                int vBase = vectorBase + group * 16;
+                float quantDot = dotSignedByteBlock(quants, qBase, vector, vBase, 16);
+                sum += groupScales[matrixGroup] * quantDot - groupMins[matrixGroup] * vectorGroupSums[vectorGroup];
+            }
+        }
+        return sum;
+    }
+
+    private static float dotRowQ3KPrepared(
+            int blocksPerRow,
+            byte[] quants,
+            float[] groupScales,
+            int row,
+            float[] vector) {
+        float sum = 0.0f;
+        for (int block = 0; block < blocksPerRow; block++) {
+            int matrixBlock = row * blocksPerRow + block;
+            int quantsOffset = matrixBlock * QK_K;
+            int matrixGroupBase = matrixBlock * 16;
+            int vectorBase = block * QK_K;
+
+            for (int group = 0; group < 16; group++) {
+                int qBase = quantsOffset + group * 16;
+                int vBase = vectorBase + group * 16;
+                float quantDot = dotSignedByteBlock(quants, qBase, vector, vBase, 16);
+                sum += groupScales[matrixGroupBase + group] * quantDot;
+            }
         }
         return sum;
     }
@@ -2009,8 +2883,8 @@ public final class GgufTensorOps {
         return quantDot;
     }
 
-    private static float dotQ8Block(byte[] quants, int qBase, float[] vector, int vBase) {
-        return dotSignedByteBlock(quants, qBase, vector, vBase, Q8_0_BLOCK_SIZE);
+    private static float dotQ8Block(byte[] quants, int qBase, float[] vector, int vBase, int length) {
+        return dotSignedByteBlock(quants, qBase, vector, vBase, length);
     }
 
     private static float dotSignedByteBlock(byte[] quants, int qBase, float[] vector, int vBase, int length) {
@@ -2092,6 +2966,20 @@ public final class GgufTensorOps {
         return sums;
     }
 
+    private static float[] vector16GroupSums(float[] vector, int columns, Q4KWorkBuffer workBuffer) {
+        int groups = columns / 16;
+        float[] sums = workBuffer.vectorGroupSums(groups);
+        for (int group = 0; group < groups; group++) {
+            int vectorBase = group * 16;
+            float sum = 0.0f;
+            for (int i = 0; i < 16; i++) {
+                sum += vector[vectorBase + i];
+            }
+            sums[group] = sum;
+        }
+        return sums;
+    }
+
     private static void fillMatVecRows(
             MemorySegment data,
             int typeId,
@@ -2150,6 +3038,44 @@ public final class GgufTensorOps {
                 || typeId == GgmlType.Q5_1.id;
     }
 
+    private static int q8BlockSize(int typeId) {
+        if (typeId == GgmlType.Q8_0.id) {
+            return Q8_0_BLOCK_SIZE;
+        }
+        if (typeId == GgmlType.Q8_1.id) {
+            return Q8_1_BLOCK_SIZE;
+        }
+        if (typeId == GgmlType.Q8_K.id) {
+            return QK_K;
+        }
+        if (typeId == GgmlType.IQ4_NL.id) {
+            return IQ4_NL_BLOCK_SIZE;
+        }
+        if (typeId == GgmlType.IQ4_XS.id) {
+            return IQ4_XS_GROUP_SIZE;
+        }
+        throw new IllegalArgumentException("Unsupported Q8 prepared type id: " + typeId);
+    }
+
+    private static int q8BlockBytes(int typeId) {
+        if (typeId == GgmlType.Q8_0.id) {
+            return Q8_0_BLOCK_BYTES;
+        }
+        if (typeId == GgmlType.Q8_1.id) {
+            return Q8_1_BLOCK_BYTES;
+        }
+        if (typeId == GgmlType.Q8_K.id) {
+            return Q8_K_BLOCK_BYTES;
+        }
+        if (typeId == GgmlType.IQ4_NL.id) {
+            return IQ4_NL_BLOCK_BYTES;
+        }
+        if (typeId == GgmlType.IQ4_XS.id) {
+            return IQ4_XS_BLOCK_BYTES;
+        }
+        throw new IllegalArgumentException("Unsupported Q8 prepared type id: " + typeId);
+    }
+
     private static int q32BlockBytes(int typeId) {
         if (typeId == GgmlType.Q4_0.id) {
             return Q4_0_BLOCK_BYTES;
@@ -2202,6 +3128,26 @@ public final class GgufTensorOps {
         }
     }
 
+    private static void unpackIQ4NLPrepared(byte[] source, int sourceOffset, byte[] quants, int qBase) {
+        for (int i = 0; i < IQ4_NL_BLOCK_SIZE / 2; i++) {
+            int quant = source[sourceOffset + i] & 0xFF;
+            quants[qBase + i] = IQ4_NL_VALUES[quant & 0x0F];
+            quants[qBase + IQ4_NL_BLOCK_SIZE / 2 + i] = IQ4_NL_VALUES[quant >>> 4];
+        }
+    }
+
+    private static int iq4XSScale(int scalesH, MemorySegment segment, long scalesLOffset, int group) {
+        int low = (u8(segment, scalesLOffset + group / 2L) >>> (4 * (group % 2))) & 0x0F;
+        int high = (scalesH >>> (2 * group)) & 0x03;
+        return low | (high << 4);
+    }
+
+    private static int iq4XSScale(int scalesH, byte[] data, int scalesLOffset, int group) {
+        int low = ((data[scalesLOffset + group / 2] & 0xFF) >>> (4 * (group % 2))) & 0x0F;
+        int high = (scalesH >>> (2 * group)) & 0x03;
+        return low | (high << 4);
+    }
+
     private static ScaleMin scaleMinK4(MemorySegment segment, long scalesOffset, int index) {
         int scale;
         int min;
@@ -2219,6 +3165,28 @@ public final class GgufTensorOps {
 
     private static int u8(MemorySegment segment, long offset) {
         return segment.get(ValueLayout.JAVA_BYTE, offset) & 0xFF;
+    }
+
+    private static int[] q3KScales(MemorySegment segment, long scalesOffset) {
+        int[] scales = new int[16];
+        for (int group = 0; group < scales.length; group++) {
+            int lowBits = group < 8
+                    ? u8(segment, scalesOffset + group) & 0x0F
+                    : (u8(segment, scalesOffset + group - 8) >>> 4) & 0x0F;
+            int highBits = (u8(segment, scalesOffset + 8 + (group % 4)) >>> (2 * (group / 4))) & 0x03;
+            scales[group] = (lowBits | (highBits << 4)) - 32;
+        }
+        return scales;
+    }
+
+    private static void unpackQ3KScales(byte[] data, int scalesOffset, int[] scales) {
+        for (int group = 0; group < 16; group++) {
+            int lowBits = group < 8
+                    ? data[scalesOffset + group] & 0x0F
+                    : (data[scalesOffset + group - 8] >>> 4) & 0x0F;
+            int highBits = ((data[scalesOffset + 8 + (group % 4)] & 0xFF) >>> (2 * (group / 4))) & 0x03;
+            scales[group] = (lowBits | (highBits << 4)) - 32;
+        }
     }
 
     private static ScaleMin scaleMinK4(byte[] data, long scalesOffset, int index) {
@@ -2251,6 +3219,10 @@ public final class GgufTensorOps {
                 | ((data[index + 1] & 0xFF) << 8)
                 | ((data[index + 2] & 0xFF) << 16)
                 | ((data[index + 3] & 0xFF) << 24);
+    }
+
+    private static float leFloat(byte[] data, long offset) {
+        return Float.intBitsToFloat(leInt(data, offset));
     }
 
     private static float f16ToF32(short bits) {
@@ -2309,6 +3281,76 @@ public final class GgufTensorOps {
             Iterator<Map.Entry<Q32MatrixKey, Q32Matrix>> iterator = matrices.entrySet().iterator();
             while (bytes > maxBytes && iterator.hasNext()) {
                 Map.Entry<Q32MatrixKey, Q32Matrix> eldest = iterator.next();
+                bytes -= eldest.getValue().estimatedBytes();
+                iterator.remove();
+            }
+        }
+    }
+
+    private static final class Q2KModelCache {
+        private final LinkedHashMap<Q2KMatrixKey, Q2KMatrix> matrices = new LinkedHashMap<>(16, 0.75f, true);
+        private long bytes;
+
+        Q2KMatrix get(Q2KMatrixKey key) {
+            return matrices.get(key);
+        }
+
+        void put(Q2KMatrixKey key, Q2KMatrix matrix, long maxBytes) {
+            Q2KMatrix previous = matrices.put(key, matrix);
+            if (previous != null) {
+                bytes -= previous.estimatedBytes();
+            }
+            bytes += matrix.estimatedBytes();
+            evictTo(maxBytes);
+        }
+
+        int size() {
+            return matrices.size();
+        }
+
+        long bytes() {
+            return bytes;
+        }
+
+        private void evictTo(long maxBytes) {
+            Iterator<Map.Entry<Q2KMatrixKey, Q2KMatrix>> iterator = matrices.entrySet().iterator();
+            while (bytes > maxBytes && iterator.hasNext()) {
+                Map.Entry<Q2KMatrixKey, Q2KMatrix> eldest = iterator.next();
+                bytes -= eldest.getValue().estimatedBytes();
+                iterator.remove();
+            }
+        }
+    }
+
+    private static final class Q3KModelCache {
+        private final LinkedHashMap<Q3KMatrixKey, Q3KMatrix> matrices = new LinkedHashMap<>(16, 0.75f, true);
+        private long bytes;
+
+        Q3KMatrix get(Q3KMatrixKey key) {
+            return matrices.get(key);
+        }
+
+        void put(Q3KMatrixKey key, Q3KMatrix matrix, long maxBytes) {
+            Q3KMatrix previous = matrices.put(key, matrix);
+            if (previous != null) {
+                bytes -= previous.estimatedBytes();
+            }
+            bytes += matrix.estimatedBytes();
+            evictTo(maxBytes);
+        }
+
+        int size() {
+            return matrices.size();
+        }
+
+        long bytes() {
+            return bytes;
+        }
+
+        private void evictTo(long maxBytes) {
+            Iterator<Map.Entry<Q3KMatrixKey, Q3KMatrix>> iterator = matrices.entrySet().iterator();
+            while (bytes > maxBytes && iterator.hasNext()) {
+                Map.Entry<Q3KMatrixKey, Q3KMatrix> eldest = iterator.next();
                 bytes -= eldest.getValue().estimatedBytes();
                 iterator.remove();
             }
@@ -2465,6 +3507,24 @@ public final class GgufTensorOps {
     }
 
     private record Q32MatrixKey(
+            String name,
+            int typeId,
+            long offset,
+            long sizeInBytes,
+            long columns,
+            long rows) {
+    }
+
+    private record Q2KMatrixKey(
+            String name,
+            int typeId,
+            long offset,
+            long sizeInBytes,
+            long columns,
+            long rows) {
+    }
+
+    private record Q3KMatrixKey(
             String name,
             int typeId,
             long offset,

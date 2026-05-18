@@ -76,16 +76,17 @@ public final class LAMB implements Optimizer {
      */
     public LAMB(List<Parameter> parameters, float lr,
             float beta1, float beta2, float eps, float weightDecay) {
-        this.parameters = parameters;
-        this.lr = lr;
-        this.beta1 = beta1;
-        this.beta2 = beta2;
-        this.eps = eps;
-        this.weightDecay = weightDecay;
+        this.parameters = OptimizerValidation.requireParameters(parameters);
+        this.lr = OptimizerValidation.learningRate(lr);
+        this.beta1 = OptimizerValidation.beta(beta1, "beta1");
+        this.beta2 = OptimizerValidation.beta(beta2, "beta2");
+        this.eps = OptimizerValidation.epsilon(eps);
+        this.weightDecay = OptimizerValidation.weightDecay(weightDecay);
     }
 
     @Override
     public void step() {
+        OptimizerValidation.requireStepInputs(parameters, "LAMB");
         step++;
         float bc1 = 1f - (float) Math.pow(beta1, step);
         float bc2 = 1f - (float) Math.pow(beta2, step);
@@ -143,6 +144,6 @@ public final class LAMB implements Optimizer {
 
     @Override
     public void setLearningRate(float lr) {
-        this.lr = lr;
+        this.lr = OptimizerValidation.learningRate(lr);
     }
 }

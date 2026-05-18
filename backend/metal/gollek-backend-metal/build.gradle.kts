@@ -33,6 +33,12 @@ sourceSets {
 
 dependencies {
     implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }
 
 publishing {

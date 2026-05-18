@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GgufRuntimeProbeTest {
@@ -51,6 +52,10 @@ class GgufRuntimeProbeTest {
             assertTrue(probe.matrixCacheNanos() >= 0);
             assertTrue(probe.matVecNanos() >= 0);
             assertTrue(probe.cachedMatVecNanos() >= 0);
+            assertFalse(probe.preparedMatVecProbe());
+            assertFalse(probe.preparedMatVecReady());
+            assertTrue(probe.compactSummary().contains("tensor=blk.0.attn_q.weight"));
+            assertTrue(probe.compactSummary().contains("preparedMatVecReady=false"));
         }
     }
 
@@ -77,8 +82,14 @@ class GgufRuntimeProbeTest {
             assertEquals(-1.7058823f, probe.rowDotChecksum(), 0.00001f);
             assertEquals(-1.7058823f, probe.matVecChecksum(), 0.00001f);
             assertEquals(probe.matVecChecksum(), probe.cachedMatVecChecksum(), 0.00001f);
+            assertTrue(probe.preparedMatVecProbe());
+            assertTrue(probe.preparedMatVecReady());
+            assertTrue(probe.matVecChecksumsAgree());
             assertTrue(probe.matrixCacheNanos() >= 0);
             assertTrue(probe.cachedMatVecNanos() >= 0);
+            assertTrue(probe.compactSummary().contains("type=Q4_0"));
+            assertTrue(probe.compactSummary().contains("preparedMatVecReady=true"));
+            assertTrue(probe.compactSummary().contains("cachedGenericMatVec="));
         }
     }
 
@@ -104,8 +115,75 @@ class GgufRuntimeProbeTest {
             assertEquals(1.7647059f, probe.rowDotChecksum(), 0.00001f);
             assertEquals(1.7647059f, probe.matVecChecksum(), 0.00001f);
             assertEquals(probe.matVecChecksum(), probe.cachedMatVecChecksum(), 0.00001f);
+            assertTrue(probe.preparedMatVecProbe());
+            assertTrue(probe.preparedMatVecReady());
+            assertTrue(probe.matVecChecksumsAgree());
             assertTrue(probe.matrixCacheNanos() >= 0);
             assertTrue(probe.cachedMatVecNanos() >= 0);
+            assertTrue(probe.compactSummary().contains("type=Q8_0"));
+            assertTrue(probe.compactSummary().contains("preparedMatVecReady=true"));
+        }
+    }
+
+    @Test
+    void probesPreparedQ8_1MatrixPath() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment segment = arena.allocate(36);
+            writeQ8_1Block(segment, (byte) -2);
+            GGUFTensorInfo tensor = new GGUFTensorInfo(
+                    "blk.0.attn_q.weight",
+                    new long[]{32, 1},
+                    9,
+                    0,
+                    36);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            GgufRuntimeProbe probe = GgufRuntimeProbe.fromModel(model, 36, 1, 1);
+
+            assertTrue(probe.hasTensorProbe());
+            assertEquals("Q8_1", probe.tensorType());
+            assertEquals(1, probe.rows());
+            assertEquals(32, probe.columns());
+            assertEquals(1.7647059f, probe.rowDotChecksum(), 0.00001f);
+            assertEquals(1.7647059f, probe.matVecChecksum(), 0.00001f);
+            assertEquals(probe.matVecChecksum(), probe.cachedMatVecChecksum(), 0.00001f);
+            assertTrue(probe.preparedMatVecProbe());
+            assertTrue(probe.preparedMatVecReady());
+            assertTrue(probe.matVecChecksumsAgree());
+            assertTrue(probe.matrixCacheNanos() >= 0);
+            assertTrue(probe.cachedMatVecNanos() >= 0);
+            assertTrue(probe.compactSummary().contains("type=Q8_1"));
+            assertTrue(probe.compactSummary().contains("preparedMatVecReady=true"));
+        }
+    }
+
+    @Test
+    void probesPreparedIQ4XSMatrixPath() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment segment = arena.allocate(136);
+            writeIQ4XSBlock(segment, (byte) 0x88);
+            GGUFTensorInfo tensor = new GGUFTensorInfo(
+                    "blk.0.attn_q.weight",
+                    new long[]{256, 1},
+                    23,
+                    0,
+                    136);
+            GGUFModel model = new GGUFModel(3, Map.of(), List.of(tensor), 0, segment, null);
+
+            GgufRuntimeProbe probe = GgufRuntimeProbe.fromModel(model, 136, 1, 1);
+
+            assertTrue(probe.hasTensorProbe());
+            assertEquals("IQ4_XS", probe.tensorType());
+            assertEquals(1, probe.rows());
+            assertEquals(256, probe.columns());
+            assertEquals(-0.47058824f, probe.rowDotChecksum(), 0.00001f);
+            assertEquals(-0.47058824f, probe.matVecChecksum(), 0.00001f);
+            assertEquals(probe.matVecChecksum(), probe.cachedMatVecChecksum(), 0.00001f);
+            assertTrue(probe.preparedMatVecProbe());
+            assertTrue(probe.preparedMatVecReady());
+            assertTrue(probe.matVecChecksumsAgree());
+            assertTrue(probe.compactSummary().contains("type=IQ4_XS"));
+            assertTrue(probe.compactSummary().contains("preparedMatVecReady=true"));
         }
     }
 
@@ -120,6 +198,25 @@ class GgufRuntimeProbeTest {
         block.set(LE_SHORT, 0, (short) 0x3c00);
         for (int i = 0; i < 32; i++) {
             block.set(ValueLayout.JAVA_BYTE, 2 + i, quant);
+        }
+    }
+
+    private static void writeQ8_1Block(MemorySegment block, byte quant) {
+        block.set(LE_SHORT, 0, (short) 0x3c00);
+        block.set(LE_SHORT, 2, (short) 0x7b00);
+        for (int i = 0; i < 32; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 4 + i, quant);
+        }
+    }
+
+    private static void writeIQ4XSBlock(MemorySegment block, byte packedQuant) {
+        block.set(LE_SHORT, 0, (short) 0x3c00);
+        block.set(LE_SHORT, 2, (short) 0xAAAA);
+        for (int i = 0; i < 4; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 4 + i, (byte) 0x11);
+        }
+        for (int i = 0; i < 128; i++) {
+            block.set(ValueLayout.JAVA_BYTE, 8 + i, packedQuant);
         }
     }
 }

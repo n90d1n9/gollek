@@ -58,17 +58,17 @@ public final class WarmupCosineScheduler extends LRScheduler {
             throw new IllegalArgumentException(
                     "warmupSteps must be <= totalSteps, got: " + warmupSteps + " > " + totalSteps);
         }
-        if (maxLr <= 0) {
-            throw new IllegalArgumentException("maxLr must be positive, got: " + maxLr);
-        }
-        if (minLr < 0 || minLr > maxLr) {
+        float validatedMaxLr = SchedulerValidation.positive(maxLr, "maxLr");
+        float validatedMinLr = SchedulerValidation.nonNegative(minLr, "minLr");
+        if (validatedMinLr > validatedMaxLr) {
             throw new IllegalArgumentException(
-                    "minLr must be in [0, maxLr], got: " + minLr + " with maxLr=" + maxLr);
+                    "minLr must be in [0, maxLr], got: " + validatedMinLr
+                            + " with maxLr=" + validatedMaxLr);
         }
         this.warmupSteps = warmupSteps;
         this.totalSteps  = totalSteps;
-        this.maxLr       = maxLr;
-        this.minLr       = minLr;
+        this.maxLr       = validatedMaxLr;
+        this.minLr       = validatedMinLr;
         this.currentLr   = 0f; // starts at 0
         setLearningRate(currentLr);
     }
@@ -124,12 +124,19 @@ public final class WarmupCosineScheduler extends LRScheduler {
             throw new IllegalArgumentException(
                     "Checkpoint scheduler mismatch: expected WarmupCosineScheduler but got " + name);
         }
-        requireIntMatch(state.get("warmupSteps"), warmupSteps, "warmupSteps");
-        requireIntMatch(state.get("totalSteps"), totalSteps, "totalSteps");
-        requireFloatMatch(state.get("maxLr"), maxLr, "maxLr");
-        requireFloatMatch(state.get("minLr"), minLr, "minLr");
-        currentStep = Math.max(0, readInt(state.get("currentStep"), currentStep));
-        currentLr = readFloat(state.get("currentLr"), computeLearningRateForStep(currentStep));
+        SchedulerValidation.requireIntMatch(
+                state.get("warmupSteps"), warmupSteps, "WarmupCosineScheduler", "warmupSteps");
+        SchedulerValidation.requireIntMatch(
+                state.get("totalSteps"), totalSteps, "WarmupCosineScheduler", "totalSteps");
+        SchedulerValidation.requireFloatMatch(
+                state.get("maxLr"), maxLr, "WarmupCosineScheduler", "maxLr");
+        SchedulerValidation.requireFloatMatch(
+                state.get("minLr"), minLr, "WarmupCosineScheduler", "minLr");
+        currentStep = SchedulerValidation.readNonNegativeInt(
+                state.get("currentStep"), currentStep, "WarmupCosineScheduler", "currentStep");
+        currentLr = SchedulerValidation.readLearningRate(
+                state.get("currentLr"), computeLearningRateForStep(currentStep),
+                "WarmupCosineScheduler", "currentLr");
         setLearningRate(currentLr);
     }
 
@@ -146,55 +153,4 @@ public final class WarmupCosineScheduler extends LRScheduler {
                 * (1f + (float) Math.cos(Math.PI * progress));
     }
 
-    private static void requireIntMatch(Object value, int expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        int loaded = readInt(value, expected);
-        if (loaded != expected) {
-            throw new IllegalArgumentException(
-                    "Invalid WarmupCosineScheduler checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static void requireFloatMatch(Object value, float expected, String fieldName) {
-        if (value == null) {
-            return;
-        }
-        float loaded = readFloat(value, expected);
-        if (Math.abs(loaded - expected) > 1e-7f) {
-            throw new IllegalArgumentException(
-                    "Invalid WarmupCosineScheduler checkpoint payload: " + fieldName
-                            + " mismatch (expected " + expected + ", got " + loaded + ")");
-        }
-    }
-
-    private static int readInt(Object value, int fallback) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Integer.parseInt(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
-
-    private static float readFloat(Object value, float fallback) {
-        if (value instanceof Number number) {
-            return number.floatValue();
-        }
-        if (value instanceof String text) {
-            try {
-                return Float.parseFloat(text);
-            } catch (NumberFormatException ignored) {
-                return fallback;
-            }
-        }
-        return fallback;
-    }
 }

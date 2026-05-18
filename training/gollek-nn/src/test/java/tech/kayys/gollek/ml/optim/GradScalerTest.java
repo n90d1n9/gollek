@@ -4,7 +4,10 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.Parameter;
 
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -95,7 +98,85 @@ class GradScalerTest {
         assertThrows(IllegalArgumentException.class, () -> GradScaler.builder().growthInterval(0));
     }
 
+    @Test
+    void stateDictRestoresLossScaleContinuity() {
+        GradScaler scaler = GradScaler.builder()
+                .initScale(4.0)
+                .growthFactor(2.0)
+                .backoffFactor(0.5)
+                .growthInterval(2)
+                .build();
+
+        scaler.update();
+        Map<String, Object> state = scaler.stateDict();
+
+        GradScaler restored = GradScaler.builder()
+                .initScale(4.0)
+                .growthFactor(2.0)
+                .backoffFactor(0.5)
+                .growthInterval(2)
+                .build();
+
+        assertTrue(restored.supportsStateDict());
+
+        restored.loadStateDict(state);
+        assertEquals(4.0, restored.getScale(), 1e-9);
+        assertFalse(restored.overflowDetected());
+
+        restored.update();
+        assertEquals(8.0, restored.getScale(), 1e-9);
+    }
+
+    @Test
+    void stateDictRejectsInvalidPayloads() {
+        GradScaler scaler = GradScaler.builder()
+                .initScale(4.0)
+                .growthFactor(2.0)
+                .backoffFactor(0.5)
+                .growthInterval(2)
+                .build();
+
+        Map<String, Object> state = scaler.stateDict();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.loadStateDict(with(state, "scaler", "OtherScaler")));
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.loadStateDict(with(state, "scale", Double.NaN)));
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.loadStateDict(with(state, "growthFactor", 3.0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.loadStateDict(with(state, "stepsWithoutOverflow", -1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.loadStateDict(with(state, "overflowDetected", "maybe")));
+    }
+
+    @Test
+    void unscaleRejectsInvalidInputsAndDoesNotPartiallyMutateOnOverflow() {
+        Parameter parameter = parameter(8f, 16f);
+        GradScaler scaler = GradScaler.builder().initScale(4.0).build();
+
+        parameter.data().backward(GradTensor.of(new float[] {8f, Float.POSITIVE_INFINITY}, 2));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> scaler.unscaleAndCheckParameters(Arrays.asList(parameter, null)));
+        assertTrue(scaler.unscaleAndCheckParameters(List.of(parameter)));
+        assertTrue(scaler.overflowDetected());
+        assertArrayEquals(new float[] {8f, Float.POSITIVE_INFINITY}, parameter.grad().data(), 0f);
+
+        assertThrows(NullPointerException.class, () -> scaler.step(null));
+    }
+
+    private static Map<String, Object> with(Map<String, Object> source, String key, Object value) {
+        Map<String, Object> copy = new HashMap<>(source);
+        copy.put(key, value);
+        return copy;
+    }
+
     private static Parameter parameter(float value) {
         return new Parameter(GradTensor.of(new float[] {value}, 1));
+    }
+
+    private static Parameter parameter(float... values) {
+        return new Parameter(GradTensor.of(values.clone(), values.length));
     }
 }

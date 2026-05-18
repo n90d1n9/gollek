@@ -39,6 +39,7 @@ public final class DiffusionOpdDDIMExample {
                 0.9990f, 0.9950f, 0.9880f, 0.9760f, 0.9600f, 0.9400f, 0.9150f, 0.8850f
         };
         DDIMScheduler ddimScheduler = new DDIMScheduler(alphasCumprod, 4, null);
+        var diffusionScheduler = RunnerDiffusionAdapters.scheduler(ddimScheduler);
 
         List<DiffusionPromptSample> ocrPrompts = List.of(
                 new DiffusionPromptSample("street sign that clearly reads GOLLEK", "", 7L, null),
@@ -54,20 +55,28 @@ public final class DiffusionOpdDDIMExample {
                 .teacher("ocr-late", RunnerDiffusionAdapters.denoiser(ocrLateTeacher))
                 .teacher("aesthetics-early", RunnerDiffusionAdapters.denoiser(aestheticsEarlyTeacher))
                 .teacher("aesthetics-late", RunnerDiffusionAdapters.denoiser(aestheticsLateTeacher))
-                .scheduler(RunnerDiffusionAdapters.scheduler(ddimScheduler))
+                .scheduler(diffusionScheduler)
                 .conditioningResolver(sample -> Tensor.zeros(1, 4, 8, 8))
                 .optimizationStep(loss -> {
                     // The example focuses on Java-side wiring and rollout shape.
                     // Real training code should connect this to an optimizer step.
                 })
                 .checkpointDir(Path.of("build", "diffusion-opd-example"))
+                .adaptiveStageWeighting(true)
+                .adaptiveStageWeightMomentum(0.60d)
+                .adaptiveStageWeightRange(0.80d, 1.35d)
                 .listener(new ConsoleDiffusionListener())
                 .task(new DiffusionTask(
                         "ocr",
                         "OCR",
                         "ocr",
                         "teacher-ocr",
-                        DiffusionTeacherBindings.splitEarlyLate(4, "ocr-early", "ocr-late", 1.25d, 0.85d),
+                        DiffusionTeacherBindings.splitEarlyLate(
+                                diffusionScheduler,
+                                "ocr-early",
+                                "ocr-late",
+                                1.25d,
+                                0.85d),
                         ocrPrompts))
                 .task(new DiffusionTask(
                         "aesthetics",
@@ -75,7 +84,7 @@ public final class DiffusionOpdDDIMExample {
                         "aesthetic",
                         "teacher-aesthetics",
                         DiffusionTeacherBindings.splitEarlyLate(
-                                4,
+                                diffusionScheduler,
                                 "aesthetics-early",
                                 "aesthetics-late",
                                 0.90d,
@@ -90,6 +99,7 @@ public final class DiffusionOpdDDIMExample {
         System.out.println("DiffusionOPD example completed.");
         System.out.println("Rounds: " + summary.epochCount());
         System.out.println("Mean loss: " + summary.latestTrainLoss());
+        System.out.println("Partitioning: " + DiffusionTeacherBindings.partitionSummary(diffusionScheduler));
         System.out.println("Metadata: " + summary.metadata());
     }
 
@@ -110,6 +120,7 @@ public final class DiffusionOpdDDIMExample {
             System.out.println("teacher usage: " + summary.metadata().get("teacherUsage"));
             System.out.println("stage usage: " + summary.metadata().get("stageUsage"));
             System.out.println("stage weighted loss: " + summary.metadata().get("stageWeightedLoss"));
+            System.out.println("adaptive stage factors: " + summary.metadata().get("adaptiveStageFactors"));
         }
     }
 

@@ -4,6 +4,8 @@ import io.smallrye.mutiny.Multi;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.extension.AbstractGollekRunner;
 import tech.kayys.gollek.runner.RunnerCapabilities;
 import tech.kayys.gollek.runner.RunnerConfiguration;
@@ -22,7 +24,8 @@ import tech.kayys.gollek.spi.exception.InferenceException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
-import tech.kayys.gollek.spi.model.*;
+import tech.kayys.gollek.spi.model.ModelManifest;
+import tech.kayys.gollek.spi.model.RunnerMetadata;
 import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 
 import java.io.IOException;
@@ -90,7 +93,12 @@ public class StableDiffusionNativeRunner extends AbstractGollekRunner {
             "1.0.0", 
             List.of(ModelFormat.SAFETENSORS), 
             List.of(DeviceType.CPU), 
-            Map.of("native", true)
+            Map.of(
+                    "native", true,
+                    "diffusionPipeline", "stable-diffusion",
+                    "schedulerFamily", PNDMScheduler.FAMILY,
+                    "trainingAlignedSchedulerSurface", true,
+                    "defaultLatentShape", "1x4x64x64")
         );
     }
 
@@ -151,6 +159,12 @@ public class StableDiffusionNativeRunner extends AbstractGollekRunner {
                 
                 PNDMScheduler scheduler = new PNDMScheduler(steps);
                 List<Long> timesteps = scheduler.getTimesteps();
+                LOG.debugf(
+                        "[SD-Native] prompt steps=%d guidance=%.2f scheduler=%s timesteps=%s",
+                        scheduler.stepCount(),
+                        guidance,
+                        scheduler.family(),
+                        Arrays.toString(scheduler.timestepsArray()));
                 
                 for (int i = 0; i < steps; i++) {
                     long t = timesteps.get(i);
