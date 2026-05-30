@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -403,6 +404,50 @@ class TrainersRuntimeTest {
     }
 
     @Test
+    void canonicalFallbackUsesExplicitEpochLoaderViewsAcrossResume() throws Exception {
+        Path checkpointDir = Files.createTempDirectory("gollek-trainer-epoch-loader-resume");
+        EpochAwareIntegerLoader firstLoader = new EpochAwareIntegerLoader();
+
+        TrainingListener stopAtSecondEpoch = new TrainingListener() {
+            @Override
+            public void onEpochEnd(TrainerSession session, int epoch, double trainLoss) {
+                if (epoch == 1) {
+                    session.stop();
+                }
+            }
+        };
+
+        CanonicalTrainerRuntime firstRun = Trainers.canonicalBuilder()
+                .epochs(4)
+                .checkpointDir(checkpointDir)
+                .trainBatchLoss((session, epoch, step, batch) -> ((Number) batch).doubleValue())
+                .listener(stopAtSecondEpoch)
+                .build();
+
+        firstRun.fit(firstLoader, null);
+
+        assertEquals(List.of(0L, 1L), firstLoader.requestedEpochs());
+        assertEquals(0, firstLoader.defaultIteratorCalls());
+        assertEquals(Boolean.TRUE, firstRun.summary().metadata().get("trainExplicitEpochLoaderViewUsed"));
+
+        EpochAwareIntegerLoader resumedLoader = new EpochAwareIntegerLoader();
+        CanonicalTrainerRuntime resumedRun = Trainers.canonicalBuilder()
+                .epochs(4)
+                .checkpointDir(checkpointDir)
+                .resumeFromCheckpoint()
+                .trainBatchLoss((session, epoch, step, batch) -> ((Number) batch).doubleValue())
+                .build();
+
+        resumedRun.fit(resumedLoader, null);
+
+        assertEquals(List.of(2L, 3L), resumedLoader.requestedEpochs());
+        assertEquals(0, resumedLoader.defaultIteratorCalls());
+        assertEquals(4, resumedRun.summary().epochCount());
+        assertEquals(2, ((Number) resumedRun.summary().metadata().get("resumeStartEpoch")).intValue());
+        assertEquals(Boolean.TRUE, resumedRun.summary().metadata().get("trainExplicitEpochLoaderViewUsed"));
+    }
+
+    @Test
     void sessionBuilderResumeModeBuildsCanonicalRuntime() {
         TrainerSession session = Trainers.sessionBuilder()
                 .epochs(1)
@@ -525,5 +570,30 @@ class TrainersRuntimeTest {
         assertEquals(Boolean.TRUE, summary.metadata().get("checkpointMigratedFromLegacy"));
         assertEquals("legacy-properties", summary.metadata().get("checkpointDetectedFormatVersion"));
         assertEquals(1, ((Number) summary.metadata().get("resumeStartEpoch")).intValue());
+    }
+
+    private static final class EpochAwareIntegerLoader implements Iterable<Integer> {
+        private final List<Long> requestedEpochs = new ArrayList<>();
+        private int defaultIteratorCalls;
+
+        public Iterable<Integer> epoch(long epoch) {
+            requestedEpochs.add(epoch);
+            int base = Math.toIntExact(epoch * 10L);
+            return List.of(base + 1, base + 2);
+        }
+
+        @Override
+        public Iterator<Integer> iterator() {
+            defaultIteratorCalls++;
+            return List.of(-1).iterator();
+        }
+
+        List<Long> requestedEpochs() {
+            return List.copyOf(requestedEpochs);
+        }
+
+        int defaultIteratorCalls() {
+            return defaultIteratorCalls;
+        }
     }
 }

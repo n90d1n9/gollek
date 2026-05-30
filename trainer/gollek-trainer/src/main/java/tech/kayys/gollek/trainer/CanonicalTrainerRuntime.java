@@ -214,6 +214,8 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
         metadata.put("trainEpochLossHook", lossState.trainEpochHookUsed);
         metadata.put("validationBatchLossHook", lossState.validationBatchHookUsed);
         metadata.put("validationEpochLossHook", lossState.validationEpochHookUsed);
+        metadata.put("trainExplicitEpochLoaderViewUsed", lossState.trainExplicitEpochLoaderViewUsed);
+        metadata.put("validationExplicitEpochLoaderViewUsed", lossState.validationExplicitEpochLoaderViewUsed);
         metadata.put("trainSyntheticFallbackUsed", lossState.trainSyntheticFallbackUsed);
         metadata.put("validationSyntheticFallbackUsed", lossState.validationSyntheticFallbackUsed);
         metadata.put("earlyStoppingPatience", earlyStoppingPatience);
@@ -484,9 +486,13 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
             return resolveEpochLoss(trainEpochLossEvaluator, epoch, null, true, state);
         }
 
+        TrainerEpochLoaderViews.View epochView = TrainerEpochLoaderViews.resolve(trainLoader, epoch);
+        state.trainExplicitEpochLoaderViewUsed |= epochView.explicitEpoch();
+        Iterable<?> epochLoader = epochView.iterable();
+
         double totalLoss = 0.0;
         int batchCount = 0;
-        for (Object batch : trainLoader) {
+        for (Object batch : epochLoader) {
             if (stopped.get()) {
                 break;
             }
@@ -501,7 +507,7 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
         if (batchCount > 0) {
             return totalLoss / batchCount;
         }
-        return resolveEpochLoss(trainEpochLossEvaluator, epoch, trainLoader, true, state);
+        return resolveEpochLoss(trainEpochLossEvaluator, epoch, epochLoader, true, state);
     }
 
     private double computeValidationLossForEpoch(int epoch, Iterable<?> validationLoader, LossExecutionState state) {
@@ -509,9 +515,13 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
             return resolveEpochLoss(validationEpochLossEvaluator, epoch, null, false, state);
         }
 
+        TrainerEpochLoaderViews.View epochView = TrainerEpochLoaderViews.resolve(validationLoader, epoch);
+        state.validationExplicitEpochLoaderViewUsed |= epochView.explicitEpoch();
+        Iterable<?> epochLoader = epochView.iterable();
+
         double totalLoss = 0.0;
         int batchCount = 0;
-        for (Object batch : validationLoader) {
+        for (Object batch : epochLoader) {
             if (stopped.get()) {
                 break;
             }
@@ -523,7 +533,7 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
         if (batchCount > 0) {
             return totalLoss / batchCount;
         }
-        return resolveEpochLoss(validationEpochLossEvaluator, epoch, validationLoader, false, state);
+        return resolveEpochLoss(validationEpochLossEvaluator, epoch, epochLoader, false, state);
     }
 
     private double computeTrainBatchLoss(int epoch, int step, Object batch, LossExecutionState state) {
@@ -633,6 +643,8 @@ public final class CanonicalTrainerRuntime implements TrainerSession {
         private boolean trainEpochHookUsed;
         private boolean validationBatchHookUsed;
         private boolean validationEpochHookUsed;
+        private boolean trainExplicitEpochLoaderViewUsed;
+        private boolean validationExplicitEpochLoaderViewUsed;
         private boolean trainSyntheticFallbackUsed;
         private boolean validationSyntheticFallbackUsed;
     }
