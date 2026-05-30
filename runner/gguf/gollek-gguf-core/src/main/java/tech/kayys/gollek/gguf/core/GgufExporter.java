@@ -1,14 +1,16 @@
 package tech.kayys.gollek.gguf.core;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.gguf.GgufMetaValue;
-import tech.kayys.gollek.ml.gguf.GgufWriter;
 import tech.kayys.gollek.ml.nn.NNModule;
+import tech.kayys.gollek.gguf.writer.GGUFWriter;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Exports a Gollek {@link NNModule} to GGUF format for llama.cpp
@@ -35,14 +37,28 @@ public final class GgufExporter {
 
     /** GGUF file_type values matching llama.cpp conventions. */
     public enum Quantization {
-        NONE(0), FP16(1), INT8(8), INT4(2), NF4(20);
+        NONE(0, GGUFWriter.TensorEncoding.F32),
+        FP16(1, GGUFWriter.TensorEncoding.F16),
+        INT8(7, GGUFWriter.TensorEncoding.Q8_0),
+        INT4(2, GGUFWriter.TensorEncoding.Q4_0),
+        NF4(20, null);
 
         public final long fileType;
+        private final GGUFWriter.TensorEncoding tensorEncoding;
 
-        Quantization(long fileType) {
+        Quantization(long fileType, GGUFWriter.TensorEncoding tensorEncoding) {
             this.fileType = fileType;
+            this.tensorEncoding = tensorEncoding;
         }
     }
+
+    private static final Set<String> RESERVED_METADATA_KEYS = Set.of(
+            "architecture",
+            "general.alignment",
+            "general.architecture",
+            "general.file_type",
+            "general.parameter_count",
+            "general.quantization_version");
 
     private final NNModule model;
     private final Map<String, Object> metadata;
@@ -67,65 +83,91 @@ public final class GgufExporter {
     }
 
     public void export(Path outputPath) throws IOException {
-        Map<String, GradTensor> stateDict = model.stateDict();
-
-        Map<String, GradTensor> quantized = new LinkedHashMap<>();
-        for (var e : stateDict.entrySet()) {
-            quantized.put(e.getKey(), quantize(e.getValue()));
+        if (quantization == Quantization.NF4) {
+            throw new UnsupportedOperationException(
+                    "NF4 GGUF export requires IQ4_NL tensor packing; use INT4 for Q4_0 GGUF export.");
         }
 
+        Map<String, GradTensor> stateDict = model.stateDict();
+        Map<String, GgufMetaValue> ggufMeta = ggufMetadata();
+        GGUFWriter.save(outputPath, stateDict, ggufMeta, quantization.tensorEncoding);
+    }
+
+    private Map<String, GgufMetaValue> ggufMetadata() {
         Map<String, GgufMetaValue> ggufMeta = new LinkedHashMap<>();
         ggufMeta.put("general.architecture",
                 GgufMetaValue.ofString(metadata.getOrDefault("architecture", "gollek").toString()));
-        ggufMeta.put("general.quantization_version", GgufMetaValue.ofUint32(2));
-        ggufMeta.put("general.file_type", GgufMetaValue.ofUint32(quantization.fileType));
-        ggufMeta.put("general.parameter_count", GgufMetaValue.ofUint32(model.parameterCount()));
+        ggufMeta.put("general.alignment", GgufMetaValue.ofUInt32(GgufModel.DEFAULT_ALIGNMENT));
+        ggufMeta.put("general.quantization_version", GgufMetaValue.ofUInt32(2));
+        ggufMeta.put("general.file_type", GgufMetaValue.ofUInt32(quantization.fileType));
+        ggufMeta.put("general.parameter_count", GgufMetaValue.ofUInt64(model.parameterCount()));
         for (var e : metadata.entrySet()) {
-            if (!e.getKey().startsWith("general."))
-                ggufMeta.put(e.getKey(), GgufMetaValue.ofString(e.getValue().toString()));
+            if (!RESERVED_METADATA_KEYS.contains(e.getKey())) {
+                ggufMeta.put(e.getKey(), toMetadataValue(e.getValue()));
+            }
+        }
+        return ggufMeta;
+    }
+
+    private static GgufMetaValue toMetadataValue(Object value) {
+        if (value instanceof GgufMetaValue ggufValue) {
+            return ggufValue;
+        }
+        if (value instanceof String string) {
+            return GgufMetaValue.ofString(string);
+        }
+        if (value instanceof Boolean bool) {
+            return GgufMetaValue.ofBool(bool);
+        }
+        if (value instanceof Float flt) {
+            return GgufMetaValue.ofFloat32(flt);
+        }
+        if (value instanceof Double dbl) {
+            return new GgufMetaValue.Float64Val(dbl);
+        }
+        if (value instanceof Byte b) {
+            return new GgufMetaValue.Int8Val(b);
+        }
+        if (value instanceof Short s) {
+            return new GgufMetaValue.Int16Val(s);
+        }
+        if (value instanceof Integer i) {
+            return GgufMetaValue.ofInt32(i);
+        }
+        if (value instanceof Long l) {
+            return l >= 0 ? GgufMetaValue.ofUInt64(l) : new GgufMetaValue.Int64Val(l);
+        }
+        if (value instanceof Iterable<?> iterable) {
+            return toArrayMetadataValue(iterable);
+        }
+        return GgufMetaValue.ofString(String.valueOf(value));
+    }
+
+    private static GgufMetaValue toArrayMetadataValue(Iterable<?> iterable) {
+        List<Object> values = new ArrayList<>();
+        for (Object value : iterable) {
+            values.add(value);
+        }
+        if (values.isEmpty()) {
+            return GgufMetaValue.ofStringArray(List.of());
+        }
+        if (values.stream().allMatch(String.class::isInstance)) {
+            return GgufMetaValue.ofStringArray(values.stream().map(String.class::cast).toList());
+        }
+        if (values.stream().allMatch(Integer.class::isInstance)) {
+            return GgufMetaValue.ofInt32Array(values.stream().map(Integer.class::cast).toList());
+        }
+        if (values.stream().allMatch(Float.class::isInstance)) {
+            return GgufMetaValue.ofFloat32Array(values.stream().map(Float.class::cast).toList());
+        }
+        if (values.stream().allMatch(Boolean.class::isInstance)) {
+            return GgufMetaValue.ofBoolArray(values.stream().map(Boolean.class::cast).toList());
         }
 
-        GgufWriter.save(outputPath, quantized, ggufMeta);
-    }
-
-    // ── Quantization ──────────────────────────────────────────────────────────
-
-    private GradTensor quantize(GradTensor t) {
-        return switch (quantization) {
-            case NONE, FP16 -> t;
-            case INT8 -> quantizeInt8(t);
-            case INT4, NF4 -> quantizeInt4(t);
-        };
-    }
-
-    /** Symmetric per-tensor INT8. */
-    private static GradTensor quantizeInt8(GradTensor t) {
-        float[] src = t.data();
-        float maxAbs = 0f;
-        for (float v : src)
-            maxAbs = Math.max(maxAbs, Math.abs(v));
-        if (maxAbs == 0f)
-            return t;
-        float scale = maxAbs / 127f;
-        float[] out = new float[src.length];
-        for (int i = 0; i < src.length; i++)
-            out[i] = Math.max(-127, Math.min(127, Math.round(src[i] / scale)));
-        return GradTensor.of(out, t.shape());
-    }
-
-    /** Block-wise Q4_0 (32-element blocks). */
-    private static GradTensor quantizeInt4(GradTensor t) {
-        float[] src = t.data();
-        float[] out = new float[src.length];
-        for (int b = 0; b < src.length; b += 32) {
-            int end = Math.min(b + 32, src.length);
-            float maxAbs = 0f;
-            for (int i = b; i < end; i++)
-                maxAbs = Math.max(maxAbs, Math.abs(src[i]));
-            float scale = maxAbs == 0f ? 1f : maxAbs / 7f;
-            for (int i = b; i < end; i++)
-                out[i] = Math.max(-8, Math.min(7, Math.round(src[i] / scale)));
+        List<String> strings = new ArrayList<>(values.size());
+        for (Object value : values) {
+            strings.add(String.valueOf(value));
         }
-        return GradTensor.of(out, t.shape());
+        return GgufMetaValue.ofStringArray(strings);
     }
 }

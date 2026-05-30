@@ -102,10 +102,21 @@ class OnnxRuntimeRunnerDeviceSelectionTest {
         Method method = OnnxRuntimeRunner.class.getDeclaredMethod("resolveSupportedDevices");
         method.setAccessible(true);
         @SuppressWarnings("unchecked")
-        List<tech.kayys.gollek.spi.model.DeviceType> devices =
-                (List<tech.kayys.gollek.spi.model.DeviceType>) method.invoke(runner);
+        List<tech.kayys.gollek.core.tensor.DeviceType> devices =
+                (List<tech.kayys.gollek.core.tensor.DeviceType>) method.invoke(runner);
 
-        assertTrue(devices.contains(tech.kayys.gollek.spi.model.DeviceType.METAL));
+        assertTrue(devices.contains(tech.kayys.gollek.core.tensor.DeviceType.METAL));
+    }
+
+    @Test
+    void metalAliasesResolveToMetalDeviceType() throws Exception {
+        OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
+        setField(runner, "executionProvider", "metal");
+
+        assertEquals(tech.kayys.gollek.core.tensor.DeviceType.METAL, runner.deviceType());
+
+        setField(runner, "executionProvider", "mps");
+        assertEquals(tech.kayys.gollek.core.tensor.DeviceType.METAL, runner.deviceType());
     }
 
     private boolean invokeMetalAllowed(OnnxRuntimeRunner runner) throws Exception {

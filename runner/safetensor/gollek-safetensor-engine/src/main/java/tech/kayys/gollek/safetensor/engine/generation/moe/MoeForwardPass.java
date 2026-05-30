@@ -17,6 +17,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
+import tech.kayys.gollek.safetensor.engine.weights.WeightTensorResolver;
+import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.safetensor.engine.forward.DirectForwardPass;
 
@@ -37,7 +39,7 @@ public class MoeForwardPass {
      * Compute the MoE FFN for one transformer layer using AccelTensor.
      */
     public AccelTensor computeAccel(AccelTensor hidden, Map<String, AccelTensor> weights,
-            ModelConfig config, int layerIdx) {
+            ModelConfig config, ModelArchitecture arch, int layerIdx) {
 
         int numExperts = config.numLocalExperts();
         int topK = config.numExpertsPerTok();
@@ -45,15 +47,13 @@ public class MoeForwardPass {
         log.tracef("MoE layer %d: %d experts, top-%d routing", layerIdx, numExperts, topK);
 
         // 1. Router
-        String gateKey = "model.layers.%d.block_sparse_moe.gate.weight".formatted(layerIdx);
-        AccelTensor gateWeight = weights.get(gateKey);
-        if (gateWeight == null) {
-            gateKey = "model.layers.%d.mlp.gate.weight".formatted(layerIdx);
-            gateWeight = weights.get(gateKey);
-        }
+        AccelTensor gateWeight = WeightTensorResolver.first(
+                weights,
+                arch.layerMoeGateWeightCandidates(layerIdx),
+                "model.layers.%d.mlp.gate.weight".formatted(layerIdx));
         if (gateWeight == null) {
             log.warnf("MoE router weight not found for layer %d — using expert 0 only", layerIdx);
-            return runExpert(hidden, weights, layerIdx, 0);
+            return runExpert(hidden, weights, config, arch, layerIdx, 0);
         }
 
         // router_logits = hidden_flat @ gateWeight^T
@@ -89,7 +89,7 @@ public class MoeForwardPass {
                 float[] tokenHidden = Arrays.copyOfRange(
                         hiddenData, t * hiddenSize, (t + 1) * hiddenSize);
 
-                float[] expertOut = runExpertOnToken(tokenHidden, weights, layerIdx, expIdx);
+                float[] expertOut = runExpertOnToken(tokenHidden, weights, config, arch, layerIdx, expIdx);
 
                 for (int d = 0; d < hiddenSize; d++) {
                     outputData[t * hiddenSize + d] += expWeight * expertOut[d];
@@ -127,30 +127,34 @@ public class MoeForwardPass {
         }
     }
 
-    private AccelTensor runExpert(AccelTensor hidden, Map<String, AccelTensor> weights,
+    private AccelTensor runExpert(AccelTensor hidden, Map<String, AccelTensor> weights, ModelConfig config,
+            ModelArchitecture arch,
             int layerIdx, int expertIdx) {
-        String prefix = "model.layers.%d.block_sparse_moe.experts.%d".formatted(layerIdx, expertIdx);
-        AccelTensor gateW = weights.get(prefix + ".w1.weight");
-        AccelTensor upW = weights.get(prefix + ".w3.weight");
-        AccelTensor downW = weights.get(prefix + ".w2.weight");
-        if (gateW == null) {
-            gateW = weights.get("model.layers.%d.mlp.experts.%d.gate_proj.weight".formatted(layerIdx, expertIdx));
-            upW = weights.get("model.layers.%d.mlp.experts.%d.up_proj.weight".formatted(layerIdx, expertIdx));
-            downW = weights.get("model.layers.%d.mlp.experts.%d.down_proj.weight".formatted(layerIdx, expertIdx));
-        }
+        AccelTensor gateW = WeightTensorResolver.first(
+                weights,
+                arch.expertGateWeightCandidates(layerIdx, expertIdx),
+                "model.layers.%d.mlp.experts.%d.gate_proj.weight".formatted(layerIdx, expertIdx));
+        AccelTensor upW = WeightTensorResolver.first(
+                weights,
+                arch.expertUpWeightCandidates(layerIdx, expertIdx),
+                "model.layers.%d.mlp.experts.%d.up_proj.weight".formatted(layerIdx, expertIdx));
+        AccelTensor downW = WeightTensorResolver.first(
+                weights,
+                arch.expertDownWeightCandidates(layerIdx, expertIdx),
+                "model.layers.%d.mlp.experts.%d.down_proj.weight".formatted(layerIdx, expertIdx));
         if (gateW == null || upW == null || downW == null) {
             log.warnf("Expert %d weights not found for layer %d", expertIdx, layerIdx);
             return hidden;
         }
-        return forwardPass.swigluFfn(hidden, null, null, gateW, null, upW, null, downW, null);
+        return forwardPass.swigluFfn(hidden, arch, config, gateW, null, upW, null, downW, null);
     }
 
     private float[] runExpertOnToken(float[] tokenHidden, Map<String, AccelTensor> weights,
-            int layerIdx, int expertIdx) {
+            ModelConfig config, ModelArchitecture arch, int layerIdx, int expertIdx) {
         try {
             int hiddenSize = tokenHidden.length;
             AccelTensor tokenTensor = AccelTensor.fromFloatArray(tokenHidden, 1, 1, hiddenSize);
-            AccelTensor out = runExpert(tokenTensor, weights, layerIdx, expertIdx);
+            AccelTensor out = runExpert(tokenTensor, weights, config, arch, layerIdx, expertIdx);
             float[] result = out.toFloatArray();
             tokenTensor.close();
             if (out != tokenTensor) out.close();
@@ -167,4 +171,5 @@ public class MoeForwardPass {
         long tokens = s[0] * s[1];
         return t.reshape(tokens, s[s.length - 1]);
     }
+
 }

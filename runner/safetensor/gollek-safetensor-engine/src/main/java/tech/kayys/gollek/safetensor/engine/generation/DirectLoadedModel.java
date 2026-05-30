@@ -1,0 +1,127 @@
+package tech.kayys.gollek.safetensor.engine.generation;
+
+import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPolicy.buildBaseStopTokenIds;
+import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPolicy.buildGreedySamplingMasks;
+
+import java.lang.foreign.Arena;
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
+import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
+import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
+import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+
+public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
+    private final Path path;
+    private final Tokenizer tokenizer;
+    private final String key;
+    private final boolean quantized;
+    private final QuantizationEngine.QuantStrategy quantStrategy;
+    private final String quantCacheState;
+    private final Path quantCachePath;
+    private final ModelConfig config;
+    private final ModelArchitecture architecture;
+    private final ModelRuntimeTraits runtimeTraits;
+    private final Set<Integer> baseStopTokenIds;
+    private final GreedySamplingMasks baseGreedySamplingMasks;
+    private final Map<String, AccelTensor> weights;
+    private final Arena weightArena;
+
+    public DirectLoadedModel(Path path, Map<String, AccelTensor> weights,
+            Tokenizer tokenizer, String key,
+            boolean quantized, QuantizationEngine.QuantStrategy quantStrategy,
+            String quantCacheState, Path quantCachePath,
+            ModelConfig config, ModelArchitecture architecture, ModelRuntimeTraits runtimeTraits,
+            Arena weightArena) {
+        this.path = path;
+        this.weights = weights;
+        this.tokenizer = tokenizer;
+        this.key = key;
+        this.quantized = quantized;
+        this.quantStrategy = quantStrategy;
+        this.quantCacheState = quantCacheState;
+        this.quantCachePath = quantCachePath;
+        this.config = config != null ? config : new ModelConfig();
+        this.architecture = Objects.requireNonNull(architecture, "architecture must not be null");
+        this.runtimeTraits = runtimeTraits == null ? ModelRuntimeTraits.fromConfig(this.config) : runtimeTraits;
+        this.baseStopTokenIds = buildBaseStopTokenIds(tokenizer, this.config);
+        this.baseGreedySamplingMasks = buildGreedySamplingMasks(tokenizer, this.baseStopTokenIds,
+                this.config.vocabSize(), this.runtimeTraits);
+        this.weightArena = weightArena;
+    }
+
+    @Override
+    public Path path() {
+        return path;
+    }
+
+    @Override
+    public Map<String, AccelTensor> weights() {
+        return weights;
+    }
+
+    @Override
+    public Tokenizer tokenizer() {
+        return tokenizer;
+    }
+
+    @Override
+    public String key() {
+        return key;
+    }
+
+    @Override
+    public boolean isQuantized() {
+        return quantized;
+    }
+
+    @Override
+    public ModelConfig config() {
+        return config;
+    }
+
+    public String arch() {
+        return config.primaryArchitecture();
+    }
+
+    public ModelArchitecture architecture() {
+        return architecture;
+    }
+
+    ModelRuntimeTraits runtimeTraits() {
+        return runtimeTraits;
+    }
+
+    Set<Integer> baseStopTokenIds() {
+        return baseStopTokenIds;
+    }
+
+    GreedySamplingMasks baseGreedySamplingMasks() {
+        return baseGreedySamplingMasks;
+    }
+
+    public QuantizationEngine.QuantStrategy getQuantStrategy() {
+        return quantStrategy;
+    }
+
+    public String getQuantCacheState() {
+        return quantCacheState;
+    }
+
+    public Path getQuantCachePath() {
+        return quantCachePath;
+    }
+
+    void closeWeightArena() {
+        if (weightArena == null) {
+            return;
+        }
+        weightArena.close();
+    }
+}

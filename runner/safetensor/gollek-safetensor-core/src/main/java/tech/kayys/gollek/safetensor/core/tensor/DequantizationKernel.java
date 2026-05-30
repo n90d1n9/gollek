@@ -74,9 +74,14 @@ public class DequantizationKernel {
      * Dequantize F16 weights to Float32.
      */
     public static void dequantizeF16(MemorySegment src, MemorySegment dst, long numel) {
+        dequantizeF16(src, 0L, dst, 0L, numel);
+    }
+
+    public static void dequantizeF16(MemorySegment src, long srcByteOffset, MemorySegment dst, long dstByteOffset,
+            long numel) {
         for (long i = 0; i < numel; i++) {
-            short raw = src.getAtIndex(ValueLayout.JAVA_SHORT, i);
-            dst.setAtIndex(ValueLayout.JAVA_FLOAT, i, float16ToFloat32(raw));
+            short raw = src.get(ValueLayout.JAVA_SHORT, srcByteOffset + i * Short.BYTES);
+            dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + i * Float.BYTES, float16ToFloat32(raw));
         }
     }
 
@@ -86,20 +91,27 @@ public class DequantizationKernel {
      * Dequantize BF16 weights to Float32.
      */
     public static void dequantizeBf16(MemorySegment src, MemorySegment dst, long numel) {
+        dequantizeBf16(src, 0L, dst, 0L, numel);
+    }
+
+    public static void dequantizeBf16(MemorySegment src, long srcByteOffset, MemorySegment dst, long dstByteOffset,
+            long numel) {
         long i = 0;
         long unrolledBound = numel - (numel % S_SPECIES.length());
         for (; i < unrolledBound; i += S_SPECIES.length()) {
-            ShortVector sv = ShortVector.fromMemorySegment(S_SPECIES, src, i * 2, ByteOrder.nativeOrder());
+            ShortVector sv = ShortVector.fromMemorySegment(S_SPECIES, src, srcByteOffset + i * Short.BYTES,
+                    ByteOrder.nativeOrder());
             // Zero-extend short to int, shift left 16 to form float32
             IntVector iv = (IntVector) sv.castShape(IntVector.SPECIES_256, 0);
             iv = iv.and(0xFFFF).lanewise(VectorOperators.LSHL, 16);
             FloatVector fv = iv.reinterpretAsFloats();
-            fv.intoMemorySegment(dst, i * 4, ByteOrder.nativeOrder());
+            fv.intoMemorySegment(dst, dstByteOffset + i * Float.BYTES, ByteOrder.nativeOrder());
         }
 
         for (; i < numel; i++) {
-            short raw = src.getAtIndex(ValueLayout.JAVA_SHORT, i);
-            dst.setAtIndex(ValueLayout.JAVA_FLOAT, i, Float.intBitsToFloat((raw & 0xFFFF) << 16));
+            short raw = src.get(ValueLayout.JAVA_SHORT, srcByteOffset + i * Short.BYTES);
+            dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + i * Float.BYTES,
+                    Float.intBitsToFloat((raw & 0xFFFF) << 16));
         }
     }
 

@@ -23,7 +23,19 @@ public enum GgmlType {
     I32(26, 1, 4),
     I64(27, 1, 8),
     F64(28, 1, 8),
-    BF16(30, 1, 2);
+    IQ1_M(29, 256, 56),
+    BF16(30, 1, 2),
+    Q4_0_4_4(31, 0, 0),
+    Q4_0_4_8(32, 0, 0),
+    Q4_0_8_8(33, 0, 0),
+    TQ1_0(34, 256, 54),
+    TQ2_0(35, 256, 66),
+    IQ4_NL_4_4(36, 0, 0),
+    IQ4_NL_4_8(37, 0, 0),
+    IQ4_NL_8_8(38, 0, 0),
+    MXFP4(39, 32, 17),
+    NVFP4(40, 64, 36),
+    Q1_0(41, 128, 18);
 
     public final int id;
     public final int blockSize;
@@ -43,6 +55,12 @@ public enum GgmlType {
     }
 
     public long bytesFor(long numElements) {
+        if (blockSize <= 0 || typeSize <= 0) {
+            throw new IllegalArgumentException("GGML type id " + id + " is not loadable from GGUF data");
+        }
+        if (numElements % blockSize != 0) {
+            throw new IllegalArgumentException("Not multiple of block size");
+        }
         return (numElements / blockSize) * typeSize;
     }
 }

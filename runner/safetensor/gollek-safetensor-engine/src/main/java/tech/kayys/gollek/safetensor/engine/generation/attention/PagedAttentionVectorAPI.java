@@ -1,11 +1,15 @@
 package tech.kayys.gollek.safetensor.engine.generation.attention;
 
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.kv.BlockManager;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
 
@@ -15,6 +19,7 @@ import java.util.List;
  * Matches the layout: [numHeads, tokensPerBlock, headDim]
  */
 public class PagedAttentionVectorAPI {
+    private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final String DEBUG_ATTENTION_PROBE_PROPERTY = "gollek.debug.attention_probe";
 
     /**
@@ -154,14 +159,23 @@ public class PagedAttentionVectorAPI {
 
         long outIndex = oOff / Float.BYTES;
         float invL = 1.0f / (l + 1e-9f);
-        for (int d = 0; d < headDim; d++) {
-            oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, outIndex + d, acc[d] * invL);
-        }
+        writeNormalizedAccumulator(oSeg, outIndex, acc, invL, headDim);
     }
 
     private static float dotProduct(MemorySegment q, long qOff, MemorySegment k, long kOff, long dim) {
-        float res = 0;
-        for (int j = 0; j < dim; j++) {
+        int n = Math.toIntExact(dim);
+        int j = 0;
+        FloatVector sum = FloatVector.zero(FLOAT_SPECIES);
+        int upperBound = FLOAT_SPECIES.loopBound(n);
+        for (; j < upperBound; j += FLOAT_SPECIES.length()) {
+            FloatVector qVec = FloatVector.fromMemorySegment(
+                    FLOAT_SPECIES, q, qOff + (long) j * Float.BYTES, ByteOrder.nativeOrder());
+            FloatVector kVec = FloatVector.fromMemorySegment(
+                    FLOAT_SPECIES, k, kOff + (long) j * Float.BYTES, ByteOrder.nativeOrder());
+            sum = sum.add(qVec.mul(kVec));
+        }
+        float res = sum.reduceLanes(VectorOperators.ADD);
+        for (; j < n; j++) {
             res += q.getAtIndex(ValueLayout.JAVA_FLOAT, (qOff / 4) + j) *
                     k.getAtIndex(ValueLayout.JAVA_FLOAT, (kOff / 4) + j);
         }
@@ -170,8 +184,34 @@ public class PagedAttentionVectorAPI {
 
     private static void updateAccumulator(float[] acc, MemorySegment vSeg, long vOff, float exp_prev, float exp_curr,
             long dim) {
-        for (int j = 0; j < dim; j++) {
+        int n = Math.toIntExact(dim);
+        int j = 0;
+        FloatVector prev = FloatVector.broadcast(FLOAT_SPECIES, exp_prev);
+        FloatVector curr = FloatVector.broadcast(FLOAT_SPECIES, exp_curr);
+        int upperBound = FLOAT_SPECIES.loopBound(n);
+        for (; j < upperBound; j += FLOAT_SPECIES.length()) {
+            FloatVector accVec = FloatVector.fromArray(FLOAT_SPECIES, acc, j);
+            FloatVector valueVec = FloatVector.fromMemorySegment(
+                    FLOAT_SPECIES, vSeg, vOff + (long) j * Float.BYTES, ByteOrder.nativeOrder());
+            accVec.mul(prev).add(valueVec.mul(curr)).intoArray(acc, j);
+        }
+        for (; j < n; j++) {
             acc[j] = acc[j] * exp_prev + vSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (vOff / 4) + j) * exp_curr;
+        }
+    }
+
+    private static void writeNormalizedAccumulator(MemorySegment out, long outIndex, float[] acc, float invL,
+            int headDim) {
+        int j = 0;
+        FloatVector inv = FloatVector.broadcast(FLOAT_SPECIES, invL);
+        int upperBound = FLOAT_SPECIES.loopBound(headDim);
+        for (; j < upperBound; j += FLOAT_SPECIES.length()) {
+            FloatVector.fromArray(FLOAT_SPECIES, acc, j)
+                    .mul(inv)
+                    .intoMemorySegment(out, (outIndex + j) * Float.BYTES, ByteOrder.nativeOrder());
+        }
+        for (; j < headDim; j++) {
+            out.setAtIndex(ValueLayout.JAVA_FLOAT, outIndex + j, acc[j] * invL);
         }
     }
 

@@ -149,6 +149,7 @@ public class OnnxRuntimeBinding {
     private static final int SLOT_APPEND_ROCM_EP = 153;
     private static final int SLOT_CREATE_SESSION = 7;
     private static final int SLOT_CREATE_RUN_OPTIONS = 39;
+    private static final int SLOT_SET_OPTIMIZED_MODEL_FILE_PATH = 11;
     private static final int SLOT_SESSION_INPUT_COUNT = 30;
     private static final int SLOT_SESSION_OUTPUT_COUNT = 31;
     private static final int SLOT_SESSION_GET_INPUT_NAME = 36;
@@ -157,6 +158,7 @@ public class OnnxRuntimeBinding {
     private static final int SLOT_CREATE_TENSOR_WITH_DATA = 49;
     private static final int SLOT_RUN = 9;
     private static final int SLOT_GET_TENSOR_MUTABLE_DATA = 51;
+    private static final int SLOT_GET_TENSOR_ELEMENT_TYPE = 60;
     private static final int SLOT_GET_TENSOR_TYPE_AND_SHAPE = 65;
     private static final int SLOT_GET_DIMENSIONS_COUNT = 61;
     private static final int SLOT_GET_DIMENSIONS = 62;
@@ -166,6 +168,7 @@ public class OnnxRuntimeBinding {
     private static final int SLOT_RELEASE_VALUE = 96;
     private static final int SLOT_RELEASE_RUN_OPTIONS = 97;
     private static final int SLOT_RELEASE_MEMORY_INFO = 94;
+    private static final int SLOT_RELEASE_TENSOR_TYPE_AND_SHAPE_INFO = 99;
 
 
     // ORT enum constants
@@ -173,6 +176,8 @@ public class OnnxRuntimeBinding {
     public static final int ORT_LOGGING_LEVEL_ERROR = 3;
     public static final int GRAPH_OPT_LEVEL_ENABLE_ALL = 99;
     public static final int ONNX_TENSOR_FLOAT = 1; // ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
+    public static final int ONNX_TENSOR_FLOAT16 = 10;
+    public static final int ONNX_TENSOR_BFLOAT16 = 16;
     public static final int ONNX_TENSOR_INT32 = 6;
     public static final int ONNX_TENSOR_INT64 = 7;
     public static final int ORT_DEVICE_ALLOCATOR = 0;
@@ -337,6 +342,21 @@ public class OnnxRuntimeBinding {
             checkStatusPtr(status, "SetGraphOptimizationLevel");
         } catch (Throwable t) {
             throw new RuntimeException("ORT SetGraphOptimizationLevel failed", t);
+        }
+    }
+
+    public void setOptimizedModelFilePath(MemorySegment opts, String optimizedModelPath) {
+        if (!nativeAvailable || optimizedModelPath == null || optimizedModelPath.isBlank())
+            return;
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment pathSeg = a.allocateFrom(optimizedModelPath);
+            MemorySegment status = (MemorySegment) vtable(SLOT_SET_OPTIMIZED_MODEL_FILE_PATH,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS,
+                            ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(opts, pathSeg);
+            checkStatusPtr(status, "SetOptimizedModelFilePath");
+        } catch (Throwable t) {
+            throw new RuntimeException("ORT SetOptimizedModelFilePath failed", t);
         }
     }
 
@@ -596,6 +616,74 @@ public class OnnxRuntimeBinding {
         }
     }
 
+    public long[] getTensorDimensions(MemorySegment value) {
+        if (!nativeAvailable || isNull(value)) {
+            return new long[0];
+        }
+        MemorySegment info = MemorySegment.NULL;
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment infoPtr = a.allocate(ValueLayout.ADDRESS);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_TENSOR_TYPE_AND_SHAPE,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(value, infoPtr);
+            checkStatusPtr(status, "GetTensorTypeAndShape");
+            info = infoPtr.get(ValueLayout.ADDRESS, 0);
+            return getDimensions(info);
+        } catch (Throwable t) {
+            return new long[0];
+        } finally {
+            releaseTensorTypeAndShapeInfo(info);
+        }
+    }
+
+    public int getTensorElementType(MemorySegment value) {
+        if (!nativeAvailable || isNull(value)) {
+            return ONNX_TENSOR_FLOAT;
+        }
+        MemorySegment info = MemorySegment.NULL;
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment infoPtr = a.allocate(ValueLayout.ADDRESS);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_TENSOR_TYPE_AND_SHAPE,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(value, infoPtr);
+            checkStatusPtr(status, "GetTensorTypeAndShape");
+            info = infoPtr.get(ValueLayout.ADDRESS, 0);
+            return getTensorElementTypeFromInfo(info);
+        } catch (Throwable t) {
+            return ONNX_TENSOR_FLOAT;
+        } finally {
+            releaseTensorTypeAndShapeInfo(info);
+        }
+    }
+
+    private int getTensorElementTypeFromInfo(MemorySegment info) {
+        if (!nativeAvailable || isNull(info)) {
+            return ONNX_TENSOR_FLOAT;
+        }
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment out = a.allocate(ValueLayout.JAVA_INT);
+            MemorySegment status = (MemorySegment) vtable(SLOT_GET_TENSOR_ELEMENT_TYPE,
+                    FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS))
+                    .invokeExact(info, out);
+            checkStatusPtr(status, "GetTensorElementType");
+            return out.get(ValueLayout.JAVA_INT, 0);
+        } catch (Throwable t) {
+            return ONNX_TENSOR_FLOAT;
+        }
+    }
+
+    private void releaseTensorTypeAndShapeInfo(MemorySegment info) {
+        if (!nativeAvailable || isNull(info)) {
+            return;
+        }
+        try {
+            vtable(SLOT_RELEASE_TENSOR_TYPE_AND_SHAPE_INFO,
+                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)).invokeExact(info);
+        } catch (Throwable t) {
+            LOG.warnf("ORT ReleaseTensorTypeAndShapeInfo failed: %s", t.getMessage());
+        }
+    }
+
     public void releaseSession(MemorySegment session) {
         if (!nativeAvailable || isNull(session))
             return;
@@ -798,12 +886,85 @@ public class OnnxRuntimeBinding {
     public float[] getTensorDataFloat(MemorySegment value, int numFloats) {
         if (!nativeAvailable)
             return new float[numFloats];
+        return getTensorDataAsFloat(value, getTensorElementType(value), 0L, numFloats);
+    }
+
+    public float[] getTensorDataFloatLast(MemorySegment value, int fallbackWidth) {
+        if (!nativeAvailable) {
+            return new float[fallbackWidth];
+        }
+        int elementType = getTensorElementType(value);
+        long[] dims = getTensorDimensions(value);
+        int width = fallbackWidth;
+        long elementCount = 0L;
+        if (dims.length > 0) {
+            long product = 1L;
+            boolean usable = true;
+            for (long dim : dims) {
+                if (dim <= 0) {
+                    usable = false;
+                    break;
+                }
+                product = Math.multiplyExact(product, dim);
+            }
+            if (usable) {
+                elementCount = product;
+                long lastDim = dims[dims.length - 1];
+                if (lastDim > 0 && lastDim <= Integer.MAX_VALUE) {
+                    width = Math.toIntExact(lastDim);
+                }
+            }
+        }
+        if (elementCount <= 0L || width <= 0 || elementCount < width) {
+            return getTensorDataAsFloat(value, elementType, 0L, fallbackWidth);
+        }
+        long offset = elementCount - width;
+        return getTensorDataAsFloat(value, elementType, offset, width);
+    }
+
+    private float[] getTensorDataAsFloat(MemorySegment value, int elementType, long elementOffset, int count) {
         MemorySegment dataPtr = getTensorMutableData(value);
-        MemorySegment data = dataPtr.reinterpret((long) numFloats * 4L);
-        float[] result = new float[numFloats];
-        for (int i = 0; i < numFloats; i++)
-            result[i] = data.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+        int elementSize = elementSizeBytes(elementType);
+        MemorySegment data = dataPtr.reinterpret((elementOffset + count) * (long) elementSize);
+        float[] result = new float[count];
+        for (int i = 0; i < count; i++) {
+            long idx = elementOffset + i;
+            result[i] = switch (elementType) {
+                case ONNX_TENSOR_FLOAT -> data.getAtIndex(ValueLayout.JAVA_FLOAT, idx);
+                case ONNX_TENSOR_FLOAT16 -> float16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, idx));
+                case ONNX_TENSOR_BFLOAT16 -> bfloat16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, idx));
+                default -> data.getAtIndex(ValueLayout.JAVA_FLOAT, idx);
+            };
+        }
         return result;
+    }
+
+    private static int elementSizeBytes(int elementType) {
+        return switch (elementType) {
+            case ONNX_TENSOR_FLOAT -> 4;
+            case ONNX_TENSOR_FLOAT16, ONNX_TENSOR_BFLOAT16 -> 2;
+            case ONNX_TENSOR_INT32 -> 4;
+            case ONNX_TENSOR_INT64 -> 8;
+            default -> 4;
+        };
+    }
+
+    private static float float16ToFloat(short value) {
+        int bits = value & 0xffff;
+        int exponent = (bits >>> 10) & 0x1f;
+        int mantissa = bits & 0x03ff;
+        float sign = (bits & 0x8000) == 0 ? 1.0f : -1.0f;
+        if (exponent == 0) {
+            return sign * Math.scalb((float) mantissa, -24);
+        }
+        if (exponent == 0x1f) {
+            return mantissa == 0 ? sign * Float.POSITIVE_INFINITY : Float.NaN;
+        }
+        return sign * Math.scalb((float) (mantissa + 1024), exponent - 25);
+    }
+
+    private static float bfloat16ToFloat(short value) {
+        return Float.intBitsToFloat((value & 0xffff) << 16);
     }
 
     // ── Run options ───────────────────────────────────────────────────────────

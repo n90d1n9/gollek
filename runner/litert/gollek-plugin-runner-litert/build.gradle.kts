@@ -19,9 +19,17 @@ repositories {
 
 dependencies {
     implementation(project(":core:plugin:gollek-plugin-runner-core"))
+    implementation(project(":core:gollek-runtime-config"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi-provider"))
     implementation(project(":runner:litert:gollek-runner-litert"))
+    implementation("io.smallrye.reactive:mutiny:2.5.5")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.2")
+    testRuntimeOnly(group = "org.jboss.logging", name = "jboss-logging")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.12")
 }
 
 publishing {
@@ -43,7 +51,7 @@ tasks.jar {
                 "Plugin-Type" to "runner",
                 "Plugin-Provider" to "tech.kayys.gollek.plugin.runner.litert.LiteRTRunnerPlugin",
                 "Plugin-Version" to "0.1.0-SNAPSHOT",
-                "Supported-Formats" to ".litertlm,.tfl"
+                "Supported-Formats" to ".litertlm,.tflite,.tfl,.task"
             )
         )
     }

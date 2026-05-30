@@ -12,18 +12,17 @@ sourceSets {
                 "tech/kayys/gollek/gguf/core/GGUFConstants.java",
                 "tech/kayys/gollek/gguf/core/GGUFTensorInfo.java",
                 "tech/kayys/gollek/gguf/core/GgmlType.java",
-                "tech/kayys/gollek/gguf/core/GgufExporter.java",
                 "tech/kayys/gollek/gguf/core/GgufMetaType.java",
                 "tech/kayys/gollek/gguf/core/GgufMetaValue.java",
+                "tech/kayys/gollek/gguf/core/GgufExporter.java",
                 "tech/kayys/gollek/gguf/core/GgufModel.java",
                 "tech/kayys/gollek/gguf/loader/GGUFModel.java",
                 "tech/kayys/gollek/gguf/loader/GGUFTensorInfo.java",
                 "tech/kayys/gollek/gguf/loader/GGUFParser.java",
                 "tech/kayys/gollek/gguf/loader/GGUFReader.java",
-                "tech/kayys/gollek/gguf/runtime/GgufRuntimeProfile.java",
-                "tech/kayys/gollek/gguf/runtime/GgufRuntimeProbe.java",
-                "tech/kayys/gollek/gguf/runtime/GgufTensorOps.java",
+                "tech/kayys/gollek/gguf/runtime/*.java",
                 "tech/kayys/gollek/gguf/tokenizer/GGUFTokenizer.java",
+                "tech/kayys/gollek/gguf/writer/GGUFWriter.java",
             )
         }
     }

@@ -5,6 +5,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.gollek.core.random.GaussianNoise;
 import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.extension.AbstractGollekRunner;
 import tech.kayys.gollek.runner.RunnerCapabilities;
@@ -152,9 +153,8 @@ public class StableDiffusionNativeRunner extends AbstractGollekRunner {
                 AccelTensor cond = clip.encode(tokens);
                 AccelTensor uncond = clip.encode(uncondTokens);
                 
-                Random rnd = new Random();
                 float[] noise = new float[1 * 4 * 64 * 64];
-                for (int i = 0; i < noise.length; i++) noise[i] = (float) rnd.nextGaussian();
+                GaussianNoise.fill(noise, new Random());
                 AccelTensor latents = AccelTensor.fromFloatArray(noise, 1, 4, 64, 64);
                 
                 PNDMScheduler scheduler = new PNDMScheduler(steps);

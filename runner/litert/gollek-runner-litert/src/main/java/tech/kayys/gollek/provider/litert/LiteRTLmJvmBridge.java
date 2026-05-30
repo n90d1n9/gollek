@@ -288,6 +288,9 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
         AtomicBoolean cancelledForLimit = new AtomicBoolean(false);
         StringBuilder accumulated = new StringBuilder();
         StringBuilder emitted = new StringBuilder();
+        ApproximateTokenStreamLimiter approximateLimiter = tokenizer == null
+                ? new ApproximateTokenStreamLimiter(maxTokens)
+                : null;
 
         Object callback = Proxy.newProxyInstance(
                 callbackClass.getClassLoader(),
@@ -300,7 +303,7 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
                                         ? args[0].toString()
                                         : "";
                                 emitLimitedChunk(conversation, chunk, maxTokens, accumulated, emitted,
-                                        cancelledForLimit, done, tokenCallback);
+                                        approximateLimiter, cancelledForLimit, done, tokenCallback);
                             }
                             case "onDone" -> done.countDown();
                             case "onError" -> {
@@ -351,10 +354,23 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
                                   int maxTokens,
                                   StringBuilder accumulated,
                                   StringBuilder emitted,
+                                  ApproximateTokenStreamLimiter approximateLimiter,
                                   AtomicBoolean cancelledForLimit,
                                   CountDownLatch done,
                                   Consumer<String> tokenCallback) {
         if (chunk == null || chunk.isEmpty() || cancelledForLimit.get()) {
+            return;
+        }
+        if (approximateLimiter != null) {
+            String delta = approximateLimiter.offer(chunk);
+            if (!delta.isEmpty()) {
+                tokenCallback.accept(delta);
+            }
+            if (approximateLimiter.atLimit()) {
+                cancelledForLimit.set(true);
+                cancelConversation(conversation);
+                done.countDown();
+            }
             return;
         }
         accumulated.append(chunk);
@@ -431,6 +447,57 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
             }
         }
         return text.substring(0, end).stripTrailing();
+    }
+
+    static final class ApproximateTokenStreamLimiter {
+        private final int maxTokens;
+        private final StringBuilder pendingWhitespace = new StringBuilder();
+        private int emittedTokenCount;
+        private boolean inToken;
+        private boolean atLimit;
+
+        ApproximateTokenStreamLimiter(int maxTokens) {
+            this.maxTokens = Math.max(1, maxTokens);
+        }
+
+        String offer(String chunk) {
+            if (chunk == null || chunk.isEmpty() || atLimit) {
+                return "";
+            }
+            StringBuilder delta = new StringBuilder(chunk.length());
+            for (int i = 0; i < chunk.length(); i++) {
+                char ch = chunk.charAt(i);
+                if (Character.isWhitespace(ch)) {
+                    pendingWhitespace.append(ch);
+                    inToken = false;
+                    continue;
+                }
+                if (!inToken) {
+                    int nextTokenCount = emittedTokenCount + 1;
+                    if (nextTokenCount > maxTokens) {
+                        pendingWhitespace.setLength(0);
+                        atLimit = true;
+                        break;
+                    }
+                    emittedTokenCount = nextTokenCount;
+                    inToken = true;
+                }
+                if (pendingWhitespace.length() > 0) {
+                    delta.append(pendingWhitespace);
+                    pendingWhitespace.setLength(0);
+                }
+                delta.append(ch);
+            }
+            return delta.toString();
+        }
+
+        boolean atLimit() {
+            return atLimit;
+        }
+
+        int emittedTokenCount() {
+            return emittedTokenCount;
+        }
     }
 
     private void cancelConversation(Object conversation) {

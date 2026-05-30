@@ -118,6 +118,32 @@ public final class GenerationConfig {
     }
 
     /**
+     * Returns {@code true} when the configured sampling parameters collapse to
+     * deterministic argmax decoding.
+     *
+     * <p>This intentionally treats {@code topK == 1} and near-zero temperature as
+     * greedy, because both settings select the highest logit deterministically even
+     * if callers did not explicitly set {@link SamplingStrategy#GREEDY}.
+     *
+     * @return {@code true} when decoding should use argmax token selection
+     */
+    public boolean requestsGreedyDecoding() {
+        return strategy == SamplingStrategy.GREEDY || temperature < 1.0e-4f || topK == 1;
+    }
+
+    /**
+     * Returns {@code true} when greedy decoding can select directly from raw logits
+     * without first applying mutable logit penalties.
+     *
+     * @return {@code true} for penalty-free greedy decoding
+     */
+    public boolean isPenaltyFreeGreedy() {
+        return requestsGreedyDecoding()
+                && repetitionPenalty == 1.0f
+                && frequencyPenalty == 0.0f;
+    }
+
+    /**
      * Builder for {@link GenerationConfig}.
      */
     public static final class Builder {

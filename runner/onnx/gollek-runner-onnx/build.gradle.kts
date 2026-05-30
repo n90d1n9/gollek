@@ -18,14 +18,21 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":core:gollek-tensor"))
+    implementation(project(":spi:gollek-spi"))
     implementation(project(":spi:gollek-spi-model"))
     implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-multimodal"))
     implementation(project(":core:gollek-model-runner"))
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
-    implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime", version = "1.17.1")
-    implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime_gpu", version = "1.17.1")
+    if (findProject(":suling") != null) {
+        implementation(project(":suling"))
+    }
+    implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
+    implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime", version = "1.19.2")
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")

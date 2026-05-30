@@ -17,7 +17,8 @@ import java.util.Random;
  * Converts raw logits into a sampled next-token ID using the strategy
  * specified in {@link GenerationConfig}:
  * <ul>
- * <li><b>Greedy</b> — returns the argmax when {@code temperature < 1e-4}.</li>
+ * <li><b>Greedy</b> — returns the argmax when requested by strategy,
+ * {@code temperature < 1e-4}, or {@code topK == 1}.</li>
  * <li><b>Temperature sampling</b> — scales logits by {@code 1/temperature}
  * before softmax, then samples from the resulting distribution.</li>
  * </ul>
@@ -29,7 +30,10 @@ import java.util.Random;
 @ApplicationScoped
 public class TokenSampler {
 
+    private static final String VALIDATE_LOGITS_PROPERTY = "gollek.safetensor.validate_logits";
+
     private final Random random = new Random();
+    private final ThreadLocal<SamplingWorkspace> workspaces = ThreadLocal.withInitial(SamplingWorkspace::new);
 
     /**
      * Samples the next token from the given logits using the default internal RNG.
@@ -69,27 +73,7 @@ public class TokenSampler {
             return -1;
         }
 
-        // Validate logits contain reasonable values
-        int nanCount = 0, infCount = 0;
-        float minVal = Float.MAX_VALUE, maxVal = Float.NEGATIVE_INFINITY;
-        for (float logit : logits) {
-            if (Float.isNaN(logit))
-                nanCount++;
-            if (Float.isInfinite(logit))
-                infCount++;
-            if (logit < minVal)
-                minVal = logit;
-            if (logit > maxVal)
-                maxVal = logit;
-        }
-
-        if (nanCount > logits.length * 0.1 || infCount > logits.length * 0.1) {
-            System.err.println("WARNING: Corrupted logits detected!");
-            System.err.println("  NaN count: " + nanCount + "/" + logits.length);
-            System.err.println("  Inf count: " + infCount + "/" + logits.length);
-            System.err.println("  Range: [" + minVal + ", " + maxVal + "]");
-            System.err.println("  First 10 logits: " + java.util.Arrays.toString(
-                    java.util.Arrays.copyOf(logits, Math.min(10, logits.length))));
+        if (Boolean.getBoolean(VALIDATE_LOGITS_PROPERTY) && !validateLogits(logits)) {
             return -1;
         }
 
@@ -128,7 +112,8 @@ public class TokenSampler {
         // helps short local QA prompts avoid falling into `jakarta jakarta ...` style
         // loops while still letting the model use the prompt vocabulary for the first
         // step.
-        if (temp < 1e-4f && freq != null && repPenalty > 1.0f) {
+        boolean greedy = config.requestsGreedyDecoding();
+        if (greedy && freq != null && repPenalty > 1.0f) {
             for (int i = 0; i < logits.length && i < freq.length; i++) {
                 if (freq[i] > 1) {
                     logits[i] = Float.NEGATIVE_INFINITY;
@@ -136,24 +121,26 @@ public class TokenSampler {
             }
         }
 
-        // Greedy sampling if temperature is very low
-        if (temp < 1e-4) {
-            int best = 0;
-            float bestVal = logits[0];
-            for (int i = 1; i < logits.length; i++) {
-                if (logits[i] > bestVal) {
-                    bestVal = logits[i];
+        // Greedy sampling when the effective sampling policy is deterministic.
+        if (greedy) {
+            int best = -1;
+            float bestVal = Float.NEGATIVE_INFINITY;
+            for (int i = 0; i < logits.length; i++) {
+                float value = logits[i];
+                if (!Float.isNaN(value) && value > bestVal) {
+                    bestVal = value;
                     best = i;
                 }
             }
-            return best;
+            return best >= 0 ? best : -1;
         }
 
         if (temp <= 0)
             temp = 1.0f;
 
-        int[] indices = new int[logits.length];
-        for (int i = 0; i < indices.length; i++) indices[i] = i;
+        SamplingWorkspace workspace = workspaces.get();
+        int[] indices = workspace.indices(logits.length);
+        for (int i = 0; i < logits.length; i++) indices[i] = i;
 
         // O(N) QuickSelect to find the top-K elements without sorting the entire vocabulary
         int limit = (topK > 0 && topK < logits.length) ? topK : logits.length;
@@ -169,12 +156,15 @@ public class TokenSampler {
         float maxLogit = logits[indices[0]];
 
         // Softmax with temperature
-        double[] probs = new double[logits.length];
+        double[] probs = workspace.probs(limit);
         double sum = 0;
 
         // Apply softcapping only to the top-K candidates (huge O(N) -> O(K) optimization)
-        Double cap = modelConfig.finalLogitSoftcapping();
+        Double cap = modelConfig == null ? null : modelConfig.finalLogitSoftcapping();
         float softCap = (cap != null && cap > 0) ? cap.floatValue() : 0.0f;
+        float normalizationMaxLogit = softCap > 0
+                ? (float) (softCap * Math.tanh(maxLogit / softCap))
+                : maxLogit;
 
         // Apply Min-P limit
         double minProbLimit = 0.0;
@@ -189,7 +179,7 @@ public class TokenSampler {
             if (softCap > 0) {
                 logit = (float) (softCap * Math.tanh(logit / softCap));
             }
-            double p = Math.exp((logit - maxLogit) / temp);
+            double p = Math.exp((logit - normalizationMaxLogit) / temp);
 
             if (minP > 0.0f && p < minProbLimit && actualElements > 0) {
                 // If it falls below threshold and we already have at least 1 token, stop.
@@ -230,6 +220,57 @@ public class TokenSampler {
         }
 
         return indices[0];
+    }
+
+    private static boolean validateLogits(float[] logits) {
+        int nanCount = 0;
+        int infCount = 0;
+        float minVal = Float.MAX_VALUE;
+        float maxVal = Float.NEGATIVE_INFINITY;
+        for (float logit : logits) {
+            if (Float.isNaN(logit)) {
+                nanCount++;
+            }
+            if (Float.isInfinite(logit)) {
+                infCount++;
+            }
+            if (logit < minVal) {
+                minVal = logit;
+            }
+            if (logit > maxVal) {
+                maxVal = logit;
+            }
+        }
+
+        if (nanCount > logits.length * 0.1 || infCount > logits.length * 0.1) {
+            System.err.println("WARNING: Corrupted logits detected!");
+            System.err.println("  NaN count: " + nanCount + "/" + logits.length);
+            System.err.println("  Inf count: " + infCount + "/" + logits.length);
+            System.err.println("  Range: [" + minVal + ", " + maxVal + "]");
+            System.err.println("  First 10 logits: " + java.util.Arrays.toString(
+                    java.util.Arrays.copyOf(logits, Math.min(10, logits.length))));
+            return false;
+        }
+        return true;
+    }
+
+    private static final class SamplingWorkspace {
+        private int[] indices;
+        private double[] probs;
+
+        int[] indices(int size) {
+            if (indices == null || indices.length < size) {
+                indices = new int[size];
+            }
+            return indices;
+        }
+
+        double[] probs(int size) {
+            if (probs == null || probs.length < size) {
+                probs = new double[size];
+            }
+            return probs;
+        }
     }
 
     private void iterativeQuickSort(float[] values, int[] indices, int low, int high, int limit) {

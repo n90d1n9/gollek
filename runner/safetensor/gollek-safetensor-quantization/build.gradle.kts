@@ -20,3 +20,10 @@ dependencies {
     implementation(project(":quantizer:gollek-quantizer-autoround"))
     implementation(project(":quantizer:gollek-quantizer-turboquant"))
 }
+
+tasks.named("compileJava") {
+    // The root build adds generated Jandex output to every source set. On a full
+    // clean install Gradle can schedule this module as soon as safetensor-core
+    // compileJava finishes, before its augmented classes output is complete.
+    dependsOn(":runner:safetensor:gollek-safetensor-core:classes")
+}

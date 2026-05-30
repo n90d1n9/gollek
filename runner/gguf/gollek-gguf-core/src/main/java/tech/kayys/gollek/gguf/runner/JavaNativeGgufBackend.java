@@ -2,60 +2,94 @@ package tech.kayys.gollek.plugin.runner.gguf;
 
 import tech.kayys.gollek.gguf.loader.GGUFModel;
 import tech.kayys.gollek.gguf.loader.GGUFLoader;
-import tech.kayys.gollek.models.GemmaFamily;
-import tech.kayys.gollek.models.llama.LlamaFamily;
+import tech.kayys.gollek.gguf.runtime.GgufBudget;
+import tech.kayys.gollek.gguf.runtime.GgufRuntimeProfile;
+import tech.kayys.gollek.gguf.runtime.GgufRuntimeProbe;
+import tech.kayys.gollek.gguf.runtime.GgufTensorOps;
 import tech.kayys.gollek.plugin.runner.RunnerRequest;
 import tech.kayys.gollek.plugin.runner.RunnerResult;
-import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.loader.SafetensorFFMLoader;
-import tech.kayys.gollek.safetensor.engine.forward.DirectForwardPass;
-import tech.kayys.gollek.spi.model.ModelArchitecture;
-import tech.kayys.gollek.spi.model.ModelConfig;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
+import java.time.Duration;
 
 /**
- * Java-native GGUF backend using DirectForwardPass and AccelTensor.
+ * Java-native GGUF backend scaffold backed by the active GGUF tensor primitives.
  */
 public class JavaNativeGgufBackend implements GgufBackend {
-    
     private final GGUFModel model;
-    private final Map<String, AccelTensor> weights;
-    private final ModelConfig config;
-    private final ModelArchitecture arch;
-    
-    public JavaNativeGgufBackend(Path modelPath) throws Exception {
-        this.model = GGUFLoader.loadModel(modelPath);
-        
-        // TODO: Bridge GGUF metadata to ModelConfig
-        this.config = new ModelConfig(); 
-        this.arch = resolveArchitecture(model);
+    private final GgufRuntimeProfile profile;
+    private final GgufRuntimeProbe.PreparedMatrixCacheDecision preparedCacheDecision;
 
-        SafetensorFFMLoader safetensorLoader = jakarta.enterprise.inject.spi.CDI.current()
-                .select(SafetensorFFMLoader.class)
-                .get();
-        this.weights = GgufWeightAdapter.adaptWeights(model, config, arch, null, safetensorLoader);
+    public JavaNativeGgufBackend(Path modelPath) throws Exception {
+        long startNanos = System.nanoTime();
+        this.model = GGUFLoader.loadModel(modelPath);
+        long loadMillis = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
+        this.profile = GgufRuntimeProfile.fromModel(model, Files.size(modelPath), loadMillis);
+        this.preparedCacheDecision = prepareDecoderMatrixCaches(model);
+    }
+
+    JavaNativeGgufBackend(GGUFModel model, long modelBytes, long loadMillis) {
+        this.model = model;
+        this.profile = GgufRuntimeProfile.fromModel(model, modelBytes, loadMillis);
+        this.preparedCacheDecision = prepareDecoderMatrixCaches(model);
     }
 
     @Override
     public <T> RunnerResult<T> execute(RunnerRequest request) {
-        // Implementation will call DirectForwardPass
-        return RunnerResult.failed("Java-native execution logic pending final integration");
+        return RunnerResult.failed("Java-native GGUF generation is not enabled yet; "
+                + profile.javaStatus()
+                + "; preparedMatrixCache=" + preparedCacheDecision.compactSummary()
+                + ". Use gguf.backend=llamacpp for generation until scheduler integration lands.");
     }
 
     @Override
     public void close() {
-        weights.values().forEach(AccelTensor::close);
+        GgufTensorOps.clearPreparedMatrixCaches(model);
         model.close();
     }
 
-    private static ModelArchitecture resolveArchitecture(GGUFModel model) {
-        Object value = model.metadata().get("general.architecture");
-        String arch = value == null ? "llama" : value.toString().toLowerCase();
-        if (arch.contains("gemma")) {
-            return new GemmaFamily();
-        }
-        return new LlamaFamily();
+    GgufTensorOps.PreparedMatrixCachePlan preparedCachePlan() {
+        return preparedCacheDecision.plan();
     }
+
+    GgufTensorOps.PreparedMatrixCacheStats preparedCacheStats() {
+        return preparedCacheDecision.stats();
+    }
+
+    String preparedCacheSummary() {
+        return preparedCacheDecision.compactSummary();
+    }
+
+    private static GgufRuntimeProbe.PreparedMatrixCacheDecision prepareDecoderMatrixCaches(GGUFModel model) {
+        int explicitMinRows = Math.max(0, Integer.getInteger("gollek.gguf.java_native.prepare_min_rows", 0));
+        if (explicitMinRows > 0) {
+            return GgufRuntimeProbe.prepareDecoderMatrixCaches(
+                    model,
+                    GgufRuntimeProbe.selectDecoderPreparedMatrixCache(
+                            model,
+                            explicitMinRows,
+                            false,
+                            1,
+                            0L));
+        }
+
+        int autoMinRows = Math.max(1, Integer.getInteger("gollek.gguf.java_native.auto_prepare_min_rows", 32));
+        long budgetBytes = autoPrepareBudgetBytes();
+        return GgufRuntimeProbe.prepareDecoderMatrixCaches(
+                model,
+                GgufRuntimeProbe.selectDecoderPreparedMatrixCache(
+                        model,
+                        0,
+                        Boolean.parseBoolean(System.getProperty("gollek.gguf.java_native.auto_prepare", "true")),
+                        autoMinRows,
+                        budgetBytes));
+    }
+
+    private static long autoPrepareBudgetBytes() {
+        return GgufBudget.byteSizeProperty(
+                "gollek.gguf.java_native.auto_prepare_budget_bytes",
+                GgufBudget.defaultAutoPrepareBytes());
+    }
+
 }

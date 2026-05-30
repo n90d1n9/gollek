@@ -6,6 +6,8 @@ import jdk.incubator.vector.VectorSpecies;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.nio.ByteOrder;
+import java.util.Arrays;
 
 /**
  * Flash Attention-2 implementation using Java Vector API.
@@ -40,9 +42,11 @@ public class FlashAttentionVectorAPI {
         for (int b = 0; b < batch; b++) {
             for (int hq = 0; hq < numQHeads; hq++) {
                 int hkv = hq / groupSize;
+                float[] accScratch = new float[(int) headDim];
                 
                 for (int i = 0; i < seqLenQ; i++) {
-                    computeHeadQuery(b, hq, hkv, i, q, k, v, out, scale, seqLenKV, headDim, causal);
+                    computeHeadQuery(b, hq, hkv, i, q, k, v, out, scale, seqLenKV, headDim, causal,
+                            accScratch);
                 }
             }
         }
@@ -51,7 +55,7 @@ public class FlashAttentionVectorAPI {
 
     private static void computeHeadQuery(int b, int hq, int hkv, int i, 
                                         AccelTensor q, AccelTensor k, AccelTensor v, AccelTensor out,
-                                        float scale, long seqLenKV, long headDim, boolean causal) {
+                                        float scale, long seqLenKV, long headDim, boolean causal, float[] acc) {
         
         MemorySegment qSeg = q.dataSegment();
         MemorySegment kSeg = k.dataSegment();
@@ -62,9 +66,7 @@ public class FlashAttentionVectorAPI {
         
         float m = Float.NEGATIVE_INFINITY;
         float l = 0.0f;
-        
-        // Running output accumulator
-        float[] acc = new float[(int) headDim];
+        Arrays.fill(acc, 0, Math.toIntExact(headDim), 0.0f);
 
         // Softmax Online Loop
         for (int j = 0; j < seqLenKV; j++) {
@@ -91,14 +93,23 @@ public class FlashAttentionVectorAPI {
 
         // 4. Final Normalization
         long oOff = ((((long)b * out.size(1) + hq) * out.size(2) + i) * headDim) * ValueLayout.JAVA_FLOAT.byteSize();
-        for (int d = 0; d < headDim; d++) {
-            oSeg.setAtIndex(ValueLayout.JAVA_FLOAT, (oOff / 4) + d, acc[d] / l);
-        }
+        writeNormalizedAccumulator(oSeg, oOff / Float.BYTES, acc, 1.0f / (l + 1e-9f), Math.toIntExact(headDim));
     }
 
     private static float dotProduct(MemorySegment q, long qOff, MemorySegment k, long kOff, long dim) {
-        float res = 0;
-        for (int i = 0; i < dim; i++) {
+        int n = Math.toIntExact(dim);
+        int i = 0;
+        FloatVector sum = FloatVector.zero(SPECIES);
+        int upperBound = SPECIES.loopBound(n);
+        for (; i < upperBound; i += SPECIES.length()) {
+            FloatVector qVec = FloatVector.fromMemorySegment(
+                    SPECIES, q, qOff + (long) i * Float.BYTES, ByteOrder.nativeOrder());
+            FloatVector kVec = FloatVector.fromMemorySegment(
+                    SPECIES, k, kOff + (long) i * Float.BYTES, ByteOrder.nativeOrder());
+            sum = sum.add(qVec.mul(kVec));
+        }
+        float res = sum.reduceLanes(VectorOperators.ADD);
+        for (; i < n; i++) {
             res += q.getAtIndex(ValueLayout.JAVA_FLOAT, (qOff / 4) + i) * 
                    k.getAtIndex(ValueLayout.JAVA_FLOAT, (kOff / 4) + i);
         }
@@ -106,8 +117,34 @@ public class FlashAttentionVectorAPI {
     }
 
     private static void updateAccumulator(float[] acc, MemorySegment vSeg, long vOff, float exp_prev, float exp_curr, long dim) {
-        for (int i = 0; i < dim; i++) {
+        int n = Math.toIntExact(dim);
+        int i = 0;
+        FloatVector prev = FloatVector.broadcast(SPECIES, exp_prev);
+        FloatVector curr = FloatVector.broadcast(SPECIES, exp_curr);
+        int upperBound = SPECIES.loopBound(n);
+        for (; i < upperBound; i += SPECIES.length()) {
+            FloatVector accVec = FloatVector.fromArray(SPECIES, acc, i);
+            FloatVector valueVec = FloatVector.fromMemorySegment(
+                    SPECIES, vSeg, vOff + (long) i * Float.BYTES, ByteOrder.nativeOrder());
+            accVec.mul(prev).add(valueVec.mul(curr)).intoArray(acc, i);
+        }
+        for (; i < n; i++) {
             acc[i] = acc[i] * exp_prev + vSeg.getAtIndex(ValueLayout.JAVA_FLOAT, (vOff / 4) + i) * exp_curr;
+        }
+    }
+
+    private static void writeNormalizedAccumulator(MemorySegment out, long outIndex, float[] acc, float invL,
+            int headDim) {
+        int i = 0;
+        FloatVector inv = FloatVector.broadcast(SPECIES, invL);
+        int upperBound = SPECIES.loopBound(headDim);
+        for (; i < upperBound; i += SPECIES.length()) {
+            FloatVector.fromArray(SPECIES, acc, i)
+                    .mul(inv)
+                    .intoMemorySegment(out, (outIndex + i) * Float.BYTES, ByteOrder.nativeOrder());
+        }
+        for (; i < headDim; i++) {
+            out.setAtIndex(ValueLayout.JAVA_FLOAT, outIndex + i, acc[i] * invL);
         }
     }
 }

@@ -38,9 +38,19 @@ public enum GgmlType {
     F64(28, "F64", 1, 8),
     IQ1_M(29, "IQ1_M", 256, 56),
     BF16(30, "BF16", 1, 2),
-    Q4_0_4_4(31, "Q4_0_4_4", 32, 18),
-    Q4_0_4_8(32, "Q4_0_4_8", 32, 18),
-    Q4_0_8_8(33, "Q4_0_8_8", 32, 18);
+    Q4_0_4_4(31, "Q4_0_4_4", 0, 0),
+    Q4_0_4_8(32, "Q4_0_4_8", 0, 0),
+    Q4_0_8_8(33, "Q4_0_8_8", 0, 0),
+    TQ1_0(34, "TQ1_0", 256, 54),
+    TQ2_0(35, "TQ2_0", 256, 66),
+    IQ4_NL_4_4(36, "IQ4_NL_4_4", 0, 0),
+    IQ4_NL_4_8(37, "IQ4_NL_4_8", 0, 0),
+    IQ4_NL_8_8(38, "IQ4_NL_8_8", 0, 0),
+    MXFP4(39, "MXFP4", 32, 17),
+    NVFP4(40, "NVFP4", 64, 36),
+    Q1_0(41, "Q1_0", 128, 18);
+
+    private static final GgmlType[] BY_ID = indexById();
 
     public final int id;
     public final String label;
@@ -58,6 +68,9 @@ public enum GgmlType {
 
     /** Bytes needed to store {@code numElements} elements of this type. */
     public long bytesFor(long numElements) {
+        if (blockSize <= 0 || typeSize <= 0) {
+            throw new IllegalArgumentException("GGML type " + label + " is not loadable from GGUF data");
+        }
         if (numElements % blockSize != 0) {
             throw new IllegalArgumentException(
                     "Element count " + numElements +
@@ -68,11 +81,28 @@ public enum GgmlType {
     }
 
     public static GgmlType fromId(int id) {
-        for (GgmlType t : values()) {
-            if (t.id == id)
-                return t;
+        if (id >= 0 && id < BY_ID.length) {
+            GgmlType type = BY_ID[id];
+            if (type != null) {
+                return type;
+            }
         }
         throw new IllegalArgumentException("Unknown ggml_type id: " + id);
+    }
+
+    private static GgmlType[] indexById() {
+        int maxId = 0;
+        for (GgmlType type : values()) {
+            maxId = Math.max(maxId, type.id);
+        }
+        GgmlType[] byId = new GgmlType[maxId + 1];
+        for (GgmlType type : values()) {
+            if (byId[type.id] != null) {
+                throw new IllegalStateException("Duplicate ggml_type id: " + type.id);
+            }
+            byId[type.id] = type;
+        }
+        return byId;
     }
 
     public static GgmlType fromLabel(String label) {

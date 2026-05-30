@@ -22,6 +22,7 @@ dependencies {
     implementation(project(":runner:onnx:gollek-runner-onnx"))
     implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi-multimodal"))
     compileOnly(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime", version = "1.20.0")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")

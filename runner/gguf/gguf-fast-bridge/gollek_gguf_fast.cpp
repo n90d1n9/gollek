@@ -51,17 +51,45 @@ struct gollek_gguf_ctx {
   int64_t last_prompt_cache_us = 0;
   int last_prompt_tokens = 0;
   int last_generated_tokens = 0;
+  int last_decoded_tokens = 0;
+  int last_prompt_cache_min_tokens = 0;
+  int last_prompt_cache_repeat_min_tokens = 0;
+  bool last_prompt_cache_eager_short = false;
   std::string prompt_cache_key;
   std::vector<uint8_t> prompt_cache_state;
   int prompt_cache_tokens = 0;
   llama_state_seq_flags prompt_cache_flags = LLAMA_STATE_SEQ_FLAGS_NONE;
   std::vector<llama_token> shared_prompt_cache_tokens;
   std::vector<uint8_t> shared_prompt_cache_state;
+  std::vector<llama_token> token_buffer;
+  std::string token_cache_prompt;
+  std::vector<llama_token> token_cache_tokens;
+  int token_cache_count = 0;
+  std::vector<char> piece_buffer;
+  size_t last_output_bytes = 0;
+  llama_batch prompt_batch = {};
+  int prompt_batch_capacity = 0;
+  llama_sampler *sampler = nullptr;
+  bool sampler_greedy = false;
+  float sampler_temperature = 0.0f;
+  int sampler_top_k = 0;
+  float sampler_top_p = 1.0f;
+  uint32_t sampler_seed = 0;
+  int64_t last_sampler_us = 0;
+  bool last_sampler_reused = false;
+  std::string last_tokenize_cache_status = "disabled";
+  bool last_repeated_prompt = false;
   int shared_prompt_cache_token_count = 0;
   llama_state_seq_flags shared_prompt_cache_flags = LLAMA_STATE_SEQ_FLAGS_NONE;
   std::string last_prompt_cache_status = "disabled";
 
   ~gollek_gguf_ctx() {
+    if (sampler != nullptr) {
+      llama_sampler_free(sampler);
+    }
+    if (prompt_batch_capacity > 0) {
+      llama_batch_free(prompt_batch);
+    }
     if (ctx != nullptr) {
       llama_free(ctx);
     }
@@ -220,28 +248,135 @@ static llama_sampler *create_sampler(float temperature, int top_k, float top_p, 
   return chain;
 }
 
-static bool append_piece(const llama_vocab *vocab, llama_token token, std::string &out, char *error, size_t error_size) {
+static llama_sampler *acquire_sampler(
+    gollek_gguf_ctx *handle,
+    float temperature,
+    int top_k,
+    float top_p,
+    uint32_t seed) {
+  const bool greedy = temperature <= 0.0f || top_k == 1;
+  const uint32_t normalized_seed = seed == 0 ? LLAMA_DEFAULT_SEED : seed;
+  const int64_t sampler_start_us = llama_time_us();
+  if (handle->sampler != nullptr
+      && handle->sampler_greedy == greedy
+      && (greedy || (handle->sampler_temperature == temperature
+          && handle->sampler_top_k == top_k
+          && handle->sampler_top_p == top_p
+          && handle->sampler_seed == normalized_seed))) {
+    llama_sampler_reset(handle->sampler);
+    handle->last_sampler_us = llama_time_us() - sampler_start_us;
+    handle->last_sampler_reused = true;
+    return handle->sampler;
+  }
+
+  if (handle->sampler != nullptr) {
+    llama_sampler_free(handle->sampler);
+    handle->sampler = nullptr;
+  }
+  handle->sampler = create_sampler(temperature, top_k, top_p, seed);
+  handle->sampler_greedy = greedy;
+  handle->sampler_temperature = temperature;
+  handle->sampler_top_k = top_k;
+  handle->sampler_top_p = top_p;
+  handle->sampler_seed = normalized_seed;
+  handle->last_sampler_us = llama_time_us() - sampler_start_us;
+  handle->last_sampler_reused = false;
+  return handle->sampler;
+}
+
+static int append_output_bytes(
+    const char *data,
+    int byte_count,
+    char *output,
+    size_t output_size,
+    size_t &output_used,
+    char *error,
+    size_t error_size) {
+  if (byte_count < 0) {
+    set_error(error, error_size, "llama_token_to_piece returned a negative byte count");
+    return -7;
+  }
+  size_t bytes = static_cast<size_t>(byte_count);
+  if (output_used + bytes + 1 > output_size) {
+    set_error(error, error_size, "output buffer too small");
+    return -9;
+  }
+  if (bytes > 0) {
+    std::memcpy(output + output_used, data, bytes);
+    output_used += bytes;
+  }
+  output[output_used] = '\0';
+  return 0;
+}
+
+static int append_piece_to_output(
+    const llama_vocab *vocab,
+    llama_token token,
+    std::vector<char> &piece_buffer,
+    char *output,
+    size_t output_size,
+    size_t &output_used,
+    char *error,
+    size_t error_size) {
   char stack_buf[256];
   int written = llama_token_to_piece(vocab, token, stack_buf, sizeof(stack_buf), 0, false);
-  if (written >= 0 && written < static_cast<int>(sizeof(stack_buf))) {
-    out.append(stack_buf, written);
-    return true;
+  if (written >= 0 && written <= static_cast<int>(sizeof(stack_buf))) {
+    return append_output_bytes(stack_buf, written, output, output_size, output_used, error, error_size);
   }
   if (written < 0) {
     int needed = -written;
     if (needed <= 0) {
       set_error(error, error_size, "llama_token_to_piece failed");
-      return false;
+      return -7;
     }
-    std::vector<char> heap_buf(static_cast<size_t>(needed) + 1);
-    written = llama_token_to_piece(vocab, token, heap_buf.data(), static_cast<int>(heap_buf.size()), 0, false);
+    if (piece_buffer.size() < static_cast<size_t>(needed) + 1) {
+      piece_buffer.resize(static_cast<size_t>(needed) + 1);
+    }
+    written = llama_token_to_piece(
+        vocab,
+        token,
+        piece_buffer.data(),
+        static_cast<int>(piece_buffer.size()),
+        0,
+        false);
     if (written >= 0) {
-      out.append(heap_buf.data(), written);
-      return true;
+      return append_output_bytes(piece_buffer.data(), written, output, output_size, output_used, error, error_size);
     }
   }
   set_error(error, error_size, "llama_token_to_piece output buffer was too small");
-  return false;
+  return -7;
+}
+
+static bool ensure_prompt_batch(
+    gollek_gguf_ctx *handle,
+    int capacity,
+    char *error,
+    size_t error_size) {
+  if (capacity <= 0 || handle->prompt_batch_capacity >= capacity) {
+    return true;
+  }
+  if (handle->prompt_batch_capacity > 0) {
+    llama_batch_free(handle->prompt_batch);
+    handle->prompt_batch = {};
+    handle->prompt_batch_capacity = 0;
+  }
+  llama_batch batch = llama_batch_init(capacity, 0, 1);
+  bool ready = batch.token != nullptr
+      && batch.pos != nullptr
+      && batch.n_seq_id != nullptr
+      && batch.seq_id != nullptr
+      && batch.logits != nullptr;
+  for (int i = 0; ready && i < capacity; ++i) {
+    ready = batch.seq_id[i] != nullptr;
+  }
+  if (!ready) {
+    llama_batch_free(batch);
+    set_error(error, error_size, "llama_batch_init failed for prompt workspace");
+    return false;
+  }
+  handle->prompt_batch = batch;
+  handle->prompt_batch_capacity = capacity;
+  return true;
 }
 
 static bool decode_prompt_chunks(
@@ -268,6 +403,51 @@ static bool decode_prompt_chunks(
   return true;
 }
 
+static int tokenize_prompt(
+    gollek_gguf_ctx *handle,
+    const char *prompt,
+    int prompt_len) {
+  const bool token_cache_allowed = env_flag_enabled("GOLLEK_GGUF_FAST_TOKEN_CACHE", true);
+  std::vector<llama_token> &tokens = handle->token_buffer;
+  const int64_t tokenize_start_us = llama_time_us();
+  if (token_cache_allowed
+      && handle->token_cache_count > 0
+      && handle->token_cache_prompt == prompt
+      && static_cast<int>(handle->token_cache_tokens.size()) == handle->token_cache_count) {
+    if (tokens.size() < static_cast<size_t>(handle->token_cache_count)) {
+      tokens.resize(static_cast<size_t>(handle->token_cache_count));
+    }
+    std::copy(
+        handle->token_cache_tokens.begin(),
+        handle->token_cache_tokens.end(),
+        tokens.begin());
+    handle->last_tokenize_us = llama_time_us() - tokenize_start_us;
+    handle->last_tokenize_cache_status = "hit";
+    return handle->token_cache_count;
+  }
+
+  int token_capacity = std::max(32, prompt_len + 32);
+  if (tokens.size() < static_cast<size_t>(token_capacity)) {
+    tokens.resize(static_cast<size_t>(token_capacity));
+  }
+  int n_prompt = llama_tokenize(handle->vocab, prompt, prompt_len, tokens.data(), token_capacity, true, true);
+  if (n_prompt < 0) {
+    token_capacity = -n_prompt;
+    if (tokens.size() < static_cast<size_t>(token_capacity)) {
+      tokens.resize(static_cast<size_t>(token_capacity));
+    }
+    n_prompt = llama_tokenize(handle->vocab, prompt, prompt_len, tokens.data(), token_capacity, true, true);
+  }
+  handle->last_tokenize_us = llama_time_us() - tokenize_start_us;
+  handle->last_tokenize_cache_status = token_cache_allowed ? "miss" : "disabled-env";
+  if (token_cache_allowed && n_prompt > 0) {
+    handle->token_cache_prompt = prompt;
+    handle->token_cache_tokens.assign(tokens.begin(), tokens.begin() + n_prompt);
+    handle->token_cache_count = n_prompt;
+  }
+  return n_prompt;
+}
+
 static bool decode_token_range_explicit(
     gollek_gguf_ctx *handle,
     const std::vector<llama_token> &tokens,
@@ -280,10 +460,13 @@ static bool decode_token_range_explicit(
     return true;
   }
   const int n_batch = std::max(1, static_cast<int>(llama_n_batch(handle->ctx)));
+  if (!ensure_prompt_batch(handle, n_batch, error, error_size)) {
+    return false;
+  }
   int n_processed = 0;
   while (n_processed < count) {
     int n_tokens = std::min(count - n_processed, n_batch);
-    llama_batch batch = llama_batch_init(n_tokens, 0, 1);
+    llama_batch &batch = handle->prompt_batch;
     batch.n_tokens = n_tokens;
     for (int i = 0; i < n_tokens; ++i) {
       int token_index = start + n_processed + i;
@@ -294,7 +477,6 @@ static bool decode_token_range_explicit(
       batch.logits[i] = (output_last && token_index == start + count - 1) ? 1 : 0;
     }
     int decode_status = llama_decode(handle->ctx, batch);
-    llama_batch_free(batch);
     if (decode_status != 0) {
       set_error(error,
                 error_size,
@@ -615,19 +797,20 @@ int gollek_gguf_generate(void *raw_handle,
   handle->last_prompt_cache_us = 0;
   handle->last_prompt_tokens = 0;
   handle->last_generated_tokens = 0;
+  handle->last_decoded_tokens = 0;
+  handle->last_prompt_cache_min_tokens = 0;
+  handle->last_prompt_cache_repeat_min_tokens = 0;
+  handle->last_prompt_cache_eager_short = false;
+  handle->last_output_bytes = 0;
+  handle->last_sampler_us = 0;
+  handle->last_sampler_reused = false;
+  handle->last_tokenize_cache_status = "disabled";
+  handle->last_repeated_prompt = false;
   handle->last_prompt_cache_status = "disabled";
 
   const int prompt_len = static_cast<int>(std::strlen(prompt));
-  int token_capacity = std::max(32, prompt_len + 32);
-  std::vector<llama_token> tokens(static_cast<size_t>(token_capacity));
-  int64_t tokenize_start_us = llama_time_us();
-  int n_prompt = llama_tokenize(handle->vocab, prompt, prompt_len, tokens.data(), token_capacity, true, true);
-  if (n_prompt < 0) {
-    token_capacity = -n_prompt;
-    tokens.assign(static_cast<size_t>(token_capacity), 0);
-    n_prompt = llama_tokenize(handle->vocab, prompt, prompt_len, tokens.data(), token_capacity, true, true);
-  }
-  handle->last_tokenize_us = llama_time_us() - tokenize_start_us;
+  std::vector<llama_token> &tokens = handle->token_buffer;
+  int n_prompt = tokenize_prompt(handle, prompt, prompt_len);
   if (n_prompt <= 0) {
     set_error(error, error_size, "prompt tokenization failed");
     return -4;
@@ -644,11 +827,27 @@ int gollek_gguf_generate(void *raw_handle,
 
   int64_t prefill_start_us = llama_time_us();
   bool prompt_ready = false;
-  const int prompt_cache_min_tokens = env_int("GOLLEK_GGUF_FAST_PROMPT_CACHE_MIN_TOKENS", 16);
+  // Sequence-state snapshots are not free on Metal; short prompts prefill faster than cache save/restore.
+  const int prompt_cache_min_tokens = env_int("GOLLEK_GGUF_FAST_PROMPT_CACHE_MIN_TOKENS", 128);
+  handle->last_prompt_cache_min_tokens = prompt_cache_min_tokens;
   const int shared_prompt_cache_min_tokens = env_int("GOLLEK_GGUF_FAST_PROMPT_CACHE_SHARED_MIN_TOKENS", 64);
-  const bool prompt_cache_enabled = env_flag_enabled("GOLLEK_GGUF_FAST_PROMPT_CACHE", true)
+  const bool prompt_cache_allowed = env_flag_enabled("GOLLEK_GGUF_FAST_PROMPT_CACHE", true);
+  const int repeat_prompt_cache_min_tokens = env_int("GOLLEK_GGUF_FAST_PROMPT_CACHE_REPEAT_MIN_TOKENS", 8);
+  handle->last_prompt_cache_repeat_min_tokens = repeat_prompt_cache_min_tokens;
+  const bool repeated_prompt = handle->last_tokenize_cache_status == "hit";
+  handle->last_repeated_prompt = repeated_prompt;
+  const bool repeated_short_prompt_cache_enabled =
+      repeated_prompt && n_prompt >= repeat_prompt_cache_min_tokens;
+  const bool eager_short_prompt_cache_enabled =
+      env_flag_enabled("GOLLEK_GGUF_FAST_PROMPT_CACHE_EAGER_SHORT", true)
+      && n_prompt < prompt_cache_min_tokens
+      && n_prompt >= repeat_prompt_cache_min_tokens;
+  handle->last_prompt_cache_eager_short = eager_short_prompt_cache_enabled;
+  const bool prompt_cache_enabled = prompt_cache_allowed
       && n_prompt > 1
-      && n_prompt >= prompt_cache_min_tokens;
+      && (n_prompt >= prompt_cache_min_tokens
+          || repeated_short_prompt_cache_enabled
+          || eager_short_prompt_cache_enabled);
   if (prompt_cache_enabled) {
     prompt_ready = restore_prompt_prefix_cache(handle, prompt, tokens, n_prompt, error, error_size);
     if (!prompt_ready) {
@@ -714,7 +913,17 @@ int gollek_gguf_generate(void *raw_handle,
     }
   }
   if (!prompt_ready) {
-    handle->last_prompt_cache_status = prompt_cache_enabled ? handle->last_prompt_cache_status : "skipped";
+    if (!prompt_cache_enabled) {
+      if (!prompt_cache_allowed) {
+        handle->last_prompt_cache_status = "disabled-env";
+      } else if (n_prompt <= 1) {
+        handle->last_prompt_cache_status = "single-token";
+      } else if (n_prompt < prompt_cache_min_tokens) {
+        handle->last_prompt_cache_status = "below-threshold";
+      } else {
+        handle->last_prompt_cache_status = "skipped";
+      }
+    }
     llama_memory_clear(llama_get_memory(handle->ctx), true);
     if (!decode_prompt_chunks(handle, tokens, n_prompt, error, error_size)) {
       return -5;
@@ -722,14 +931,13 @@ int gollek_gguf_generate(void *raw_handle,
   }
   handle->last_prefill_us = llama_time_us() - prefill_start_us;
 
-  llama_sampler *sampler = create_sampler(temperature, top_k, top_p, seed);
+  llama_sampler *sampler = acquire_sampler(handle, temperature, top_k, top_p, seed);
   if (sampler == nullptr) {
     set_error(error, error_size, "failed to create sampler");
     return -6;
   }
-  const bool sampler_needs_accept = !(temperature <= 0.0f || top_k == 1);
 
-  std::string generated;
+  size_t output_used = 0;
   int generated_tokens = 0;
   int limit = std::min(max_tokens > 0 ? max_tokens : 256, n_ctx - n_prompt);
   int64_t decode_start_us = llama_time_us();
@@ -738,32 +946,34 @@ int gollek_gguf_generate(void *raw_handle,
     if (llama_vocab_is_eog(handle->vocab, token)) {
       break;
     }
-    if (!append_piece(handle->vocab, token, generated, error, error_size)) {
-      llama_sampler_free(sampler);
-      return -7;
+    int append_status = append_piece_to_output(
+        handle->vocab,
+        token,
+        handle->piece_buffer,
+        output,
+        output_size,
+        output_used,
+        error,
+        error_size);
+    if (append_status != 0) {
+      return append_status;
     }
     generated_tokens++;
+    // Sampler chains keep token history; accept emitted tokens even for greedy mode.
+    llama_sampler_accept(sampler, token);
     if (generated_tokens >= limit) {
       break;
     }
-    if (sampler_needs_accept) {
-      llama_sampler_accept(sampler, token);
-    }
     llama_pos token_pos = n_prompt + generated_tokens - 1;
     if (!decode_single_token_explicit(handle, token, token_pos, error, error_size)) {
-      llama_sampler_free(sampler);
       return -8;
     }
+    handle->last_decoded_tokens++;
   }
   handle->last_decode_us = llama_time_us() - decode_start_us;
   handle->last_generated_tokens = generated_tokens;
-  llama_sampler_free(sampler);
+  handle->last_output_bytes = output_used;
 
-  if (generated.size() + 1 > output_size) {
-    set_error(error, error_size, "output buffer too small");
-    return -9;
-  }
-  std::memcpy(output, generated.c_str(), generated.size() + 1);
   return generated_tokens;
 }
 
@@ -775,20 +985,46 @@ int gollek_gguf_last_metrics(void *raw_handle, char *output, size_t output_size)
   int written = std::snprintf(
       output,
       output_size,
+      "backend=%s, gpuLayers=%d, threads=%d, ctx=%d, batch=%d, "
       "modelLoad=%.3fms, contextInit=%.3fms, tokenize=%.3fms, prefill=%.3fms, decode=%.3fms, "
+      "tokenizeCache=%s, tokenCacheTokens=%d, "
+      "sampler=%s, samplerMs=%.3fms, "
       "promptCache=%s, promptCacheMs=%.3fms, promptStateBytes=%zu, sharedPromptStateBytes=%zu, "
-      "promptTokens=%d, generatedTokens=%d",
+      "promptTokens=%d, generatedTokens=%d, decodedTokens=%d, repeatedPrompt=%s, "
+      "promptCacheEagerShort=%s, "
+      "promptCacheMinTokens=%d, promptCacheRepeatMinTokens=%d, "
+      "tokenBufferSize=%zu, tokenBufferCapacity=%zu, pieceBufferCapacity=%zu, "
+      "outputBytes=%zu, promptBatchCapacity=%d",
+      handle->backend_name.c_str(),
+      handle->n_gpu_layers,
+      handle->n_threads,
+      static_cast<int>(llama_n_ctx(handle->ctx)),
+      static_cast<int>(llama_n_batch(handle->ctx)),
       handle->model_load_us / 1000.0,
       handle->context_init_us / 1000.0,
       handle->last_tokenize_us / 1000.0,
       handle->last_prefill_us / 1000.0,
       handle->last_decode_us / 1000.0,
+      handle->last_tokenize_cache_status.c_str(),
+      handle->token_cache_count,
+      handle->last_sampler_reused ? "reused" : "created",
+      handle->last_sampler_us / 1000.0,
       handle->last_prompt_cache_status.c_str(),
       handle->last_prompt_cache_us / 1000.0,
       handle->prompt_cache_state.size(),
       handle->shared_prompt_cache_state.size(),
       handle->last_prompt_tokens,
-      handle->last_generated_tokens);
+      handle->last_generated_tokens,
+      handle->last_decoded_tokens,
+      handle->last_repeated_prompt ? "true" : "false",
+      handle->last_prompt_cache_eager_short ? "true" : "false",
+      handle->last_prompt_cache_min_tokens,
+      handle->last_prompt_cache_repeat_min_tokens,
+      handle->token_buffer.size(),
+      handle->token_buffer.capacity(),
+      handle->piece_buffer.capacity(),
+      handle->last_output_bytes,
+      handle->prompt_batch_capacity);
   if (written < 0 || static_cast<size_t>(written) >= output_size) {
     output[0] = '\0';
     return -2;

@@ -377,6 +377,27 @@ public class AccelTensor implements AutoCloseable {
     public long offset() { return offset; }
     public int rank() { return shape.length; }
 
+    public long[] shapeWithLastDim(long lastDim) {
+        if (shape.length == 0) {
+            return new long[] { lastDim };
+        }
+        long[] out = shape.clone();
+        out[out.length - 1] = lastDim;
+        return out;
+    }
+
+    public boolean hasShape(long[] expectedShape) {
+        if (expectedShape == null || expectedShape.length != shape.length) {
+            return false;
+        }
+        for (int i = 0; i < shape.length; i++) {
+            if (shape[i] != expectedShape[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public long size(int dim) {
         int d = dim < 0 ? shape.length + dim : dim;
         return shape[d];
@@ -387,8 +408,14 @@ public class AccelTensor implements AutoCloseable {
     }
 
     public boolean isContiguous() {
-        long[] expected = contiguousStride(shape);
-        return Arrays.equals(stride, expected);
+        long expected = 1L;
+        for (int i = shape.length - 1; i >= 0; i--) {
+            if (stride[i] != expected) {
+                return false;
+            }
+            expected *= Math.max(1L, shape[i]);
+        }
+        return true;
     }
 
     public boolean isClosed() { return closed; }
@@ -423,7 +450,7 @@ public class AccelTensor implements AutoCloseable {
      */
     public MemorySegment dataPtr() {
         checkClosed();
-        return data.asSlice(offset * (long) Float.BYTES);
+        return offset == 0L ? data : data.asSlice(offset * (long) Float.BYTES);
     }
 
     /**
@@ -720,14 +747,77 @@ public class AccelTensor implements AutoCloseable {
         return out;
     }
 
+    /**
+     * Copies one embedding row directly into a caller-owned Float32 segment.
+     * This keeps decode on the reusable workspace path instead of allocating an
+     * indexSelect tensor for every generated token.
+     */
+    public void copyRowToFloatSegment(long row, MemorySegment dst, float outputScale) {
+        checkClosed();
+        if (shape.length < 2) {
+            throw new IllegalStateException("copyRowToFloatSegment requires a 2D embedding table");
+        }
+        if (row < 0 || row >= shape[0]) {
+            throw new IndexOutOfBoundsException("row " + row + " outside embedding table of size " + shape[0]);
+        }
+        int embDim = Math.toIntExact(shape[1]);
+        copyRowToFloatSegmentUnchecked(row, dst, 0L, embDim, outputScale);
+    }
+
+    private void copyRowToFloatSegmentUnchecked(long row, MemorySegment dst, long dstByteOffset, int embDim,
+            float outputScale) {
+        if (isQuantized()) {
+            dequantizeRow(row, dst, dstByteOffset, embDim);
+            scaleFloatSegment(dst, dstByteOffset, embDim, outputScale);
+            return;
+        }
+
+        long srcByteOffset = (offset + row * stride[0]) * (long) Float.BYTES;
+        if (outputScale == 1.0f) {
+            MemorySegment.copy(data, srcByteOffset, dst, dstByteOffset, (long) embDim * Float.BYTES);
+            return;
+        }
+        for (int i = 0; i < embDim; i++) {
+            float value = data.get(ValueLayout.JAVA_FLOAT, srcByteOffset + (long) i * Float.BYTES);
+            dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + (long) i * Float.BYTES, value * outputScale);
+        }
+    }
+
+    /**
+     * Copies multiple embedding rows directly into a packed Float32 segment.
+     * This is the prefill sibling of {@link #copyRowToFloatSegment(long, MemorySegment, float)}.
+     */
+    public void copyRowsToFloatSegment(long[] rows, MemorySegment dst, float outputScale) {
+        checkClosed();
+        if (rows == null) {
+            throw new IllegalArgumentException("rows must not be null");
+        }
+        if (shape.length < 2) {
+            throw new IllegalStateException("copyRowsToFloatSegment requires a 2D embedding table");
+        }
+        int embDim = Math.toIntExact(shape[1]);
+        long rowBytes = (long) embDim * Float.BYTES;
+        for (int i = 0; i < rows.length; i++) {
+            long row = rows[i];
+            if (row < 0 || row >= shape[0]) {
+                throw new IndexOutOfBoundsException("row " + row + " outside embedding table of size " + shape[0]);
+            }
+            copyRowToFloatSegmentUnchecked(row, dst, (long) i * rowBytes, embDim, outputScale);
+        }
+    }
+
     private void dequantizeRow(long row, MemorySegment dst, int embDim) {
+        dequantizeRow(row, dst, 0L, embDim);
+    }
+
+    private void dequantizeRow(long row, MemorySegment dst, long dstByteOffset, int embDim) {
         if (quantType == QuantType.F16) {
             long srcRowByteOff = (offset + row * stride[0]) * 2L;
-            DequantizationKernel.dequantizeF16(data.asSlice(srcRowByteOff, embDim * 2L), dst, embDim);
+            DequantizationKernel.dequantizeF16(data, srcRowByteOff, dst, dstByteOffset, embDim);
             return;
         } else if (quantType == QuantType.BF16) {
             long srcRowByteOff = (offset + row * stride[0]) * 2L;
-            DequantizationKernel.dequantizeBf16(data.asSlice(srcRowByteOff, embDim * 2L), dst, embDim);
+            DequantizationKernel.dequantizeBf16(data, srcRowByteOff, dst, dstByteOffset, embDim);
             return;
         }
 
@@ -742,11 +832,26 @@ public class AccelTensor implements AutoCloseable {
         for (int j = 0; j < embDim; j++) {
             if (quantType == QuantType.INT8) {
                 byte q = data.get(ValueLayout.JAVA_BYTE, srcRowByteOff + j);
-                dst.setAtIndex(ValueLayout.JAVA_FLOAT, j, q * scale);
+                dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + (long) j * Float.BYTES, q * scale);
             } else if (quantType == QuantType.INT4) {
                 // Support simple packed INT4? 
                 // This is getting complex, for now assume INT8 for embeddings
             }
+        }
+    }
+
+    private static void scaleFloatSegment(MemorySegment segment, int elements, float scale) {
+        scaleFloatSegment(segment, 0L, elements, scale);
+    }
+
+    private static void scaleFloatSegment(MemorySegment segment, long byteOffset, int elements, float scale) {
+        if (scale == 1.0f) {
+            return;
+        }
+        for (int i = 0; i < elements; i++) {
+            long elementOffset = byteOffset + (long) i * Float.BYTES;
+            float value = segment.get(ValueLayout.JAVA_FLOAT, elementOffset);
+            segment.set(ValueLayout.JAVA_FLOAT, elementOffset, value * scale);
         }
     }
 
@@ -769,6 +874,14 @@ public class AccelTensor implements AutoCloseable {
             if (f16 != null && !f16.isClosed()) {
                 try {
                     f16.close();
+                } catch (Exception ignored) {
+                }
+            }
+            AccelTensor transposedF16 = cachedF16Transposed2d;
+            cachedF16Transposed2d = null;
+            if (transposedF16 != null && !transposedF16.isClosed()) {
+                try {
+                    transposedF16.close();
                 } catch (Exception ignored) {
                 }
             }

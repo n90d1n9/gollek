@@ -26,7 +26,8 @@ import java.util.Set;
  *
  * <p>This is intentionally stricter than the llama.cpp fallback: Java can parse
  * and inspect many models today, but generation should only be enabled after we
- * can prove the tensor layout and decoder tensor set are complete.</p>
+ * can prove the tensor layout, quant families, and decoder tensor set are
+ * complete.</p>
  */
 public record GgufRuntimeProfile(
         String architecture,
@@ -64,7 +65,12 @@ public record GgufRuntimeProfile(
             GgmlType.Q6_K.id,
             GgmlType.Q8_K.id,
             GgmlType.IQ4_NL.id,
-            GgmlType.IQ4_XS.id
+            GgmlType.IQ4_XS.id,
+            GgmlType.TQ1_0.id,
+            GgmlType.TQ2_0.id,
+            GgmlType.MXFP4.id,
+            GgmlType.NVFP4.id,
+            GgmlType.Q1_0.id
     );
 
     public static GgufRuntimeProfile load(Path modelPath) throws IOException {

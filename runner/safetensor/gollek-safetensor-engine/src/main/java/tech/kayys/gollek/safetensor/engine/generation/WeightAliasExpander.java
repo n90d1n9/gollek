@@ -1,0 +1,49 @@
+package tech.kayys.gollek.safetensor.engine.generation;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
+
+final class WeightAliasExpander {
+    private static final List<Alias> COMMON_TEXT_MODEL_ALIASES = List.of(
+            new Alias("text_model.", "model."),
+            new Alias("model.text_model.", "model."),
+            new Alias("language_model.model.", "model."),
+            new Alias("model.language_model.", "model."),
+            new Alias("text_model.model.", "model."),
+            new Alias("model.text_model.model.", "model."));
+
+    private WeightAliasExpander() {
+    }
+
+    static void applyCommonAliases(Map<String, AccelTensor> weights) {
+        applyAliases(weights, COMMON_TEXT_MODEL_ALIASES);
+    }
+
+    static void applyAliases(Map<String, AccelTensor> weights, List<Alias> aliases) {
+        if (weights == null || weights.isEmpty() || aliases == null || aliases.isEmpty()) {
+            return;
+        }
+        Map<String, AccelTensor> updates = new HashMap<>();
+        List<Map.Entry<String, AccelTensor>> entries = new ArrayList<>(weights.entrySet());
+
+        for (Alias alias : aliases) {
+            for (Map.Entry<String, AccelTensor> entry : entries) {
+                String key = entry.getKey();
+                if (key.startsWith(alias.from())) {
+                    String rewritten = alias.to() + key.substring(alias.from().length());
+                    if (!weights.containsKey(rewritten)) {
+                        updates.putIfAbsent(rewritten, entry.getValue());
+                    }
+                }
+            }
+        }
+        weights.putAll(updates);
+    }
+
+    record Alias(String from, String to) {
+    }
+}

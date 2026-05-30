@@ -37,6 +37,9 @@ import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.spi.observability.AdapterMetricTagResolver;
 import tech.kayys.gollek.spi.observability.AdapterMetricsRecorder;
 import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
+import tech.kayys.gollek.spi.pipeline.ModelPipeline;
+import tech.kayys.gollek.spi.pipeline.ModelPipelineRegistry;
+import tech.kayys.gollek.spi.pipeline.ModelPipelineRequest;
 import tech.kayys.gollek.spi.provider.*;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.provider.StreamingProvider;
@@ -74,6 +77,9 @@ public class SafetensorProvider implements StreamingProvider {
     DirectSafetensorBackend directBackend;
     @Inject
     AdapterMetricsRecorder adapterMetricsRecorder;
+
+    @Inject
+    ModelPipelineRegistry pipelineRegistry;
 
     @Inject
     Instance<SafetensorFeature> features;
@@ -219,6 +225,12 @@ public class SafetensorProvider implements StreamingProvider {
                     "Model not found: " + friendlyModelName(modelRef)));
         }
 
+        ModelPipelineRequest pipelineRequest = modelPipelineRequest(request, resolved);
+        Optional<ModelPipeline> pipeline = selectFeaturePipeline(pipelineRequest);
+        if (pipeline.isPresent()) {
+            return pipeline.get().infer(pipelineRequest);
+        }
+
         return directBackend.infer(request);
     }
 
@@ -234,6 +246,12 @@ public class SafetensorProvider implements StreamingProvider {
         if (resolved == null || (!Files.exists(resolved) && !Files.isDirectory(resolved))) {
             return Multi.createFrom().failure(new ProviderException(
                     "Model not found: " + friendlyModelName(modelRef)));
+        }
+
+        ModelPipelineRequest pipelineRequest = modelPipelineRequest(request, resolved);
+        Optional<ModelPipeline> pipeline = selectFeaturePipeline(pipelineRequest);
+        if (pipeline.isPresent()) {
+            return pipeline.get().inferStream(pipelineRequest);
         }
 
         return directBackend.inferStream(request);
@@ -283,6 +301,52 @@ public class SafetensorProvider implements StreamingProvider {
                 return resolveToSafetensorFile(withExt);
         }
         return resolveToSafetensorFile(Path.of(config.basePath(), modelId));
+    }
+
+    private Optional<ModelPipeline> selectFeaturePipeline(ModelPipelineRequest request) {
+        if (pipelineRegistry == null) {
+            return Optional.empty();
+        }
+        return pipelineRegistry.select(request);
+    }
+
+    private ModelPipelineRequest modelPipelineRequest(ProviderRequest request, Path modelPath) {
+        Map<String, Object> facts = new LinkedHashMap<>();
+        put(facts, "provider", PROVIDER_ID);
+        put(facts, "format", "safetensors");
+        put(facts, "safetensor.backend", "direct");
+        put(facts, "safetensor.model_path", modelPath == null ? null : modelPath.toAbsolutePath().normalize().toString());
+        put(facts, "safetensor.model_name", modelPath == null || modelPath.getFileName() == null
+                ? null
+                : modelPath.getFileName().toString());
+        put(facts, "safetensor.model_directory", modelPath == null ? null : Files.isDirectory(modelPath));
+        put(facts, "safetensor.model_regular_file", modelPath == null ? null : Files.isRegularFile(modelPath));
+        put(facts, "safetensor.model_size_bytes", regularFileSize(modelPath));
+        Path modelDir = modelPath == null ? null : (Files.isDirectory(modelPath) ? modelPath : modelPath.getParent());
+        put(facts, "safetensor.has_config_json", modelDir != null && Files.isRegularFile(modelDir.resolve("config.json")));
+        put(facts, "safetensor.has_tokenizer_json", modelDir != null && Files.isRegularFile(modelDir.resolve("tokenizer.json")));
+        put(facts, "safetensor.has_index_json", modelDir != null
+                && Files.isRegularFile(modelDir.resolve("model.safetensors.index.json")));
+
+        return ModelPipelineRequest.builder(request)
+                .providerId(PROVIDER_ID)
+                .modelPath(modelPath)
+                .facts(facts)
+                .build();
+    }
+
+    private static void put(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
+    private static Long regularFileSize(Path path) {
+        try {
+            return path != null && Files.isRegularFile(path) ? Files.size(path) : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private Path resolveToSafetensorFile(Path candidate) {

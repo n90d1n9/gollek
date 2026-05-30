@@ -205,7 +205,13 @@ public class LiteRTCpuRunner implements AutoCloseable {
     }
 
     public boolean health() {
-        return initialized && compiledModel != null && compiledModel.address() != 0;
+        if (!initialized) {
+            return false;
+        }
+        if (llmRunner != null) {
+            return true;
+        }
+        return compiledModel != null && compiledModel.address() != 0;
     }
 
     @Override

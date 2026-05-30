@@ -151,6 +151,20 @@ class LiteRTGemmaNativeRunnerHeuristicsTest {
     }
 
     @Test
+    void officialLiteRtLmJvmBridgeApproximateLimiterAvoidsRescanningChunks() {
+        LiteRTLmJvmBridge.ApproximateTokenStreamLimiter limiter =
+                new LiteRTLmJvmBridge.ApproximateTokenStreamLimiter(4);
+
+        String output = limiter.offer("Indonesia is ")
+                + limiter.offer("in Southeast ")
+                + limiter.offer("Asia with many islands");
+
+        assertEquals("Indonesia is in Southeast", output);
+        assertEquals(4, limiter.emittedTokenCount());
+        assertTrue(limiter.atLimit());
+    }
+
+    @Test
     void plainWherePromptIsRewrittenAsLocationQuestion() {
         assertEquals("Question: What country, region, or place is Jakarta located in?\\nAnswer:",
                 LiteRTGemmaNativeRunner.formatPlainPrompt("where is jakarta"));

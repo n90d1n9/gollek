@@ -66,6 +66,14 @@ dependencies {
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
     implementation("jakarta.inject:jakarta.inject-api:2.0.1")
     implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
+
+    testImplementation(platform("org.junit:junit-bom:5.10.0"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }
 
 publishing {

@@ -426,9 +426,7 @@ public final class DirectTextExecutionSession implements TextExecutionSession {
     }
 
     private boolean supportsDeterministicReplay() {
-        return generation.generationConfig().temperature() < 1.0e-4f
-                && generation.generationConfig().repetitionPenalty() == 1.0f
-                && generation.generationConfig().frequencyPenalty() == 0.0f;
+        return generation.generationConfig().isPenaltyFreeGreedy();
     }
 
     private Integer resolvedReplayTokenId() {

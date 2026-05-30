@@ -5,7 +5,7 @@
  */
 package tech.kayys.gollek.safetensor.engine.generation.kv;
 
-import tech.kayys.gollek.safetensor.engine.generation.attention.FlashAttentionKernel;
+import tech.kayys.gollek.safetensor.engine.generation.attention.SharedKvState;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import java.util.Map;
@@ -40,7 +40,7 @@ public class KVCacheManager {
         private int numKVHeads;
         private int headDim;
         private ForwardWorkspace workspace;
-        private final Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates =
+        private final Map<Integer, SharedKvState> sharedKvStates =
                 new java.util.concurrent.ConcurrentHashMap<>();
         private tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization kvQuantization =
                 tech.kayys.gollek.safetensor.generation.GenerationConfig.KvCacheQuantization.NONE;
@@ -54,6 +54,10 @@ public class KVCacheManager {
             private java.lang.foreign.MemorySegment hiddenASeg;
             private java.lang.foreign.MemorySegment hiddenBSeg;
             private java.lang.foreign.MemorySegment logitsSeg;
+            private java.lang.foreign.Arena hiddenArena;
+            private java.lang.foreign.Arena combinedArena;
+            private java.lang.foreign.Arena projectionArena;
+            private java.lang.foreign.Arena logitsArena;
             private java.lang.foreign.Arena attentionMetadataArena;
             private java.lang.foreign.MemorySegment attentionBlockTableSeg;
             private java.lang.foreign.MemorySegment attentionContextLensSeg;
@@ -76,17 +80,19 @@ public class KVCacheManager {
                 long combinedNeeded = combinedElements * 4L;
                 long paddedCombined = (combinedNeeded + 4095) & ~4095;
                 if (normedAttnSeg == null || hiddenCap < paddedNeeded) {
-                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
+                    closeArena(hiddenArena);
+                    hiddenArena = java.lang.foreign.Arena.ofShared();
                     // Explicitly request 4096-byte alignment
-                    normedAttnSeg = arena.allocate(paddedNeeded, 4096);
-                    normedFfnSeg = arena.allocate(paddedNeeded, 4096);
-                    hiddenASeg = arena.allocate(paddedNeeded, 4096);
-                    hiddenBSeg = arena.allocate(paddedNeeded, 4096);
+                    normedAttnSeg = hiddenArena.allocate(paddedNeeded, 4096);
+                    normedFfnSeg = hiddenArena.allocate(paddedNeeded, 4096);
+                    hiddenASeg = hiddenArena.allocate(paddedNeeded, 4096);
+                    hiddenBSeg = hiddenArena.allocate(paddedNeeded, 4096);
                     hiddenCap = paddedNeeded;
                 }
                 if (combinedSeg == null || combinedCap < paddedCombined) {
-                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
-                    combinedSeg = arena.allocate(paddedCombined, 4096);
+                    closeArena(combinedArena);
+                    combinedArena = java.lang.foreign.Arena.ofShared();
+                    combinedSeg = combinedArena.allocate(paddedCombined, 4096);
                     combinedCap = paddedCombined;
                 }
             }
@@ -95,8 +101,9 @@ public class KVCacheManager {
                 long needed = Math.max(1L, requiredElements) * Float.BYTES;
                 long padded = (needed + 4095) & ~4095;
                 if (logitsSeg == null || logitsCap < padded) {
-                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
-                    logitsSeg = arena.allocate(padded, 4096);
+                    closeArena(logitsArena);
+                    logitsArena = java.lang.foreign.Arena.ofShared();
+                    logitsSeg = logitsArena.allocate(padded, 4096);
                     logitsCap = padded;
                 }
             }
@@ -104,9 +111,10 @@ public class KVCacheManager {
             public void ensureProjectionScratchCapacity(long requiredBytes) {
                 long padded = (requiredBytes + 4095) & ~4095;
                 if (gateSeg == null || projectionCap < padded) {
-                    java.lang.foreign.Arena arena = java.lang.foreign.Arena.ofAuto();
-                    gateSeg = arena.allocate(padded, 4096);
-                    upSeg = arena.allocate(padded, 4096);
+                    closeArena(projectionArena);
+                    projectionArena = java.lang.foreign.Arena.ofShared();
+                    gateSeg = projectionArena.allocate(padded, 4096);
+                    upSeg = projectionArena.allocate(padded, 4096);
                     projectionCap = padded;
                 }
             }
@@ -141,10 +149,16 @@ public class KVCacheManager {
 
             @Override
             public void close() {
-                if (attentionMetadataArena != null) {
-                    attentionMetadataArena.close();
-                }
-                // The primary tensor workspaces use ofAuto and are reclaimed by the JVM.
+                closeArena(hiddenArena);
+                closeArena(combinedArena);
+                closeArena(projectionArena);
+                closeArena(logitsArena);
+                closeArena(attentionMetadataArena);
+                hiddenArena = null;
+                combinedArena = null;
+                projectionArena = null;
+                logitsArena = null;
+                attentionMetadataArena = null;
                 normedAttnSeg = null;
                 normedFfnSeg = null;
                 gateSeg = null;
@@ -153,7 +167,6 @@ public class KVCacheManager {
                 hiddenASeg = null;
                 hiddenBSeg = null;
                 logitsSeg = null;
-                attentionMetadataArena = null;
                 attentionBlockTableSeg = null;
                 attentionContextLensSeg = null;
                 hiddenCap = 0;
@@ -162,6 +175,12 @@ public class KVCacheManager {
                 logitsCap = 0;
                 attentionBlockTableCap = 0;
                 attentionContextLensCap = 0;
+            }
+
+            private static void closeArena(java.lang.foreign.Arena arena) {
+                if (arena != null) {
+                    arena.close();
+                }
             }
         }
 
@@ -301,12 +320,12 @@ public class KVCacheManager {
             return blockManager;
         }
 
-        public Map<Integer, FlashAttentionKernel.SharedKvState> sharedKvStates() {
+        public Map<Integer, SharedKvState> sharedKvStates() {
             return sharedKvStates;
         }
 
         public void clearSharedKvStates() {
-            for (FlashAttentionKernel.SharedKvState state : sharedKvStates.values()) {
+            for (SharedKvState state : sharedKvStates.values()) {
                 if (state != null) {
                     state.close();
                 }

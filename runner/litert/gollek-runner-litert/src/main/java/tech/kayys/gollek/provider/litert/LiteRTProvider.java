@@ -25,6 +25,9 @@ import tech.kayys.gollek.spi.observability.AdapterMetricTagResolver;
 import tech.kayys.gollek.spi.observability.AdapterMetricsRecorder;
 import tech.kayys.gollek.spi.observability.AdapterMetricSchema;
 import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
+import tech.kayys.gollek.spi.pipeline.ModelPipeline;
+import tech.kayys.gollek.spi.pipeline.ModelPipelineRegistry;
+import tech.kayys.gollek.spi.pipeline.ModelPipelineRequest;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -61,6 +64,9 @@ public class LiteRTProvider implements StreamingProvider {
     
     @jakarta.inject.Inject
     LiteRTSessionManager sessionManager;
+
+    @jakarta.inject.Inject
+    ModelPipelineRegistry pipelineRegistry;
 
     private volatile boolean initialized = false;
 
@@ -261,6 +267,13 @@ public class LiteRTProvider implements StreamingProvider {
                     0);
 
             Path modelPath = resolveModelPath(request.getModel(), request);
+            ModelPipelineRequest pipelineRequest = modelPipelineRequest(request, modelPath);
+            Optional<ModelPipeline> pipeline = selectFeaturePipeline(pipelineRequest);
+            if (pipeline.isPresent()) {
+                return pipeline.get().infer(pipelineRequest)
+                        .await()
+                        .atMost(request.getTimeout());
+            }
             boolean gpuEnabled = config != null && LiteRTDeviceSupport.effectiveGpuEnabled(config);
             String gpuBackend = config != null ? LiteRTDeviceSupport.resolveGpuBackend(config) : "auto";
             
@@ -469,6 +482,15 @@ public class LiteRTProvider implements StreamingProvider {
 
             String tenantId = resolveTenantId(request);
             Path modelPath = resolveModelPath(request.getModel(), request);
+            ModelPipelineRequest pipelineRequest = modelPipelineRequest(request, modelPath);
+            Optional<ModelPipeline> pipeline = selectFeaturePipeline(pipelineRequest);
+            if (pipeline.isPresent()) {
+                pipeline.get().inferStream(pipelineRequest).subscribe().with(
+                        emitter::emit,
+                        emitter::fail,
+                        emitter::complete);
+                return;
+            }
             boolean gpuEnabled = config != null && LiteRTDeviceSupport.effectiveGpuEnabled(config);
             String gpuBackend = config != null ? LiteRTDeviceSupport.resolveGpuBackend(config) : "auto";
 
@@ -545,6 +567,75 @@ public class LiteRTProvider implements StreamingProvider {
                 }
             }
         });
+    }
+
+    private Optional<ModelPipeline> selectFeaturePipeline(ModelPipelineRequest request) {
+        if (pipelineRegistry == null) {
+            return Optional.empty();
+        }
+        return pipelineRegistry.select(request);
+    }
+
+    private ModelPipelineRequest modelPipelineRequest(ProviderRequest request, Path modelPath) {
+        Map<String, Object> facts = new LinkedHashMap<>();
+        put(facts, "provider", PROVIDER_ID);
+        put(facts, "format", "litert");
+        put(facts, "litert.model_path", modelPath == null ? null : modelPath.toAbsolutePath().normalize().toString());
+        put(facts, "litert.model_name", modelPath == null || modelPath.getFileName() == null
+                ? null
+                : modelPath.getFileName().toString());
+        put(facts, "litert.model_directory", modelPath == null ? null : Files.isDirectory(modelPath));
+        put(facts, "litert.model_regular_file", modelPath == null ? null : Files.isRegularFile(modelPath));
+        put(facts, "litert.model_size_bytes", regularFileSize(modelPath));
+        put(facts, "litert.artifact_type", litertArtifactType(modelPath));
+        put(facts, "litert.native_gemma_lm", modelPath != null
+                && modelPath.getFileName() != null
+                && modelPath.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".litertlm"));
+        boolean gpuEnabled = config != null && LiteRTDeviceSupport.effectiveGpuEnabled(config);
+        String gpuBackend = config != null ? LiteRTDeviceSupport.resolveGpuBackend(config) : "auto";
+
+        return ModelPipelineRequest.builder(request)
+                .providerId(PROVIDER_ID)
+                .modelPath(modelPath)
+                .facts(facts)
+                .attribute("litert.threads", config != null ? config.threads() : 4)
+                .attribute("litert.gpu_enabled", gpuEnabled)
+                .attribute("litert.gpu_backend", gpuBackend)
+                .build();
+    }
+
+    private static void put(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
+    private static Long regularFileSize(Path path) {
+        try {
+            return path != null && Files.isRegularFile(path) ? Files.size(path) : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String litertArtifactType(Path path) {
+        if (path == null || path.getFileName() == null) {
+            return null;
+        }
+        String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (fileName.endsWith(".litertlm")) {
+            return "litertlm";
+        }
+        if (fileName.endsWith(".tflite")) {
+            return "tflite";
+        }
+        if (fileName.endsWith(".task")) {
+            return "task";
+        }
+        if (Files.isDirectory(path)) {
+            return "directory";
+        }
+        return "unknown";
     }
 
     private String userFacingLiteRtFailureMessage(Throwable throwable) {
