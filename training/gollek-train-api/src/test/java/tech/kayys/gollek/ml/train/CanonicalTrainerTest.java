@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -25,9 +26,12 @@ import tech.kayys.gollek.ml.nn.loss.HuberLoss;
 import tech.kayys.gollek.ml.nn.loss.MSELoss;
 import tech.kayys.gollek.ml.optim.Adam;
 import tech.kayys.gollek.ml.optim.AdamW;
+import tech.kayys.gollek.ml.optim.ExponentialLR;
 import tech.kayys.gollek.ml.optim.GradScaler;
+import tech.kayys.gollek.ml.optim.OneCycleLR;
 import tech.kayys.gollek.ml.optim.RMSprop;
 import tech.kayys.gollek.ml.optim.SGD;
+import tech.kayys.gollek.ml.optim.SequentialLR;
 import tech.kayys.gollek.ml.optim.StepLR;
 import tech.kayys.gollek.train.data.DataLoader;
 import tech.kayys.gollek.train.data.DataLoader.Batch;
@@ -68,6 +72,113 @@ class CanonicalTrainerTest {
         assertEquals(Boolean.TRUE, summary.metadata().get("trainBatchLossHook"));
         assertEquals(Boolean.FALSE, summary.metadata().get("trainSyntheticFallbackUsed"));
         assertEquals(Boolean.FALSE, summary.metadata().get("modelCheckpointEnabled"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("dataLoaderPlanMetadataCaptured"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("trainLoaderPlan.available"));
+        assertEquals("batch-collection", summary.metadata().get("trainLoaderPlan.kind"));
+        assertEquals(2, summary.metadata().get("trainLoaderPlan.batchCount"));
+        assertEquals(4, summary.metadata().get("trainLoaderPlan.sampleCount"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("trainLoaderPlan.derivedFromBatchCollection"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("validationLoaderPlan.available"));
+        assertEquals("batch-collection", summary.metadata().get("validationLoaderPlan.kind"));
+        assertEquals(1, summary.metadata().get("validationLoaderPlan.batchCount"));
+        assertEquals(2, summary.metadata().get("validationLoaderPlan.sampleCount"));
+        assertEquals("healthy", summary.metadata().get("dataLoaderPlanHealthStatus"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("dataLoaderPlanHealthGatePassed"));
+        assertEquals(0, summary.metadata().get("dataLoaderPlanHealthIssueCount"));
+    }
+
+    @Test
+    void canonicalTrainerPublishesOptInDataDistributionDiagnosticsForTensorLoaders() {
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        DataLoader.TensorDataLoader train = DataLoader.tensors(
+                GradTensor.of(new float[] {0f, 1f, 2f, 3f}, 4, 1),
+                GradTensor.of(new float[] {0f, 0f, 1f, 1f}, 4, 1),
+                2);
+        DataLoader.TensorDataLoader validation = DataLoader.tensors(
+                GradTensor.of(new float[] {4f, 5f}, 2, 1),
+                GradTensor.of(new float[] {0f, 1f}, 2, 1),
+                2);
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .dataDistributionDiagnostics()
+                .build()) {
+            trainer.fit(train, validation);
+
+            Map<String, Object> metadata = trainer.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("dataDistributionDiagnosticsEnabled"));
+            assertEquals(Boolean.TRUE, metadata.get("dataLoaderPlanMetadataCaptured"));
+            assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.available"));
+            assertEquals("tensor", metadata.get("trainLoaderPlan.kind"));
+            assertEquals(2, metadata.get("trainLoaderPlan.batchCount"));
+            assertEquals(4, metadata.get("trainLoaderPlan.sampleCount"));
+            assertEquals(2, metadata.get("trainLoaderPlan.batchSize"));
+            assertEquals(Boolean.TRUE, metadata.get("validationLoaderPlan.available"));
+            assertEquals("tensor", metadata.get("validationLoaderPlan.kind"));
+            assertEquals(1, metadata.get("validationLoaderPlan.batchCount"));
+            assertEquals("healthy", metadata.get("dataLoaderPlanHealthStatus"));
+            assertEquals(Boolean.TRUE, metadata.get("dataLoaderPlanHealthGatePassed"));
+            assertEquals(0, metadata.get("dataLoaderPlanHealthIssueCount"));
+            assertEquals(Boolean.TRUE, metadata.get("trainDataDistribution.available"));
+            assertEquals("classification", metadata.get("trainDataDistribution.kind"));
+            assertEquals(4, metadata.get("trainDataDistribution.sampleCount"));
+            assertEquals(List.of(2, 2), metadata.get("trainDataDistribution.classCounts"));
+            assertEquals(0L, metadata.get("trainDataDistribution.diagnosticEpoch"));
+            assertEquals(Boolean.TRUE, metadata.get("trainDataDistribution.diagnosticEpochViewUsed"));
+            assertEquals(1.0, (double) metadata.get("trainDataDistribution.imbalanceRatio"), 1e-6);
+            assertEquals(1.0, (double) metadata.get("trainDataDistribution.normalizedEntropy"), 1e-6);
+            assertEquals(List.of(1.0f, 1.0f), metadata.get("trainDataDistribution.balancedClassWeights"));
+            assertEquals(Boolean.TRUE, metadata.get("validationDataDistribution.available"));
+            assertEquals(List.of(1, 1), metadata.get("validationDataDistribution.classCounts"));
+            assertEquals(0L, metadata.get("validationDataDistribution.diagnosticEpoch"));
+            assertEquals(Boolean.TRUE, metadata.get("validationDataDistribution.diagnosticEpochViewUsed"));
+            assertEquals(Boolean.TRUE, metadata.get("dataDistributionDrift.available"));
+            assertEquals("classification", metadata.get("dataDistributionDrift.kind"));
+            assertEquals(0.0, (double) metadata.get("dataDistributionDrift.totalVariationDistance"), 1e-6);
+            assertEquals(0.0, (double) metadata.get("dataDistributionDrift.maxAbsoluteFractionDelta"), 1e-6);
+            assertEquals("healthy", metadata.get("dataDistributionHealthStatus"));
+            assertEquals(Boolean.TRUE, metadata.get("dataDistributionHealthGatePassed"));
+            assertEquals(0, metadata.get("dataDistributionHealthIssueCount"));
+        }
+    }
+
+    @Test
+    void dataDistributionDiagnosticsDoNotAdvanceReshufflingTensorLoaderEpoch() {
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        DataLoader.TensorDataset dataset = DataLoader.tensorDataset(
+                GradTensor.of(new float[] {0f, 1f, 2f, 3f, 4f, 5f}, 6, 1),
+                GradTensor.of(new float[] {0f, 1f, 0f, 1f, 0f, 1f}, 6, 1));
+        DataLoader.TensorDataLoader train = DataLoader.tensorBuilder(dataset)
+                .batchSize(2)
+                .shuffle(123L)
+                .reshuffleEachEpoch()
+                .build();
+        DataLoader.TensorDataLoader expected = DataLoader.tensorBuilder(dataset)
+                .batchSize(2)
+                .shuffle(123L)
+                .reshuffleEachEpoch()
+                .build();
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .dataDistributionDiagnostics()
+                .build()) {
+            trainer.fit(train, null);
+
+            Map<String, Object> metadata = trainer.summary().metadata();
+            assertEquals(Boolean.TRUE, metadata.get("trainDataDistribution.diagnosticEpochViewUsed"));
+            assertEquals(0L, metadata.get("trainDataDistribution.diagnosticEpoch"));
+        }
+
+        assertEquals(flattenInputs(expected.epoch(0L)), flattenInputs(train));
     }
 
     @Test
@@ -124,8 +235,58 @@ class CanonicalTrainerTest {
             assertEquals("cpu", summary.metadata().get("executionBackend"));
             assertEquals(Boolean.FALSE, summary.metadata().get("executionAccelerated"));
             assertEquals(Boolean.TRUE, summary.metadata().get("requestedDeviceAvailable"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("executionFallback"));
+            assertEquals("cpu", summary.metadata().get("executionBackendAtStart"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("executionAcceleratedAtStart"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("requestedDeviceAvailableAtStart"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("acceleratedMatmulUsed"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("executionBackendChanged"));
             assertTrue(summary.metadata().get("acceleratedMatmulCalls") instanceof Number);
             assertTrue(summary.metadata().get("acceleratedMatmulCallsDelta") instanceof Number);
+        }
+    }
+
+    @Test
+    void canonicalTrainerAllowsExplicitAcceleratorFallbackByDefault() {
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .device("npu")
+                .build()) {
+            trainer.fit(train, null);
+
+            TrainingSummary summary = trainer.summary();
+            assertEquals("npu", summary.metadata().get("requestedDevice"));
+            assertEquals("cpu", summary.metadata().get("executionBackend"));
+            assertEquals(Boolean.FALSE, summary.metadata().get("requestedDeviceAvailable"));
+            assertEquals(Boolean.TRUE, summary.metadata().get("executionFallback"));
+        }
+    }
+
+    @Test
+    void canonicalTrainerCanFailFastOnExplicitAcceleratorFallback() {
+        Linear model = new Linear(1, 1);
+        MSELoss mseLoss = new MSELoss();
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        try (CanonicalTrainer trainer = CanonicalTrainer.builder()
+                .model(model)
+                .optimizer(SGD.builder(model.parameters(), 0.01f).build())
+                .loss(mseLoss::compute)
+                .epochs(1)
+                .device("npu")
+                .requireAccelerator()
+                .build()) {
+            IllegalStateException error = assertThrows(IllegalStateException.class, () ->
+                    trainer.fit(train, null));
+
+            assertTrue(error.getMessage().contains("Requested accelerator 'npu' is unavailable"));
         }
     }
 
@@ -149,6 +310,7 @@ class CanonicalTrainerTest {
                 Gollek.DL.trainingOptions()
                         .device("cpu")
                         .gradientClip(1.0)
+                        .gradientClipByValue(0.05)
                         .gradientAccumulationSteps(1)
                         .build());
 
@@ -156,6 +318,58 @@ class CanonicalTrainerTest {
         assertEquals("cpu", summary.metadata().get("executionBackend"));
         assertEquals(Boolean.FALSE, summary.metadata().get("executionAccelerated"));
         assertEquals(1, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
+        assertEquals(Boolean.TRUE, summary.metadata().get("gradientClipValueEnabled"));
+        assertEquals(0.05, summary.metadata().get("gradientClipValueThreshold"));
+    }
+
+    @Test
+    void gollekDlTrainingOptionsEnableDataDistributionDiagnostics() {
+        Linear model = new Linear(1, 1);
+        DataLoader.TensorDataLoader train = DataLoader.tensors(
+                GradTensor.of(new float[] {0f, 1f, 2f, 3f}, 4, 1),
+                GradTensor.of(new float[] {0f, 0f, 1f, 1f}, 4, 1),
+                2);
+
+        TrainingSummary summary = Gollek.DL.fit(
+                model,
+                train,
+                List.of(),
+                1,
+                0.01f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .dataDistributionDiagnostics()
+                        .saveBestModelCheckpoint(false)
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("dataDistributionDiagnosticsEnabled"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("trainDataDistribution.available"));
+        assertEquals("classification", summary.metadata().get("trainDataDistribution.kind"));
+        assertEquals(List.of(2, 2), summary.metadata().get("trainDataDistribution.classCounts"));
+        assertEquals("healthy", summary.metadata().get("dataDistributionHealthStatus"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("dataDistributionHealthGatePassed"));
+        assertEquals(0, summary.metadata().get("dataDistributionHealthIssueCount"));
+    }
+
+    @Test
+    void gollekDlTrainingOptionsCanRequireAccelerator() {
+        Linear model = new Linear(1, 1);
+        List<Batch> train = List.of(batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () ->
+                Gollek.DL.fit(
+                        model,
+                        train,
+                        List.of(),
+                        1,
+                        0.01f,
+                        Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                        Gollek.DL.trainingOptions()
+                                .device("npu")
+                                .requireAccelerator()
+                                .build()));
+
+        assertTrue(error.getMessage().contains("Requested accelerator 'npu' is unavailable"));
     }
 
     @Test
@@ -251,7 +465,15 @@ class CanonicalTrainerTest {
                 Gollek.DL.meanAbsoluteErrorMetric(),
                 Gollek.DL.meanSquaredErrorMetric(),
                 Gollek.DL.rmseMetric(),
-                Gollek.DL.r2Metric());
+                Gollek.DL.medaeMetric(),
+                Gollek.DL.maxErrorMetric(),
+                Gollek.DL.pinballLossMetric(0.5),
+                Gollek.DL.pinballLossMetric(0.9),
+                Gollek.DL.r2Metric(),
+                Gollek.DL.mapeMetric(),
+                Gollek.DL.smapeMetric(),
+                Gollek.DL.mbeMetric(),
+                Gollek.DL.explainedVarianceMetric());
 
         assertTrue(model.isTraining());
         assertEquals(14.0 / 3.0, summary.loss(), 1e-6);
@@ -260,10 +482,90 @@ class CanonicalTrainerTest {
         assertEquals(2.0, summary.metric("mae"), 1e-6);
         assertEquals(14.0 / 3.0, summary.metric("mse"), 1e-6);
         assertEquals(Math.sqrt(14.0 / 3.0), summary.metric("rmse"), 1e-6);
+        assertEquals(2.0, summary.metric("median_absolute_error"), 1e-6);
+        assertEquals(3.0, summary.metric("max_error"), 1e-6);
+        assertEquals(1.0, summary.metric("pinball_loss_q50"), 1e-6);
+        assertEquals(3.8 / 3.0, summary.metric("pinball_loss_q90"), 1e-6);
         assertEquals(-8.0 / 13.0, summary.metric("r2"), 1e-6);
+        assertEquals(31.0 / 30.0, summary.metric("mape"), 1e-6);
+        assertEquals(53.0 / 63.0, summary.metric("smape"), 1e-6);
+        assertEquals(-2.0 / 3.0, summary.metric("mbe"), 1e-6);
+        assertEquals(-6.0 / 13.0, summary.metric("explained_variance"), 1e-6);
         assertEquals("cpu", summary.metadata().get("requestedDevice"));
         assertEquals("cpu", summary.metadata().get("executionBackend"));
         assertEquals(Boolean.FALSE, summary.metadata().get("executionAccelerated"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("executionFallback"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("failOnAcceleratorFallback"));
+        assertTrue(summary.metadata().get("acceleratedMatmulCallsDelta") instanceof Number);
+        assertTrue(summary.metadata().get("acceleratedMatmulUsed") instanceof Boolean);
+    }
+
+    @Test
+    void gollekDlEvaluateSupportsEvaluationOptionsDeviceAliases() {
+        IdentityModel model = new IdentityModel();
+        List<Batch> loader = List.of(batch(new float[] {1f, 3f}, new float[] {2f, 1f}, 2));
+
+        Gollek.DL.EvaluationSummary summary = Gollek.DL.evaluate(
+                model,
+                loader,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.evaluationOptions()
+                        .device("off")
+                        .build(),
+                Gollek.DL.meanSquaredErrorMetric());
+
+        assertEquals("cpu", summary.metadata().get("requestedDevice"));
+        assertEquals("cpu", summary.metadata().get("executionBackend"));
+        assertEquals(Boolean.FALSE, summary.metadata().get("executionFallback"));
+        assertEquals(2.5, summary.loss(), 1e-6);
+        assertEquals(2.5, summary.metric("mse"), 1e-6);
+    }
+
+    @Test
+    void gollekDlEvaluateCanRequireAccelerator() {
+        IdentityModel model = new IdentityModel();
+        List<Batch> loader = List.of(batch(new float[] {1f, 3f}, new float[] {2f, 1f}, 2));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () ->
+                Gollek.DL.evaluate(
+                        model,
+                        loader,
+                        Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                        Gollek.DL.evaluationOptions()
+                                .device("npu")
+                                .requireAccelerator()
+                                .build()));
+
+        assertTrue(error.getMessage().contains("Requested accelerator 'npu' is unavailable"));
+    }
+
+    @Test
+    void gollekDlEvaluateReportsPredictionIntervalMetrics() {
+        List<Batch> loader = List.of(new Batch(
+                GradTensor.of(new float[] {
+                        -1.0f, 1.0f,
+                        1.5f, 2.5f,
+                        4.0f, 6.0f,
+                        12.0f, 8.0f
+                }, 4, 2),
+                GradTensor.of(new float[] {0.0f, 1.0f, 5.0f, 10.0f}, 4)));
+
+        Gollek.DL.EvaluationSummary summary = Gollek.DL.evaluate(
+                new IdentityModel(),
+                loader,
+                (predictions, targets) -> GradTensor.scalar(0.0f),
+                "cpu",
+                Gollek.DL.predictionIntervalCoverageMetric(),
+                Gollek.DL.predictionIntervalMeanWidthMetric(),
+                Gollek.DL.predictionIntervalNormalizedMeanWidthMetric());
+
+        assertEquals(0.0, summary.loss(), 1e-6);
+        assertEquals(0.75, summary.metric("prediction_interval_coverage"), 1e-6);
+        assertEquals(2.25, summary.metric("prediction_interval_mean_width"), 1e-6);
+        assertEquals(0.225, summary.metric("prediction_interval_normalized_mean_width"), 1e-6);
+        Map<String, Object> details = metricDetails(summary.metricDetails(), "prediction_interval_coverage");
+        assertEquals(1L, details.get("crossedIntervals"));
+        assertEquals(Boolean.TRUE, details.get("boundsReorderedForEvaluation"));
     }
 
     @Test
@@ -321,6 +623,12 @@ class CanonicalTrainerTest {
                 Gollek.DL.precisionMetric(),
                 Gollek.DL.recallMetric(),
                 Gollek.DL.f1Metric(),
+                Gollek.DL.classificationBalancedAccuracyMetric(),
+                Gollek.DL.classificationMccMetric(),
+                Gollek.DL.classificationWeightedPrecisionMetric(),
+                Gollek.DL.classificationWeightedRecallMetric(),
+                Gollek.DL.classificationWeightedF1Metric(),
+                Gollek.DL.classificationKappaMetric(),
                 Gollek.DL.classificationMacroRocAucMetric(),
                 Gollek.DL.classificationMacroAveragePrecisionMetric());
 
@@ -331,6 +639,12 @@ class CanonicalTrainerTest {
         assertEquals(2.0 / 3.0, summary.metric("precision"), 1e-6);
         assertEquals(0.5, summary.metric("recall"), 1e-6);
         assertEquals(5.0 / 9.0, summary.metric("f1"), 1e-6);
+        assertEquals(0.75, summary.metric("classification_balanced_accuracy"), 1e-6);
+        assertEquals(3.0 / Math.sqrt(24.0), summary.metric("classification_matthews_correlation_coefficient"), 1e-6);
+        assertEquals(1.0, summary.metric("classification_weighted_precision"), 1e-6);
+        assertEquals(2.0 / 3.0, summary.metric("classification_weighted_recall"), 1e-6);
+        assertEquals(7.0 / 9.0, summary.metric("classification_weighted_f1"), 1e-6);
+        assertEquals(0.5, summary.metric("classification_cohens_kappa"), 1e-6);
         assertEquals(0.875, summary.metric("classification_macro_roc_auc"), 1e-6);
         assertEquals(11.0 / 12.0, summary.metric("classification_macro_average_precision"), 1e-6);
         assertTrue(Double.isFinite(summary.loss()));
@@ -363,6 +677,39 @@ class CanonicalTrainerTest {
 
         assertEquals(1.0, summary.metric("classification_macro_roc_auc"), 1e-6);
         assertEquals(1.0, summary.metric("classification_macro_average_precision"), 1e-6);
+    }
+
+    @Test
+    void gollekDlClassificationCalibrationMetricsReportTopLabelReliability() {
+        var loader = Gollek.DL.classificationDataLoader(
+                GradTensor.of(new float[] {
+                        logProb(0.8), logProb(0.1), logProb(0.1),
+                        logProb(0.4), logProb(0.5), logProb(0.1),
+                        logProb(0.2), logProb(0.3), logProb(0.5)
+                }, 3, 3),
+                new int[] {0, 0, 2},
+                3);
+
+        Gollek.DL.EvaluationSummary summary = Gollek.DL.evaluate(
+                new IdentityModel(),
+                loader,
+                Gollek.DL.TrainingPreset.CLASSIFICATION_CROSS_ENTROPY_SGD,
+                "cpu",
+                Gollek.DL.classificationBrierScoreMetric(),
+                Gollek.DL.classificationExpectedCalibrationErrorMetric(5));
+
+        assertEquals(1.06 / 3.0, summary.metric("classification_brier_score"), 1e-6);
+        assertEquals(1.0 / 15.0, summary.metric("classification_expected_calibration_error"), 1e-6);
+        Map<String, Object> details = metricDetails(
+                summary.metricDetails(),
+                "classification_expected_calibration_error");
+        assertEquals("classification_calibration", details.get("type"));
+        assertEquals("top_label", details.get("mode"));
+        assertEquals(5, details.get("bins"));
+        assertEquals(List.of(0L, 0L, 2L, 0L, 1L), details.get("binCount"));
+        assertEquals(
+                details,
+                metricDetails(summary.metadata(), "metricDetails", "classification_expected_calibration_error"));
     }
 
     @Test
@@ -508,6 +855,9 @@ class CanonicalTrainerTest {
                         .device("cpu")
                         .classificationMetrics()
                         .classificationRankingMetrics()
+                        .classificationImbalanceMetrics()
+                        .classificationAgreementMetrics()
+                        .classificationCalibrationMetrics()
                         .topKAccuracyMetric(2)
                         .build());
 
@@ -520,6 +870,17 @@ class CanonicalTrainerTest {
         assertTrue(summary.metadata().get("trainMetric.f1") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.classification_macro_roc_auc") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.classification_macro_average_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_balanced_accuracy") instanceof Number);
+        assertTrue(
+                summary.metadata().get("trainMetric.classification_matthews_correlation_coefficient")
+                        instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_weighted_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_weighted_recall") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_weighted_f1") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_cohens_kappa") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.classification_brier_score") instanceof Number);
+        assertTrue(
+                summary.metadata().get("trainMetric.classification_expected_calibration_error") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.top2_accuracy") instanceof Number);
     }
 
@@ -539,8 +900,12 @@ class CanonicalTrainerTest {
                 Gollek.DL.binaryPrecisionMetric(),
                 Gollek.DL.binaryRecallMetric(),
                 Gollek.DL.binaryF1Metric(),
+                Gollek.DL.binaryBalancedAccuracyMetric(),
+                Gollek.DL.binaryMccMetric(),
+                Gollek.DL.binaryKappaMetric(),
                 Gollek.DL.binaryRocAucMetric(),
-                Gollek.DL.binaryAveragePrecisionMetric());
+                Gollek.DL.binaryAveragePrecisionMetric(),
+                Gollek.DL.binaryBestF1ThresholdMetric());
 
         assertEquals(4, summary.sampleCount());
         assertEquals(1, summary.batchCount());
@@ -548,9 +913,45 @@ class CanonicalTrainerTest {
         assertEquals(0.5, summary.metric("binary_precision"), 1e-6);
         assertEquals(0.5, summary.metric("binary_recall"), 1e-6);
         assertEquals(0.5, summary.metric("binary_f1"), 1e-6);
+        assertEquals(0.5, summary.metric("binary_balanced_accuracy"), 1e-6);
+        assertEquals(0.0, summary.metric("binary_matthews_correlation_coefficient"), 1e-6);
+        assertEquals(0.0, summary.metric("binary_cohens_kappa"), 1e-6);
         assertEquals(0.5, summary.metric("binary_roc_auc"), 1e-6);
         assertEquals(0.75, summary.metric("binary_average_precision"), 1e-6);
+        assertEquals(2.0 / 3.0, summary.metric("binary_best_f1"), 1e-6);
+        assertEquals(2.0f, (Float) metricDetails(summary.metricDetails(), "binary_best_f1").get("threshold"), 1e-6f);
         assertTrue(Double.isFinite(summary.loss()));
+    }
+
+    @Test
+    void gollekDlBinaryCalibrationMetricsReportProbabilityQuality() {
+        var loader = Gollek.DL.binaryDataLoader(
+                GradTensor.of(new float[] {
+                        logit(0.9),
+                        logit(0.8),
+                        logit(0.35),
+                        logit(0.1)
+                }, 4, 1),
+                new int[] {1, 1, 0, 0},
+                4);
+
+        Gollek.DL.EvaluationSummary summary = Gollek.DL.evaluate(
+                new IdentityModel(),
+                loader,
+                Gollek.DL.TrainingPreset.BINARY_BCE_WITH_LOGITS_SGD,
+                "cpu",
+                Gollek.DL.binaryBrierScoreMetric(),
+                Gollek.DL.binaryExpectedCalibrationErrorMetric(5));
+
+        assertEquals(0.045625, summary.metric("binary_brier_score"), 1e-6);
+        assertEquals(0.1875, summary.metric("binary_expected_calibration_error"), 1e-6);
+        Map<String, Object> details = metricDetails(
+                summary.metricDetails(),
+                "binary_expected_calibration_error");
+        assertEquals("binary_calibration", details.get("type"));
+        assertEquals(5, details.get("bins"));
+        assertEquals(List.of(1L, 1L, 0L, 0L, 2L), details.get("binCount"));
+        assertEquals(details, metricDetails(summary.metadata(), "metricDetails", "binary_expected_calibration_error"));
     }
 
     @Test
@@ -770,6 +1171,10 @@ class CanonicalTrainerTest {
                 "cpu",
                 Gollek.DL.multiLabelExactMatchMetric(),
                 Gollek.DL.multiLabelHammingLossMetric(),
+                Gollek.DL.multiLabelSamplePrecisionMetric(),
+                Gollek.DL.multiLabelSampleRecallMetric(),
+                Gollek.DL.multiLabelSampleF1Metric(),
+                Gollek.DL.multiLabelSampleJaccardMetric(),
                 Gollek.DL.multiLabelMacroPrecisionMetric(),
                 Gollek.DL.multiLabelMacroRecallMetric(),
                 Gollek.DL.multiLabelMacroF1Metric(),
@@ -779,6 +1184,10 @@ class CanonicalTrainerTest {
         assertEquals(3, summary.sampleCount());
         assertEquals(1.0 / 3.0, summary.metric("multilabel_exact_match"), 1e-6);
         assertEquals(2.0 / 9.0, summary.metric("multilabel_hamming_loss"), 1e-6);
+        assertEquals(5.0 / 6.0, summary.metric("multilabel_sample_precision"), 1e-6);
+        assertEquals(5.0 / 6.0, summary.metric("multilabel_sample_recall"), 1e-6);
+        assertEquals(7.0 / 9.0, summary.metric("multilabel_sample_f1"), 1e-6);
+        assertEquals(2.0 / 3.0, summary.metric("multilabel_sample_jaccard"), 1e-6);
         assertEquals(5.0 / 6.0, summary.metric("multilabel_macro_precision"), 1e-6);
         assertEquals(5.0 / 6.0, summary.metric("multilabel_macro_recall"), 1e-6);
         assertEquals(7.0 / 9.0, summary.metric("multilabel_macro_f1"), 1e-6);
@@ -806,12 +1215,20 @@ class CanonicalTrainerTest {
                 "cpu",
                 Gollek.DL.multiLabelExactMatchMetric(0.5f),
                 Gollek.DL.multiLabelHammingLossMetric(0.5f),
+                Gollek.DL.multiLabelSamplePrecisionMetric(0.5f),
+                Gollek.DL.multiLabelSampleRecallMetric(0.5f),
+                Gollek.DL.multiLabelSampleF1Metric(0.5f),
+                Gollek.DL.multiLabelSampleJaccardMetric(0.5f),
                 Gollek.DL.multiLabelMacroPrecisionMetric(0.5f),
                 Gollek.DL.multiLabelMacroRecallMetric(0.5f),
                 Gollek.DL.multiLabelMacroF1Metric(0.5f));
 
         assertEquals(0.0, summary.metric("multilabel_exact_match"), 1e-6);
         assertEquals(0.5, summary.metric("multilabel_hamming_loss"), 1e-6);
+        assertEquals(0.5, summary.metric("multilabel_sample_precision"), 1e-6);
+        assertEquals(0.25, summary.metric("multilabel_sample_recall"), 1e-6);
+        assertEquals(1.0 / 3.0, summary.metric("multilabel_sample_f1"), 1e-6);
+        assertEquals(0.25, summary.metric("multilabel_sample_jaccard"), 1e-6);
         assertEquals(1.0 / 3.0, summary.metric("multilabel_macro_precision"), 1e-6);
         assertEquals(1.0 / 6.0, summary.metric("multilabel_macro_recall"), 1e-6);
         assertEquals(2.0 / 9.0, summary.metric("multilabel_macro_f1"), 1e-6);
@@ -839,10 +1256,46 @@ class CanonicalTrainerTest {
                 Gollek.DL.TrainingPreset.BINARY_BCE_WITH_LOGITS_SGD,
                 "cpu",
                 Gollek.DL.multiLabelMacroRocAucMetric(),
-                Gollek.DL.multiLabelMacroAveragePrecisionMetric());
+                Gollek.DL.multiLabelMacroAveragePrecisionMetric(),
+                Gollek.DL.multiLabelLrapMetric(),
+                Gollek.DL.multiLabelRankingLossMetric(),
+                Gollek.DL.multiLabelCoverageErrorMetric());
 
         assertEquals(0.5, summary.metric("multilabel_macro_roc_auc"), 1e-6);
         assertEquals(2.0 / 3.0, summary.metric("multilabel_macro_average_precision"), 1e-6);
+        assertEquals(2.0 / 3.0, summary.metric("multilabel_label_ranking_average_precision"), 1e-6);
+        assertEquals(2.0 / 3.0, summary.metric("multilabel_ranking_loss"), 1e-6);
+        assertEquals(5.0 / 3.0, summary.metric("multilabel_coverage_error"), 1e-6);
+    }
+
+    @Test
+    void gollekDlMultiLabelThresholdTuningReportsPerLabelBestF1() {
+        var loader = Gollek.DL.multiLabelBinaryDataLoader(
+                GradTensor.of(new float[] {
+                        0.9f, 0.1f, 0.2f,
+                        0.8f, 0.7f, 0.6f,
+                        0.2f, 0.6f, 0.4f
+                }, 3, 3),
+                new int[][] {
+                        {1, 0, 0},
+                        {1, 0, 1},
+                        {0, 1, 0}
+                },
+                3);
+
+        Gollek.DL.EvaluationSummary summary = Gollek.DL.evaluate(
+                new IdentityModel(),
+                loader,
+                Gollek.DL.TrainingPreset.BINARY_BCE_WITH_LOGITS_SGD,
+                "cpu",
+                Gollek.DL.multiLabelBestF1ThresholdsMetric());
+
+        assertEquals(8.0 / 9.0, summary.metric("multilabel_macro_best_f1"), 1e-6);
+        Map<String, Object> details = metricDetails(summary.metricDetails(), "multilabel_macro_best_f1");
+        assertEquals(List.of(0.8f, 0.6f, 0.6f), details.get("perLabelThreshold"));
+        assertEquals(List.of(1.0, 2.0 / 3.0, 1.0), details.get("perLabelF1"));
+        assertEquals(List.of(2L, 1L, 1L), details.get("truePositive"));
+        assertEquals(details, metricDetails(summary.metadata(), "metricDetails", "multilabel_macro_best_f1"));
     }
 
     @Test
@@ -874,8 +1327,13 @@ class CanonicalTrainerTest {
                 Gollek.DL.trainingOptions()
                         .device("cpu")
                         .binaryClassificationMetrics()
+                        .binaryImbalanceMetrics()
+                        .binaryAgreementMetrics()
                         .binaryRankingMetrics()
+                        .binaryThresholdTuningMetrics()
+                        .binaryCalibrationMetrics()
                         .multiLabelBinaryMetrics()
+                        .multiLabelThresholdTuningMetrics()
                         .build());
 
         assertEquals(1, summary.epochCount());
@@ -885,13 +1343,24 @@ class CanonicalTrainerTest {
         assertTrue(summary.metadata().get("trainMetric.binary_precision") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.binary_recall") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.binary_f1") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_balanced_accuracy") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_matthews_correlation_coefficient") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_cohens_kappa") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.binary_roc_auc") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.binary_average_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_best_f1") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_brier_score") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.binary_expected_calibration_error") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_exact_match") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_hamming_loss") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_sample_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_sample_recall") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_sample_f1") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_sample_jaccard") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_macro_precision") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_macro_recall") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_macro_f1") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_macro_best_f1") instanceof Number);
     }
 
     @Test
@@ -937,6 +1406,7 @@ class CanonicalTrainerTest {
                         .device("cpu")
                         .binaryClassificationMetrics()
                         .multiLabelRankingMetrics()
+                        .multiLabelThresholdTuningMetrics()
                         .build());
 
         assertEquals(1, summary.epochCount());
@@ -948,6 +1418,10 @@ class CanonicalTrainerTest {
         assertTrue(summary.metadata().get("trainMetric.binary_f1") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_macro_roc_auc") instanceof Number);
         assertTrue(summary.metadata().get("trainMetric.multilabel_macro_average_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_label_ranking_average_precision") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_ranking_loss") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_coverage_error") instanceof Number);
+        assertTrue(summary.metadata().get("trainMetric.multilabel_macro_best_f1") instanceof Number);
     }
 
     @Test
@@ -966,18 +1440,42 @@ class CanonicalTrainerTest {
                 Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
                 Gollek.DL.trainingOptions()
                         .device("cpu")
-                        .regressionMetrics()
+                        .regressionExtendedMetrics()
+                        .regressionLogScaleMetrics()
+                        .regressionQuantileMetrics()
                         .build());
 
         assertEquals(Boolean.TRUE, summary.metadata().get("metricsEnabled"));
         assertEquals(2.0, metric(summary, "trainMetric.mae"), 1e-6);
         assertEquals(14.0 / 3.0, metric(summary, "trainMetric.mse"), 1e-6);
         assertEquals(Math.sqrt(14.0 / 3.0), metric(summary, "trainMetric.rmse"), 1e-6);
+        assertEquals(2.0, metric(summary, "trainMetric.median_absolute_error"), 1e-6);
+        assertEquals(3.0, metric(summary, "trainMetric.max_error"), 1e-6);
+        assertEquals(trainMsle(), metric(summary, "trainMetric.msle"), 1e-6);
+        assertEquals(Math.sqrt(trainMsle()), metric(summary, "trainMetric.rmsle"), 1e-6);
+        assertEquals(2.2 / 3.0, metric(summary, "trainMetric.pinball_loss_q10"), 1e-6);
+        assertEquals(1.0, metric(summary, "trainMetric.pinball_loss_q50"), 1e-6);
+        assertEquals(3.8 / 3.0, metric(summary, "trainMetric.pinball_loss_q90"), 1e-6);
         assertEquals(-8.0 / 13.0, metric(summary, "trainMetric.r2"), 1e-6);
+        assertEquals(31.0 / 30.0, metric(summary, "trainMetric.mape"), 1e-6);
+        assertEquals(53.0 / 63.0, metric(summary, "trainMetric.smape"), 1e-6);
+        assertEquals(-2.0 / 3.0, metric(summary, "trainMetric.mbe"), 1e-6);
+        assertEquals(-6.0 / 13.0, metric(summary, "trainMetric.explained_variance"), 1e-6);
         assertEquals(2.0, metric(summary, "validationMetric.mae"), 1e-6);
         assertEquals(5.0, metric(summary, "validationMetric.mse"), 1e-6);
         assertEquals(Math.sqrt(5.0), metric(summary, "validationMetric.rmse"), 1e-6);
+        assertEquals(2.0, metric(summary, "validationMetric.median_absolute_error"), 1e-6);
+        assertEquals(3.0, metric(summary, "validationMetric.max_error"), 1e-6);
+        assertEquals(validationMsle(), metric(summary, "validationMetric.msle"), 1e-6);
+        assertEquals(Math.sqrt(validationMsle()), metric(summary, "validationMetric.rmsle"), 1e-6);
+        assertEquals(1.4, metric(summary, "validationMetric.pinball_loss_q10"), 1e-6);
+        assertEquals(1.0, metric(summary, "validationMetric.pinball_loss_q50"), 1e-6);
+        assertEquals(0.6, metric(summary, "validationMetric.pinball_loss_q90"), 1e-6);
         assertEquals(4.0 / 9.0, metric(summary, "validationMetric.r2"), 1e-6);
+        assertEquals(5.0 / 7.0, metric(summary, "validationMetric.mape"), 1e-6);
+        assertEquals(20.0 / 17.0, metric(summary, "validationMetric.smape"), 1e-6);
+        assertEquals(1.0, metric(summary, "validationMetric.mbe"), 1e-6);
+        assertEquals(5.0 / 9.0, metric(summary, "validationMetric.explained_variance"), 1e-6);
     }
 
     @Test
@@ -1054,6 +1552,35 @@ class CanonicalTrainerTest {
         assertEquals("BATCH", summary.metadata().get("learningRateSchedulerStepUnit"));
         assertEquals(2, ((Number) summary.metadata().get("learningRateSchedulerStepCount")).intValue());
         assertEquals(0.01f, ((Number) summary.metadata().get("learningRate")).floatValue(), 1e-6f);
+    }
+
+    @Test
+    void gollekDlTrainingOptionsAttachCosineWarmRestartsSchedulerToOneCallFit() {
+        Linear model = new Linear(1, 1);
+        List<Batch> train = List.of(
+                batch(new float[] {1f, 2f}, new float[] {2f, 4f}, 2),
+                batch(new float[] {3f, 4f}, new float[] {6f, 8f}, 2));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                model,
+                train,
+                List.of(),
+                1,
+                0.1f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .device("cpu")
+                        .cosineAnnealingWarmRestartsLrBatches(2, 2, 0.01f)
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("learningRateSchedulerEnabled"));
+        assertEquals("CosineAnnealingWarmRestartsLR", summary.metadata().get("learningRateSchedulerType"));
+        assertEquals("BATCH", summary.metadata().get("learningRateSchedulerStepUnit"));
+        assertEquals(2, ((Number) summary.metadata().get("learningRateSchedulerStepCount")).intValue());
+        assertEquals(0.01f, ((Number) summary.metadata().get("learningRate")).floatValue(), 1e-6f);
+        assertEquals(1, ((Number) summary.metadata().get("learningRateSchedulerState.cycleIndex")).intValue());
+        assertEquals(0, ((Number) summary.metadata().get("learningRateSchedulerState.cycleStep")).intValue());
+        assertEquals(4, ((Number) summary.metadata().get("learningRateSchedulerState.cycleLength")).intValue());
     }
 
     @Test
@@ -1431,6 +1958,7 @@ class CanonicalTrainerTest {
                 .loss(mseLoss::compute)
                 .epochs(1)
                 .gradientClip(0.1)
+                .parameterUpdateDiagnostics()
                 .checkpointDir(checkpointDir)
                 .metric(CanonicalTrainer.Metrics.meanAbsoluteError())
                 .build()) {
@@ -1441,25 +1969,93 @@ class CanonicalTrainerTest {
             assertTrue(metric(summary, "latestGradientL2Norm") <= 0.1001);
             assertTrue(metric(summary, "latestGradientMaxAbsBeforeClip") > 0.1);
             assertTrue(metric(summary, "latestGradientMaxAbs") <= 0.1001);
+            assertTrue(metric(summary, "latestGradientMeanAbsBeforeClip") > 0.1);
+            assertTrue(metric(summary, "latestGradientMeanAbs") <= 0.1001);
+            assertTrue(metric(summary, "latestGradientRmsBeforeClip") > 0.1);
+            assertTrue(metric(summary, "latestGradientRms") <= 0.1001);
             assertEquals(Boolean.TRUE, summary.metadata().get("latestGradientClipped"));
+            assertTrue(metric(summary, "latestGradientClipScale") > 0.0);
+            assertTrue(metric(summary, "latestGradientClipScale") < 1.0);
+            assertEquals(0L, ((Number) summary.metadata().get("latestGradientZeroCount")).longValue());
+            assertEquals(0.0, metric(summary, "latestGradientZeroFraction"), 1e-9);
             assertEquals(Boolean.TRUE, summary.metadata().get("gradientClipEnabled"));
             assertEquals(0.1, metric(summary, "gradientClipThreshold"), 1e-6);
             assertEquals(1, ((Number) summary.metadata().get("latestGradientParameterCount")).intValue());
             assertEquals(1L, ((Number) summary.metadata().get("latestGradientValueCount")).longValue());
             assertEquals(1, ((Number) summary.metadata().get("latestParameterCount")).intValue());
             assertEquals(1L, ((Number) summary.metadata().get("latestParameterValueCount")).longValue());
+            assertEquals(0L, ((Number) summary.metadata().get("latestParameterZeroCount")).longValue());
+            assertEquals(0.0, metric(summary, "latestParameterZeroFraction"), 1e-9);
             assertTrue(metric(summary, "latestParameterL2Norm") > 0.0);
+            assertTrue(metric(summary, "latestParameterMeanAbs") > 0.0);
+            assertTrue(metric(summary, "latestParameterRms") > 0.0);
+            assertTrue(metric(summary, "latestGradientToParameterL2Ratio") > 0.0);
+            assertTrue(metric(summary, "latestGradientToParameterMaxAbsRatio") > 0.0);
+            assertTrue(metric(summary, "latestGradientToParameterMeanAbsRatio") > 0.0);
+            assertTrue(metric(summary, "latestGradientToParameterRmsRatio") > 0.0);
+            assertEquals(Boolean.TRUE, summary.metadata().get("parameterUpdateDiagnosticsEnabled"));
+            assertEquals(1, ((Number) summary.metadata().get("latestParameterUpdateCount")).intValue());
+            assertEquals(1L, ((Number) summary.metadata().get("latestParameterUpdateValueCount")).longValue());
+            assertEquals(0L, ((Number) summary.metadata().get("latestParameterUpdateZeroCount")).longValue());
+            assertEquals(0.0, metric(summary, "latestParameterUpdateZeroFraction"), 1e-9);
+            assertTrue(metric(summary, "latestParameterUpdateL2Norm") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateMaxAbs") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateMeanAbs") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateRms") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateToParameterL2Ratio") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateToParameterMaxAbsRatio") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateToParameterMeanAbsRatio") > 0.0);
+            assertTrue(metric(summary, "latestParameterUpdateToParameterRmsRatio") > 0.0);
 
             Map<String, Object> firstEpoch = epochHistory(summary).get(0);
             assertEquals(Boolean.TRUE, firstEpoch.get("gradientClipped"));
             assertTrue(((Number) firstEpoch.get("gradientL2NormBeforeClip")).doubleValue() > 0.1);
             assertTrue(((Number) firstEpoch.get("gradientL2Norm")).doubleValue() <= 0.1001);
+            assertTrue(((Number) firstEpoch.get("gradientMeanAbsBeforeClip")).doubleValue() > 0.1);
+            assertTrue(((Number) firstEpoch.get("gradientMeanAbs")).doubleValue() <= 0.1001);
+            assertTrue(((Number) firstEpoch.get("gradientRmsBeforeClip")).doubleValue() > 0.1);
+            assertTrue(((Number) firstEpoch.get("gradientRms")).doubleValue() <= 0.1001);
+            assertTrue(((Number) firstEpoch.get("gradientClipScale")).doubleValue() < 1.0);
+            assertEquals(0L, ((Number) firstEpoch.get("gradientZeroCount")).longValue());
+            assertEquals(0.0, ((Number) firstEpoch.get("gradientZeroFraction")).doubleValue(), 1e-9);
             assertTrue(((Number) firstEpoch.get("parameterL2Norm")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterMeanAbs")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterRms")).doubleValue() > 0.0);
+            assertEquals(0L, ((Number) firstEpoch.get("parameterZeroCount")).longValue());
+            assertEquals(0.0, ((Number) firstEpoch.get("parameterZeroFraction")).doubleValue(), 1e-9);
+            assertTrue(((Number) firstEpoch.get("gradientToParameterL2Ratio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("gradientToParameterMaxAbsRatio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("gradientToParameterMeanAbsRatio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("gradientToParameterRmsRatio")).doubleValue() > 0.0);
+            assertEquals(Boolean.TRUE, firstEpoch.get("parameterUpdateDiagnosticsEnabled"));
+            assertTrue(((Number) firstEpoch.get("parameterUpdateL2Norm")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateMaxAbs")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateMeanAbs")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateRms")).doubleValue() > 0.0);
+            assertEquals(1, ((Number) firstEpoch.get("parameterUpdateCount")).intValue());
+            assertEquals(1L, ((Number) firstEpoch.get("parameterUpdateValueCount")).longValue());
+            assertEquals(0L, ((Number) firstEpoch.get("parameterUpdateZeroCount")).longValue());
+            assertEquals(0.0, ((Number) firstEpoch.get("parameterUpdateZeroFraction")).doubleValue(), 1e-9);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateToParameterL2Ratio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateToParameterMaxAbsRatio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateToParameterMeanAbsRatio")).doubleValue() > 0.0);
+            assertTrue(((Number) firstEpoch.get("parameterUpdateToParameterRmsRatio")).doubleValue() > 0.0);
         }
 
         String csv = Files.readString(checkpointDir.resolve("canonical-history.csv"));
         assertTrue(csv.contains("gradientL2NormBeforeClip"));
+        assertTrue(csv.contains("gradientMeanAbsBeforeClip"));
+        assertTrue(csv.contains("gradientRmsBeforeClip"));
+        assertTrue(csv.contains("gradientZeroFraction"));
+        assertTrue(csv.contains("gradientClipScale"));
         assertTrue(csv.contains("gradientClipped"));
+        assertTrue(csv.contains("parameterMeanAbs"));
+        assertTrue(csv.contains("parameterRms"));
+        assertTrue(csv.contains("parameterZeroFraction"));
+        assertTrue(csv.contains("gradientToParameterL2Ratio"));
+        assertTrue(csv.contains("gradientToParameterRmsRatio"));
+        assertTrue(csv.contains("parameterUpdateL2Norm"));
+        assertTrue(csv.contains("parameterUpdateToParameterL2Ratio"));
         assertTrue(csv.contains("parameterL2Norm"));
     }
 
@@ -1564,6 +2160,12 @@ class CanonicalTrainerTest {
         assertEquals("train", summary.metadata().get("nonFinitePhase"));
         assertEquals("input", summary.metadata().get("nonFiniteKind"));
         assertEquals(Boolean.TRUE, summary.metadata().get("nonFiniteOptimizerStepSkipped"));
+        assertEquals(1L, ((Number) summary.metadata().get("nonFiniteTotalValueCount")).longValue());
+        assertEquals(1L, ((Number) summary.metadata().get("nonFiniteValueCount")).longValue());
+        assertEquals(1L, ((Number) summary.metadata().get("nonFiniteNanCount")).longValue());
+        assertEquals(0L, ((Number) summary.metadata().get("nonFinitePositiveInfinityCount")).longValue());
+        assertEquals(0L, ((Number) summary.metadata().get("nonFiniteNegativeInfinityCount")).longValue());
+        assertEquals(1.0, (double) summary.metadata().get("nonFiniteFraction"), 1e-12);
         assertEquals("non-finite-train-input", summary.metadata().get("stopReason"));
         assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
         assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
@@ -2496,8 +3098,20 @@ class CanonicalTrainerTest {
             assertEquals(Boolean.FALSE, metadata.get("resumedFromCheckpoint"));
             assertEquals(Boolean.TRUE, metadata.get("checkpointResumePartial"));
             assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointIntegrityMismatch"));
+            assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointResumeAllowed"));
             assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointResumeSkipped"));
             assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointLoadFailed"));
+            assertEquals(
+                    "runtime-checkpoint-integrity-mismatch",
+                    metadata.get("runtimeCheckpointResumeDecision"));
+            assertEquals(
+                    "skip runtime checkpoint and rebuild runtime state from trainer artifacts",
+                    metadata.get("runtimeCheckpointRecommendedAction"));
+            Map<?, ?> runtimePlan = (Map<?, ?>) metadata.get("runtimeCheckpointResumePlan");
+            assertEquals(Boolean.FALSE, runtimePlan.get("resumeAllowed"));
+            assertEquals(
+                    "runtime-checkpoint-integrity-mismatch",
+                    runtimePlan.get("decision"));
             assertEquals(Boolean.TRUE, metadata.get("checkpointManifestLoaded"));
             assertEquals(Boolean.TRUE, metadata.get("checkpointManifestIntegrityMismatch"));
             assertTrue(String.valueOf(metadata.get("runtimeCheckpointLoadError"))
@@ -3167,6 +3781,168 @@ class CanonicalTrainerTest {
     }
 
     @Test
+    void gollekTrainingOptionsOneCycleLrBatchesSchedulesAndReportsState() throws Exception {
+        SGD directOptimizer = SGD.builder(List.of(), 0.1f).build();
+        var directScheduler = Gollek.DL.oneCycleScheduler(
+                directOptimizer,
+                4,
+                0.2f,
+                0.5f,
+                10.0f,
+                100.0f,
+                OneCycleLR.AnnealStrategy.COSINE);
+        assertEquals(0.02f, directOptimizer.learningRate(), 1e-6f);
+        directScheduler.step();
+        assertEquals(0.11f, directOptimizer.learningRate(), 1e-6f);
+
+        Path checkpointDir = Files.createTempDirectory("gollek-one-cycle-scheduler");
+        List<Batch> train = List.of(
+                batch(new float[] {1f}, new float[] {1f}, 1),
+                batch(new float[] {2f}, new float[] {2f}, 1),
+                batch(new float[] {3f}, new float[] {3f}, 1),
+                batch(new float[] {4f}, new float[] {4f}, 1));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                new IdentityModel(),
+                train,
+                null,
+                1,
+                0.1f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .device("cpu")
+                        .checkpointDir(checkpointDir)
+                        .oneCycleLrBatches(
+                                4,
+                                0.2f,
+                                0.5f,
+                                10.0f,
+                                100.0f,
+                                OneCycleLR.AnnealStrategy.COSINE)
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("learningRateSchedulerEnabled"));
+        assertEquals("OneCycleLR", summary.metadata().get("learningRateSchedulerType"));
+        assertEquals("BATCH", summary.metadata().get("learningRateSchedulerStepUnit"));
+        assertEquals(4, ((Number) summary.metadata().get("learningRateSchedulerStepCount")).intValue());
+        assertEquals(0.0002, metric(summary, "learningRate"), 1e-6);
+        assertEquals(4, ((Number) summary.metadata().get("learningRateSchedulerState.totalSteps")).intValue());
+        assertEquals(2, ((Number) summary.metadata().get("learningRateSchedulerState.warmupSteps")).intValue());
+        assertEquals(4, ((Number) summary.metadata().get("learningRateSchedulerState.currentStep")).intValue());
+        assertEquals(0.2, metric(summary, "learningRateSchedulerState.maxLr"), 1e-6);
+        assertEquals(0.02, metric(summary, "learningRateSchedulerState.initialLr"), 1e-6);
+        assertEquals(0.0002, metric(summary, "learningRateSchedulerState.currentLr"), 1e-6);
+        assertEquals("COSINE", summary.metadata().get("learningRateSchedulerState.annealStrategy"));
+        assertEquals(Boolean.TRUE, summary.metadata().get("schedulerCheckpointSaved"));
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-scheduler.state")));
+
+        String reportJson = Files.readString(checkpointDir.resolve("canonical-report.json"));
+        assertTrue(reportJson.contains("\"learningRateSchedulerType\":\"OneCycleLR\""));
+        assertTrue(reportJson.contains("\"annealStrategy\":\"COSINE\""));
+        assertTrue(reportJson.contains("\"currentStep\":4"));
+    }
+
+    @Test
+    void gollekTrainingOptionsExponentialLrBatchesSchedulesAndReportsState() throws Exception {
+        SGD directOptimizer = SGD.builder(List.of(), 0.2f).build();
+        ExponentialLR directScheduler = Gollek.DL.exponentialScheduler(directOptimizer, 0.5f);
+        directScheduler.step();
+        assertEquals(0.1f, directOptimizer.learningRate(), 1e-6f);
+
+        Path checkpointDir = Files.createTempDirectory("gollek-exponential-scheduler");
+        List<Batch> train = List.of(
+                batch(new float[] {1f}, new float[] {1f}, 1),
+                batch(new float[] {2f}, new float[] {2f}, 1),
+                batch(new float[] {3f}, new float[] {3f}, 1));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                new IdentityModel(),
+                train,
+                null,
+                1,
+                0.1f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .device("cpu")
+                        .checkpointDir(checkpointDir)
+                        .exponentialLrBatches(0.5f)
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("learningRateSchedulerEnabled"));
+        assertEquals("ExponentialLR", summary.metadata().get("learningRateSchedulerType"));
+        assertEquals("BATCH", summary.metadata().get("learningRateSchedulerStepUnit"));
+        assertEquals(3, ((Number) summary.metadata().get("learningRateSchedulerStepCount")).intValue());
+        assertEquals(0.0125, metric(summary, "learningRate"), 1e-6);
+        assertEquals(3, ((Number) summary.metadata().get("learningRateSchedulerState.currentStep")).intValue());
+        assertEquals(0.5, metric(summary, "learningRateSchedulerState.gamma"), 1e-6);
+        assertEquals(0.0125, metric(summary, "learningRateSchedulerState.currentLr"), 1e-6);
+        assertEquals(Boolean.TRUE, summary.metadata().get("schedulerCheckpointSaved"));
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-scheduler.state")));
+
+        String reportJson = Files.readString(checkpointDir.resolve("canonical-report.json"));
+        assertTrue(reportJson.contains("\"learningRateSchedulerType\":\"ExponentialLR\""));
+        assertTrue(reportJson.contains("\"gamma\":0.5"));
+        assertTrue(reportJson.contains("\"currentStep\":3"));
+    }
+
+    @Test
+    void gollekTrainingOptionsSequentialLrBatchesComposesSchedulersAndReportsState() throws Exception {
+        SGD directOptimizer = SGD.builder(List.of(), 0.1f).build();
+        SequentialLR directScheduler = Gollek.DL.sequentialScheduler(
+                directOptimizer,
+                List.of(
+                        Gollek.DL.exponentialScheduler(directOptimizer, 0.5f),
+                        Gollek.DL.exponentialScheduler(directOptimizer, 0.1f)),
+                2);
+        directScheduler.step();
+        assertEquals(0.05f, directOptimizer.learningRate(), 1e-6f);
+        directScheduler.step();
+        assertEquals(0.025f, directOptimizer.learningRate(), 1e-6f);
+        directScheduler.step();
+        assertEquals(0.01f, directOptimizer.learningRate(), 1e-6f);
+        assertEquals(1, directScheduler.activeIndex());
+
+        Path checkpointDir = Files.createTempDirectory("gollek-sequential-scheduler");
+        List<Batch> train = List.of(
+                batch(new float[] {1f}, new float[] {1f}, 1),
+                batch(new float[] {2f}, new float[] {2f}, 1),
+                batch(new float[] {3f}, new float[] {3f}, 1));
+        List<Gollek.DL.SchedulerFactory> schedulers = List.of(
+                optimizer -> Gollek.DL.exponentialScheduler(optimizer, 0.5f),
+                optimizer -> Gollek.DL.exponentialScheduler(optimizer, 0.1f));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                new IdentityModel(),
+                train,
+                null,
+                1,
+                0.1f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions()
+                        .device("cpu")
+                        .checkpointDir(checkpointDir)
+                        .sequentialLrBatches(schedulers, 2)
+                        .build());
+
+        assertEquals(Boolean.TRUE, summary.metadata().get("learningRateSchedulerEnabled"));
+        assertEquals("SequentialLR", summary.metadata().get("learningRateSchedulerType"));
+        assertEquals("BATCH", summary.metadata().get("learningRateSchedulerStepUnit"));
+        assertEquals(3, ((Number) summary.metadata().get("learningRateSchedulerStepCount")).intValue());
+        assertEquals(0.01, metric(summary, "learningRate"), 1e-6);
+        assertEquals(3, ((Number) summary.metadata().get("learningRateSchedulerState.currentStep")).intValue());
+        assertEquals(1, ((Number) summary.metadata().get("learningRateSchedulerState.activeIndex")).intValue());
+        assertEquals(List.of(2), summary.metadata().get("learningRateSchedulerState.milestones"));
+        assertEquals(0.01, metric(summary, "learningRateSchedulerState.currentLr"), 1e-6);
+        assertEquals(Boolean.TRUE, summary.metadata().get("schedulerCheckpointSaved"));
+        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-scheduler.state")));
+
+        String reportJson = Files.readString(checkpointDir.resolve("canonical-report.json"));
+        assertTrue(reportJson.contains("\"learningRateSchedulerType\":\"SequentialLR\""));
+        assertTrue(reportJson.contains("\"milestones\":[2]"));
+        assertTrue(reportJson.contains("\"scheduler\":\"ExponentialLR\""));
+    }
+
+    @Test
     void gollekTrainingOptionsReduceLrOnPlateauStepsAfterValidationAndReportsState() throws Exception {
         SGD directOptimizer = SGD.builder(List.of(), 0.1f).build();
         var directScheduler = Gollek.DL.reduceLrOnPlateauScheduler(
@@ -3643,12 +4419,25 @@ class CanonicalTrainerTest {
                 .epochs(1)
                 .metric(TrainingMetrics.meanAbsoluteError())
                 .metric(() -> new ConstantMetric("constant_metric", 1.0))
+                .metric(TrainingMetrics.custom("mean_bias", BiasMetricState::new)
+                        .reset(BiasMetricState::reset)
+                        .update(BiasMetricState::update)
+                        .value(BiasMetricState::meanBias)
+                        .details(state -> Map.of(
+                                "count", state.count,
+                                "sumBias", state.sumBias))
+                        .build())
                 .build()) {
             trainer.fit(train, null);
 
             TrainingSummary summary = trainer.summary();
             assertEquals(1.5, metric(summary, "trainMetric.mae"), 1e-6);
             assertEquals(1.0, metric(summary, "trainMetric.constant_metric"), 1e-6);
+            assertEquals(0.5, metric(summary, "trainMetric.mean_bias"), 1e-6);
+            Map<String, Object> details = metricDetails(summary, "latestTrainMetricDetails", "mean_bias");
+            assertEquals(2L, details.get("count"));
+            assertEquals(1.0, ((Number) details.get("sumBias")).doubleValue(), 1e-6);
+            assertEquals(details, summary.metadata().get("trainMetricDetails.mean_bias"));
         }
     }
 
@@ -3994,6 +4783,24 @@ class CanonicalTrainerTest {
                 GradTensor.of(targets, rows, 1));
     }
 
+    private static List<Float> flattenInputs(Iterable<Batch> batches) {
+        List<Float> values = new ArrayList<>();
+        for (Batch batch : batches) {
+            for (float value : batch.inputs().data()) {
+                values.add(value);
+            }
+        }
+        return values;
+    }
+
+    private static float logit(double probability) {
+        return (float) Math.log(probability / (1.0 - probability));
+    }
+
+    private static float logProb(double probability) {
+        return (float) Math.log(probability);
+    }
+
     private static void writeCorruptCheckpoint(Path checkpointFile) {
         try {
             Files.write(checkpointFile, new byte[] {9, 8, 7, 6});
@@ -4054,6 +4861,21 @@ class CanonicalTrainerTest {
         Object value = summary.metadata().get(metadataKey);
         assertTrue(value instanceof Number, "expected numeric metric for " + metadataKey);
         return ((Number) value).doubleValue();
+    }
+
+    private static double trainMsle() {
+        return (square(Math.log1p(1.0) - Math.log1p(2.0))
+                + square(Math.log1p(3.0) - Math.log1p(1.0))
+                + square(Math.log1p(2.0) - Math.log1p(5.0))) / 3.0;
+    }
+
+    private static double validationMsle() {
+        return (square(Math.log1p(0.0) - Math.log1p(1.0))
+                + square(Math.log1p(10.0) - Math.log1p(7.0))) / 2.0;
+    }
+
+    private static double square(double value) {
+        return value * value;
     }
 
     private static final class IdentityModel extends NNModule {
@@ -4156,6 +4978,29 @@ class CanonicalTrainerTest {
         @Override
         public double value() {
             return value;
+        }
+    }
+
+    private static final class BiasMetricState {
+        private double sumBias;
+        private long count;
+
+        private void reset() {
+            sumBias = 0.0;
+            count = 0L;
+        }
+
+        private void update(GradTensor predictions, GradTensor targets) {
+            float[] predictionValues = predictions.data();
+            float[] targetValues = targets.data();
+            for (int i = 0; i < predictionValues.length; i++) {
+                sumBias += predictionValues[i] - targetValues[i];
+                count++;
+            }
+        }
+
+        private double meanBias() {
+            return count == 0L ? 0.0 : sumBias / count;
         }
     }
 

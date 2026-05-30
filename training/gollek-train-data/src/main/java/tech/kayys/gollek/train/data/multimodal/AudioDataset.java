@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * A dataset that loads audio files from a directory and provides raw byte access.
@@ -85,15 +84,9 @@ public class AudioDataset implements Dataset<byte[]> {
      * @throws NullPointerException if {@code directory} is null
      */
     public AudioDataset(Path directory) throws IOException {
-        try (var stream = Files.walk(directory)) {
-            this.audioPaths = stream
-                .filter(Files::isRegularFile)
-                .filter(p -> {
-                    String name = p.toString().toLowerCase();
-                    return name.endsWith(".wav") || name.endsWith(".mp3") || name.endsWith(".flac");
-                })
-                .collect(Collectors.toList());
-        }
+        this.audioPaths = MultimodalFileSupport.regularFilesWithExtensions(
+                directory,
+                MultimodalFileSupport.AUDIO_EXTENSIONS);
     }
 
     /**
@@ -143,5 +136,9 @@ public class AudioDataset implements Dataset<byte[]> {
      */
     public Path getPath(int index) {
         return audioPaths.get(index);
+    }
+
+    public List<Path> paths() {
+        return audioPaths;
     }
 }

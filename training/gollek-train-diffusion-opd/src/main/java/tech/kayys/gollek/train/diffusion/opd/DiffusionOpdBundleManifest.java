@@ -16,6 +16,10 @@ public record DiffusionOpdBundleManifest(
         List<DiffusionOpdBundleGeneratedFile> generatedFiles,
         Map<String, Object> raw) {
 
+    /**
+     * Adapts a raw manifest map into the typed manifest shape, normalizing generated-file entries
+     * along the way.
+     */
     public static DiffusionOpdBundleManifest fromMap(Map<String, Object> raw) {
         return new DiffusionOpdBundleManifest(
                 stringValue(raw, "bundleType"),
@@ -27,6 +31,9 @@ public record DiffusionOpdBundleManifest(
                 Map.copyOf(new LinkedHashMap<>(raw)));
     }
 
+    /**
+     * Returns the normalized raw manifest map backing this typed manifest view.
+     */
     public Map<String, Object> toMap() {
         return raw;
     }

@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import tech.kayys.gollek.ml.autograd.Acceleration;
 import tech.kayys.gollek.ml.nn.NNModule;
@@ -13,6 +12,7 @@ import tech.kayys.gollek.ml.optim.GradScaler;
 import tech.kayys.gollek.ml.optim.LRScheduler;
 import tech.kayys.gollek.ml.optim.Optimizer;
 import tech.kayys.gollek.train.data.DataLoader.Batch;
+import tech.kayys.gollek.train.data.PrefetchingIterable;
 import tech.kayys.gollek.trainer.CanonicalTrainerRuntime;
 import tech.kayys.gollek.trainer.Trainers;
 import tech.kayys.gollek.trainer.api.TrainerSession;
@@ -45,7 +45,9 @@ public final class CanonicalTrainer implements AutoCloseable {
     private final TrainerBatchGuards.FailureRecorder batchFailures;
     private final TrainerMetricRuntime metricRuntime;
     private final TrainerBatchRuntime batchRuntime;
-    private final double gradientClip;
+    private final TrainerGradientClipConfig gradientClip;
+    private final boolean parameterUpdateDiagnostics;
+    private final boolean dataDistributionDiagnostics;
     private final int earlyStoppingPatience;
     private final double earlyStoppingMinDelta;
     private final String earlyStoppingMonitorMetric;
@@ -56,6 +58,7 @@ public final class CanonicalTrainer implements AutoCloseable {
     private final boolean failOnCheckpointLoadError;
     private final boolean saveBestModelCheckpoint;
     private final boolean restoreBestModelAtEnd;
+    private final boolean failOnAcceleratorFallback;
     private final String bestModelMonitorMetric;
     private final BestModelMonitorMode bestModelMonitorMode;
     private final TrainerBestModelCheckpointMonitor bestModelCheckpointMonitor;
@@ -71,68 +74,23 @@ public final class CanonicalTrainer implements AutoCloseable {
     private final Path reportFile;
     private final Path runtimeCheckpointFile;
     private final Path checkpointManifestFile;
-    private final AtomicBoolean modelCheckpointLoadAttempted = new AtomicBoolean(false);
-    private final AtomicBoolean optimizerCheckpointLoadAttempted = new AtomicBoolean(false);
-    private final AtomicBoolean schedulerCheckpointLoadAttempted = new AtomicBoolean(false);
-    private final AtomicBoolean gradScalerCheckpointLoadAttempted = new AtomicBoolean(false);
-    private final AtomicBoolean historyLoadAttempted = new AtomicBoolean(false);
-    private volatile boolean modelCheckpointLoaded;
-    private volatile boolean modelCheckpointSaved;
-    private volatile boolean modelCheckpointMetadataLoaded;
-    private volatile boolean modelCheckpointMetadataSaved;
-    private volatile boolean modelCheckpointMetadataMissingOnResume;
-    private volatile boolean modelCheckpointCompatibilityMismatch;
-    private volatile boolean optimizerCheckpointLoaded;
-    private volatile boolean optimizerCheckpointSaved;
-    private volatile boolean schedulerCheckpointLoaded;
-    private volatile boolean schedulerCheckpointSaved;
-    private volatile boolean gradScalerCheckpointLoaded;
-    private volatile boolean gradScalerCheckpointSaved;
-    private volatile boolean gradScalerCheckpointFallbackUsed;
-    private volatile boolean modelCheckpointMissingOnResume;
-    private volatile boolean optimizerCheckpointMissingOnResume;
-    private volatile boolean schedulerCheckpointMissingOnResume;
-    private volatile boolean gradScalerCheckpointMissingOnResume;
-    private volatile boolean historyMissingOnResume;
-    private volatile boolean historyLoaded;
-    private volatile boolean historySaved;
-    private volatile boolean reportSaved;
-    private volatile boolean checkpointManifestLoaded;
-    private volatile boolean checkpointManifestSaved;
-    private volatile boolean checkpointManifestMissingOnResume;
-    private volatile boolean checkpointManifestIntegrityMismatch;
-    private volatile boolean runtimeCheckpointIntegrityMismatch;
-    private volatile boolean runtimeCheckpointResumeSkipped;
-    private volatile String modelCheckpointLoadError;
-    private volatile String modelCheckpointSaveError;
-    private volatile String modelCheckpointMetadataLoadError;
-    private volatile String modelCheckpointMetadataSaveError;
     private volatile String bestModelCheckpointSaveError;
     private volatile String bestModelCheckpointLoadError;
-    private volatile String optimizerCheckpointLoadError;
-    private volatile String optimizerCheckpointSaveError;
-    private volatile String schedulerCheckpointLoadError;
-    private volatile String schedulerCheckpointSaveError;
-    private volatile String gradScalerCheckpointLoadError;
-    private volatile String gradScalerCheckpointSaveError;
-    private volatile String historyLoadError;
-    private volatile String historySaveError;
-    private volatile String reportSaveError;
-    private volatile String checkpointManifestLoadError;
-    private volatile String checkpointManifestSaveError;
-    private volatile String runtimeCheckpointLoadError;
     private TrainerOptimizationRuntime optimizationRuntime;
     private volatile Acceleration.BackendStatus accelerationStatusAtStart;
-    private volatile Map<String, Double> latestTrainMetrics = Map.of();
-    private volatile Map<String, Double> latestValidationMetrics = Map.of();
-    private volatile Map<String, Object> latestTrainMetricDetails = Map.of();
-    private volatile Map<String, Object> latestValidationMetricDetails = Map.of();
+    private final TrainerMetricState metricState = new TrainerMetricState();
+    private final TrainerModelCheckpointStatus modelCheckpointStatus = new TrainerModelCheckpointStatus();
+    private final TrainerStateCheckpointStatus stateCheckpointStatus = new TrainerStateCheckpointStatus();
+    private final TrainerRuntimeArtifactState runtimeArtifactState = new TrainerRuntimeArtifactState();
     private final TrainerThroughputStats throughputStats = new TrainerThroughputStats();
     private final TrainerEpochHistory epochHistory = new TrainerEpochHistory();
     private final TrainerCheckpointResumeDiagnostics checkpointResumeDiagnostics =
             new TrainerCheckpointResumeDiagnostics();
+    private final TrainerCheckpointResumeCoordinator checkpointResume;
     private final CanonicalTrainerRuntime runtime;
     private volatile TrainingSummary latestSummary;
+    private volatile Map<String, Object> dataLoaderPlanMetadata = Map.of();
+    private volatile Map<String, Object> dataDistributionMetadata = Map.of();
     private volatile RuntimeException postTrainingCheckpointError;
 
     private CanonicalTrainer(Builder builder) {
@@ -162,7 +120,9 @@ public final class CanonicalTrainer implements AutoCloseable {
                 metricRuntime,
                 throughputStats,
                 batchFailures);
-        this.gradientClip = Math.max(0.0, builder.gradientClip);
+        this.gradientClip = TrainerGradientClipConfig.of(builder.gradientClip, builder.gradientClipValue);
+        this.parameterUpdateDiagnostics = builder.parameterUpdateDiagnostics;
+        this.dataDistributionDiagnostics = builder.dataDistributionDiagnostics;
         this.earlyStoppingPatience = Math.max(0, builder.earlyStoppingPatience);
         this.earlyStoppingMinDelta = Math.max(0.0, builder.earlyStoppingMinDelta);
         this.earlyStoppingMonitorMetric = TrainerMonitorSupport.normalizeMetric(
@@ -181,6 +141,7 @@ public final class CanonicalTrainer implements AutoCloseable {
         this.failOnCheckpointLoadError = builder.failOnCheckpointLoadError;
         this.saveBestModelCheckpoint = builder.saveBestModelCheckpoint;
         this.restoreBestModelAtEnd = builder.restoreBestModelAtEnd;
+        this.failOnAcceleratorFallback = builder.failOnAcceleratorFallback;
         this.bestModelMonitorMetric = TrainerMonitorSupport.normalizeMetric(
                 builder.bestModelMonitorMetric,
                 "best model monitor metric");
@@ -223,13 +184,40 @@ public final class CanonicalTrainer implements AutoCloseable {
                         gradScaler,
                         this.gradientClip,
                         batchFailures,
-                        this::stepBatchScheduler),
+                        this::stepBatchScheduler,
+                        this.parameterUpdateDiagnostics),
                 this.gradientAccumulationSteps,
                 this.mixedPrecision,
                 this.gradScaler,
                 failureState::nonFiniteDetected);
+        this.checkpointResume = new TrainerCheckpointResumeCoordinator(
+                new TrainerCheckpointResumeCoordinator.Request(
+                        this.resumeFromCheckpoint,
+                        this.failOnCheckpointLoadError,
+                        this.checkpointManifestFile,
+                        this.runtimeCheckpointFile,
+                        this.modelCheckpointFile,
+                        this.modelCheckpointMetadataFile,
+                        this.optimizerCheckpointFile,
+                        this.schedulerCheckpointFile,
+                        this.gradScalerCheckpointFile,
+                        this.historyFile,
+                        this.model,
+                        this.optimizer,
+                        this.learningRateScheduler,
+                        this.schedulerStepUnit,
+                        this.schedulerStepper,
+                        this.gradScaler,
+                        this.optimizationRuntime,
+                        this.checkpointResumeDiagnostics,
+                        this.runtimeArtifactState,
+                        this.modelCheckpointStatus,
+                        this.stateCheckpointStatus,
+                        this.epochHistory,
+                        this::checkRequiredCheckpointArtifactIntegrity,
+                        MODEL_CHECKPOINT_METADATA_VERSION));
 
-        boolean runtimeResumeAllowed = runtimeResumeAllowedAfterManifestValidation();
+        boolean runtimeResumeAllowed = checkpointResume.runtimeResumeAllowedAfterManifestValidation();
         int runtimeEarlyStoppingPatience = this.earlyStoppingMonitorMetric == null
                 ? this.earlyStoppingPatience
                 : 0;
@@ -237,7 +225,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 .model(model)
                 .optimizer(optimizer)
                 .epochs(builder.epochs)
-                .gradientClip(this.gradientClip)
+                .gradientClip(this.gradientClip.normThreshold())
                 .mixedPrecision(this.mixedPrecision)
                 .earlyStopping(runtimeEarlyStoppingPatience, this.earlyStoppingMinDelta)
                 .resumeFromCheckpoint(runtimeResumeAllowed)
@@ -256,8 +244,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                         flushGradientAccumulation(session);
                         TrainerMetricRuntime.MetricSnapshot trainSnapshot =
                                 metricRuntime.snapshotTrain(session, throughputStats.trainEpoch());
-                        latestTrainMetrics = trainSnapshot.values();
-                        latestTrainMetricDetails = trainSnapshot.details();
+                        metricState.recordTrain(trainSnapshot);
                         stepScheduler(SchedulerStepUnit.EPOCH);
                         recordEpochHistory(epoch, trainLoss);
                         persistCheckpointsSafely();
@@ -268,8 +255,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                     public void onValidationEnd(TrainerSession session, int epoch, double valLoss) {
                         TrainerMetricRuntime.MetricSnapshot validationSnapshot =
                                 metricRuntime.snapshotValidation(session, throughputStats.validationEpoch());
-                        latestValidationMetrics = validationSnapshot.values();
-                        latestValidationMetricDetails = validationSnapshot.details();
+                        metricState.recordValidation(validationSnapshot);
                         persistBestModelCheckpointIfImproved(epoch, valLoss);
                         updateCustomEarlyStoppingMonitor(session, epoch, valLoss);
                         stepScheduler(SchedulerStepUnit.VALIDATION, schedulerMonitorValue(valLoss));
@@ -304,29 +290,49 @@ public final class CanonicalTrainer implements AutoCloseable {
 
     public void fit(Iterable<Batch> trainLoader) {
         try (Acceleration.Scope ignored = Acceleration.prefer(preferredDevice)) {
-            prepareFitRun();
-            accelerationStatusAtStart = Acceleration.status(preferredDevice);
-            ensureCheckpointStateLoaded();
-            runtime.fit(trainLoader);
-            persistReportSafely(runtime.summary());
-            latestSummary = enrichSummary(runtime.summary());
-            throwIfPostTrainingCheckpointFailed();
-            throwIfNonFiniteDetected();
-            throwIfInvalidMetricDetected();
+            try {
+                prepareFitRun();
+                accelerationStatusAtStart = Acceleration.status(preferredDevice);
+                TrainerAccelerationPolicy.requireNoFallback(
+                        preferredDevice,
+                        accelerationStatusAtStart,
+                        failOnAcceleratorFallback);
+                ensureCheckpointStateLoaded();
+                runtime.fit(trainLoader);
+                captureDataLoaderPlanMetadata(trainLoader, null);
+                captureDataDistributionMetadata(trainLoader, null);
+                persistReportSafely(runtime.summary());
+                latestSummary = enrichSummary(runtime.summary());
+                throwIfPostTrainingCheckpointFailed();
+                throwIfNonFiniteDetected();
+                throwIfInvalidMetricDetected();
+            } finally {
+                closePrefetchingLoader(trainLoader);
+            }
         }
     }
 
     public void fit(Iterable<Batch> trainLoader, Iterable<Batch> validationLoader) {
         try (Acceleration.Scope ignored = Acceleration.prefer(preferredDevice)) {
-            prepareFitRun();
-            accelerationStatusAtStart = Acceleration.status(preferredDevice);
-            ensureCheckpointStateLoaded();
-            runtime.fit(trainLoader, validationLoader);
-            persistReportSafely(runtime.summary());
-            latestSummary = enrichSummary(runtime.summary());
-            throwIfPostTrainingCheckpointFailed();
-            throwIfNonFiniteDetected();
-            throwIfInvalidMetricDetected();
+            try {
+                prepareFitRun();
+                accelerationStatusAtStart = Acceleration.status(preferredDevice);
+                TrainerAccelerationPolicy.requireNoFallback(
+                        preferredDevice,
+                        accelerationStatusAtStart,
+                        failOnAcceleratorFallback);
+                ensureCheckpointStateLoaded();
+                runtime.fit(trainLoader, validationLoader);
+                captureDataLoaderPlanMetadata(trainLoader, validationLoader);
+                captureDataDistributionMetadata(trainLoader, validationLoader);
+                persistReportSafely(runtime.summary());
+                latestSummary = enrichSummary(runtime.summary());
+                throwIfPostTrainingCheckpointFailed();
+                throwIfNonFiniteDetected();
+                throwIfInvalidMetricDetected();
+            } finally {
+                closePrefetchingLoaders(trainLoader, validationLoader);
+            }
         }
     }
 
@@ -352,8 +358,25 @@ public final class CanonicalTrainer implements AutoCloseable {
 
     private void prepareFitRun() {
         latestSummary = null;
+        dataLoaderPlanMetadata = Map.of();
+        dataDistributionMetadata = Map.of();
         postTrainingCheckpointError = null;
         failureState.reset();
+    }
+
+    private void captureDataLoaderPlanMetadata(
+            Iterable<Batch> trainLoader,
+            Iterable<Batch> validationLoader) {
+        dataLoaderPlanMetadata = TrainerDataLoaderPlanMetadata.capture(trainLoader, validationLoader);
+    }
+
+    private void captureDataDistributionMetadata(
+            Iterable<Batch> trainLoader,
+            Iterable<Batch> validationLoader) {
+        dataDistributionMetadata = TrainerDataDistributionMetadata.capture(
+                dataDistributionDiagnostics,
+                trainLoader,
+                validationLoader);
     }
 
     private void throwIfNonFiniteDetected() {
@@ -371,251 +394,26 @@ public final class CanonicalTrainer implements AutoCloseable {
         }
     }
 
+    private static void closePrefetchingLoaders(Iterable<Batch> trainLoader, Iterable<Batch> validationLoader) {
+        closePrefetchingLoader(trainLoader);
+        if (validationLoader != trainLoader) {
+            closePrefetchingLoader(validationLoader);
+        }
+    }
+
+    private static void closePrefetchingLoader(Iterable<Batch> loader) {
+        if (loader instanceof PrefetchingIterable<?> prefetched) {
+            prefetched.close();
+        }
+    }
+
     @Override
     public void close() {
         runtime.close();
     }
 
     private void ensureCheckpointStateLoaded() {
-        ensureModelCheckpointLoaded();
-        ensureOptimizerCheckpointLoaded();
-        ensureSchedulerCheckpointLoaded();
-        ensureGradScalerCheckpointLoaded();
-        ensureHistoryLoaded();
-    }
-
-    private boolean runtimeResumeAllowedAfterManifestValidation() {
-        TrainerRuntimeCheckpointResume.Decision decision = TrainerRuntimeCheckpointResume.evaluate(
-                resumeFromCheckpoint,
-                runtimeCheckpointFile,
-                this::checkCheckpointArtifactIntegrity);
-        runtimeCheckpointIntegrityMismatch = decision.integrityMismatch();
-        runtimeCheckpointResumeSkipped = decision.resumeSkipped();
-        runtimeCheckpointLoadError = decision.loadError();
-        if (decision.shouldFail(failOnCheckpointLoadError)) {
-            throw new IllegalStateException(
-                    "Runtime checkpoint integrity mismatch for resume at "
-                            + checkpointManifestFile + ": " + decision.loadError());
-        }
-        return decision.resumeAllowed();
-    }
-
-    private void ensureModelCheckpointLoaded() {
-        TrainerModelCheckpointResume.Result result = TrainerModelCheckpointResume.resume(
-                resumeFromCheckpoint,
-                modelCheckpointFile,
-                modelCheckpointMetadataFile,
-                modelCheckpointLoadAttempted,
-                new TrainerModelCheckpointMetadata.ExpectedModel(
-                        model.getClass().getName(),
-                        modelParameterSignature(),
-                        model.parameterCount()),
-                MODEL_CHECKPOINT_METADATA_VERSION,
-                failOnCheckpointLoadError,
-                checkpointResumeDiagnostics,
-                model::loadSafetensors);
-        if (!result.stateChanged()) {
-            return;
-        }
-        modelCheckpointMissingOnResume = result.missingOnResume();
-        modelCheckpointLoaded = result.loaded();
-        modelCheckpointCompatibilityMismatch = result.compatibilityMismatch();
-        modelCheckpointMetadataLoaded = result.metadataLoaded();
-        modelCheckpointMetadataMissingOnResume = result.metadataMissingOnResume();
-        modelCheckpointMetadataLoadError = result.metadataLoadError();
-        modelCheckpointLoadError = result.loadError();
-        if (result.failure() != null) {
-            throw result.failure();
-        }
-    }
-
-    private void ensureOptimizerCheckpointLoaded() {
-        if (!resumeFromCheckpoint || optimizerCheckpointFile == null || !optimizer.supportsStateDict()) {
-            return;
-        }
-        TrainerStateCheckpointResume.Result result = TrainerStateCheckpointResume.resume(
-                true,
-                optimizerCheckpointFile,
-                optimizerCheckpointLoadAttempted,
-                "optimizer",
-                "optimizer",
-                checkpointManifestFile,
-                "Optimizer checkpoint integrity mismatch for resume",
-                "optimizer",
-                failOnCheckpointLoadError,
-                this::checkCheckpointArtifactIntegrity,
-                path -> {
-                    TrainerStateCheckpointReader.OptimizerState checkpoint =
-                            TrainerStateCheckpointReader.readOptimizer(
-                                    path,
-                                    optimizationRuntime.optimizerStepCount());
-                    return new TrainerStateCheckpointResume.StateSnapshot(
-                            checkpoint.state(),
-                            checkpoint.stepCount());
-                },
-                state -> TrainerStateCheckpointMetadataValidator.requireOptimizer(
-                        state,
-                        optimizer.getClass().getName(),
-                        TrainerMetadataSupport.parameterSignature(optimizer.parameters()),
-                        checkpointResumeDiagnostics::recordCompatibilityMismatch),
-                optimizer::loadStateDict);
-        if (!result.stateChanged()) {
-            return;
-        }
-        optimizerCheckpointMissingOnResume = result.missingOnResume();
-        optimizerCheckpointLoaded = result.loaded();
-        optimizerCheckpointLoadError = result.loadError();
-        if (result.loaded()) {
-            optimizationRuntime.restoreOptimizerStepCount(result.counter());
-        }
-        if (result.failure() != null) {
-            throw result.failure();
-        }
-    }
-
-    private void ensureSchedulerCheckpointLoaded() {
-        if (!resumeFromCheckpoint
-                || schedulerCheckpointFile == null
-                || !schedulerStepper.supportsStateDict()) {
-            return;
-        }
-        TrainerStateCheckpointResume.Result result = TrainerStateCheckpointResume.resume(
-                true,
-                schedulerCheckpointFile,
-                schedulerCheckpointLoadAttempted,
-                "scheduler",
-                "scheduler",
-                checkpointManifestFile,
-                "Scheduler checkpoint integrity mismatch for resume",
-                "scheduler",
-                failOnCheckpointLoadError,
-                this::checkCheckpointArtifactIntegrity,
-                path -> {
-                    TrainerStateCheckpointReader.SchedulerState checkpoint =
-                            TrainerStateCheckpointReader.readScheduler(path, schedulerStepper.stepCount());
-                    return new TrainerStateCheckpointResume.StateSnapshot(
-                            checkpoint.state(),
-                            checkpoint.stepCount());
-                },
-                state -> {
-                    TrainerStateCheckpointMetadataValidator.requireScheduler(
-                            state,
-                            learningRateScheduler.getClass().getName(),
-                            TrainerMetadataSupport.parameterSignature(optimizer.parameters()),
-                            schedulerStepUnit.name(),
-                            checkpointResumeDiagnostics::recordCompatibilityMismatch);
-                },
-                learningRateScheduler::loadStateDict);
-        if (!result.stateChanged()) {
-            return;
-        }
-        schedulerCheckpointMissingOnResume = result.missingOnResume();
-        schedulerCheckpointLoaded = result.loaded();
-        schedulerCheckpointLoadError = result.loadError();
-        if (result.loaded()) {
-            schedulerStepper.restoreStepCount(result.counter());
-        }
-        if (result.failure() != null) {
-            throw result.failure();
-        }
-    }
-
-    private void ensureGradScalerCheckpointLoaded() {
-        if (!resumeFromCheckpoint
-                || gradScalerCheckpointFile == null
-                || gradScaler == null
-                || !gradScaler.supportsStateDict()) {
-            return;
-        }
-        TrainerStateCheckpointResume.Result result = TrainerStateCheckpointResume.resume(
-                true,
-                gradScalerCheckpointFile,
-                gradScalerCheckpointLoadAttempted,
-                "GradScaler",
-                "gradScaler",
-                checkpointManifestFile,
-                "GradScaler checkpoint integrity mismatch for resume",
-                "GradScaler",
-                failOnCheckpointLoadError,
-                this::checkCheckpointArtifactIntegrity,
-                path -> {
-                    TrainerStateCheckpointReader.GradScalerState checkpoint =
-                            TrainerStateCheckpointReader.readGradScaler(
-                                    path,
-                                    optimizationRuntime.mixedPrecisionOverflowSkipCount());
-                    return new TrainerStateCheckpointResume.StateSnapshot(
-                            checkpoint.state(),
-                            checkpoint.overflowSkipCount());
-                },
-                state -> {
-                    TrainerStateCheckpointMetadataValidator.requireGradScaler(
-                            state,
-                            gradScaler.getClass().getName(),
-                            checkpointResumeDiagnostics::recordCompatibilityMismatch);
-                },
-                gradScaler::loadStateDict);
-        if (!result.stateChanged()) {
-            return;
-        }
-        gradScalerCheckpointMissingOnResume = result.missingOnResume();
-        gradScalerCheckpointLoaded = result.loaded();
-        gradScalerCheckpointLoadError = result.loadError();
-        if (result.failure() != null) {
-            throw result.failure();
-        }
-        if (result.loaded()) {
-            optimizationRuntime.restoreMixedPrecisionState(
-                    result.counter(),
-                    gradScaler.getScale(),
-                    gradScaler.overflowDetected());
-            gradScalerCheckpointFallbackUsed = false;
-        } else if (!result.missingOnResume() && result.loadError() != null) {
-            gradScalerCheckpointFallbackUsed = true;
-        }
-    }
-
-    private void ensureHistoryLoaded() {
-        TrainerCheckpointLoadGate.Decision gate = TrainerCheckpointLoadGate.evaluate(
-                resumeFromCheckpoint,
-                historyFile,
-                historyLoadAttempted,
-                "history",
-                false);
-        if (gate.missing()) {
-            historyMissingOnResume = true;
-        }
-        if (!gate.shouldLoad()) {
-            return;
-        }
-        TrainerCheckpointIntegrityGate.Decision integrity = TrainerCheckpointIntegrityGate.evaluate(
-                "history",
-                historyFile,
-                checkpointManifestFile,
-                "Training history checkpoint integrity mismatch for resume",
-                failOnCheckpointLoadError,
-                this::checkCheckpointArtifactIntegrity);
-        if (!integrity.compatible()) {
-            historyLoadError = integrity.loadError();
-            if (integrity.failure() != null) {
-                throw integrity.failure();
-            }
-            return;
-        }
-        TrainerHistoryCheckpointReader.ReadResult result =
-                TrainerHistoryCheckpointReader.readExisting(historyFile);
-        if (result.loaded()) {
-            epochHistory.replaceWith(result.rows());
-            historyLoaded = true;
-            historyMissingOnResume = false;
-            historyLoadError = null;
-        } else if (result.error() != null) {
-            historyLoadError = result.error();
-            if (failOnCheckpointLoadError) {
-                throw new IllegalStateException(
-                        "Failed to load training history checkpoint from " + historyFile,
-                        result.cause());
-            }
-        }
+        checkpointResume.ensureCheckpointStateLoaded();
     }
 
     private void persistCheckpointsSafely() {
@@ -639,7 +437,7 @@ public final class CanonicalTrainer implements AutoCloseable {
 
     private void persistBestModelCheckpointIfImproved(int epoch, double validationLoss) {
         TrainerBestModelCheckpointMonitor.Decision decision =
-                bestModelCheckpointMonitor.evaluate(epoch, validationLoss, latestValidationMetrics);
+                bestModelCheckpointMonitor.evaluate(epoch, validationLoss, metricState.validationValues());
         if (!decision.shouldSave()) {
             return;
         }
@@ -653,13 +451,13 @@ public final class CanonicalTrainer implements AutoCloseable {
         return TrainerMonitorSupport.valueOrThrow(
                 bestModelMonitorMetric,
                 validationLoss,
-                latestValidationMetrics,
+                metricState.validationValues(),
                 "Best model monitor metric");
     }
 
     private void updateCustomEarlyStoppingMonitor(TrainerSession session, int epoch, double validationLoss) {
         TrainerEarlyStoppingMonitor.UpdateResult result =
-                earlyStoppingMonitor.update(epoch, validationLoss, latestValidationMetrics);
+                earlyStoppingMonitor.update(epoch, validationLoss, metricState.validationValues());
         if (result.shouldStop()) {
             session.stop();
         }
@@ -671,7 +469,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 bestModelCheckpointFile,
                 checkpointManifestFile,
                 failOnCheckpointLoadError,
-                this::checkCheckpointArtifactIntegrity,
+                this::checkRequiredCheckpointArtifactIntegrity,
                 model::loadSafetensors);
         bestModelCheckpointLoadError = result.loadError();
         if (result.restored()) {
@@ -683,38 +481,32 @@ public final class CanonicalTrainer implements AutoCloseable {
         }
     }
 
-    private TrainerCheckpointCompatibilityReport checkCheckpointArtifactIntegrity(
+    private TrainerCheckpointCompatibilityReport checkRequiredCheckpointArtifactIntegrity(
             String artifactName,
             Path artifactFile) {
-        TrainerCheckpointArtifactIntegrity.Result check = TrainerCheckpointArtifactIntegrity.check(
+        TrainerCheckpointArtifactIntegrity.Result check = TrainerCheckpointArtifactIntegrity.checkRequired(
                 checkpointManifestFile,
                 artifactName,
                 artifactFile,
                 CHECKPOINT_MANIFEST_VERSION);
-        checkpointManifestLoaded = check.manifestLoaded();
-        checkpointManifestMissingOnResume = check.manifestMissing();
-        checkpointManifestLoadError = check.manifestLoadError();
-        if (check.integrityMismatch()) {
-            checkpointManifestIntegrityMismatch = true;
-            check.recordMismatch(checkpointResumeDiagnostics);
-        }
+        runtimeArtifactState.recordManifestIntegrityCheck(check, checkpointResumeDiagnostics);
         return check.report();
     }
 
     private boolean persistModelSafely(Path checkpointFile, boolean latestModelCheckpoint) {
         TrainerModelCheckpointWriter.WriteResult result =
                 TrainerModelCheckpointWriter.writeModel(checkpointFile, model::saveSafetensors);
+        if (latestModelCheckpoint) {
+            modelCheckpointStatus.recordModelPersistence(result);
+        }
         if (!result.written()) {
             if (!latestModelCheckpoint) {
                 bestModelCheckpointSaveError = result.error();
                 return false;
             }
-            modelCheckpointSaveError = result.error();
             return false;
         }
         if (latestModelCheckpoint) {
-            modelCheckpointSaved = true;
-            modelCheckpointSaveError = null;
             persistModelCheckpointMetadataSafely(checkpointFile);
         }
         return true;
@@ -732,12 +524,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                         modelParameterSignature(),
                         model.parameterCount()),
                 MODEL_CHECKPOINT_METADATA_VERSION);
-        if (result.written()) {
-            modelCheckpointMetadataSaved = true;
-            modelCheckpointMetadataSaveError = null;
-        } else if (result.error() != null) {
-            modelCheckpointMetadataSaveError = result.error();
-        }
+        modelCheckpointStatus.recordMetadataPersistence(result);
     }
 
     private void persistOptimizerCheckpointSafely() {
@@ -745,12 +532,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 optimizerCheckpointFile,
                 optimizer,
                 optimizationRuntime.optimizerStepCount());
-        if (result.saved()) {
-            optimizerCheckpointSaved = true;
-            optimizerCheckpointSaveError = null;
-        } else if (result.saveError() != null) {
-            optimizerCheckpointSaveError = result.saveError();
-        }
+        stateCheckpointStatus.recordOptimizerPersistence(result);
     }
 
     private void persistSchedulerCheckpointSafely() {
@@ -760,12 +542,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 schedulerStepUnit.name(),
                 schedulerStepper.stepCount(),
                 optimizer);
-        if (result.saved()) {
-            schedulerCheckpointSaved = true;
-            schedulerCheckpointSaveError = null;
-        } else if (result.saveError() != null) {
-            schedulerCheckpointSaveError = result.saveError();
-        }
+        stateCheckpointStatus.recordSchedulerPersistence(result);
     }
 
     private void persistGradScalerCheckpointSafely() {
@@ -773,12 +550,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 gradScalerCheckpointFile,
                 gradScaler,
                 optimizationRuntime.mixedPrecisionOverflowSkipCount());
-        if (result.saved()) {
-            gradScalerCheckpointSaved = true;
-            gradScalerCheckpointSaveError = null;
-        } else if (result.saveError() != null) {
-            gradScalerCheckpointSaveError = result.saveError();
-        }
+        stateCheckpointStatus.recordGradScalerPersistence(result);
     }
 
     private void persistHistorySafely() {
@@ -787,12 +559,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                         historyFile,
                         epochHistory.snapshot(),
                         checkpointManifestRequest());
-        if (result.artifact().saved()) {
-            historySaved = true;
-            historySaveError = null;
-        } else if (result.artifact().error() != null) {
-            historySaveError = result.artifact().error();
-        }
+        runtimeArtifactState.recordHistoryPersistence(result.artifact());
         applyCheckpointManifestSaveResult(result.manifest());
     }
 
@@ -806,12 +573,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                         reportFile,
                         summary,
                         checkpointManifestRequest());
-        if (result.artifact().saved()) {
-            reportSaved = true;
-            reportSaveError = null;
-        } else if (result.artifact().error() != null) {
-            reportSaveError = result.artifact().error();
-        }
+        runtimeArtifactState.recordReportPersistence(result.artifact());
         applyCheckpointManifestSaveResult(result.manifest());
     }
 
@@ -828,12 +590,7 @@ public final class CanonicalTrainer implements AutoCloseable {
     }
 
     private void applyCheckpointManifestSaveResult(TrainerRuntimeArtifactPersistence.SaveResult result) {
-        if (result.saved()) {
-            checkpointManifestSaved = true;
-            checkpointManifestSaveError = null;
-        } else if (result.error() != null) {
-            checkpointManifestSaveError = result.error();
-        }
+        runtimeArtifactState.recordManifestPersistence(result);
     }
 
     private TrainingSummary enrichSummary(TrainingSummary base) {
@@ -845,22 +602,10 @@ public final class CanonicalTrainer implements AutoCloseable {
                 new TrainerSummaryAssembler.Resume(
                         resumeFromCheckpoint,
                         checkpointResumeMissingArtifacts(),
-                        checkpointResumeDiagnostics.compatibilityMismatches()),
-                new TrainerSummaryAssembler.ModelCheckpoint(
-                        modelCheckpointFile,
-                        modelCheckpointMissingOnResume,
-                        modelCheckpointLoaded,
-                        modelCheckpointSaved,
-                        modelCheckpointLoadError,
-                        modelCheckpointSaveError,
-                        modelCheckpointCompatibilityMismatch),
-                new TrainerSummaryAssembler.Artifact(
-                        modelCheckpointMetadataFile,
-                        modelCheckpointMetadataMissingOnResume,
-                        modelCheckpointMetadataLoaded,
-                        modelCheckpointMetadataSaved,
-                        modelCheckpointMetadataLoadError,
-                        modelCheckpointMetadataSaveError),
+                        checkpointResumeDiagnostics.compatibilityMismatches(),
+                        checkpointResumeDiagnostics.manifestEntryMissingArtifacts()),
+                modelCheckpointStatus.modelSummary(modelCheckpointFile),
+                modelCheckpointStatus.metadataSummary(modelCheckpointMetadataFile),
                 new TrainerSummaryAssembler.BestModel(
                         saveBestModelCheckpoint && bestModelCheckpointFile != null,
                         restoreBestModelAtEnd,
@@ -870,32 +615,18 @@ public final class CanonicalTrainer implements AutoCloseable {
                         bestModelCheckpointMonitor.state(),
                         bestModelCheckpointSaveError,
                         bestModelCheckpointLoadError),
-                new TrainerSummaryAssembler.StateCheckpoint(
-                        optimizerCheckpointFile != null,
-                        optimizer.supportsStateDict(),
-                        optimizerCheckpointFile,
-                        optimizerCheckpointMissingOnResume,
-                        optimizerCheckpointLoaded,
-                        optimizerCheckpointSaved,
-                        optimizerCheckpointLoadError,
-                        optimizerCheckpointSaveError),
+                stateCheckpointStatus.optimizerSummary(optimizerCheckpointFile, optimizer.supportsStateDict()),
                 new TrainerSummaryAssembler.MixedPrecision(
                         mixedPrecision,
                         optimizationRuntime.latestMixedPrecisionLossScale(),
                         optimizationRuntime.latestMixedPrecisionOverflowDetected(),
                         optimizationRuntime.mixedPrecisionOverflowSkipCount(),
                         optimizationRuntime.gradScalerStateSnapshot(),
-                        new TrainerMixedPrecisionMetadata.GradScalerCheckpoint(
+                        stateCheckpointStatus.gradScalerSummary(
+                                gradScalerCheckpointFile,
                                 gradScalerCheckpointFile != null && gradScaler != null,
                                 gradScaler != null && gradScaler.supportsStateDict(),
-                                resumeFromCheckpoint,
-                                gradScalerCheckpointFile,
-                                gradScalerCheckpointMissingOnResume,
-                                gradScalerCheckpointLoaded,
-                                gradScalerCheckpointSaved,
-                                gradScalerCheckpointLoadError,
-                                gradScalerCheckpointSaveError,
-                                gradScalerCheckpointFallbackUsed)),
+                                resumeFromCheckpoint)),
                 new TrainerSummaryAssembler.Scheduler(
                         schedulerStepper.enabled(),
                         schedulerStepUnit.name(),
@@ -905,44 +636,15 @@ public final class CanonicalTrainer implements AutoCloseable {
                         schedulerMonitorMetric != null,
                         schedulerStepper.stateSnapshot(),
                         optimizer.learningRate(),
-                        new TrainerLearningRateSchedulerMetadata.SchedulerCheckpoint(
-                                schedulerCheckpointFile != null,
-                                schedulerStepper.supportsStateDict(),
-                                resumeFromCheckpoint,
+                        stateCheckpointStatus.schedulerSummary(
                                 schedulerCheckpointFile,
-                                schedulerCheckpointMissingOnResume,
-                                schedulerCheckpointLoaded,
-                                schedulerCheckpointSaved,
-                                schedulerCheckpointLoadError,
-                                schedulerCheckpointSaveError)),
-                new TrainerSummaryAssembler.RuntimeArtifacts(
-                        new TrainerRuntimeArtifactMetadata.Artifact(
-                                historyFile != null,
-                                historyFile,
-                                historyMissingOnResume,
-                                historyLoaded,
-                                historySaved,
-                                historyLoadError,
-                                historySaveError),
-                        new TrainerRuntimeArtifactMetadata.SaveOnlyArtifact(
-                                reportFile != null,
-                                reportFile,
-                                reportSaved,
-                                reportSaveError),
-                        new TrainerRuntimeArtifactMetadata.Artifact(
-                                checkpointManifestFile != null,
-                                checkpointManifestFile,
-                                checkpointManifestMissingOnResume,
-                                checkpointManifestLoaded,
-                                checkpointManifestSaved,
-                                checkpointManifestLoadError,
-                                checkpointManifestSaveError),
-                        checkpointManifestIntegrityMismatch,
-                        new TrainerRuntimeArtifactMetadata.RuntimeCheckpoint(
-                                runtimeCheckpointFile,
-                                runtimeCheckpointIntegrityMismatch,
-                                runtimeCheckpointResumeSkipped,
-                                runtimeCheckpointLoadError)),
+                                schedulerStepper.supportsStateDict(),
+                                resumeFromCheckpoint)),
+                runtimeArtifactState.runtimeArtifacts(
+                        historyFile,
+                        reportFile,
+                        checkpointManifestFile,
+                        runtimeCheckpointFile),
                 new TrainerSummaryAssembler.EarlyStopping(
                         earlyStoppingPatience,
                         earlyStoppingMinDelta,
@@ -955,10 +657,12 @@ public final class CanonicalTrainer implements AutoCloseable {
                 failureState,
                 new TrainerSummaryAssembler.Metrics(
                         !trainMetrics.isEmpty(),
-                        latestTrainMetrics,
-                        latestValidationMetrics,
-                        latestTrainMetricDetails,
-                        latestValidationMetricDetails),
+                        metricState.trainValues(),
+                        metricState.validationValues(),
+                        metricState.trainDetails(),
+                        metricState.validationDetails()),
+                new TrainerSummaryAssembler.DataLoaderPlans(dataLoaderPlanMetadata),
+                new TrainerSummaryAssembler.DataDistribution(dataDistributionMetadata),
                 new TrainerSummaryAssembler.History(epochHistory.snapshot(), epochHistory.size()),
                 new TrainerSummaryAssembler.Optimization(
                         optimizationRuntime.gradientAccumulationSteps(),
@@ -966,7 +670,8 @@ public final class CanonicalTrainer implements AutoCloseable {
                         optimizationRuntime.optimizerStepCount(),
                         gradientClip,
                         optimizationRuntime.latestGradientDiagnostics(),
-                        optimizationRuntime.latestParameterDiagnostics()),
+                        optimizationRuntime.latestParameterDiagnostics(),
+                        optimizationRuntime.latestParameterUpdateDiagnostics()),
                 new TrainerSummaryAssembler.Throughput(
                         throughputStats.trainTotal(),
                         throughputStats.validationTotal()),
@@ -988,24 +693,24 @@ public final class CanonicalTrainer implements AutoCloseable {
                                 runtimeCheckpointFile,
                                 checkpointManifestFile),
                         new TrainerSummaryReferenceMetadata.Errors(
-                                modelCheckpointLoadError,
-                                modelCheckpointSaveError,
-                                modelCheckpointMetadataLoadError,
-                                modelCheckpointMetadataSaveError,
+                                modelCheckpointStatus.loadError(),
+                                modelCheckpointStatus.saveError(),
+                                modelCheckpointStatus.metadataLoadError(),
+                                modelCheckpointStatus.metadataSaveError(),
                                 bestModelCheckpointSaveError,
                                 bestModelCheckpointLoadError,
-                                optimizerCheckpointLoadError,
-                                optimizerCheckpointSaveError,
-                                schedulerCheckpointLoadError,
-                                schedulerCheckpointSaveError,
-                                gradScalerCheckpointLoadError,
-                                gradScalerCheckpointSaveError,
-                                historyLoadError,
-                                historySaveError,
-                                reportSaveError,
-                                checkpointManifestLoadError,
-                                checkpointManifestSaveError,
-                                runtimeCheckpointLoadError)));
+                                stateCheckpointStatus.optimizerLoadError(),
+                                stateCheckpointStatus.optimizerSaveError(),
+                                stateCheckpointStatus.schedulerLoadError(),
+                                stateCheckpointStatus.schedulerSaveError(),
+                                stateCheckpointStatus.gradScalerLoadError(),
+                                stateCheckpointStatus.gradScalerSaveError(),
+                                runtimeArtifactState.historyLoadError(),
+                                runtimeArtifactState.historySaveError(),
+                                runtimeArtifactState.reportSaveError(),
+                                runtimeArtifactState.manifestLoadError(),
+                                runtimeArtifactState.manifestSaveError(),
+                                runtimeArtifactState.runtimeCheckpointLoadError())));
     }
 
     private String bestModelCheckpointMonitorLabel() {
@@ -1021,7 +726,10 @@ public final class CanonicalTrainer implements AutoCloseable {
     }
 
     private double schedulerMonitorValue(double validationLoss) {
-        return TrainerMonitorSupport.valueOrNaN(schedulerMonitorMetric, validationLoss, latestValidationMetrics);
+        return TrainerMonitorSupport.valueOrNaN(
+                schedulerMonitorMetric,
+                validationLoss,
+                metricState.validationValues());
     }
 
     private TrainerEarlyStoppingMetadata.MonitorState earlyStoppingMonitorState(TrainingSummary base) {
@@ -1041,19 +749,16 @@ public final class CanonicalTrainer implements AutoCloseable {
 
     private List<String> checkpointResumeMissingArtifacts() {
         return TrainerCheckpointResumeDiagnostics.missingArtifacts(
-                modelCheckpointMissingOnResume,
-                optimizerCheckpointMissingOnResume,
-                schedulerCheckpointMissingOnResume,
-                gradScalerCheckpointMissingOnResume,
-                historyMissingOnResume);
+                modelCheckpointStatus.missingOnResume(),
+                stateCheckpointStatus.optimizerMissingOnResume(),
+                stateCheckpointStatus.schedulerMissingOnResume(),
+                stateCheckpointStatus.gradScalerMissingOnResume(),
+                runtimeArtifactState.historyMissingOnResume());
     }
 
     private void resetMetrics() {
         metricRuntime.reset();
-        latestTrainMetrics = Map.of();
-        latestValidationMetrics = Map.of();
-        latestTrainMetricDetails = Map.of();
-        latestValidationMetricDetails = Map.of();
+        metricState.reset();
     }
 
     private void resetEpochThroughputCounters() {
@@ -1069,10 +774,11 @@ public final class CanonicalTrainer implements AutoCloseable {
                 schedulerStepper.stepCount(),
                 optimizationRuntime.latestGradientDiagnostics(),
                 optimizationRuntime.latestParameterDiagnostics(),
+                optimizationRuntime.latestParameterUpdateDiagnostics(),
                 optimizationRuntime.latestMixedPrecisionDiagnostics(),
                 throughputStats.trainEpoch(),
-                latestTrainMetrics,
-                latestTrainMetricDetails));
+                metricState.trainValues(),
+                metricState.trainDetails()));
     }
 
     private void updateEpochHistoryValidation(int epoch, double validationLoss) {
@@ -1083,8 +789,8 @@ public final class CanonicalTrainer implements AutoCloseable {
                 optimizer.learningRate(),
                 schedulerStepper.stepCount(),
                 throughputStats.validationEpoch(),
-                latestValidationMetrics,
-                latestValidationMetricDetails,
+                metricState.validationValues(),
+                metricState.validationDetails(),
                 monitorValue,
                 bestModelCheckpointMonitorLabel(),
                 bestModelMonitorMode.name()));
@@ -1203,7 +909,10 @@ public final class CanonicalTrainer implements AutoCloseable {
         private final List<Supplier<? extends TrainingMetric>> metricFactories = new ArrayList<>();
         private int epochs = 1;
         private double gradientClip = 0.0;
+        private double gradientClipValue = 0.0;
         private int gradientAccumulationSteps = 1;
+        private boolean parameterUpdateDiagnostics = false;
+        private boolean dataDistributionDiagnostics = false;
         private boolean mixedPrecision = false;
         private GradScaler gradScaler;
         private Path checkpointDir;
@@ -1215,6 +924,7 @@ public final class CanonicalTrainer implements AutoCloseable {
         private boolean failOnCheckpointLoadError = true;
         private boolean saveBestModelCheckpoint = true;
         private boolean restoreBestModelAtEnd = false;
+        private boolean failOnAcceleratorFallback = false;
         private String bestModelMonitorMetric;
         private BestModelMonitorMode bestModelMonitorMode = BestModelMonitorMode.MIN;
         private String preferredDevice = "auto";
@@ -1297,8 +1007,35 @@ public final class CanonicalTrainer implements AutoCloseable {
             return this;
         }
 
+        public Builder gradientClipByValue(double maxAbsValue) {
+            this.gradientClipValue = Math.max(0.0, maxAbsValue);
+            return this;
+        }
+
+        public Builder gradientValueClip(double maxAbsValue) {
+            return gradientClipByValue(maxAbsValue);
+        }
+
         public Builder gradientAccumulationSteps(int steps) {
             this.gradientAccumulationSteps = Math.max(1, steps);
+            return this;
+        }
+
+        public Builder parameterUpdateDiagnostics() {
+            return parameterUpdateDiagnostics(true);
+        }
+
+        public Builder parameterUpdateDiagnostics(boolean enabled) {
+            this.parameterUpdateDiagnostics = enabled;
+            return this;
+        }
+
+        public Builder dataDistributionDiagnostics() {
+            return dataDistributionDiagnostics(true);
+        }
+
+        public Builder dataDistributionDiagnostics(boolean enabled) {
+            this.dataDistributionDiagnostics = enabled;
             return this;
         }
 
@@ -1327,6 +1064,15 @@ public final class CanonicalTrainer implements AutoCloseable {
 
         public Builder accelerator(String deviceId) {
             return device(deviceId);
+        }
+
+        public Builder failOnAcceleratorFallback(boolean failOnAcceleratorFallback) {
+            this.failOnAcceleratorFallback = failOnAcceleratorFallback;
+            return this;
+        }
+
+        public Builder requireAccelerator() {
+            return failOnAcceleratorFallback(true);
         }
 
         public Builder checkpointDir(Path checkpointDir) {

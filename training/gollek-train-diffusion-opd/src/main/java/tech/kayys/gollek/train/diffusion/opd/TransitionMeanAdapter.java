@@ -10,7 +10,15 @@ import tech.kayys.gollek.core.tensor.Tensor;
  */
 public interface TransitionMeanAdapter {
 
+    /**
+     * Converts the current noisy state and model prediction into the scheduler-step mean that OPD
+     * supervises at the given timestep.
+     */
     Tensor transitionMean(Tensor xT, Tensor modelPrediction, int timestepIndex);
 
+    /**
+     * Returns the effective variance associated with the adapted scheduler step at the given
+     * timestep.
+     */
     float stepVariance(int timestepIndex);
 }

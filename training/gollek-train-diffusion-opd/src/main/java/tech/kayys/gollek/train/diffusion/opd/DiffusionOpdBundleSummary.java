@@ -6,6 +6,10 @@ import java.util.Map;
 
 /**
  * Typed top-level summary of a DiffusionOPD export bundle.
+ *
+ * <p>This is the lighter-weight derived inspection view: it emphasizes
+ * section/format composition and missing-file overview without the full health
+ * check detail carried by {@link DiffusionOpdBundleHealth}.
  */
 public record DiffusionOpdBundleSummary(
         String bundleType,

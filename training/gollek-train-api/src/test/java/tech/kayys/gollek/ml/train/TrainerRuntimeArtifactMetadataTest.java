@@ -1,6 +1,7 @@
 package tech.kayys.gollek.ml.train;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,9 +48,26 @@ class TrainerRuntimeArtifactMetadataTest {
         assertEquals(Boolean.TRUE, metadata.get("checkpointManifestSaved"));
         assertEquals(Boolean.FALSE, metadata.get("checkpointManifestIntegrityMismatch"));
         assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointPresent"));
+        assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointResumeAllowed"));
         assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointIntegrityMismatch"));
         assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointResumeSkipped"));
         assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointLoadFailed"));
+        assertEquals("runtime-checkpoint-ready", metadata.get("runtimeCheckpointResumeDecision"));
+        assertEquals(
+                "continue with runtime checkpoint resume when requested",
+                metadata.get("runtimeCheckpointRecommendedAction"));
+        Map<String, Object> plan = runtimeCheckpointResumePlan(metadata);
+        assertEquals(1, plan.get("version"));
+        assertEquals(Boolean.TRUE, plan.get("present"));
+        assertEquals(Boolean.TRUE, plan.get("resumeAllowed"));
+        assertEquals(Boolean.FALSE, plan.get("integrityMismatch"));
+        assertEquals(Boolean.FALSE, plan.get("resumeSkipped"));
+        assertEquals(Boolean.FALSE, plan.get("loadFailed"));
+        assertEquals("runtime-checkpoint-ready", plan.get("decision"));
+        assertEquals(
+                "continue with runtime checkpoint resume when requested",
+                plan.get("recommendedAction"));
+        assertThrows(UnsupportedOperationException.class, plan::clear);
     }
 
     @Test
@@ -89,8 +107,33 @@ class TrainerRuntimeArtifactMetadataTest {
         assertEquals(Boolean.TRUE, metadata.get("checkpointManifestSaveFailed"));
         assertEquals(Boolean.TRUE, metadata.get("checkpointManifestIntegrityMismatch"));
         assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointPresent"));
+        assertEquals(Boolean.FALSE, metadata.get("runtimeCheckpointResumeAllowed"));
         assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointIntegrityMismatch"));
         assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointResumeSkipped"));
         assertEquals(Boolean.TRUE, metadata.get("runtimeCheckpointLoadFailed"));
+        assertEquals(
+                "runtime-checkpoint-integrity-mismatch",
+                metadata.get("runtimeCheckpointResumeDecision"));
+        assertEquals(
+                "skip runtime checkpoint and rebuild runtime state from trainer artifacts",
+                metadata.get("runtimeCheckpointRecommendedAction"));
+        Map<String, Object> plan = runtimeCheckpointResumePlan(metadata);
+        assertEquals(Boolean.FALSE, plan.get("present"));
+        assertEquals(Boolean.FALSE, plan.get("resumeAllowed"));
+        assertEquals(Boolean.TRUE, plan.get("integrityMismatch"));
+        assertEquals(Boolean.TRUE, plan.get("resumeSkipped"));
+        assertEquals(Boolean.TRUE, plan.get("loadFailed"));
+        assertEquals("runtime load failed", plan.get("loadError"));
+        assertEquals(
+                "runtime-checkpoint-integrity-mismatch",
+                plan.get("decision"));
+        assertEquals(
+                "skip runtime checkpoint and rebuild runtime state from trainer artifacts",
+                plan.get("recommendedAction"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> runtimeCheckpointResumePlan(Map<String, Object> metadata) {
+        return (Map<String, Object>) metadata.get("runtimeCheckpointResumePlan");
     }
 }

@@ -4,10 +4,8 @@ import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.train.data.Dataset;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * A dataset that loads images from a directory and converts them to tensors.
@@ -81,15 +79,9 @@ public class ImageDataset implements Dataset<GradTensor> {
      * @throws NullPointerException if {@code directory} is null
      */
     public ImageDataset(Path directory) throws IOException {
-        try (var stream = Files.walk(directory)) {
-            this.imagePaths = stream
-                .filter(Files::isRegularFile)
-                .filter(p -> {
-                    String name = p.toString().toLowerCase();
-                    return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png");
-                })
-                .collect(Collectors.toList());
-        }
+        this.imagePaths = MultimodalFileSupport.regularFilesWithExtensions(
+                directory,
+                MultimodalFileSupport.IMAGE_EXTENSIONS);
     }
 
     /**
@@ -140,5 +132,9 @@ public class ImageDataset implements Dataset<GradTensor> {
      */
     public Path getPath(int index) {
         return imagePaths.get(index);
+    }
+
+    public List<Path> paths() {
+        return imagePaths;
     }
 }

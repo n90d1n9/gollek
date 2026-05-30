@@ -15,6 +15,13 @@ final class TrainingMetricChecks {
         return logitThreshold;
     }
 
+    static double requireUnitInterval(String name, double value) {
+        if (!Double.isFinite(value) || value < 0.0 || value > 1.0) {
+            throw new IllegalArgumentException(name + " must be finite and in [0, 1], got: " + value);
+        }
+        return value;
+    }
+
     static void requireSameShape(String metricName, GradTensor predictions, GradTensor targets) {
         long[] predictionShape = predictions.shape();
         long[] targetShape = targets.shape();

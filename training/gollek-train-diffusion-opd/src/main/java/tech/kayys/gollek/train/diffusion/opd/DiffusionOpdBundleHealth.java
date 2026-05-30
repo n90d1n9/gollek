@@ -6,6 +6,10 @@ import java.util.Map;
 
 /**
  * Typed bundle health report for exported DiffusionOPD bundles.
+ *
+ * <p>This is the richest derived inspection view: it carries health status,
+ * checks, issue codes, grouped missing-artifact rollups, and the UI-oriented
+ * badge/check summary projections.
  */
 public record DiffusionOpdBundleHealth(
         String bundleType,

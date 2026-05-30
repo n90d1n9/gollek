@@ -82,6 +82,7 @@ class TrainerCheckpointManifestTest {
         assertTrue(check.loaded());
         assertFalse(check.missing());
         assertNull(check.loadError());
+        assertFalse(check.manifestEntryMissing());
     }
 
     @Test
@@ -99,6 +100,7 @@ class TrainerCheckpointManifestTest {
         assertFalse(check.loaded());
         assertTrue(check.missing());
         assertNull(check.loadError());
+        assertFalse(check.manifestEntryMissing());
     }
 
     @Test
@@ -126,6 +128,34 @@ class TrainerCheckpointManifestTest {
         assertTrue(check.loaded());
         assertFalse(check.missing());
         assertNull(check.loadError());
+        assertFalse(check.manifestEntryMissing());
+    }
+
+    @Test
+    void checkRequiredArtifactReportsMissingManifestEntry() throws Exception {
+        Path dir = Files.createTempDirectory("gollek-checkpoint-manifest-required-missing");
+        Path scheduler = writeFile(dir.resolve("canonical-scheduler.state"), "abc");
+        Path manifest = dir.resolve("canonical-manifest.properties");
+        Properties properties = new Properties();
+        properties.setProperty("formatVersion", "1");
+        try (var writer = Files.newBufferedWriter(manifest, StandardCharsets.UTF_8)) {
+            properties.store(writer, "test");
+        }
+
+        TrainerCheckpointManifest.CompatibilityCheck check = TrainerCheckpointManifest.checkRequiredArtifact(
+                manifest,
+                "scheduler",
+                scheduler,
+                1);
+
+        assertFalse(check.report().compatible());
+        assertEquals(
+                "scheduler checkpoint is missing from checkpoint manifest",
+                check.report().error());
+        assertTrue(check.loaded());
+        assertFalse(check.missing());
+        assertNull(check.loadError());
+        assertTrue(check.manifestEntryMissing());
     }
 
     private static Path writeFile(Path path, String content) throws Exception {

@@ -20,7 +20,8 @@ final class TrainerSummaryAssembler {
                 metadata,
                 request.resume().resumeRequested(),
                 request.resume().missingArtifacts(),
-                request.resume().compatibilityMismatches());
+                request.resume().compatibilityMismatches(),
+                request.resume().manifestEntryMissingArtifacts());
         TrainerSummaryMetadata.putCheckpointStatus(
                 metadata,
                 "modelCheckpoint",
@@ -109,6 +110,22 @@ final class TrainerSummaryAssembler {
                 request.metrics().validation(),
                 request.metrics().trainDetails(),
                 request.metrics().validationDetails());
+        metadata.putAll(request.dataLoaderPlans().metadata());
+        TrainerDataLoaderPlanHealthMetadata.put(metadata);
+        metadata.putAll(request.dataDistribution().metadata());
+        TrainerDataDistributionHealthMetadata.put(metadata);
+        TrainerGeneralizationMetadata.putLatest(metadata, base.latestTrainLoss(), base.latestValidationLoss());
+        TrainerGeneralizationMetadata.putLatestTrend(metadata, request.history().rows());
+        TrainerLossTrendMetadata.putLatest(metadata, request.history().rows());
+        TrainerLossSlopeMetadata.putLatest(metadata, request.history().rows());
+        TrainerLossWindowStatsMetadata.putLatest(metadata, request.history().rows());
+        TrainerLossImprovementMetadata.putLatest(metadata, request.history().rows());
+        TrainerValidationProgressMetadata.put(
+                metadata,
+                base.epochCount(),
+                base.bestValidationLoss(),
+                base.bestValidationEpoch(),
+                base.latestValidationLoss());
         metadata.put("epochHistory", request.history().rows());
         metadata.put("epochHistorySize", request.history().size());
         TrainerOptimizationMetadata.put(
@@ -118,7 +135,8 @@ final class TrainerSummaryAssembler {
                 request.optimization().optimizerStepCount(),
                 request.optimization().gradientClip(),
                 request.optimization().gradients(),
-                request.optimization().parameters());
+                request.optimization().parameters(),
+                request.optimization().updates());
         TrainerThroughputStats.putPhaseMetadata(metadata, "train", request.throughput().trainTotal());
         TrainerThroughputStats.putPhaseMetadata(metadata, "validation", request.throughput().validationTotal());
         TrainerAccelerationMetadata.put(
@@ -130,6 +148,7 @@ final class TrainerSummaryAssembler {
                 metadata,
                 request.references().paths(),
                 request.references().errors());
+        TrainerRunHealthMetadata.put(metadata);
         return new TrainingSummary(
                 base.epochCount(),
                 base.bestValidationLoss(),
@@ -152,6 +171,8 @@ final class TrainerSummaryAssembler {
             EarlyStopping earlyStopping,
             TrainerFailureState failureState,
             Metrics metrics,
+            DataLoaderPlans dataLoaderPlans,
+            DataDistribution dataDistribution,
             History history,
             Optimization optimization,
             Throughput throughput,
@@ -162,7 +183,8 @@ final class TrainerSummaryAssembler {
     record Resume(
             boolean resumeRequested,
             List<String> missingArtifacts,
-            List<String> compatibilityMismatches) {
+            List<String> compatibilityMismatches,
+            List<String> manifestEntryMissingArtifacts) {
     }
 
     record ModelCheckpoint(
@@ -254,6 +276,18 @@ final class TrainerSummaryAssembler {
             Map<String, Object> validationDetails) {
     }
 
+    record DataLoaderPlans(Map<String, Object> metadata) {
+        DataLoaderPlans {
+            metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        }
+    }
+
+    record DataDistribution(Map<String, Object> metadata) {
+        DataDistribution {
+            metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        }
+    }
+
     record History(
             List<Map<String, Object>> rows,
             int size) {
@@ -263,9 +297,10 @@ final class TrainerSummaryAssembler {
             int gradientAccumulationSteps,
             int pendingGradientAccumulationBatches,
             int optimizerStepCount,
-            double gradientClip,
+            TrainerGradientClipConfig gradientClip,
             TrainerOptimizationMetadata.GradientDiagnostics gradients,
-            TrainerOptimizationMetadata.ParameterDiagnostics parameters) {
+            TrainerOptimizationMetadata.ParameterDiagnostics parameters,
+            TrainerOptimizationMetadata.UpdateDiagnostics updates) {
     }
 
     record Throughput(

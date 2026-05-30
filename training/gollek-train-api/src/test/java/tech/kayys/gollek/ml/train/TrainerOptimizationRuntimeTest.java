@@ -50,7 +50,53 @@ class TrainerOptimizationRuntimeTest {
         assertEquals(7.0f, parameter.data().data()[0], 1e-6f);
         assertEquals(1, schedulerSteps.get());
         assertEquals(3.0, runtime.latestGradientDiagnostics().l2Norm(), 1e-6);
+        assertEquals(3.0, runtime.latestGradientDiagnostics().meanAbs(), 1e-6);
+        assertEquals(3.0, runtime.latestGradientDiagnostics().rms(), 1e-6);
+        assertEquals(1.0, runtime.latestGradientDiagnostics().clipScale(), 1e-6);
+        assertEquals(0L, runtime.latestGradientDiagnostics().zeroCount());
+        assertEquals(0.0, runtime.latestGradientDiagnostics().zeroFraction(), 1e-9);
+        assertEquals(1L, runtime.latestGradientDiagnostics().finiteCount());
+        assertEquals(0L, runtime.latestGradientDiagnostics().nonFiniteCount());
+        assertEquals(0.0, runtime.latestGradientDiagnostics().nonFiniteFraction(), 1e-9);
+        assertFalse(runtime.latestGradientDiagnostics().clipped());
         assertEquals(7.0, runtime.latestParameterDiagnostics().l2Norm(), 1e-6);
+        assertEquals(7.0, runtime.latestParameterDiagnostics().meanAbs(), 1e-6);
+        assertEquals(7.0, runtime.latestParameterDiagnostics().rms(), 1e-6);
+        assertEquals(0L, runtime.latestParameterDiagnostics().zeroCount());
+        assertEquals(1L, runtime.latestParameterDiagnostics().finiteCount());
+        assertEquals(0L, runtime.latestParameterDiagnostics().nonFiniteCount());
+        assertEquals(0.0, runtime.latestParameterDiagnostics().nonFiniteFraction(), 1e-9);
+        assertFalse(runtime.latestParameterUpdateDiagnostics().enabled());
+    }
+
+    @Test
+    void propagatesExactParameterUpdateDiagnosticsWhenStepRunnerEnablesThem() {
+        Parameter parameter = parameter(10f);
+        Optimizer optimizer = SGD.builder(List.of(parameter), 1.0f).build();
+        TrainerOptimizationRuntime runtime = runtime(
+                optimizer,
+                null,
+                2,
+                new RecordingFailures(),
+                () -> {
+                },
+                () -> false,
+                true);
+
+        parameter.data().backward(GradTensor.of(new float[] {4f}, 1));
+        runtime.afterBackwardBatch();
+        parameter.data().backward(GradTensor.of(new float[] {2f}, 1));
+        runtime.afterBackwardBatch();
+
+        TrainerOptimizationMetadata.UpdateDiagnostics updates = runtime.latestParameterUpdateDiagnostics();
+        assertTrue(updates.enabled());
+        assertEquals(3.0, updates.l2Norm(), 1e-6);
+        assertEquals(3.0, updates.maxAbs(), 1e-6);
+        assertEquals(3.0, updates.meanAbs(), 1e-6);
+        assertEquals(3.0, updates.rms(), 1e-6);
+        assertEquals(1, updates.count());
+        assertEquals(1L, updates.valueCount());
+        assertEquals(0L, updates.zeroCount());
     }
 
     @Test
@@ -182,6 +228,17 @@ class TrainerOptimizationRuntimeTest {
             TrainerBatchGuards.FailureRecorder failures,
             Runnable schedulerStep,
             java.util.function.BooleanSupplier nonFiniteDetected) {
+        return runtime(optimizer, gradScaler, accumulationSteps, failures, schedulerStep, nonFiniteDetected, false);
+    }
+
+    private static TrainerOptimizationRuntime runtime(
+            Optimizer optimizer,
+            GradScaler gradScaler,
+            int accumulationSteps,
+            TrainerBatchGuards.FailureRecorder failures,
+            Runnable schedulerStep,
+            java.util.function.BooleanSupplier nonFiniteDetected,
+            boolean parameterUpdateDiagnostics) {
         return new TrainerOptimizationRuntime(
                 optimizer,
                 new TrainerOptimizerStepRunner(
@@ -189,7 +246,8 @@ class TrainerOptimizationRuntimeTest {
                         gradScaler,
                         0.0,
                         failures,
-                        schedulerStep),
+                        schedulerStep,
+                        parameterUpdateDiagnostics),
                 accumulationSteps,
                 gradScaler != null,
                 gradScaler,

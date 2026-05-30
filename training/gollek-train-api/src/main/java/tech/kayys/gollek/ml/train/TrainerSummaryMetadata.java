@@ -15,16 +15,45 @@ final class TrainerSummaryMetadata {
             Map<String, Object> metadata,
             boolean resumeRequested,
             List<String> missingArtifacts,
-            List<String> compatibilityMismatches) {
-        List<String> missing = immutableList(missingArtifacts);
-        List<String> mismatches = immutableList(compatibilityMismatches);
-        metadata.put("checkpointResumeMissingArtifacts", missing);
-        metadata.put("checkpointResumeCompatibilityMismatches", mismatches);
-        metadata.put("checkpointCompatibilityMismatches", mismatches);
-        metadata.put("checkpointCompatibilityMismatch", !mismatches.isEmpty());
-        metadata.put(
-                "checkpointResumePartial",
-                resumeRequested && (!missing.isEmpty() || !mismatches.isEmpty()));
+            List<String> compatibilityMismatches,
+            List<String> manifestEntryMissingArtifacts) {
+        TrainerCheckpointResumeIssueMetadata.Snapshot resumeIssues =
+                TrainerCheckpointResumeIssueMetadata.snapshot(
+                        missingArtifacts,
+                        compatibilityMismatches,
+                        manifestEntryMissingArtifacts);
+        metadata.put("checkpointResumeMissingArtifacts", resumeIssues.missingArtifacts());
+        metadata.put("checkpointResumeCompatibilityMismatches", resumeIssues.compatibilityMismatches());
+        metadata.put("checkpointCompatibilityMismatches", resumeIssues.compatibilityMismatches());
+        metadata.put("checkpointCompatibilityMismatch", resumeIssues.hasCompatibilityMismatches());
+        metadata.put("checkpointResumeManifestEntryMissingArtifacts", resumeIssues.manifestEntryMissingArtifacts());
+        metadata.put("checkpointResumeManifestEntryMissing", resumeIssues.hasManifestEntryMissingArtifacts());
+        metadata.put("checkpointResumeIssueDetected", resumeIssues.issueDetected());
+        metadata.put("checkpointResumeIssueCount", resumeIssues.issueCount());
+        metadata.put("checkpointResumeIssueKinds", resumeIssues.issueKinds());
+        metadata.put("checkpointResumeAffectedArtifacts", resumeIssues.affectedArtifacts());
+        metadata.put("checkpointResumeIssues", resumeIssues.issues());
+        metadata.put("checkpointResumeBlockingIssueDetected", resumeIssues.blockingIssueDetected());
+        metadata.put("checkpointResumeBlockingIssueCount", resumeIssues.blockingIssueCount());
+        metadata.put("checkpointResumeBlockingIssueKinds", resumeIssues.blockingIssueKinds());
+        metadata.put("checkpointResumeBlockingIssues", resumeIssues.blockingIssues());
+        metadata.put("checkpointResumeIssueCodes", resumeIssues.issueCodes());
+        metadata.put("checkpointResumeIssueSeverities", resumeIssues.issueSeverities());
+        metadata.put("checkpointResumeRecommendedActions", resumeIssues.recommendedActions());
+        putCheckpointResumePrimaryIssue(metadata, resumeIssues);
+        metadata.put("checkpointResumeIssueCountsByKind", resumeIssues.issueCountsByKind());
+        metadata.put("checkpointResumeIssueSeveritiesByKind", resumeIssues.issueSeveritiesByKind());
+        metadata.put("checkpointResumeIssueBlockingByKind", resumeIssues.issueBlockingByKind());
+        metadata.put("checkpointResumeIssueArtifactsByKind", resumeIssues.issueArtifactsByKind());
+        TrainerCheckpointResumePlan.Snapshot plan =
+                TrainerCheckpointResumePlan.snapshot(resumeRequested, resumeIssues);
+        metadata.put("checkpointResumeComplete", plan.complete());
+        metadata.put("checkpointResumeStatus", plan.status());
+        metadata.put("checkpointResumeStateUsable", plan.stateUsable());
+        metadata.put("checkpointResumeRecommendedMode", plan.recommendedMode());
+        metadata.put("checkpointResumeNextAction", plan.nextAction());
+        metadata.put("checkpointResumePlan", plan.metadata());
+        metadata.put("checkpointResumePartial", resumeRequested && resumeIssues.issueDetected());
     }
 
     static void putCheckpointStatus(
@@ -104,8 +133,36 @@ final class TrainerSummaryMetadata {
         }
     }
 
-    private static List<String> immutableList(List<String> values) {
-        return values == null || values.isEmpty() ? List.of() : List.copyOf(values);
+    private static void putCheckpointResumePrimaryIssue(
+            Map<String, Object> metadata,
+            TrainerCheckpointResumeIssueMetadata.Snapshot resumeIssues) {
+        metadata.put("checkpointResumePrimaryIssueAvailable", resumeIssues.primaryIssueAvailable());
+        putCheckpointResumePrimaryBlockingIssue(metadata, resumeIssues);
+        if (!resumeIssues.primaryIssueAvailable()) {
+            return;
+        }
+        metadata.put("checkpointResumePrimaryIssueKind", resumeIssues.primaryIssueKind());
+        metadata.put("checkpointResumePrimaryIssueCode", resumeIssues.primaryIssueCode());
+        metadata.put("checkpointResumePrimaryIssueSeverity", resumeIssues.primaryIssueSeverity());
+        metadata.put("checkpointResumePrimaryIssueBlocking", resumeIssues.primaryIssueBlocking());
+        metadata.put("checkpointResumePrimaryAffectedArtifact", resumeIssues.primaryAffectedArtifact());
+        metadata.put("checkpointResumePrimaryIssueMessage", resumeIssues.primaryIssueMessage());
+        metadata.put("checkpointResumePrimaryRecommendedAction", resumeIssues.primaryRecommendedAction());
+    }
+
+    private static void putCheckpointResumePrimaryBlockingIssue(
+            Map<String, Object> metadata,
+            TrainerCheckpointResumeIssueMetadata.Snapshot resumeIssues) {
+        metadata.put("checkpointResumePrimaryBlockingIssueAvailable", resumeIssues.primaryBlockingIssueAvailable());
+        if (!resumeIssues.primaryBlockingIssueAvailable()) {
+            return;
+        }
+        metadata.put("checkpointResumePrimaryBlockingIssueKind", resumeIssues.primaryBlockingIssueKind());
+        metadata.put("checkpointResumePrimaryBlockingIssueCode", resumeIssues.primaryBlockingIssueCode());
+        metadata.put("checkpointResumePrimaryBlockingIssueSeverity", resumeIssues.primaryBlockingIssueSeverity());
+        metadata.put("checkpointResumePrimaryBlockingAffectedArtifact", resumeIssues.primaryBlockingAffectedArtifact());
+        metadata.put("checkpointResumePrimaryBlockingIssueMessage", resumeIssues.primaryBlockingIssueMessage());
+        metadata.put("checkpointResumePrimaryBlockingRecommendedAction", resumeIssues.primaryBlockingRecommendedAction());
     }
 
     private static void putArtifactState(

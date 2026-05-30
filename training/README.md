@@ -226,6 +226,7 @@ gollek/
 ├── ml/gollek-ml-hub/           # ModelHub, HF/local repositories, SafeTensors
 ├── ml/gollek-ml-export/        # ONNX, GGUF, LiteRT exporters and benchmark
 ├── ml/gollek-ml-byte-latent/   # Planned byte-latent language-model family
+├── ml/gollek-ml-recursive-reasoning/ # Planned recursive reasoning family (GRAM-style)
 ├── ml/gollek-ml-api/           # Gollek.java umbrella ML entry point
 ├── trainer/gollek-trainer-api/ # Canonical trainer session/config contracts
 ├── trainer/gollek-trainer/     # Trainer bridge/runtime facade
@@ -235,6 +236,12 @@ gollek/
 Fast Byte Latent Transformer style work belongs in a new byte-latent language
 modeling family, not in the diffusion OPD stack. See
 `gollek/docs/FAST_BYTE_LATENT_TRANSFORMER_INTEGRATION_PLAN.md` for the paper
+mapping and the code paths that should be reused.
+
+Generative Recursive Reasoning / GRAM style work belongs in a new recursive
+reasoning family, not in the diffusion OPD stack or the byte-latent language
+modeling family. See
+`gollek/docs/GENERATIVE_RECURSIVE_REASONING_INTEGRATION_PLAN.md` for the paper
 mapping and the code paths that should be reused.
 
 ## JVM Flags Required

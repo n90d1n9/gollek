@@ -71,6 +71,21 @@ class TrainerCheckpointFileIntegrityTest {
     }
 
     @Test
+    void requiredManifestArtifactMismatchRejectsUntrackedArtifacts() throws Exception {
+        Path artifact = writeTempFile("gollek-artifact-required-untracked", "abc");
+        Properties manifest = new Properties();
+        manifest.setProperty("formatVersion", "1");
+
+        assertEquals(
+                "optimizer checkpoint is missing from checkpoint manifest",
+                TrainerCheckpointFileIntegrity.requiredManifestArtifactMismatch(
+                        manifest,
+                        "optimizer",
+                        artifact,
+                        1));
+    }
+
+    @Test
     void manifestArtifactMismatchValidatesManifestVersion() throws Exception {
         Path artifact = writeTempFile("gollek-artifact-version", "abc");
         Properties unsupported = new Properties();

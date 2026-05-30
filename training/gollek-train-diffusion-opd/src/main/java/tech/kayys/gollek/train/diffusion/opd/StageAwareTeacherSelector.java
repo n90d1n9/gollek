@@ -7,6 +7,10 @@ import tech.kayys.gollek.train.diffusion.api.DiffusionDenoiser;
 import tech.kayys.gollek.train.diffusion.api.DiffusionTask;
 import tech.kayys.gollek.train.diffusion.api.DiffusionTeacherBinding;
 
+/**
+ * Resolves the active teacher binding for a task and rollout step so the main
+ * trainer loop can stay focused on optimization flow instead of binding rules.
+ */
 final class StageAwareTeacherSelector {
 
     ResolvedTeacher resolve(
@@ -43,6 +47,10 @@ final class StageAwareTeacherSelector {
                 "No teacher binding matched step " + stepIndex + " for task " + task.id());
     }
 
+    /**
+     * Carries the resolved teacher plus the stage metadata that downstream trainer helpers reuse
+     * for weighting, diagnostics, and round-history rows.
+     */
     record ResolvedTeacher(String teacherKey, String stageName, double lossWeight, DiffusionDenoiser teacher) {
     }
 }

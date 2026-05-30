@@ -9,6 +9,10 @@ import java.util.Map;
 
 /**
  * Typed loader utilities for DiffusionOPD bundle manifests.
+ *
+ * <p>This is the public manifest-loading boundary for bundle inspection. It
+ * keeps raw JSON parsing separate from the higher-level bundle inspection API
+ * in {@link DiffusionOpdBundleInspector}.
  */
 public final class DiffusionOpdBundleManifests {
 
@@ -17,6 +21,9 @@ public final class DiffusionOpdBundleManifests {
     private DiffusionOpdBundleManifests() {
     }
 
+    /**
+     * Loads a bundle manifest from disk and normalizes it into the typed public manifest shape.
+     */
     public static DiffusionOpdBundleManifest load(Path manifestPath) {
         try {
             return fromMap(OBJECT_MAPPER.readValue(
@@ -28,6 +35,9 @@ public final class DiffusionOpdBundleManifests {
         }
     }
 
+    /**
+     * Adapts an already-parsed raw manifest map into the typed public manifest record.
+     */
     public static DiffusionOpdBundleManifest fromMap(Map<String, Object> raw) {
         return DiffusionOpdBundleManifest.fromMap(raw);
     }

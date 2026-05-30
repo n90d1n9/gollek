@@ -62,7 +62,7 @@ class TrainerBatchGuardsTest {
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
                 TrainerBatchGuards.requireFiniteTensor(
-                        GradTensor.of(new float[] {Float.NaN}, 1),
+                        GradTensor.of(new float[] {Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, 1f}, 4),
                         "validation",
                         "prediction",
                         false,
@@ -70,6 +70,10 @@ class TrainerBatchGuardsTest {
 
         assertTrue(error.getMessage().contains("validation prediction must be finite"));
         assertEquals("prediction", failures.kind);
+        assertEquals(4L, failures.totalValueCount);
+        assertEquals(1L, failures.nanCount);
+        assertEquals(1L, failures.positiveInfinityCount);
+        assertEquals(1L, failures.negativeInfinityCount);
         assertFalse(failures.optimizerStepSkipped);
         assertFalse(failures.discarded);
     }
@@ -80,6 +84,10 @@ class TrainerBatchGuardsTest {
         private String kind;
         private String shape;
         private long elements;
+        private long totalValueCount;
+        private long nanCount;
+        private long positiveInfinityCount;
+        private long negativeInfinityCount;
         private boolean optimizerStepSkipped;
         private boolean discarded;
 
@@ -120,6 +128,24 @@ class TrainerBatchGuardsTest {
             this.kind = kind;
             this.optimizerStepSkipped = optimizerStepSkipped;
             return phase + " " + label + " must be finite, got " + value;
+        }
+
+        @Override
+        public String nonFiniteTensor(
+                String phase,
+                String kind,
+                double value,
+                String label,
+                boolean optimizerStepSkipped,
+                long totalValueCount,
+                long nanCount,
+                long positiveInfinityCount,
+                long negativeInfinityCount) {
+            this.totalValueCount = totalValueCount;
+            this.nanCount = nanCount;
+            this.positiveInfinityCount = positiveInfinityCount;
+            this.negativeInfinityCount = negativeInfinityCount;
+            return nonFinite(phase, kind, value, label, optimizerStepSkipped);
         }
 
         @Override

@@ -22,9 +22,14 @@ final class TrainerOptimizationRuntime {
     private boolean latestMixedPrecisionOverflowDetected;
     private double latestMixedPrecisionLossScale = Double.NaN;
     private TrainerOptimizationMetadata.GradientDiagnostics latestGradientDiagnostics =
-            new TrainerOptimizationMetadata.GradientDiagnostics(0.0, 0.0, 0.0, 0.0, 0, 0L, false);
+            new TrainerOptimizationMetadata.GradientDiagnostics(
+                    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0L, 0L, 0.0,
+                    0L, 0L, 0L, 0L, 0L, 0.0, 1.0, false);
     private TrainerOptimizationMetadata.ParameterDiagnostics latestParameterDiagnostics =
-            new TrainerOptimizationMetadata.ParameterDiagnostics(0.0, 0.0, 0, 0L);
+            new TrainerOptimizationMetadata.ParameterDiagnostics(
+                    0.0, 0.0, 0.0, 0.0, 0, 0L, 0L, 0.0, 0L, 0L, 0L, 0L, 0L, 0.0);
+    private TrainerOptimizationMetadata.UpdateDiagnostics latestParameterUpdateDiagnostics =
+            TrainerOptimizationMetadata.UpdateDiagnostics.disabled();
 
     TrainerOptimizationRuntime(
             Optimizer optimizer,
@@ -112,6 +117,10 @@ final class TrainerOptimizationRuntime {
         return latestParameterDiagnostics;
     }
 
+    TrainerOptimizationMetadata.UpdateDiagnostics latestParameterUpdateDiagnostics() {
+        return latestParameterUpdateDiagnostics;
+    }
+
     TrainerEpochHistoryRecordFactory.MixedPrecisionDiagnostics latestMixedPrecisionDiagnostics() {
         return new TrainerEpochHistoryRecordFactory.MixedPrecisionDiagnostics(
                 mixedPrecision,
@@ -151,6 +160,10 @@ final class TrainerOptimizationRuntime {
                 updateTensorDiagnostics(
                         result.gradientBeforeClip(),
                         result.gradientAfterClip(),
+                        result.gradientClipScale(),
+                        result.gradientClipped(),
+                        result.parameterUpdateDiagnosticsEnabled(),
+                        result.parameterUpdates(),
                         result.parametersAfterStep());
             }
             if (result.mixedPrecisionUsed()) {
@@ -171,19 +184,49 @@ final class TrainerOptimizationRuntime {
     private void updateTensorDiagnostics(
             TensorDiagnostics gradientBeforeClip,
             TensorDiagnostics gradientAfterClip,
+            double gradientClipScale,
+            boolean gradientClipped,
+            boolean parameterUpdateDiagnosticsEnabled,
+            TensorDiagnostics parameterUpdates,
             TensorDiagnostics parametersAfterStep) {
         latestGradientDiagnostics = new TrainerOptimizationMetadata.GradientDiagnostics(
                 gradientBeforeClip.l2Norm(),
                 gradientAfterClip.l2Norm(),
                 gradientBeforeClip.maxAbs(),
                 gradientAfterClip.maxAbs(),
+                gradientBeforeClip.meanAbs(),
+                gradientAfterClip.meanAbs(),
+                gradientBeforeClip.rms(),
+                gradientAfterClip.rms(),
                 gradientAfterClip.tensorCount(),
                 gradientAfterClip.valueCount(),
-                gradientAfterClip.l2Norm() + 1e-9 < gradientBeforeClip.l2Norm());
+                gradientAfterClip.zeroCount(),
+                gradientAfterClip.zeroFraction(),
+                gradientAfterClip.finiteCount(),
+                gradientAfterClip.nonFiniteCount(),
+                gradientAfterClip.nanCount(),
+                gradientAfterClip.positiveInfinityCount(),
+                gradientAfterClip.negativeInfinityCount(),
+                gradientAfterClip.nonFiniteFraction(),
+                gradientClipScale,
+                gradientClipped);
         latestParameterDiagnostics = new TrainerOptimizationMetadata.ParameterDiagnostics(
                 parametersAfterStep.l2Norm(),
                 parametersAfterStep.maxAbs(),
+                parametersAfterStep.meanAbs(),
+                parametersAfterStep.rms(),
                 parametersAfterStep.tensorCount(),
-                parametersAfterStep.valueCount());
+                parametersAfterStep.valueCount(),
+                parametersAfterStep.zeroCount(),
+                parametersAfterStep.zeroFraction(),
+                parametersAfterStep.finiteCount(),
+                parametersAfterStep.nonFiniteCount(),
+                parametersAfterStep.nanCount(),
+                parametersAfterStep.positiveInfinityCount(),
+                parametersAfterStep.negativeInfinityCount(),
+                parametersAfterStep.nonFiniteFraction());
+        latestParameterUpdateDiagnostics = parameterUpdateDiagnosticsEnabled
+                ? TrainerOptimizationMetadata.UpdateDiagnostics.enabled(parameterUpdates)
+                : TrainerOptimizationMetadata.UpdateDiagnostics.disabled();
     }
 }

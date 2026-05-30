@@ -3,7 +3,10 @@ package tech.kayys.gollek.train.data.multimodal;
 import tech.kayys.gollek.train.data.Dataset;
 import tech.kayys.gollek.spi.model.MultimodalContent;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A generic multimodal dataset that yields lists of {@link MultimodalContent} objects.
@@ -57,7 +60,12 @@ public class MultimodalDataset implements Dataset<List<MultimodalContent>> {
      * @throws NullPointerException if {@code preloadedData} is null
      */
     public MultimodalDataset(List<List<MultimodalContent>> preloadedData) {
-        this.backingStore = preloadedData;
+        Objects.requireNonNull(preloadedData, "preloadedData must not be null");
+        List<List<MultimodalContent>> samples = new ArrayList<>(preloadedData.size());
+        for (int i = 0; i < preloadedData.size(); i++) {
+            samples.add(MultimodalDatasetSupport.immutableSample(preloadedData.get(i), "sample " + i));
+        }
+        this.backingStore = Collections.unmodifiableList(samples);
     }
 
     /**
@@ -84,5 +92,15 @@ public class MultimodalDataset implements Dataset<List<MultimodalContent>> {
     @Override
     public int size() {
         return backingStore.size();
+    }
+
+    /**
+     * Returns an immutable snapshot of all samples.
+     *
+     * <p>This is useful when dataset manifests, train/validation splits, or small
+     * in-memory examples need a stable view that cannot be mutated by caller code.</p>
+     */
+    public List<List<MultimodalContent>> samples() {
+        return backingStore;
     }
 }

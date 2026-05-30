@@ -28,6 +28,8 @@ class TrainerRuntimeCheckpointResumeTest {
         assertFalse(decision.integrityMismatch());
         assertFalse(decision.resumeSkipped());
         assertNull(decision.loadError());
+        assertEquals("runtime-resume-not-requested", decision.decisionCode());
+        assertEquals("run without runtime checkpoint resume", decision.recommendedAction());
         assertEquals(0, checks.get());
     }
 
@@ -47,6 +49,8 @@ class TrainerRuntimeCheckpointResumeTest {
         assertFalse(decision.integrityMismatch());
         assertFalse(decision.resumeSkipped());
         assertNull(decision.loadError());
+        assertEquals("runtime-checkpoint-not-configured", decision.decisionCode());
+        assertEquals("continue without runtime checkpoint integrity check", decision.recommendedAction());
         assertEquals(0, checks.get());
     }
 
@@ -68,6 +72,8 @@ class TrainerRuntimeCheckpointResumeTest {
         assertFalse(decision.integrityMismatch());
         assertFalse(decision.resumeSkipped());
         assertNull(decision.loadError());
+        assertEquals("runtime-checkpoint-compatible", decision.decisionCode());
+        assertEquals("continue with runtime checkpoint resume", decision.recommendedAction());
         assertEquals("runtime", artifactName.get());
         assertEquals(Path.of("runtime.state"), artifactFile.get());
     }
@@ -83,6 +89,10 @@ class TrainerRuntimeCheckpointResumeTest {
         assertTrue(decision.integrityMismatch());
         assertTrue(decision.resumeSkipped());
         assertEquals("sha mismatch", decision.loadError());
+        assertEquals("runtime-checkpoint-integrity-mismatch", decision.decisionCode());
+        assertEquals(
+                "skip runtime checkpoint and rebuild runtime state from trainer artifacts",
+                decision.recommendedAction());
         assertFalse(decision.shouldFail(false));
         assertTrue(decision.shouldFail(true));
     }

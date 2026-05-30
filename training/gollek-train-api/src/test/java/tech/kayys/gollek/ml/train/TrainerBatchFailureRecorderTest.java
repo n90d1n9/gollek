@@ -52,13 +52,27 @@ class TrainerBatchFailureRecorderTest {
         TrainerFailureState failureState = new TrainerFailureState();
         TrainerBatchFailureRecorder recorder = new TrainerBatchFailureRecorder(failureState, NO_OP);
 
-        String message = recorder.nonFinite("train", "gradient", Double.NaN, "gradient", true);
+        String message = recorder.nonFiniteTensor(
+                "train",
+                "gradient",
+                Double.NaN,
+                "gradient",
+                true,
+                5L,
+                1L,
+                2L,
+                0L);
 
         Map<String, Object> metadata = metadata(failureState);
         assertEquals("train gradient must be finite, got NaN", message);
         assertEquals(Boolean.TRUE, metadata.get("nonFiniteDetected"));
         assertEquals("gradient", metadata.get("nonFiniteKind"));
         assertEquals(Boolean.TRUE, metadata.get("nonFiniteOptimizerStepSkipped"));
+        assertEquals(5L, metadata.get("nonFiniteTotalValueCount"));
+        assertEquals(3L, metadata.get("nonFiniteValueCount"));
+        assertEquals(1L, metadata.get("nonFiniteNanCount"));
+        assertEquals(2L, metadata.get("nonFinitePositiveInfinityCount"));
+        assertEquals(0L, metadata.get("nonFiniteNegativeInfinityCount"));
     }
 
     private static Map<String, Object> metadata(TrainerFailureState failureState) {

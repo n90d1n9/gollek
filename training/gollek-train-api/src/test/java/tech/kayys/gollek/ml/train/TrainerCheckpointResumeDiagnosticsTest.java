@@ -23,6 +23,22 @@ class TrainerCheckpointResumeDiagnosticsTest {
     }
 
     @Test
+    void recordCompatibilityMismatchNormalizesInputsBeforeDeduplicating() {
+        TrainerCheckpointResumeDiagnostics diagnostics = new TrainerCheckpointResumeDiagnostics();
+
+        diagnostics.recordCompatibilityMismatch(" model ", " signature mismatch ");
+        diagnostics.recordCompatibilityMismatch("model", "signature mismatch");
+        diagnostics.recordCompatibilityMismatch(" ", null);
+        diagnostics.recordCompatibilityMismatch(null, " ");
+
+        assertEquals(
+                List.of(
+                        "model: signature mismatch",
+                        "unknown: checkpoint compatibility mismatch"),
+                diagnostics.compatibilityMismatches());
+    }
+
+    @Test
     void compatibilityMismatchesSnapshotIsImmutable() {
         TrainerCheckpointResumeDiagnostics diagnostics = new TrainerCheckpointResumeDiagnostics();
         diagnostics.recordCompatibilityMismatch("model", "signature mismatch");
@@ -32,6 +48,35 @@ class TrainerCheckpointResumeDiagnosticsTest {
 
         assertEquals(List.of("model: signature mismatch"), snapshot);
         assertThrows(UnsupportedOperationException.class, () -> snapshot.add("optimizer: size mismatch"));
+    }
+
+    @Test
+    void manifestEntryMissingArtifactsKeepFirstOccurrenceOrderAndDeduplicate() {
+        TrainerCheckpointResumeDiagnostics diagnostics = new TrainerCheckpointResumeDiagnostics();
+
+        diagnostics.recordManifestEntryMissing("scheduler");
+        diagnostics.recordManifestEntryMissing("gradScaler");
+        diagnostics.recordManifestEntryMissing("scheduler");
+
+        List<String> snapshot = diagnostics.manifestEntryMissingArtifacts();
+        diagnostics.recordManifestEntryMissing("history");
+
+        assertEquals(List.of("scheduler", "gradScaler"), snapshot);
+        assertThrows(UnsupportedOperationException.class, () -> snapshot.add("runtime"));
+    }
+
+    @Test
+    void manifestEntryMissingArtifactsNormalizeBeforeDeduplicating() {
+        TrainerCheckpointResumeDiagnostics diagnostics = new TrainerCheckpointResumeDiagnostics();
+
+        diagnostics.recordManifestEntryMissing(" scheduler ");
+        diagnostics.recordManifestEntryMissing("scheduler");
+        diagnostics.recordManifestEntryMissing(" ");
+        diagnostics.recordManifestEntryMissing(null);
+
+        assertEquals(
+                List.of("scheduler", "unknown"),
+                diagnostics.manifestEntryMissingArtifacts());
     }
 
     @Test
@@ -56,5 +101,22 @@ class TrainerCheckpointResumeDiagnosticsTest {
         assertEquals(
                 "Missing optimizer checkpoint artifact for resume: /tmp/canonical-optimizer.state",
                 error.getMessage());
+    }
+
+    @Test
+    void missingArtifactExceptionNormalizesArtifactName() {
+        IllegalStateException trimmed = TrainerCheckpointResumeDiagnostics.missingArtifactException(
+                " optimizer ",
+                Path.of("/tmp/canonical-optimizer.state"));
+        IllegalStateException fallback = TrainerCheckpointResumeDiagnostics.missingArtifactException(
+                " ",
+                Path.of("/tmp/canonical.state"));
+
+        assertEquals(
+                "Missing optimizer checkpoint artifact for resume: /tmp/canonical-optimizer.state",
+                trimmed.getMessage());
+        assertEquals(
+                "Missing unknown checkpoint artifact for resume: /tmp/canonical.state",
+                fallback.getMessage());
     }
 }

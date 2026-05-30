@@ -37,6 +37,14 @@ final class ClassificationTrainingMetrics {
         return () -> new TopKAccuracyMetric(k);
     }
 
+    static Supplier<TrainingMetric> classificationLogLoss() {
+        return ClassificationLogLossMetric::new;
+    }
+
+    static Supplier<TrainingMetric> classificationCrossEntropy() {
+        return classificationLogLoss();
+    }
+
     static Supplier<TrainingMetric> precision() {
         return PrecisionMetric::new;
     }
@@ -299,6 +307,107 @@ final class ClassificationTrainingMetrics {
         @Override
         public double value() {
             return total == 0 ? Double.NaN : (double) correct / total;
+        }
+    }
+
+    private static final class ClassificationLogLossMetric implements DetailedTrainingMetric {
+        private int classes = -1;
+        private long samples;
+        private double totalLogLoss;
+        private double correctClassProbabilitySum;
+        private double maximumSampleLogLoss;
+
+        @Override
+        public String name() {
+            return "classification_log_loss";
+        }
+
+        @Override
+        public void reset() {
+            classes = -1;
+            samples = 0L;
+            totalLogLoss = 0.0;
+            correctClassProbabilitySum = 0.0;
+            maximumSampleLogLoss = 0.0;
+        }
+
+        @Override
+        public void update(GradTensor predictions, GradTensor targets) {
+            long[] predictionShape = predictions.shape();
+            if (predictionShape.length != 2) {
+                throw new IllegalArgumentException(
+                        name() + " expects predictions shaped [batch, classes], got "
+                                + Arrays.toString(predictionShape));
+            }
+            int batch = Math.toIntExact(predictionShape[0]);
+            int currentClasses = Math.toIntExact(predictionShape[1]);
+            ensureClassStorage(currentClasses);
+            float[] predictionData = predictions.data();
+            for (int row = 0; row < batch; row++) {
+                int offset = row * currentClasses;
+                double maxLogit = Double.NEGATIVE_INFINITY;
+                for (int classIndex = 0; classIndex < currentClasses; classIndex++) {
+                    double logit = predictionData[offset + classIndex];
+                    if (!Double.isFinite(logit)) {
+                        throw new IllegalArgumentException(
+                                name() + " expects finite logits, got " + logit
+                                        + " at sample " + row + ", class " + classIndex);
+                    }
+                    maxLogit = Math.max(maxLogit, logit);
+                }
+
+                double sumExp = 0.0;
+                for (int classIndex = 0; classIndex < currentClasses; classIndex++) {
+                    sumExp += Math.exp(predictionData[offset + classIndex] - maxLogit);
+                }
+                double logSumExp = maxLogit + Math.log(sumExp);
+                int targetClass = TrainingMetricChecks.targetClass(targets, row, batch, currentClasses);
+                double sampleLogLoss = logSumExp - predictionData[offset + targetClass];
+                totalLogLoss += sampleLogLoss;
+                correctClassProbabilitySum += Math.exp(-sampleLogLoss);
+                maximumSampleLogLoss = Math.max(maximumSampleLogLoss, sampleLogLoss);
+                samples++;
+            }
+        }
+
+        @Override
+        public double value() {
+            return samples == 0L ? Double.NaN : totalLogLoss / samples;
+        }
+
+        @Override
+        public Map<String, Object> details() {
+            double logLoss = value();
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("type", "classification_log_loss");
+            details.put("classes", Math.max(0, classes));
+            details.put("samples", samples);
+            details.put("logLoss", samples == 0L ? null : logLoss);
+            details.put("crossEntropy", samples == 0L ? null : logLoss);
+            details.put("negativeLogLikelihood", samples == 0L ? null : logLoss);
+            details.put("perplexity", samples == 0L ? null : finiteExpOrNull(logLoss));
+            details.put(
+                    "meanCorrectClassProbability",
+                    samples == 0L ? null : correctClassProbabilitySum / samples);
+            details.put("maximumSampleLogLoss", samples == 0L ? null : maximumSampleLogLoss);
+            details.put("input", "logits");
+            return Collections.unmodifiableMap(details);
+        }
+
+        private void ensureClassStorage(int currentClasses) {
+            if (classes < 0) {
+                classes = currentClasses;
+                return;
+            }
+            if (classes != currentClasses) {
+                throw new IllegalArgumentException(
+                        name() + " expected " + classes + " classes but got " + currentClasses);
+            }
+        }
+
+        private static Double finiteExpOrNull(double value) {
+            double result = Math.exp(value);
+            return Double.isFinite(result) ? result : null;
         }
     }
 

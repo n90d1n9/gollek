@@ -16,11 +16,23 @@ class TrainerTensorDiagnosticsTest {
     @Test
     void tensorsSummarizeCountsL2NormAndMaxAbs() {
         TensorDiagnostics diagnostics = TrainerTensorDiagnostics.tensors(List.of(
-                GradTensor.of(new float[] {3f, -4f}, 2),
+                GradTensor.of(new float[] {3f, 0f, -4f}, 3),
                 GradTensor.of(new float[] {12f}, 1)));
 
         assertEquals(2, diagnostics.tensorCount());
-        assertEquals(3L, diagnostics.valueCount());
+        assertEquals(4L, diagnostics.valueCount());
+        assertEquals(1L, diagnostics.zeroCount());
+        assertEquals(3L, diagnostics.nonZeroCount());
+        assertEquals(4L, diagnostics.finiteCount());
+        assertEquals(0L, diagnostics.nonFiniteCount());
+        assertEquals(0L, diagnostics.nanCount());
+        assertEquals(0L, diagnostics.positiveInfinityCount());
+        assertEquals(0L, diagnostics.negativeInfinityCount());
+        assertEquals(0.0, diagnostics.nonFiniteFraction(), 1e-9);
+        assertEquals(0.25, diagnostics.zeroFraction(), 1e-9);
+        assertEquals(19.0, diagnostics.sumAbs(), 1e-6);
+        assertEquals(4.75, diagnostics.meanAbs(), 1e-6);
+        assertEquals(6.5, diagnostics.rms(), 1e-6);
         assertEquals(13.0, diagnostics.l2Norm(), 1e-6);
         assertEquals(12.0, diagnostics.maxAbs(), 1e-6);
     }
@@ -35,8 +47,45 @@ class TrainerTensorDiagnosticsTest {
 
         assertEquals(2, diagnostics.tensorCount());
         assertEquals(3L, diagnostics.valueCount());
+        assertEquals(0L, diagnostics.zeroCount());
+        assertEquals(0.0, diagnostics.zeroFraction(), 1e-9);
+        assertEquals(5.0, diagnostics.sumAbs(), 1e-6);
+        assertEquals(5.0 / 3.0, diagnostics.meanAbs(), 1e-6);
+        assertEquals(Math.sqrt(3.0), diagnostics.rms(), 1e-6);
         assertEquals(3.0, diagnostics.l2Norm(), 1e-6);
         assertEquals(2.0, diagnostics.maxAbs(), 1e-6);
+    }
+
+    @Test
+    void parameterUpdatesSummarizeExactDeltasFromSnapshot() {
+        List<Parameter> parameters = List.of(
+                new Parameter(GradTensor.of(new float[] {1f, -2f}, 2)),
+                new Parameter(GradTensor.of(new float[] {3f}, 1)));
+        List<float[]> beforeStep = TrainerTensorDiagnostics.snapshotParameters(parameters);
+        parameters.get(0).data().data()[0] = 1.5f;
+        parameters.get(0).data().data()[1] = -2f;
+        parameters.get(1).data().data()[0] = 1f;
+
+        TensorDiagnostics diagnostics = TrainerTensorDiagnostics.parameterUpdates(parameters, beforeStep);
+
+        assertEquals(2, diagnostics.tensorCount());
+        assertEquals(3L, diagnostics.valueCount());
+        assertEquals(1L, diagnostics.zeroCount());
+        assertEquals(2.5, diagnostics.sumAbs(), 1e-6);
+        assertEquals(Math.sqrt(4.25), diagnostics.l2Norm(), 1e-6);
+        assertEquals(2.0, diagnostics.maxAbs(), 1e-6);
+        assertEquals(2.5 / 3.0, diagnostics.meanAbs(), 1e-6);
+        assertEquals(Math.sqrt(4.25) / Math.sqrt(3.0), diagnostics.rms(), 1e-6);
+    }
+
+    @Test
+    void parameterUpdatesRequireMatchingSnapshotShape() {
+        List<Parameter> parameters = List.of(new Parameter(GradTensor.of(new float[] {1f, 2f}, 2)));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> TrainerTensorDiagnostics.parameterUpdates(parameters, List.of()));
+        assertThrows(IllegalStateException.class,
+                () -> TrainerTensorDiagnostics.parameterUpdates(parameters, List.of(new float[] {1f})));
     }
 
     @Test
@@ -49,6 +98,7 @@ class TrainerTensorDiagnosticsTest {
 
         assertEquals(1, diagnostics.tensorCount());
         assertEquals(2L, diagnostics.valueCount());
+        assertEquals(0L, diagnostics.zeroCount());
         assertEquals(10.0, diagnostics.l2Norm(), 1e-6);
         assertEquals(8.0, diagnostics.maxAbs(), 1e-6);
     }
@@ -69,12 +119,20 @@ class TrainerTensorDiagnosticsTest {
     @Test
     void tensorsPreserveNonFiniteDiagnosticsForTrainerGuard() {
         TensorDiagnostics diagnostics = TrainerTensorDiagnostics.tensors(List.of(
-                GradTensor.of(new float[] {Float.POSITIVE_INFINITY}, 1)));
+                GradTensor.of(new float[] {Float.POSITIVE_INFINITY, Float.NaN, Float.NEGATIVE_INFINITY, 0f}, 4)));
 
         assertEquals(1, diagnostics.tensorCount());
-        assertEquals(1L, diagnostics.valueCount());
-        assertTrue(Double.isInfinite(diagnostics.l2Norm()));
-        assertTrue(Double.isInfinite(diagnostics.maxAbs()));
+        assertEquals(4L, diagnostics.valueCount());
+        assertEquals(1L, diagnostics.zeroCount());
+        assertEquals(1L, diagnostics.finiteCount());
+        assertEquals(3L, diagnostics.nonFiniteCount());
+        assertEquals(1L, diagnostics.nanCount());
+        assertEquals(1L, diagnostics.positiveInfinityCount());
+        assertEquals(1L, diagnostics.negativeInfinityCount());
+        assertEquals(0.75, diagnostics.nonFiniteFraction(), 1e-9);
+        assertTrue(Double.isNaN(diagnostics.representativeNonFiniteValue()));
+        assertTrue(Double.isNaN(diagnostics.l2Norm()));
+        assertTrue(Double.isNaN(diagnostics.maxAbs()));
     }
 
     @Test
@@ -82,7 +140,7 @@ class TrainerTensorDiagnosticsTest {
         RecordingFailures failures = new RecordingFailures();
 
         TrainerTensorDiagnostics.requireFinite(
-                new TensorDiagnostics(1, 2L, 3.0, 2.0),
+                new TensorDiagnostics(1, 2L, 0L, 4.0, 3.0, 2.0, 0L, 0L, 0L),
                 "train",
                 "gradient",
                 true,
@@ -97,7 +155,7 @@ class TrainerTensorDiagnosticsTest {
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
                 TrainerTensorDiagnostics.requireFinite(
-                        new TensorDiagnostics(1, 2L, Double.NaN, 2.0),
+                        new TensorDiagnostics(1, 2L, 0L, 4.0, Double.NaN, 2.0, 1L, 0L, 0L),
                         "train",
                         "gradient",
                         true,

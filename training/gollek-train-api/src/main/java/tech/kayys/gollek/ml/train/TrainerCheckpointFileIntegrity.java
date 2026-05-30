@@ -36,6 +36,23 @@ final class TrainerCheckpointFileIntegrity {
             String artifactName,
             Path artifactFile,
             int supportedManifestVersion) {
+        return manifestArtifactMismatch(manifest, artifactName, artifactFile, supportedManifestVersion, false);
+    }
+
+    static String requiredManifestArtifactMismatch(
+            Properties manifest,
+            String artifactName,
+            Path artifactFile,
+            int supportedManifestVersion) {
+        return manifestArtifactMismatch(manifest, artifactName, artifactFile, supportedManifestVersion, true);
+    }
+
+    private static String manifestArtifactMismatch(
+            Properties manifest,
+            String artifactName,
+            Path artifactFile,
+            int supportedManifestVersion,
+            boolean requireManifestEntry) {
         String versionMismatch = formatVersionMismatch(
                 manifest.getProperty("formatVersion"),
                 "checkpoint manifest",
@@ -52,7 +69,9 @@ final class TrainerCheckpointFileIntegrity {
         String expectedBytes = manifest.getProperty(prefix + "bytes");
         String expectedSha256 = manifest.getProperty(prefix + "sha256");
         if (expectedFile == null && expectedBytes == null && expectedSha256 == null) {
-            return null;
+            return requireManifestEntry
+                    ? artifactName + " checkpoint is missing from checkpoint manifest"
+                    : null;
         }
         if (expectedFile != null && !expectedFile.equals(artifactFile.getFileName().toString())) {
             return artifactName + " checkpoint file mismatch (expected "

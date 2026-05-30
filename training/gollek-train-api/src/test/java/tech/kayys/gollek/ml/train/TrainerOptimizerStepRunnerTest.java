@@ -40,7 +40,39 @@ class TrainerOptimizerStepRunnerTest {
         assertEquals(1, schedulerSteps.get());
         assertEquals(2.0, result.gradientBeforeClip().l2Norm(), 1e-6);
         assertEquals(2.0, result.gradientAfterClip().l2Norm(), 1e-6);
+        assertEquals(1.0, result.gradientClipScale(), 1e-6);
+        assertFalse(result.gradientClipped());
+        assertFalse(result.parameterUpdateDiagnosticsEnabled());
+        assertEquals(0.0, result.parameterUpdates().l2Norm(), 1e-6);
         assertEquals(8.0, result.parametersAfterStep().l2Norm(), 1e-6);
+    }
+
+    @Test
+    void canReportExactParameterUpdateDiagnosticsWhenEnabled() {
+        Parameter parameter = parameter(10f);
+        parameter.data().backward(GradTensor.of(new float[] {4f}, 1));
+        Optimizer optimizer = SGD.builder(List.of(parameter), 1.0f).build();
+
+        TrainerOptimizerStepRunner.StepResult result = new TrainerOptimizerStepRunner(
+                optimizer,
+                null,
+                0.0,
+                new RecordingFailures(),
+                () -> {
+                },
+                true).step(2);
+
+        assertTrue(result.optimizerStepApplied());
+        assertTrue(result.parameterUpdateDiagnosticsEnabled());
+        assertEquals(8.0f, parameter.data().data()[0], 1e-6f);
+        assertEquals(1, result.parameterUpdates().tensorCount());
+        assertEquals(1L, result.parameterUpdates().valueCount());
+        assertEquals(0L, result.parameterUpdates().zeroCount());
+        assertEquals(2.0, result.parameterUpdates().sumAbs(), 1e-6);
+        assertEquals(2.0, result.parameterUpdates().l2Norm(), 1e-6);
+        assertEquals(2.0, result.parameterUpdates().maxAbs(), 1e-6);
+        assertEquals(2.0, result.parameterUpdates().meanAbs(), 1e-6);
+        assertEquals(2.0, result.parameterUpdates().rms(), 1e-6);
     }
 
     @Test
@@ -90,7 +122,31 @@ class TrainerOptimizerStepRunnerTest {
         assertTrue(result.optimizerStepApplied());
         assertEquals(4.0, result.gradientBeforeClip().l2Norm(), 1e-6);
         assertTrue(result.gradientAfterClip().l2Norm() <= 1.000001);
+        assertTrue(result.gradientClipped());
+        assertEquals(1.0 / (4.0 + 1e-6), result.gradientClipScale(), 1e-7);
         assertEquals(9.0f, parameter.data().data()[0], 1e-5f);
+    }
+
+    @Test
+    void clipsGradientValueBeforeApplyingOptimizerStep() {
+        Parameter parameter = parameter(10f);
+        parameter.data().backward(GradTensor.of(new float[] {4f}, 1));
+        Optimizer optimizer = SGD.builder(List.of(parameter), 1.0f).build();
+
+        TrainerOptimizerStepRunner.StepResult result = new TrainerOptimizerStepRunner(
+                optimizer,
+                null,
+                TrainerGradientClipConfig.value(0.5),
+                new RecordingFailures(),
+                () -> { },
+                false).step(1);
+
+        assertTrue(result.optimizerStepApplied());
+        assertEquals(4.0, result.gradientBeforeClip().maxAbs(), 1e-6);
+        assertEquals(0.5, result.gradientAfterClip().maxAbs(), 1e-6);
+        assertTrue(result.gradientClipped());
+        assertEquals(1.0, result.gradientClipScale(), 1e-6);
+        assertEquals(9.5f, parameter.data().data()[0], 1e-6f);
     }
 
     @Test
@@ -109,6 +165,8 @@ class TrainerOptimizerStepRunnerTest {
         assertFalse(result.attempted());
         assertFalse(result.pendingGradientsCleared());
         assertFalse(result.optimizerStepApplied());
+        assertFalse(result.parameterUpdateDiagnosticsEnabled());
+        assertNull(result.parameterUpdates());
         assertEquals(5.0f, parameter.data().data()[0], 1e-6f);
         assertEquals(0, schedulerSteps.get());
     }

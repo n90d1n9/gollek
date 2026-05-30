@@ -1,5 +1,6 @@
 package tech.kayys.gollek.train.diffusion.opd.adapter;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import tech.kayys.gollek.core.backend.ComputeBackend;
@@ -24,7 +25,10 @@ import tech.kayys.gollek.train.diffusion.api.DiffusionScheduler;
  * Diffusion runtime with the Java-first diffusion training stack. The
  * scheduler path is directly adaptable, while the UNet path requires an
  * explicit tensor bridge because the stable-diffusion-native runner uses
- * {@link AccelTensor} and OPD uses core {@link Tensor}.
+ * {@link AccelTensor} and OPD uses core {@link Tensor}. This is the
+ * non-Java-native sibling of {@link RunnerDiffusionAdapters}: use it when the
+ * runner surface comes from the safetensor Stable Diffusion stack rather than
+ * the core Java diffusion contracts.
  */
 public final class StableDiffusionRunnerAdapters {
 
@@ -354,7 +358,7 @@ public final class StableDiffusionRunnerAdapters {
         }
 
         @Override
-        public java.util.List<Tensor> split(Tensor a, int axis, int parts) {
+        public List<Tensor> split(Tensor a, int axis, int parts) {
             throw unsupported();
         }
 

@@ -19,13 +19,31 @@ final class TrainerCheckpointArtifactIntegrity {
                 artifactName,
                 artifactFile,
                 supportedManifestVersion);
+        return result(artifactName, check);
+    }
+
+    static Result checkRequired(
+            Path manifestFile,
+            String artifactName,
+            Path artifactFile,
+            int supportedManifestVersion) {
+        TrainerCheckpointManifest.CompatibilityCheck check = TrainerCheckpointManifest.checkRequiredArtifact(
+                manifestFile,
+                artifactName,
+                artifactFile,
+                supportedManifestVersion);
+        return result(artifactName, check);
+    }
+
+    private static Result result(String artifactName, TrainerCheckpointManifest.CompatibilityCheck check) {
         return new Result(
                 artifactName,
                 check.report(),
                 check.loaded(),
                 check.missing(),
                 check.loadError(),
-                !check.report().compatible());
+                !check.report().compatible(),
+                check.manifestEntryMissing());
     }
 
     record Result(
@@ -34,9 +52,13 @@ final class TrainerCheckpointArtifactIntegrity {
             boolean manifestLoaded,
             boolean manifestMissing,
             String manifestLoadError,
-            boolean integrityMismatch) {
+            boolean integrityMismatch,
+            boolean manifestEntryMissing) {
         void recordMismatch(TrainerCheckpointResumeDiagnostics diagnostics) {
             if (integrityMismatch && diagnostics != null) {
+                if (manifestEntryMissing) {
+                    diagnostics.recordManifestEntryMissing(artifactName);
+                }
                 diagnostics.recordCompatibilityMismatch(artifactName, report.error());
             }
         }

@@ -4,6 +4,10 @@ import java.util.List;
 import java.util.Objects;
 import tech.kayys.gollek.train.diffusion.api.DiffusionTask;
 
+/**
+ * Cycles through the configured task list in a stable round-robin order for trainer loops that
+ * want simple fair task rotation without extra weighting policy.
+ */
 final class RoundRobinTaskSampler {
     private final List<DiffusionTask> tasks;
     private int nextIndex;

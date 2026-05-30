@@ -16,20 +16,20 @@ import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
  * Supports two formats:
  * <ul>
  * <li>Classification: directory with one subdirectory per class</li>
- * <li>Language modeling: single text file, split into fixed-length chunks</li>
+ * <li>Language modeling: single text file or packed text corpus, split into fixed-length chunks</li>
  * </ul>
  *
  * <h3>Example — classification</h3>
- * 
+ *
  * <pre>{@code
  * // Directory structure: data/pos/*.txt, data/neg/*.txt
  * var dataset = TokenizedDataset.fromDirectory(Path.of("data"), tokenizer, maxLength = 128);
  * }</pre>
  *
  * <h3>Example — language modeling</h3>
- * 
+ *
  * <pre>{@code
- * var dataset = TokenizedDataset.fromFile(Path.of("corpus.txt"), tokenizer, chunkSize = 512);
+ * var dataset = TokenizedDataset.fromDirectoryCorpus(Path.of("corpus"), tokenizer, chunkSize = 512);
  * }</pre>
  */
 public final class TokenizedDataset implements Dataset<Dataset.Sample> {
@@ -113,24 +113,125 @@ public final class TokenizedDataset implements Dataset<Dataset.Sample> {
      */
     public static TokenizedDataset fromFile(
             Path file,
-            tech.kayys.gollek.tokenizer.spi.Tokenizer tokenizer,
+            Tokenizer tokenizer,
             int chunkSize) throws IOException {
+        return fromFile(file, tokenizer, chunkSize, chunkSize);
+    }
+
+    /**
+     * Loads a language modeling dataset from a single text file with overlapping chunks.
+     *
+     * @param file      path to text file
+     * @param tokenizer tokenizer for encoding
+     * @param chunkSize number of tokens per input/target sample
+     * @param stride    step between chunk starts
+     * @return loaded dataset
+     * @throws IOException if the file cannot be read
+     */
+    public static TokenizedDataset fromFile(
+            Path file,
+            Tokenizer tokenizer,
+            int chunkSize,
+            int stride) throws IOException {
 
         String text = Files.readString(file);
-        long[] allIds = tokenizer.encode(text, tech.kayys.gollek.tokenizer.spi.EncodeOptions.defaultOptions());
-        List<Sample> samples = new ArrayList<>();
+        long[] allIds = tokenizer.encode(text, EncodeOptions.defaultOptions());
+        return new TokenizedDataset(DataLoader.causalLanguageModelingDataset(allIds, chunkSize, stride).toList());
+    }
 
-        for (int i = 0; i + chunkSize + 1 <= allIds.length; i += chunkSize) {
-            float[] input = new float[chunkSize];
-            float[] target = new float[chunkSize];
-            for (int j = 0; j < chunkSize; j++) {
-                input[j] = (float) allIds[i + j];
-                target[j] = (float) allIds[i + j + 1];
-            }
-            samples.add(new Sample(
-                    GradTensor.of(input, chunkSize),
-                    GradTensor.of(target, chunkSize)));
+    /**
+     * Loads a packed language modeling dataset from multiple text files in caller-provided order.
+     *
+     * <p>
+     * Each file is tokenized independently, then non-empty documents are packed with the tokenizer
+     * EOS token between documents before next-token windows are produced.
+     */
+    public static TokenizedDataset fromFiles(
+            List<Path> files,
+            Tokenizer tokenizer,
+            int chunkSize) throws IOException {
+        return fromFiles(files, tokenizer, chunkSize, chunkSize);
+    }
+
+    /**
+     * Loads a packed language modeling dataset from multiple text files with overlapping chunks.
+     *
+     * @param files     ordered text files to tokenize
+     * @param tokenizer tokenizer for encoding and EOS separation
+     * @param chunkSize number of tokens per input/target sample
+     * @param stride    step between chunk starts
+     * @return loaded packed corpus dataset
+     * @throws IOException if any file cannot be read
+     */
+    public static TokenizedDataset fromFiles(
+            List<Path> files,
+            Tokenizer tokenizer,
+            int chunkSize,
+            int stride) throws IOException {
+        Objects.requireNonNull(files, "files must not be null");
+        Objects.requireNonNull(tokenizer, "tokenizer must not be null");
+        long[][] documents = new long[files.size()][];
+        for (int i = 0; i < files.size(); i++) {
+            Path file = Objects.requireNonNull(files.get(i), "files[" + i + "] must not be null");
+            documents[i] = tokenizer.encode(Files.readString(file), EncodeOptions.defaultOptions());
         }
-        return new TokenizedDataset(samples);
+        return packedCorpus(tokenizer, documents, chunkSize, stride);
+    }
+
+    /**
+     * Loads a packed language modeling dataset from all {@code .txt} files under a directory.
+     *
+     * <p>
+     * Files are discovered recursively and processed in sorted path order for reproducible training.
+     */
+    public static TokenizedDataset fromDirectoryCorpus(
+            Path dir,
+            Tokenizer tokenizer,
+            int chunkSize) throws IOException {
+        return fromDirectoryCorpus(dir, tokenizer, chunkSize, chunkSize);
+    }
+
+    /**
+     * Loads a packed language modeling dataset from all {@code .txt} files under a directory with overlapping chunks.
+     */
+    public static TokenizedDataset fromDirectoryCorpus(
+            Path dir,
+            Tokenizer tokenizer,
+            int chunkSize,
+            int stride) throws IOException {
+        Objects.requireNonNull(dir, "dir must not be null");
+        List<Path> files;
+        try (var stream = Files.walk(dir)) {
+            files = stream
+                    .filter(Files::isRegularFile)
+                    .filter(TokenizedDataset::isTextFile)
+                    .sorted()
+                    .toList();
+        }
+        return fromFiles(files, tokenizer, chunkSize, stride);
+    }
+
+    private static TokenizedDataset packedCorpus(
+            Tokenizer tokenizer,
+            long[][] documents,
+            int chunkSize,
+            int stride) {
+        int eosTokenId = requireEosTokenId(tokenizer);
+        return new TokenizedDataset(
+                DataLoader.packedCausalLanguageModelingDataset(documents, eosTokenId, chunkSize, stride).toList());
+    }
+
+    private static int requireEosTokenId(Tokenizer tokenizer) {
+        Objects.requireNonNull(tokenizer, "tokenizer must not be null");
+        int eosTokenId = tokenizer.eosTokenId();
+        if (eosTokenId < 0) {
+            throw new IllegalArgumentException("tokenizer must provide a non-negative EOS token id for packed corpus loading");
+        }
+        return eosTokenId;
+    }
+
+    private static boolean isTextFile(Path path) {
+        Path fileName = path.getFileName();
+        return fileName != null && fileName.toString().endsWith(".txt");
     }
 }

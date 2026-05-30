@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -128,21 +129,14 @@ public class ImageTextDataset implements Dataset<ImageTextDataset.Sample> {
      * @see #get(int) for loading actual image-text pairs
      */
     public ImageTextDataset(Path directory) throws IOException {
-        try (var stream = Files.walk(directory)) {
-            stream.filter(Files::isRegularFile)
-                .filter(p -> {
-                    String name = p.toString().toLowerCase();
-                    return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png");
-                })
-                .forEach(imgPath -> {
-                    String imgName = imgPath.getFileName().toString();
-                    String textName = imgName.substring(0, imgName.lastIndexOf('.')) + ".txt";
-                    Path textPath = imgPath.getParent().resolve(textName);
-                    if (Files.exists(textPath)) {
-                        imagePaths.add(imgPath);
-                        textPaths.add(textPath);
-                    }
-                });
+        for (Path imagePath : MultimodalFileSupport.regularFilesWithExtensions(
+                directory,
+                MultimodalFileSupport.IMAGE_EXTENSIONS)) {
+            Path textPath = MultimodalFileSupport.sidecarTextPath(imagePath);
+            if (Files.isRegularFile(textPath)) {
+                imagePaths.add(imagePath);
+                textPaths.add(textPath);
+            }
         }
     }
 
@@ -190,5 +184,21 @@ public class ImageTextDataset implements Dataset<ImageTextDataset.Sample> {
     @Override
     public int size() {
         return imagePaths.size();
+    }
+
+    public Path getImagePath(int index) {
+        return imagePaths.get(index);
+    }
+
+    public Path getTextPath(int index) {
+        return textPaths.get(index);
+    }
+
+    public List<Path> imagePaths() {
+        return Collections.unmodifiableList(imagePaths);
+    }
+
+    public List<Path> textPaths() {
+        return Collections.unmodifiableList(textPaths);
     }
 }

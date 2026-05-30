@@ -3,6 +3,13 @@ package tech.kayys.gollek.train.diffusion.opd;
 import tech.kayys.gollek.core.tensor.Tensor;
 import tech.kayys.gollek.train.diffusion.api.DiffusionSamplerType;
 
+/**
+ * Minimal loss helpers for transition-mean supervision in DiffusionOPD.
+ *
+ * <p>This utility sits directly under {@link TransitionMeanAdapter}: adapters
+ * convert model outputs into scheduler-aligned transition means, and this
+ * helper evaluates the corresponding mean-matching objective.
+ */
 final class DiffusionOpdLosses {
 
     private DiffusionOpdLosses() {

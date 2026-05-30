@@ -30,7 +30,11 @@ class TrainerMetadataSupportTest {
     void normalizesDeviceIds() {
         assertEquals("auto", TrainerMetadataSupport.normalizeDevice(null));
         assertEquals("auto", TrainerMetadataSupport.normalizeDevice("   "));
-        assertEquals("metal-gpu", TrainerMetadataSupport.normalizeDevice(" Metal_GPU "));
+        assertEquals("auto", TrainerMetadataSupport.normalizeDevice(" GPU "));
+        assertEquals("metal", TrainerMetadataSupport.normalizeDevice(" Metal_GPU "));
+        assertEquals("metal", TrainerMetadataSupport.normalizeDevice("mps"));
+        assertEquals("cuda", TrainerMetadataSupport.normalizeDevice("nvidia"));
+        assertEquals("cpu", TrainerMetadataSupport.normalizeDevice("off"));
     }
 
     @Test

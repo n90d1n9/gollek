@@ -13,8 +13,10 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
 
 /**
@@ -23,32 +25,63 @@ import java.util.stream.IntStream;
  * @param <T> type of elements produced by this loader
  */
 public class DataLoader<T> implements Iterable<List<T>> {
+    public static final float DEFAULT_CAUSAL_LM_LABEL_IGNORE_INDEX = -100.0f;
 
     private final Dataset<? extends T> dataset;
     private final int batchSize;
     private final boolean shuffle;
     private final boolean dropLast;
+    private final IndexSampler sampler;
+    private final BatchSampler batchSampler;
 
     public DataLoader(Dataset<? extends T> dataset, int batchSize) {
         this(dataset, batchSize, false, false);
     }
 
     public DataLoader(Dataset<? extends T> dataset, int batchSize, boolean shuffle, boolean dropLast) {
+        this(dataset, batchSize, shuffle, dropLast, null);
+    }
+
+    public DataLoader(
+            Dataset<? extends T> dataset,
+            int batchSize,
+            boolean shuffle,
+            boolean dropLast,
+            IndexSampler sampler) {
+        this(dataset, batchSize, shuffle, dropLast, sampler, null);
+    }
+
+    public DataLoader(
+            Dataset<? extends T> dataset,
+            int batchSize,
+            boolean shuffle,
+            boolean dropLast,
+            IndexSampler sampler,
+            BatchSampler batchSampler) {
         this.dataset = Objects.requireNonNull(dataset, "dataset must not be null");
         if (batchSize <= 0) {
             throw new IllegalArgumentException("batchSize must be positive, got: " + batchSize);
         }
+        if (sampler != null && batchSampler != null) {
+            throw new IllegalArgumentException("sampler and batchSampler cannot both be configured");
+        }
         this.batchSize = batchSize;
         this.shuffle = shuffle;
         this.dropLast = dropLast;
+        this.sampler = sampler;
+        this.batchSampler = batchSampler;
     }
 
     @Override
     public Iterator<List<T>> iterator() {
-        int n = dataset.size();
-        List<Integer> indices = new ArrayList<>(IntStream.range(0, n).boxed().toList());
+        if (batchSampler != null) {
+            return batchSamplerIterator();
+        }
+        List<Integer> indices = sampler == null
+                ? new ArrayList<>(IntStream.range(0, dataset.size()).boxed().toList())
+                : new ArrayList<>(sampler.sample(dataset.size()));
 
-        if (shuffle) {
+        if (sampler == null && shuffle) {
             Collections.shuffle(indices, ThreadLocalRandom.current());
         }
 
@@ -69,7 +102,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
                 }
 
                 int start = current * batchSize;
-                int end = Math.min(start + batchSize, n);
+                int end = Math.min(start + batchSize, indices.size());
 
                 List<T> batch = new ArrayList<>(end - start);
                 for (int i = start; i < end; i++) {
@@ -83,8 +116,38 @@ public class DataLoader<T> implements Iterable<List<T>> {
     }
 
     public int numBatches() {
-        int n = dataset.size();
+        if (batchSampler != null) {
+            return batchSampler.batchCount(dataset.size());
+        }
+        int n = sampleCount();
         return dropLast ? n / batchSize : (int) Math.ceil((double) n / batchSize);
+    }
+
+    public int size() {
+        return dataset.size();
+    }
+
+    public int batchSize() {
+        return batchSize;
+    }
+
+    public int sampleCount() {
+        if (batchSampler != null) {
+            return batchSampler.sampleCount(dataset.size());
+        }
+        return sampler == null ? dataset.size() : sampler.sampleCount(dataset.size());
+    }
+
+    public boolean sampled() {
+        return sampler != null || batchSampler != null;
+    }
+
+    public boolean shuffle() {
+        return shuffle;
+    }
+
+    public boolean dropLast() {
+        return dropLast;
     }
 
     public <R> DataLoader<R> map(Function<? super T, ? extends R> mapper) {
@@ -100,11 +163,376 @@ public class DataLoader<T> implements Iterable<List<T>> {
                 return srcDataset.size();
             }
         };
-        return new DataLoader<>(mappedDataset, this.batchSize, this.shuffle, this.dropLast);
+        return new DataLoader<>(
+                mappedDataset,
+                this.batchSize,
+                this.shuffle,
+                this.dropLast,
+                this.sampler,
+                this.batchSampler);
+    }
+
+    private Iterator<List<T>> batchSamplerIterator() {
+        List<List<Integer>> batches = batchSampler.sampleBatches(dataset.size());
+        return new Iterator<>() {
+            private int current = 0;
+
+            @Override
+            public boolean hasNext() {
+                return current < batches.size();
+            }
+
+            @Override
+            public List<T> next() {
+                if (current >= batches.size()) {
+                    throw new NoSuchElementException();
+                }
+                List<Integer> batchIndices = batches.get(current);
+                List<T> batch = new ArrayList<>(batchIndices.size());
+                for (int index : batchIndices) {
+                    batch.add(dataset.get(index));
+                }
+                current++;
+                return batch;
+            }
+        };
+    }
+
+    public <B> CollatingDataLoader<T, B> collate(Function<? super List<T>, ? extends B> collateFn) {
+        return new CollatingDataLoader<>(this, collateFn);
     }
 
     public static TensorBuilder tensorBuilder(TensorDatasetAdapter dataset) {
         return new TensorBuilder(dataset);
+    }
+
+    public static CollateFn defaultTensorCollate() {
+        return TensorCollators.defaultPairCollate();
+    }
+
+    public static Function<List<Dataset.Sample>, Batch> sampleBatchCollate() {
+        return TensorCollators.sampleBatchCollate();
+    }
+
+    public static Function<List<Dataset.Pair<GradTensor, GradTensor>>, Batch> tensorPairBatchCollate() {
+        return TensorCollators.tensorPairBatchCollate();
+    }
+
+    public static Function<List<Dataset.Sample>, PaddedBatch> paddedSampleBatchCollate() {
+        return paddedSampleBatchCollate(0.0f, 0.0f);
+    }
+
+    public static Function<List<Dataset.Sample>, PaddedBatch> paddedSampleBatchCollate(float padValue) {
+        return paddedSampleBatchCollate(padValue, padValue);
+    }
+
+    public static Function<List<Dataset.Sample>, PaddedBatch> paddedSampleBatchCollate(
+            float inputPadValue,
+            float labelPadValue) {
+        return TensorCollators.paddedSampleBatchCollate(inputPadValue, labelPadValue);
+    }
+
+    public static Function<List<Dataset.Sample>, PaddedBatch> causalLanguageModelingBatchCollate(int padTokenId) {
+        return causalLanguageModelingBatchCollate((float) padTokenId, DEFAULT_CAUSAL_LM_LABEL_IGNORE_INDEX);
+    }
+
+    public static Function<List<Dataset.Sample>, PaddedBatch> causalLanguageModelingBatchCollate(
+            float inputPadValue,
+            float labelIgnoreIndex) {
+        return paddedSampleBatchCollate(inputPadValue, labelIgnoreIndex);
+    }
+
+    public static Function<List<Dataset.Pair<GradTensor, GradTensor>>, PaddedBatch> paddedTensorPairBatchCollate() {
+        return paddedTensorPairBatchCollate(0.0f, 0.0f);
+    }
+
+    public static Function<List<Dataset.Pair<GradTensor, GradTensor>>, PaddedBatch> paddedTensorPairBatchCollate(
+            float padValue) {
+        return paddedTensorPairBatchCollate(padValue, padValue);
+    }
+
+    public static Function<List<Dataset.Pair<GradTensor, GradTensor>>, PaddedBatch> paddedTensorPairBatchCollate(
+            float inputPadValue,
+            float labelPadValue) {
+        return TensorCollators.paddedTensorPairBatchCollate(inputPadValue, labelPadValue);
+    }
+
+    public static PaddingEfficiencyReport paddingEfficiency(Iterable<PaddedBatch> batches) {
+        return PaddingDiagnostics.paddingEfficiency(batches);
+    }
+
+    public static Dataset<Dataset.Sample> causalLanguageModelingDataset(int[] tokenIds, int sequenceLength) {
+        return LanguageModelingDatasets.causalNextToken(tokenIds, sequenceLength);
+    }
+
+    public static Dataset<Dataset.Sample> causalLanguageModelingDataset(
+            int[] tokenIds,
+            int sequenceLength,
+            int stride) {
+        return LanguageModelingDatasets.causalNextToken(tokenIds, sequenceLength, stride);
+    }
+
+    public static Dataset<Dataset.Sample> causalLanguageModelingDataset(long[] tokenIds, int sequenceLength) {
+        return LanguageModelingDatasets.causalNextToken(tokenIds, sequenceLength);
+    }
+
+    public static Dataset<Dataset.Sample> causalLanguageModelingDataset(
+            long[] tokenIds,
+            int sequenceLength,
+            int stride) {
+        return LanguageModelingDatasets.causalNextToken(tokenIds, sequenceLength, stride);
+    }
+
+    public static Dataset<Dataset.Sample> packedCausalLanguageModelingDataset(
+            int[][] tokenDocuments,
+            int eosTokenId,
+            int sequenceLength) {
+        return LanguageModelingDatasets.packedCausalNextToken(tokenDocuments, eosTokenId, sequenceLength);
+    }
+
+    public static Dataset<Dataset.Sample> packedCausalLanguageModelingDataset(
+            int[][] tokenDocuments,
+            int eosTokenId,
+            int sequenceLength,
+            int stride) {
+        return LanguageModelingDatasets.packedCausalNextToken(tokenDocuments, eosTokenId, sequenceLength, stride);
+    }
+
+    public static Dataset<Dataset.Sample> packedCausalLanguageModelingDataset(
+            long[][] tokenDocuments,
+            long eosTokenId,
+            int sequenceLength) {
+        return LanguageModelingDatasets.packedCausalNextToken(tokenDocuments, eosTokenId, sequenceLength);
+    }
+
+    public static Dataset<Dataset.Sample> packedCausalLanguageModelingDataset(
+            long[][] tokenDocuments,
+            long eosTokenId,
+            int sequenceLength,
+            int stride) {
+        return LanguageModelingDatasets.packedCausalNextToken(tokenDocuments, eosTokenId, sequenceLength, stride);
+    }
+
+    public static int sequenceLength(GradTensor tensor) {
+        return SequenceLengthSupport.sequenceLength(tensor);
+    }
+
+    public static <T> int[] sequenceLengths(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor) {
+        return SequenceLengthSupport.lengths(dataset, lengthExtractor);
+    }
+
+    public static ToIntFunction<Dataset.Sample> sampleInputLength() {
+        return SequenceLengthSupport.sampleInputLength();
+    }
+
+    public static ToIntFunction<Dataset.Sample> sampleLabelLength() {
+        return SequenceLengthSupport.sampleLabelLength();
+    }
+
+    public static ToIntFunction<Dataset.Pair<GradTensor, GradTensor>> tensorPairInputLength() {
+        return SequenceLengthSupport.tensorPairInputLength();
+    }
+
+    public static ToIntFunction<Dataset.Pair<GradTensor, GradTensor>> tensorPairLabelLength() {
+        return SequenceLengthSupport.tensorPairLabelLength();
+    }
+
+    public static int[] sampleInputLengths(Dataset<? extends Dataset.Sample> dataset) {
+        return sequenceLengths(dataset, sampleInputLength());
+    }
+
+    public static int[] sampleLabelLengths(Dataset<? extends Dataset.Sample> dataset) {
+        return sequenceLengths(dataset, sampleLabelLength());
+    }
+
+    public static int[] tensorPairInputLengths(
+            Dataset<? extends Dataset.Pair<GradTensor, GradTensor>> dataset) {
+        return sequenceLengths(dataset, tensorPairInputLength());
+    }
+
+    public static int[] tensorPairLabelLengths(
+            Dataset<? extends Dataset.Pair<GradTensor, GradTensor>> dataset) {
+        return sequenceLengths(dataset, tensorPairLabelLength());
+    }
+
+    public static WeightedRandomSampler weightedRandomSampler(
+            float[] sampleWeights,
+            int numSamples,
+            boolean replacement,
+            long seed) {
+        return new WeightedRandomSampler(sampleWeights, numSamples, replacement, seed);
+    }
+
+    public static LengthBucketBatchSampler lengthBucketBatchSampler(
+            int[] lengths,
+            int batchSize,
+            long seed) {
+        return new LengthBucketBatchSampler(lengths, batchSize, seed);
+    }
+
+    public static <T> LengthBucketBatchSampler lengthBucketBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int batchSize,
+            long seed) {
+        return lengthBucketBatchSampler(sequenceLengths(dataset, lengthExtractor), batchSize, seed);
+    }
+
+    public static LengthBucketBatchSampler lengthBucketBatchSampler(
+            int[] lengths,
+            int batchSize,
+            boolean dropLast,
+            long seed) {
+        return new LengthBucketBatchSampler(lengths, batchSize, dropLast, seed);
+    }
+
+    public static <T> LengthBucketBatchSampler lengthBucketBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int batchSize,
+            boolean dropLast,
+            long seed) {
+        return lengthBucketBatchSampler(sequenceLengths(dataset, lengthExtractor), batchSize, dropLast, seed);
+    }
+
+    public static LengthBucketBatchSampler lengthBucketBatchSampler(
+            int[] lengths,
+            int batchSize,
+            int bucketSizeMultiplier,
+            boolean shuffleBatches,
+            boolean shuffleWithinBuckets,
+            boolean dropLast,
+            long seed) {
+        return new LengthBucketBatchSampler(
+                lengths,
+                batchSize,
+                bucketSizeMultiplier,
+                shuffleBatches,
+                shuffleWithinBuckets,
+                dropLast,
+                seed);
+    }
+
+    public static <T> LengthBucketBatchSampler lengthBucketBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int batchSize,
+            int bucketSizeMultiplier,
+            boolean shuffleBatches,
+            boolean shuffleWithinBuckets,
+            boolean dropLast,
+            long seed) {
+        return lengthBucketBatchSampler(
+                sequenceLengths(dataset, lengthExtractor),
+                batchSize,
+                bucketSizeMultiplier,
+                shuffleBatches,
+                shuffleWithinBuckets,
+                dropLast,
+                seed);
+    }
+
+    public static TokenBudgetBatchSampler tokenBudgetBatchSampler(int[] lengths, int maxTokens, long seed) {
+        return new TokenBudgetBatchSampler(lengths, maxTokens, seed);
+    }
+
+    public static <T> TokenBudgetBatchSampler tokenBudgetBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int maxTokens,
+            long seed) {
+        return tokenBudgetBatchSampler(sequenceLengths(dataset, lengthExtractor), maxTokens, seed);
+    }
+
+    public static TokenBudgetBatchSampler tokenBudgetBatchSampler(
+            int[] lengths,
+            int maxTokens,
+            int maxExamples,
+            long seed) {
+        return new TokenBudgetBatchSampler(lengths, maxTokens, maxExamples, seed);
+    }
+
+    public static <T> TokenBudgetBatchSampler tokenBudgetBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int maxTokens,
+            int maxExamples,
+            long seed) {
+        return tokenBudgetBatchSampler(sequenceLengths(dataset, lengthExtractor), maxTokens, maxExamples, seed);
+    }
+
+    public static TokenBudgetBatchSampler tokenBudgetBatchSampler(
+            int[] lengths,
+            int maxTokens,
+            int maxExamples,
+            boolean shuffleBatches,
+            boolean shuffleWithinBatches,
+            long seed) {
+        return new TokenBudgetBatchSampler(
+                lengths,
+                maxTokens,
+                maxExamples,
+                shuffleBatches,
+                shuffleWithinBatches,
+                seed);
+    }
+
+    public static <T> TokenBudgetBatchSampler tokenBudgetBatchSampler(
+            Dataset<? extends T> dataset,
+            ToIntFunction<? super T> lengthExtractor,
+            int maxTokens,
+            int maxExamples,
+            boolean shuffleBatches,
+            boolean shuffleWithinBatches,
+            long seed) {
+        return tokenBudgetBatchSampler(
+                sequenceLengths(dataset, lengthExtractor),
+                maxTokens,
+                maxExamples,
+                shuffleBatches,
+                shuffleWithinBatches,
+                seed);
+    }
+
+    public static SequentialSampler sequentialSampler() {
+        return new SequentialSampler();
+    }
+
+    public static RandomSampler randomSampler(long seed) {
+        return new RandomSampler(seed);
+    }
+
+    public static RandomSampler randomSampler(int numSamples, boolean replacement, long seed) {
+        return new RandomSampler(numSamples, replacement, seed);
+    }
+
+    public static SubsetSampler subsetSampler(int... indices) {
+        return new SubsetSampler(indices);
+    }
+
+    public static DistributedSampler distributedSampler(int numReplicas, int rank) {
+        return new DistributedSampler(numReplicas, rank);
+    }
+
+    public static DistributedSampler distributedSampler(
+            int numReplicas,
+            int rank,
+            boolean shuffle,
+            boolean dropLast,
+            long seed) {
+        return new DistributedSampler(numReplicas, rank, shuffle, dropLast, seed);
+    }
+
+    public static DistributedSampler distributedSampler(
+            int numReplicas,
+            int rank,
+            boolean shuffle,
+            boolean dropLast,
+            long seed,
+            long epoch) {
+        return new DistributedSampler(numReplicas, rank, shuffle, dropLast, seed, epoch);
     }
 
     public static TensorDataset tensorDataset(GradTensor inputs, GradTensor labels) {
@@ -121,6 +549,60 @@ public class DataLoader<T> implements Iterable<List<T>> {
             values[i] = labels[i];
         }
         return GradTensor.of(values, labels.length);
+    }
+
+    public static class CollatingDataLoader<T, B> implements Iterable<B> {
+        private final DataLoader<T> loader;
+        private final Function<? super List<T>, ? extends B> collateFn;
+
+        private CollatingDataLoader(DataLoader<T> loader, Function<? super List<T>, ? extends B> collateFn) {
+            this.loader = Objects.requireNonNull(loader, "loader must not be null");
+            this.collateFn = Objects.requireNonNull(collateFn, "collateFn must not be null");
+        }
+
+        @Override
+        public Iterator<B> iterator() {
+            Iterator<List<T>> batches = loader.iterator();
+            return new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return batches.hasNext();
+                }
+
+                @Override
+                public B next() {
+                    return collateFn.apply(batches.next());
+                }
+            };
+        }
+
+        public int numBatches() {
+            return loader.numBatches();
+        }
+
+        public int size() {
+            return loader.size();
+        }
+
+        public int sampleCount() {
+            return loader.sampleCount();
+        }
+
+        public boolean sampled() {
+            return loader.sampled();
+        }
+
+        public int batchSize() {
+            return loader.batchSize();
+        }
+
+        public boolean shuffle() {
+            return loader.shuffle();
+        }
+
+        public boolean dropLast() {
+            return loader.dropLast();
+        }
     }
 
     public static float[] classWeights(int... labels) {
@@ -155,6 +637,36 @@ public class DataLoader<T> implements Iterable<List<T>> {
             counts[label]++;
         }
         return balancedClassWeights(counts, labels.length);
+    }
+
+    public static float[] classBalancedSampleWeights(int... labels) {
+        Objects.requireNonNull(labels, "labels must not be null");
+        if (labels.length == 0) {
+            throw new IllegalArgumentException("labels must contain at least one value");
+        }
+        int maxLabel = -1;
+        for (int label : labels) {
+            if (label < 0) {
+                throw new IllegalArgumentException("class labels must be non-negative, got: " + label);
+            }
+            maxLabel = Math.max(maxLabel, label);
+        }
+        float[] classWeights = classWeightsFor(maxLabel + 1, labels);
+        float[] sampleWeights = new float[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            sampleWeights[i] = classWeights[labels[i]];
+        }
+        return sampleWeights;
+    }
+
+    public static float[] binaryBalancedSampleWeights(int... labels) {
+        Objects.requireNonNull(labels, "labels must not be null");
+        for (int label : labels) {
+            if (label != 0 && label != 1) {
+                throw new IllegalArgumentException("binary labels must be 0 or 1, got: " + label);
+            }
+        }
+        return classBalancedSampleWeights(labels);
     }
 
     public static GradTensor binaryLabels(int... labels) {
@@ -855,11 +1367,11 @@ public class DataLoader<T> implements Iterable<List<T>> {
         private final List<GradTensor[]> samples;
 
         public TensorDataset(GradTensor[]... samples) {
-            this.samples = List.copyOf(Arrays.asList(samples));
+            this.samples = copySamples(samples);
         }
 
         private TensorDataset(List<GradTensor[]> samples) {
-            this.samples = List.copyOf(samples);
+            this.samples = copySamples(samples);
         }
 
         public TensorDataset(GradTensor inputs, GradTensor targets) {
@@ -909,7 +1421,8 @@ public class DataLoader<T> implements Iterable<List<T>> {
 
         @Override
         public GradTensor[] get(int index) {
-            return samples.get(index);
+            GradTensor[] sample = samples.get(index);
+            return Arrays.copyOf(sample, sample.length);
         }
 
         public TensorDatasetSplit split(double trainFraction, long seed) {
@@ -931,6 +1444,33 @@ public class DataLoader<T> implements Iterable<List<T>> {
                 }
             }
             return new TensorDatasetSplit(new TensorDataset(train), new TensorDataset(validation));
+        }
+
+        private static List<GradTensor[]> copySamples(GradTensor[]... samples) {
+            Objects.requireNonNull(samples, "samples must not be null");
+            List<GradTensor[]> copies = new ArrayList<>(samples.length);
+            for (int i = 0; i < samples.length; i++) {
+                copies.add(copySample(samples[i], "samples[" + i + "]"));
+            }
+            return List.copyOf(copies);
+        }
+
+        private static List<GradTensor[]> copySamples(List<GradTensor[]> samples) {
+            Objects.requireNonNull(samples, "samples must not be null");
+            List<GradTensor[]> copies = new ArrayList<>(samples.size());
+            for (int i = 0; i < samples.size(); i++) {
+                copies.add(copySample(samples.get(i), "samples[" + i + "]"));
+            }
+            return List.copyOf(copies);
+        }
+
+        private static GradTensor[] copySample(GradTensor[] sample, String name) {
+            Objects.requireNonNull(sample, name + " must not be null");
+            GradTensor[] copy = Arrays.copyOf(sample, sample.length);
+            for (int i = 0; i < copy.length; i++) {
+                Objects.requireNonNull(copy[i], name + "[" + i + "] must not be null");
+            }
+            return copy;
         }
     }
 
@@ -967,6 +1507,10 @@ public class DataLoader<T> implements Iterable<List<T>> {
         private boolean shuffle = false;
         private boolean dropLast = false;
         private Long shuffleSeed;
+        private boolean reshuffleEachEpoch;
+        private long initialEpoch;
+        private IndexSampler sampler;
+        private BatchSampler batchSampler;
         private CollateFn collateFn;
 
         TensorBuilder(TensorDatasetAdapter dataset) {
@@ -983,6 +1527,9 @@ public class DataLoader<T> implements Iterable<List<T>> {
 
         public TensorBuilder shuffle(boolean shuffle) {
             this.shuffle = shuffle;
+            if (!shuffle) {
+                this.reshuffleEachEpoch = false;
+            }
             return this;
         }
 
@@ -1000,6 +1547,250 @@ public class DataLoader<T> implements Iterable<List<T>> {
             return seed(seed);
         }
 
+        public TensorBuilder reshuffleEachEpoch() {
+            return reshuffleEachEpoch(true);
+        }
+
+        public TensorBuilder reshuffleEachEpoch(boolean reshuffleEachEpoch) {
+            this.reshuffleEachEpoch = reshuffleEachEpoch;
+            if (reshuffleEachEpoch) {
+                this.shuffle = true;
+            }
+            return this;
+        }
+
+        public TensorBuilder initialEpoch(long initialEpoch) {
+            if (initialEpoch < 0L) {
+                throw new IllegalArgumentException("initialEpoch must be non-negative, got: " + initialEpoch);
+            }
+            this.initialEpoch = initialEpoch;
+            return this;
+        }
+
+        public TensorBuilder startEpoch(long initialEpoch) {
+            return initialEpoch(initialEpoch);
+        }
+
+        public TensorBuilder sampler(IndexSampler sampler) {
+            this.sampler = Objects.requireNonNull(sampler, "sampler must not be null");
+            this.batchSampler = null;
+            return this;
+        }
+
+        public TensorBuilder batchSampler(BatchSampler batchSampler) {
+            this.batchSampler = Objects.requireNonNull(batchSampler, "batchSampler must not be null");
+            this.sampler = null;
+            return this;
+        }
+
+        public TensorBuilder weightedRandomSampler(
+                float[] sampleWeights,
+                int numSamples,
+                boolean replacement,
+                long seed) {
+            return sampler(DataLoader.weightedRandomSampler(sampleWeights, numSamples, replacement, seed));
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(int[] lengths, long seed) {
+            return sampler(DataLoader.lengthBucketBatchSampler(lengths, batchSize, dropLast, seed));
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(ToIntFunction<GradTensor[]> lengthExtractor, long seed) {
+            return lengthBucketBatchSampler(tensorDatasetLengths(lengthExtractor), seed);
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(int[] lengths, int batchSize, long seed) {
+            batchSize(batchSize);
+            return lengthBucketBatchSampler(lengths, seed);
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int batchSize,
+                long seed) {
+            batchSize(batchSize);
+            return lengthBucketBatchSampler(lengthExtractor, seed);
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(
+                int[] lengths,
+                int bucketSizeMultiplier,
+                boolean shuffleBatches,
+                boolean shuffleWithinBuckets,
+                long seed) {
+            return sampler(DataLoader.lengthBucketBatchSampler(
+                    lengths,
+                    batchSize,
+                    bucketSizeMultiplier,
+                    shuffleBatches,
+                    shuffleWithinBuckets,
+                    dropLast,
+                    seed));
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int bucketSizeMultiplier,
+                boolean shuffleBatches,
+                boolean shuffleWithinBuckets,
+                long seed) {
+            return lengthBucketBatchSampler(
+                    tensorDatasetLengths(lengthExtractor),
+                    bucketSizeMultiplier,
+                    shuffleBatches,
+                    shuffleWithinBuckets,
+                    seed);
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(
+                int[] lengths,
+                int batchSize,
+                int bucketSizeMultiplier,
+                boolean shuffleBatches,
+                boolean shuffleWithinBuckets,
+                boolean dropLast,
+                long seed) {
+            batchSize(batchSize);
+            dropLast(dropLast);
+            return sampler(DataLoader.lengthBucketBatchSampler(
+                    lengths,
+                    batchSize,
+                    bucketSizeMultiplier,
+                    shuffleBatches,
+                    shuffleWithinBuckets,
+                    dropLast,
+                    seed));
+        }
+
+        public TensorBuilder lengthBucketBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int batchSize,
+                int bucketSizeMultiplier,
+                boolean shuffleBatches,
+                boolean shuffleWithinBuckets,
+                boolean dropLast,
+                long seed) {
+            return lengthBucketBatchSampler(
+                    tensorDatasetLengths(lengthExtractor),
+                    batchSize,
+                    bucketSizeMultiplier,
+                    shuffleBatches,
+                    shuffleWithinBuckets,
+                    dropLast,
+                    seed);
+        }
+
+        public TensorBuilder inputLengthBucketBatchSampler(long seed) {
+            return lengthBucketBatchSampler(sample -> DataLoader.sequenceLength(sample[0]), seed);
+        }
+
+        public TensorBuilder inputLengthBucketBatchSampler(int batchSize, long seed) {
+            batchSize(batchSize);
+            return inputLengthBucketBatchSampler(seed);
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(int[] lengths, int maxTokens, long seed) {
+            return batchSampler(DataLoader.tokenBudgetBatchSampler(lengths, maxTokens, seed));
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int maxTokens,
+                long seed) {
+            return tokenBudgetBatchSampler(tensorDatasetLengths(lengthExtractor), maxTokens, seed);
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(int[] lengths, int maxTokens, int maxExamples, long seed) {
+            return batchSampler(DataLoader.tokenBudgetBatchSampler(lengths, maxTokens, maxExamples, seed));
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int maxTokens,
+                int maxExamples,
+                long seed) {
+            return tokenBudgetBatchSampler(tensorDatasetLengths(lengthExtractor), maxTokens, maxExamples, seed);
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(
+                int[] lengths,
+                int maxTokens,
+                int maxExamples,
+                boolean shuffleBatches,
+                boolean shuffleWithinBatches,
+                long seed) {
+            return batchSampler(DataLoader.tokenBudgetBatchSampler(
+                    lengths,
+                    maxTokens,
+                    maxExamples,
+                    shuffleBatches,
+                    shuffleWithinBatches,
+                    seed));
+        }
+
+        public TensorBuilder tokenBudgetBatchSampler(
+                ToIntFunction<GradTensor[]> lengthExtractor,
+                int maxTokens,
+                int maxExamples,
+                boolean shuffleBatches,
+                boolean shuffleWithinBatches,
+                long seed) {
+            return tokenBudgetBatchSampler(
+                    tensorDatasetLengths(lengthExtractor),
+                    maxTokens,
+                    maxExamples,
+                    shuffleBatches,
+                    shuffleWithinBatches,
+                    seed);
+        }
+
+        public TensorBuilder inputTokenBudgetBatchSampler(int maxTokens, long seed) {
+            return tokenBudgetBatchSampler(sample -> DataLoader.sequenceLength(sample[0]), maxTokens, seed);
+        }
+
+        public TensorBuilder inputTokenBudgetBatchSampler(int maxTokens, int maxExamples, long seed) {
+            return tokenBudgetBatchSampler(sample -> DataLoader.sequenceLength(sample[0]), maxTokens, maxExamples, seed);
+        }
+
+        public TensorBuilder sequentialSampler() {
+            return sampler(DataLoader.sequentialSampler());
+        }
+
+        public TensorBuilder randomSampler(long seed) {
+            return sampler(DataLoader.randomSampler(seed));
+        }
+
+        public TensorBuilder randomSampler(int numSamples, boolean replacement, long seed) {
+            return sampler(DataLoader.randomSampler(numSamples, replacement, seed));
+        }
+
+        public TensorBuilder subsetSampler(int... indices) {
+            return sampler(DataLoader.subsetSampler(indices));
+        }
+
+        public TensorBuilder distributedSampler(int numReplicas, int rank) {
+            return sampler(DataLoader.distributedSampler(numReplicas, rank));
+        }
+
+        public TensorBuilder distributedSampler(
+                int numReplicas,
+                int rank,
+                boolean shuffle,
+                boolean dropLast,
+                long seed) {
+            return sampler(DataLoader.distributedSampler(numReplicas, rank, shuffle, dropLast, seed));
+        }
+
+        public TensorBuilder distributedSampler(
+                int numReplicas,
+                int rank,
+                boolean shuffle,
+                boolean dropLast,
+                long seed,
+                long epoch) {
+            return sampler(DataLoader.distributedSampler(numReplicas, rank, shuffle, dropLast, seed, epoch));
+        }
+
         public TensorBuilder collateFn(CollateFn collateFn) {
             this.collateFn = collateFn;
             return this;
@@ -1007,6 +1798,20 @@ public class DataLoader<T> implements Iterable<List<T>> {
 
         public TensorDataLoader build() {
             return new TensorDataLoader(this);
+        }
+
+        private int[] tensorDatasetLengths(ToIntFunction<GradTensor[]> lengthExtractor) {
+            Objects.requireNonNull(lengthExtractor, "lengthExtractor must not be null");
+            int[] lengths = new int[dataset.size()];
+            for (int i = 0; i < lengths.length; i++) {
+                GradTensor[] sample = Objects.requireNonNull(dataset.get(i), "dataset sample must not be null");
+                int length = lengthExtractor.applyAsInt(sample);
+                if (length < 0) {
+                    throw new IllegalArgumentException("sequence lengths must be non-negative, got: " + length);
+                }
+                lengths[i] = length;
+            }
+            return lengths;
         }
     }
 
@@ -1016,7 +1821,12 @@ public class DataLoader<T> implements Iterable<List<T>> {
         private final boolean shuffle;
         private final boolean dropLast;
         private final Long shuffleSeed;
+        private final boolean reshuffleEachEpoch;
+        private final long initialEpoch;
+        private final IndexSampler sampler;
+        private final BatchSampler batchSampler;
         private final CollateFn collateFn;
+        private final AtomicLong epochCounter;
 
         private TensorDataLoader(TensorBuilder builder) {
             this.dataset = Objects.requireNonNull(builder.dataset, "dataset must not be null");
@@ -1024,19 +1834,45 @@ public class DataLoader<T> implements Iterable<List<T>> {
             this.shuffle = builder.shuffle;
             this.dropLast = builder.dropLast;
             this.shuffleSeed = builder.shuffleSeed;
+            this.reshuffleEachEpoch = builder.reshuffleEachEpoch;
+            if (builder.initialEpoch < 0L) {
+                throw new IllegalArgumentException("initialEpoch must be non-negative, got: " + builder.initialEpoch);
+            }
+            this.initialEpoch = builder.initialEpoch;
+            this.epochCounter = new AtomicLong(initialEpoch);
+            this.sampler = builder.sampler;
+            this.batchSampler = builder.batchSampler;
             this.collateFn = builder.collateFn != null ? builder.collateFn : defaultCollate();
         }
 
         @Override
         public Iterator<Batch> iterator() {
-            int n = dataset.size();
-            List<Integer> indices = new ArrayList<>(IntStream.range(0, n).boxed().toList());
+            return iterator(nextEpoch());
+        }
 
-            if (shuffle) {
-                if (shuffleSeed == null) {
+        public Iterable<Batch> epoch(long epoch) {
+            requireEpoch(epoch);
+            return () -> iterator(epoch);
+        }
+
+        private Iterator<Batch> iterator(long epoch) {
+            requireEpoch(epoch);
+            if (batchSampler != null) {
+                return batchSamplerIterator();
+            }
+            List<Integer> indices = sampler == null
+                    ? new ArrayList<>(IntStream.range(0, dataset.size()).boxed().toList())
+                    : new ArrayList<>(sampler.sample(dataset.size()));
+
+            if (sampler == null && shuffle) {
+                Long epochSeed = DataLoaderShuffleSeeds.forEpoch(
+                        shuffleSeed,
+                        reshuffleEachEpoch,
+                        epoch);
+                if (epochSeed == null) {
                     Collections.shuffle(indices, ThreadLocalRandom.current());
                 } else {
-                    Collections.shuffle(indices, new Random(shuffleSeed));
+                    Collections.shuffle(indices, new Random(epochSeed));
                 }
             }
 
@@ -1057,7 +1893,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
                     }
 
                     int start = current * batchSize;
-                    int end = Math.min(start + batchSize, n);
+                    int end = Math.min(start + batchSize, indices.size());
                     List<Integer> batchIndices = indices.subList(start, end);
 
                     current++;
@@ -1067,7 +1903,10 @@ public class DataLoader<T> implements Iterable<List<T>> {
         }
 
         public int numBatches() {
-            int n = dataset.size();
+            if (batchSampler != null) {
+                return batchSampler.batchCount(dataset.size());
+            }
+            int n = sampleCount();
             return dropLast ? n / batchSize : (int) Math.ceil((double) n / batchSize);
         }
 
@@ -1079,6 +1918,17 @@ public class DataLoader<T> implements Iterable<List<T>> {
             return batchSize;
         }
 
+        public int sampleCount() {
+            if (batchSampler != null) {
+                return batchSampler.sampleCount(dataset.size());
+            }
+            return sampler == null ? dataset.size() : sampler.sampleCount(dataset.size());
+        }
+
+        public boolean sampled() {
+            return sampler != null || batchSampler != null;
+        }
+
         public boolean shuffle() {
             return shuffle;
         }
@@ -1087,27 +1937,45 @@ public class DataLoader<T> implements Iterable<List<T>> {
             return dropLast;
         }
 
+        public boolean reshuffleEachEpoch() {
+            return reshuffleEachEpoch;
+        }
+
+        public long initialEpoch() {
+            return initialEpoch;
+        }
+
+        private long nextEpoch() {
+            return reshuffleEachEpoch ? epochCounter.getAndIncrement() : initialEpoch;
+        }
+
+        private static void requireEpoch(long epoch) {
+            if (epoch < 0L) {
+                throw new IllegalArgumentException("epoch must be non-negative, got: " + epoch);
+            }
+        }
+
         private static CollateFn defaultCollate() {
-            return (indices, ds) -> {
-                int numSamples = ds.size(indices);
-                int numTensors = ds.get(0).length;
-                if (numTensors < 2) {
-                    throw new IllegalStateException("TensorDataset must have at least 2 tensors (input and label)");
+            return TensorCollators.defaultPairCollate();
+        }
+
+        private Iterator<Batch> batchSamplerIterator() {
+            List<List<Integer>> batches = batchSampler.sampleBatches(dataset.size());
+            return new Iterator<>() {
+                private int current = 0;
+
+                @Override
+                public boolean hasNext() {
+                    return current < batches.size();
                 }
 
-                GradTensor[] inputSamples = new GradTensor[numSamples];
-                GradTensor[] labelSamples = new GradTensor[numSamples];
-
-                for (int i = 0; i < numSamples; i++) {
-                    GradTensor[] sample = ds.get(indices.get(i));
-                    inputSamples[i] = sample[0];
-                    labelSamples[i] = sample[1];
+                @Override
+                public Batch next() {
+                    if (current >= batches.size()) {
+                        throw new NoSuchElementException();
+                    }
+                    return collateFn.collate(batches.get(current++), dataset);
                 }
-
-                return new Batch(
-                    GradTensor.stack(0, inputSamples),
-                    GradTensor.stack(0, labelSamples)
-                );
             };
         }
     }
@@ -1126,6 +1994,86 @@ public class DataLoader<T> implements Iterable<List<T>> {
         @Override
         public GradTensor labels() {
             return labels;
+        }
+    }
+
+    public record PaddedBatch(
+            GradTensor inputs,
+            GradTensor labels,
+            GradTensor inputMask,
+            GradTensor labelMask,
+            int[] inputLengths,
+            int[] labelLengths) {
+        public PaddedBatch {
+            Objects.requireNonNull(inputs, "inputs must not be null");
+            Objects.requireNonNull(labels, "labels must not be null");
+            Objects.requireNonNull(inputMask, "inputMask must not be null");
+            Objects.requireNonNull(labelMask, "labelMask must not be null");
+            inputLengths = Objects.requireNonNull(inputLengths, "inputLengths must not be null").clone();
+            labelLengths = Objects.requireNonNull(labelLengths, "labelLengths must not be null").clone();
+            validatePaddedTensor("inputs", inputs, inputMask, inputLengths);
+            validatePaddedTensor("labels", labels, labelMask, labelLengths);
+        }
+
+        public Batch batch() {
+            return new Batch(inputs, labels);
+        }
+
+        public PaddingStats inputPaddingStats() {
+            return PaddingStats.fromLengths(paddedLength("inputs", inputs), inputLengths);
+        }
+
+        public PaddingStats labelPaddingStats() {
+            return PaddingStats.fromLengths(paddedLength("labels", labels), labelLengths);
+        }
+
+        public PaddingEfficiencyReport paddingEfficiency() {
+            return new PaddingEfficiencyReport(inputPaddingStats(), labelPaddingStats());
+        }
+
+        @Override
+        public int[] inputLengths() {
+            return inputLengths.clone();
+        }
+
+        @Override
+        public int[] labelLengths() {
+            return labelLengths.clone();
+        }
+
+        private static void validatePaddedTensor(
+                String name,
+                GradTensor values,
+                GradTensor mask,
+                int[] lengths) {
+            long[] valueShape = values.shape();
+            if (valueShape.length < 2) {
+                throw new IllegalArgumentException(name + " must include batch and padded sequence dimensions");
+            }
+            if (valueShape[0] != lengths.length) {
+                throw new IllegalArgumentException(name + " batch dimension must match lengths");
+            }
+            long[] maskShape = mask.shape();
+            if (maskShape.length != 2 || maskShape[0] != valueShape[0]) {
+                throw new IllegalArgumentException(name + " mask must be shaped [batch, maxLength]");
+            }
+            long maxLength = valueShape[1];
+            if (maskShape[1] != maxLength) {
+                throw new IllegalArgumentException(name + " mask length must match padded sequence length");
+            }
+            for (int length : lengths) {
+                if (length < 0 || length > maxLength) {
+                    throw new IllegalArgumentException(name + " lengths must be within the padded sequence length");
+                }
+            }
+        }
+
+        private static int paddedLength(String name, GradTensor values) {
+            try {
+                return Math.toIntExact(values.shape()[1]);
+            } catch (ArithmeticException e) {
+                throw new IllegalArgumentException(name + " padded sequence length is too large", e);
+            }
         }
     }
 }

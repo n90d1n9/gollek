@@ -23,6 +23,19 @@ final class TrainerBatchGuards {
                 String label,
                 boolean optimizerStepSkipped);
 
+        default String nonFiniteTensor(
+                String phase,
+                String kind,
+                double value,
+                String label,
+                boolean optimizerStepSkipped,
+                long totalValueCount,
+                long nanCount,
+                long positiveInfinityCount,
+                long negativeInfinityCount) {
+            return nonFinite(phase, kind, value, label, optimizerStepSkipped);
+        }
+
         void discardPendingGradients();
     }
 
@@ -55,13 +68,40 @@ final class TrainerBatchGuards {
             boolean optimizerStepSkipped,
             FailureRecorder failures) {
         float[] values = tensor.data();
+        long nanCount = 0L;
+        long positiveInfinityCount = 0L;
+        long negativeInfinityCount = 0L;
+        double firstNonFiniteValue = Double.NaN;
         for (float value : values) {
             if (!Float.isFinite(value)) {
-                String message = failures.nonFinite(phase, kind, value, kind, optimizerStepSkipped);
-                discardGradientsIfNeeded(optimizerStepSkipped, failures);
-                throw new IllegalArgumentException(message);
+                if (Double.isNaN(firstNonFiniteValue) && nanCount == 0L
+                        && positiveInfinityCount == 0L && negativeInfinityCount == 0L) {
+                    firstNonFiniteValue = value;
+                }
+                if (Float.isNaN(value)) {
+                    nanCount++;
+                } else if (value == Float.POSITIVE_INFINITY) {
+                    positiveInfinityCount++;
+                } else {
+                    negativeInfinityCount++;
+                }
             }
         }
+        if (nanCount == 0L && positiveInfinityCount == 0L && negativeInfinityCount == 0L) {
+            return;
+        }
+        String message = failures.nonFiniteTensor(
+                phase,
+                kind,
+                firstNonFiniteValue,
+                kind,
+                optimizerStepSkipped,
+                values.length,
+                nanCount,
+                positiveInfinityCount,
+                negativeInfinityCount);
+        discardGradientsIfNeeded(optimizerStepSkipped, failures);
+        throw new IllegalArgumentException(message);
     }
 
     static String shapeString(GradTensor tensor) {

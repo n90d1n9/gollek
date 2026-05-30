@@ -36,7 +36,45 @@ class TrainerFailureStateTest {
         assertEquals("value", metadata.get("nonFiniteKind"));
         assertEquals(Double.POSITIVE_INFINITY, metadata.get("nonFiniteValue"));
         assertEquals(Boolean.TRUE, metadata.get("nonFiniteOptimizerStepSkipped"));
+        assertEquals(1L, metadata.get("nonFiniteTotalValueCount"));
+        assertEquals(1L, metadata.get("nonFiniteValueCount"));
+        assertEquals(0L, metadata.get("nonFiniteNanCount"));
+        assertEquals(1L, metadata.get("nonFinitePositiveInfinityCount"));
+        assertEquals(0L, metadata.get("nonFiniteNegativeInfinityCount"));
+        assertEquals(0L, metadata.get("nonFiniteFiniteCount"));
+        assertEquals(1.0, metadata.get("nonFiniteFraction"));
         assertEquals("non-finite-unknown-value", metadata.get("stopReason"));
+    }
+
+    @Test
+    void recordsNonFiniteTensorCountsForFailureMetadata() {
+        TrainerFailureState state = new TrainerFailureState();
+
+        String message = state.recordNonFiniteTensor(
+                "train",
+                "gradient",
+                Double.NaN,
+                "gradient",
+                true,
+                8L,
+                2L,
+                1L,
+                3L);
+
+        assertEquals("train gradient must be finite, got NaN", message);
+
+        Map<String, Object> metadata = new HashMap<>();
+        state.putMetadata(metadata);
+
+        assertEquals("train", metadata.get("nonFinitePhase"));
+        assertEquals("gradient", metadata.get("nonFiniteKind"));
+        assertEquals(8L, metadata.get("nonFiniteTotalValueCount"));
+        assertEquals(6L, metadata.get("nonFiniteValueCount"));
+        assertEquals(2L, metadata.get("nonFiniteNanCount"));
+        assertEquals(1L, metadata.get("nonFinitePositiveInfinityCount"));
+        assertEquals(3L, metadata.get("nonFiniteNegativeInfinityCount"));
+        assertEquals(2L, metadata.get("nonFiniteFiniteCount"));
+        assertEquals(0.75, metadata.get("nonFiniteFraction"));
     }
 
     @Test

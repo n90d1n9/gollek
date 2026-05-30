@@ -21,6 +21,7 @@ dependencies {
     implementation(project(":ml:gollek-ml-autograd"))
     implementation(project(":spi:gollek-spi-multimodal"))
     implementation(project(":core:gollek-tokenizer-core"))
+    implementation("com.fasterxml.jackson.core:jackson-databind")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher", version = "1.10.2")
 }

@@ -35,6 +35,30 @@ public final class GradientClipper {
     }
 
     /**
+     * Detailed clipping telemetry for trainer logs, callbacks, and checkpoint
+     * diagnostics.
+     *
+     * @param preClipNorm  global L2 gradient norm before clipping
+     * @param postClipNorm global L2 gradient norm after clipping
+     * @param maxNorm      configured clipping threshold
+     * @param scale        multiplier applied to gradients
+     * @param clipped      whether gradients were actually rescaled
+     */
+    public record ClipResult(float preClipNorm, float postClipNorm, float maxNorm, float scale, boolean clipped) {
+    }
+
+    /**
+     * Computes the current global L2 gradient norm without mutating gradients.
+     *
+     * @param params list of parameters whose gradients to inspect
+     * @return global L2 norm across all non-null gradient buffers
+     */
+    public static float totalNorm(List<Parameter> params) {
+        OptimizerValidation.requireStepInputs(params, "GradientClipper");
+        return (float) Math.sqrt(totalSquaredNorm(params));
+    }
+
+    /**
      * Clips gradients by global L2 norm.
      *
      * <p>
@@ -50,23 +74,30 @@ public final class GradientClipper {
      * @return the pre-clipping total gradient norm
      */
     public static float clipByNorm(List<Parameter> params, float maxNorm) {
+        return clipByNormDetailed(params, maxNorm).preClipNorm();
+    }
+
+    /**
+     * Clips gradients by global L2 norm and returns detailed telemetry.
+     *
+     * <p>
+     * The existing {@link #clipByNorm(List, float)} API remains intentionally
+     * small. This richer variant is meant for trainers that need to log or react
+     * to exploding gradients.
+     *
+     * @param params  list of parameters whose gradients to clip
+     * @param maxNorm maximum allowed gradient norm (must be positive)
+     * @return clipping telemetry, including pre/post norm and applied scale
+     */
+    public static ClipResult clipByNormDetailed(List<Parameter> params, float maxNorm) {
         OptimizerValidation.finitePositive(maxNorm, "maxNorm");
         OptimizerValidation.requireStepInputs(params, "GradientClipper");
-        // Compute total squared norm using VectorOps dot-product
-        float totalSq = 0f;
-        for (Parameter p : params) {
-            if (p.data().grad() == null)
-                continue;
-            float[] g = p.data().grad().data();
-            // sum(g * g) via VectorOps mul then sum
-            float[] sq = new float[g.length];
-            VectorOps.mul(g, g, sq);
-            totalSq += VectorOps.sum(sq);
-        }
-        float totalNorm = (float) Math.sqrt(totalSq);
+        float preClipNorm = (float) Math.sqrt(totalSquaredNorm(params));
+        float scale = 1.0f;
+        boolean clipped = preClipNorm > maxNorm;
 
-        if (totalNorm > maxNorm) {
-            float scale = maxNorm / (totalNorm + 1e-6f);
+        if (clipped) {
+            scale = maxNorm / (preClipNorm + 1e-6f);
             for (Parameter p : params) {
                 if (p.data().grad() == null)
                     continue;
@@ -74,7 +105,9 @@ public final class GradientClipper {
                 VectorOps.mulScalar(g, scale, g);
             }
         }
-        return totalNorm;
+
+        float postClipNorm = clipped ? (float) Math.sqrt(totalSquaredNorm(params)) : preClipNorm;
+        return new ClipResult(preClipNorm, postClipNorm, maxNorm, scale, clipped);
     }
 
     /**
@@ -106,5 +139,18 @@ public final class GradientClipper {
                     g[i] = maxVal;
             }
         }
+    }
+
+    private static float totalSquaredNorm(List<Parameter> params) {
+        float totalSq = 0f;
+        for (Parameter p : params) {
+            if (p.data().grad() == null)
+                continue;
+            float[] g = p.data().grad().data();
+            for (float v : g) {
+                totalSq += v * v;
+            }
+        }
+        return totalSq;
     }
 }

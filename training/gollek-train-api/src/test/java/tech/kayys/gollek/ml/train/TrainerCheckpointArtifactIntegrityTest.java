@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class TrainerCheckpointArtifactIntegrityTest {
         assertFalse(result.manifestMissing());
         assertNull(result.manifestLoadError());
         assertFalse(result.integrityMismatch());
+        assertFalse(result.manifestEntryMissing());
     }
 
     @Test
@@ -53,6 +55,40 @@ class TrainerCheckpointArtifactIntegrityTest {
         assertTrue(result.manifestMissing());
         assertNull(result.manifestLoadError());
         assertFalse(result.integrityMismatch());
+        assertFalse(result.manifestEntryMissing());
+    }
+
+    @Test
+    void checkRequiredReportsMissingManifestEntryAsMismatch() throws Exception {
+        Path artifact = Files.writeString(tempDir.resolve("scheduler.state"), "state");
+        Path manifest = tempDir.resolve("manifest.properties");
+        Properties properties = new Properties();
+        properties.setProperty("formatVersion", "1");
+        try (var writer = Files.newBufferedWriter(manifest, StandardCharsets.UTF_8)) {
+            properties.store(writer, "test");
+        }
+
+        TrainerCheckpointArtifactIntegrity.Result result = TrainerCheckpointArtifactIntegrity.checkRequired(
+                manifest,
+                "scheduler",
+                artifact,
+                1);
+
+        assertFalse(result.report().compatible());
+        assertTrue(result.manifestLoaded());
+        assertFalse(result.manifestMissing());
+        assertEquals(
+                "scheduler checkpoint is missing from checkpoint manifest",
+                result.report().error());
+        assertTrue(result.integrityMismatch());
+        assertTrue(result.manifestEntryMissing());
+
+        TrainerCheckpointResumeDiagnostics diagnostics = new TrainerCheckpointResumeDiagnostics();
+        result.recordMismatch(diagnostics);
+        assertEquals(List.of("scheduler"), diagnostics.manifestEntryMissingArtifacts());
+        assertEquals(
+                "scheduler: scheduler checkpoint is missing from checkpoint manifest",
+                diagnostics.compatibilityMismatches().getFirst());
     }
 
     @Test
@@ -75,11 +111,13 @@ class TrainerCheckpointArtifactIntegrityTest {
         assertTrue(result.manifestLoaded());
         assertFalse(result.manifestMissing());
         assertTrue(result.integrityMismatch());
+        assertFalse(result.manifestEntryMissing());
         assertEquals(
                 "history checkpoint size mismatch (expected 999 bytes, got 8 bytes)",
                 result.report().error());
         assertEquals(
                 "history: history checkpoint size mismatch (expected 999 bytes, got 8 bytes)",
                 diagnostics.compatibilityMismatches().getFirst());
+        assertTrue(diagnostics.manifestEntryMissingArtifacts().isEmpty());
     }
 }

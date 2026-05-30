@@ -25,7 +25,14 @@ final class TrainerMetadataSupport {
         if (deviceId == null || deviceId.isBlank()) {
             return "auto";
         }
-        return deviceId.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        String value = deviceId.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        return switch (value) {
+            case "auto", "gpu", "accelerated", "default" -> "auto";
+            case "cpu", "java", "none", "off", "disable", "disabled" -> "cpu";
+            case "metal", "mps", "apple", "apple-metal", "apple-gpu", "metal-gpu" -> "metal";
+            case "cuda", "nvidia", "gpu-nvidia", "nvidia-cuda" -> "cuda";
+            default -> value;
+        };
     }
 
     static int readInt(Object value, int fallback) {

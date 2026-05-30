@@ -14,6 +14,9 @@ public record DiffusionOpdBundleGeneratedFile(
         String columns,
         String entryColumns) {
 
+    /**
+     * Adapts one raw generated-file manifest entry into the typed generated-file record.
+     */
     public static DiffusionOpdBundleGeneratedFile fromMap(Map<String, Object> map) {
         return new DiffusionOpdBundleGeneratedFile(
                 stringValue(map, "name"),
@@ -24,6 +27,9 @@ public record DiffusionOpdBundleGeneratedFile(
                 stringValue(map, "entryColumns"));
     }
 
+    /**
+     * Converts this typed generated-file record back into the normalized manifest-entry map shape.
+     */
     public Map<String, Object> toMap() {
         LinkedHashMap<String, Object> value = new LinkedHashMap<>();
         value.put("name", name);

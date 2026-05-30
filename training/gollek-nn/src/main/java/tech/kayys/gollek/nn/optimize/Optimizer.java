@@ -43,6 +43,12 @@ import java.util.Map;
  * <ul>
  *   <li><b>SGD:</b> Simple stochastic gradient descent with optional momentum</li>
  *   <li><b>AdamW:</b> Adam optimizer with decoupled weight decay (recommended)</li>
+ *   <li><b>NAdam:</b> Adam with Nesterov-accelerated first moment</li>
+ *   <li><b>RAdam:</b> Rectified Adam for lower-variance warmup behavior</li>
+ *   <li><b>LAMB:</b> Layer-wise adaptive moments for large-batch training</li>
+ *   <li><b>Lion:</b> Memory-efficient sign-based optimizer</li>
+ *   <li><b>Adagrad:</b> Sparse-feature adaptive learning rates</li>
+ *   <li><b>Adadelta:</b> Windowed adaptive learning rates without manual lr tuning</li>
  *   <li><b>Adam:</b> Adaptive moment estimation (in development)</li>
  *   <li><b>RMSprop:</b> Root mean square propagation (in development)</li>
  * </ul>
@@ -82,6 +88,12 @@ import java.util.Map;
  *
  * @see tech.kayys.gollek.ml.optim.SGD
  * @see tech.kayys.gollek.ml.optim.AdamW
+ * @see tech.kayys.gollek.ml.optim.NAdam
+ * @see tech.kayys.gollek.ml.optim.RAdam
+ * @see tech.kayys.gollek.ml.optim.LAMB
+ * @see tech.kayys.gollek.ml.optim.Lion
+ * @see tech.kayys.gollek.ml.optim.Adagrad
+ * @see tech.kayys.gollek.ml.optim.Adadelta
  */
 public interface Optimizer {
 

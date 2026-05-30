@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Properties;
 
 /**
@@ -21,16 +20,7 @@ final class TrainerCheckpointManifest {
             Map<String, Path> artifacts,
             int formatVersion,
             Instant generatedAt) throws IOException {
-        Objects.requireNonNull(artifacts, "artifacts must not be null");
-        Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-
-        Properties manifest = new Properties();
-        manifest.setProperty("formatVersion", Integer.toString(formatVersion));
-        manifest.setProperty("generatedAt", generatedAt.toString());
-        for (Map.Entry<String, Path> artifact : artifacts.entrySet()) {
-            addArtifact(manifest, artifact.getKey(), artifact.getValue());
-        }
-        return manifest;
+        return TrainerArtifactManifest.build(artifacts, formatVersion, generatedAt);
     }
 
     static void write(
@@ -41,10 +31,11 @@ final class TrainerCheckpointManifest {
         if (manifestFile == null) {
             return;
         }
-        Properties manifest = build(artifacts, formatVersion, generatedAt);
-        TrainerCheckpointIO.writePropertiesAtomically(
+        TrainerArtifactManifest.write(
                 manifestFile,
-                manifest,
+                artifacts,
+                formatVersion,
+                generatedAt,
                 "Gollek canonical trainer checkpoint manifest");
     }
 
@@ -53,6 +44,23 @@ final class TrainerCheckpointManifest {
             String artifactName,
             Path artifactFile,
             int supportedManifestVersion) {
+        return checkArtifact(manifestFile, artifactName, artifactFile, supportedManifestVersion, false);
+    }
+
+    static CompatibilityCheck checkRequiredArtifact(
+            Path manifestFile,
+            String artifactName,
+            Path artifactFile,
+            int supportedManifestVersion) {
+        return checkArtifact(manifestFile, artifactName, artifactFile, supportedManifestVersion, true);
+    }
+
+    private static CompatibilityCheck checkArtifact(
+            Path manifestFile,
+            String artifactName,
+            Path artifactFile,
+            int supportedManifestVersion,
+            boolean requireManifestEntry) {
         if (manifestFile == null || artifactFile == null || !Files.isRegularFile(artifactFile)) {
             return CompatibilityCheck.ok(false, false, null);
         }
@@ -68,38 +76,52 @@ final class TrainerCheckpointManifest {
             return CompatibilityCheck.incompatible(message, false, false, error.getMessage());
         }
 
-        String mismatch = TrainerCheckpointFileIntegrity.manifestArtifactMismatch(
-                manifest,
-                artifactName,
-                artifactFile,
-                supportedManifestVersion);
+        if (requireManifestEntry && !hasArtifactEntry(manifest, artifactName)) {
+            return CompatibilityCheck.incompatible(
+                    artifactName + " checkpoint is missing from checkpoint manifest",
+                    true,
+                    false,
+                    null,
+                    true);
+        }
+
+        String mismatch = requireManifestEntry
+                ? TrainerCheckpointFileIntegrity.requiredManifestArtifactMismatch(
+                        manifest,
+                        artifactName,
+                        artifactFile,
+                        supportedManifestVersion)
+                : TrainerCheckpointFileIntegrity.manifestArtifactMismatch(
+                        manifest,
+                        artifactName,
+                        artifactFile,
+                        supportedManifestVersion);
         if (mismatch != null) {
             return CompatibilityCheck.incompatible(mismatch, true, false, null);
         }
         return CompatibilityCheck.ok(true, false, null);
     }
 
-    private static void addArtifact(Properties manifest, String artifactName, Path artifactFile) throws IOException {
-        if (artifactFile == null || !Files.isRegularFile(artifactFile)) {
-            return;
-        }
+    private static boolean hasArtifactEntry(Properties manifest, String artifactName) {
         String prefix = "artifact." + artifactName + '.';
-        manifest.setProperty(prefix + "file", artifactFile.getFileName().toString());
-        manifest.setProperty(prefix + "bytes", Long.toString(Files.size(artifactFile)));
-        manifest.setProperty(prefix + "sha256", TrainerCheckpointIO.sha256Hex(artifactFile));
+        return manifest.getProperty(prefix + "file") != null
+                || manifest.getProperty(prefix + "bytes") != null
+                || manifest.getProperty(prefix + "sha256") != null;
     }
 
     record CompatibilityCheck(
             TrainerCheckpointCompatibilityReport report,
             boolean loaded,
             boolean missing,
-            String loadError) {
+            String loadError,
+            boolean manifestEntryMissing) {
         static CompatibilityCheck ok(boolean loaded, boolean missing, String loadError) {
             return new CompatibilityCheck(
                     TrainerCheckpointCompatibilityReport.ok(),
                     loaded,
                     missing,
-                    loadError);
+                    loadError,
+                    false);
         }
 
         static CompatibilityCheck incompatible(
@@ -107,11 +129,21 @@ final class TrainerCheckpointManifest {
                 boolean loaded,
                 boolean missing,
                 String loadError) {
+            return incompatible(error, loaded, missing, loadError, false);
+        }
+
+        static CompatibilityCheck incompatible(
+                String error,
+                boolean loaded,
+                boolean missing,
+                String loadError,
+                boolean manifestEntryMissing) {
             return new CompatibilityCheck(
                     TrainerCheckpointCompatibilityReport.incompatible(error),
                     loaded,
                     missing,
-                    loadError);
+                    loadError,
+                    manifestEntryMissing);
         }
     }
 }

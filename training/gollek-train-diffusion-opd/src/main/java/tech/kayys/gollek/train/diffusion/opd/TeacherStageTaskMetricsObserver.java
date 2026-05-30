@@ -11,6 +11,10 @@ import tech.kayys.gollek.train.diffusion.api.DiffusionTask;
 /**
  * Reusable runtime observer that aggregates OPD step diagnostics by task,
  * teacher, stage, and task-stage pair.
+ *
+ * <p>This observer is the general loss-aggregation companion to
+ * {@link ConditioningTaskMetricsObserver}: it tracks structural training usage
+ * and mean-loss rollups across the main OPD execution dimensions.
  */
 public final class TeacherStageTaskMetricsObserver implements DiffusionOpdRuntimeObserver {
     private final Map<String, String> teacherStages;
@@ -27,6 +31,10 @@ public final class TeacherStageTaskMetricsObserver implements DiffusionOpdRuntim
     private final Map<String, Double> taskStageLossSums = new LinkedHashMap<>();
     private final Map<String, Double> taskStageMeanLoss = new LinkedHashMap<>();
 
+    /**
+     * Creates the structural observer using the configured task list to precompute teacher/stage
+     * relationships and seed the standard aggregation buckets.
+     */
     public TeacherStageTaskMetricsObserver(List<DiffusionTask> tasks) {
         Objects.requireNonNull(tasks, "tasks must not be null");
         this.teacherStages = buildTeacherStageMap(tasks);

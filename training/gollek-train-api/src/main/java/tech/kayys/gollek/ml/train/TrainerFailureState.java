@@ -12,6 +12,11 @@ final class TrainerFailureState {
     private volatile double nonFiniteValue = Double.NaN;
     private volatile String nonFiniteMessage;
     private volatile boolean nonFiniteOptimizerStepSkipped;
+    private volatile long nonFiniteTotalValueCount;
+    private volatile long nonFiniteValueCount;
+    private volatile long nonFiniteNanCount;
+    private volatile long nonFinitePositiveInfinityCount;
+    private volatile long nonFiniteNegativeInfinityCount;
     private volatile boolean invalidBatchDetected;
     private volatile String invalidBatchPhase;
     private volatile String invalidBatchReason;
@@ -75,6 +80,31 @@ final class TrainerFailureState {
             double value,
             String label,
             boolean optimizerStepSkipped) {
+        long nanCount = Double.isNaN(value) ? 1L : 0L;
+        long positiveInfinityCount = value == Double.POSITIVE_INFINITY ? 1L : 0L;
+        long negativeInfinityCount = value == Double.NEGATIVE_INFINITY ? 1L : 0L;
+        return recordNonFiniteTensor(
+                phase,
+                kind,
+                value,
+                label,
+                optimizerStepSkipped,
+                1L,
+                nanCount,
+                positiveInfinityCount,
+                negativeInfinityCount);
+    }
+
+    String recordNonFiniteTensor(
+            String phase,
+            String kind,
+            double value,
+            String label,
+            boolean optimizerStepSkipped,
+            long totalValueCount,
+            long nanCount,
+            long positiveInfinityCount,
+            long negativeInfinityCount) {
         String safePhase = safe(phase, "unknown");
         String safeKind = safe(kind, "value");
         String message = safePhase + " " + label + " must be finite, got " + value;
@@ -85,6 +115,13 @@ final class TrainerFailureState {
             nonFiniteValue = value;
             nonFiniteMessage = message;
             nonFiniteOptimizerStepSkipped = optimizerStepSkipped;
+            nonFiniteTotalValueCount = Math.max(0L, totalValueCount);
+            nonFiniteNanCount = Math.max(0L, nanCount);
+            nonFinitePositiveInfinityCount = Math.max(0L, positiveInfinityCount);
+            nonFiniteNegativeInfinityCount = Math.max(0L, negativeInfinityCount);
+            nonFiniteValueCount = nonFiniteNanCount
+                    + nonFinitePositiveInfinityCount
+                    + nonFiniteNegativeInfinityCount;
         }
         return nonFiniteMessage;
     }
@@ -237,6 +274,15 @@ final class TrainerFailureState {
             metadata.put("nonFiniteValue", nonFiniteValue);
             metadata.put("nonFiniteMessage", nonFiniteMessage);
             metadata.put("nonFiniteOptimizerStepSkipped", nonFiniteOptimizerStepSkipped);
+            metadata.put("nonFiniteTotalValueCount", nonFiniteTotalValueCount);
+            metadata.put("nonFiniteValueCount", nonFiniteValueCount);
+            metadata.put("nonFiniteNanCount", nonFiniteNanCount);
+            metadata.put("nonFinitePositiveInfinityCount", nonFinitePositiveInfinityCount);
+            metadata.put("nonFiniteNegativeInfinityCount", nonFiniteNegativeInfinityCount);
+            metadata.put("nonFiniteFiniteCount", Math.max(0L, nonFiniteTotalValueCount - nonFiniteValueCount));
+            metadata.put("nonFiniteFraction", nonFiniteTotalValueCount == 0L
+                    ? 0.0
+                    : nonFiniteValueCount / (double) nonFiniteTotalValueCount);
             metadata.put("stopReason", "non-finite-" + nonFinitePhase + "-" + nonFiniteKind);
         }
         metadata.put("batchDataGuardEnabled", true);
@@ -285,6 +331,11 @@ final class TrainerFailureState {
         nonFiniteValue = Double.NaN;
         nonFiniteMessage = null;
         nonFiniteOptimizerStepSkipped = false;
+        nonFiniteTotalValueCount = 0L;
+        nonFiniteValueCount = 0L;
+        nonFiniteNanCount = 0L;
+        nonFinitePositiveInfinityCount = 0L;
+        nonFiniteNegativeInfinityCount = 0L;
     }
 
     private void resetInvalidBatch() {

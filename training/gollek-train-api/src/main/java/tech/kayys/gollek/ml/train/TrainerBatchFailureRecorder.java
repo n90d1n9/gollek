@@ -45,6 +45,29 @@ final class TrainerBatchFailureRecorder implements TrainerBatchGuards.FailureRec
     }
 
     @Override
+    public String nonFiniteTensor(
+            String phase,
+            String kind,
+            double value,
+            String label,
+            boolean optimizerStepSkipped,
+            long totalValueCount,
+            long nanCount,
+            long positiveInfinityCount,
+            long negativeInfinityCount) {
+        return failureState.recordNonFiniteTensor(
+                phase,
+                kind,
+                value,
+                label,
+                optimizerStepSkipped,
+                totalValueCount,
+                nanCount,
+                positiveInfinityCount,
+                negativeInfinityCount);
+    }
+
+    @Override
     public void discardPendingGradients() {
         discardPendingGradients.run();
     }
