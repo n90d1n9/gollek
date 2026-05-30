@@ -51,10 +51,7 @@ public class ListCommand implements Runnable {
                     .sort(true)
                     .build();
 
-            List<ModelInfo> models = sdk.listModels(request);
-            if (models.isEmpty()) {
-                models = fromLocalIndex();
-            }
+            List<ModelInfo> models = mergeModels(sdk.listModels(request), fromLocalIndex());
 
             if (models.isEmpty()) {
                 System.out.println("No models found.");
@@ -69,6 +66,83 @@ public class ListCommand implements Runnable {
         } catch (Exception e) {
             System.err.println("Failed to list models: " + e.getMessage());
         }
+    }
+
+    private List<ModelInfo> mergeModels(List<ModelInfo> sdkModels, List<ModelInfo> indexedModels) {
+        Map<String, ModelInfo> merged = new LinkedHashMap<>();
+        if (sdkModels != null) {
+            for (ModelInfo model : sdkModels) {
+                putBest(merged, model);
+            }
+        }
+        if (indexedModels != null) {
+            for (ModelInfo model : indexedModels) {
+                putBest(merged, model);
+            }
+        }
+
+        List<ModelInfo> models = new ArrayList<>(merged.values());
+        models.sort(Comparator.comparing((ModelInfo m) -> m.getUpdatedAt() != null ? m.getUpdatedAt() : Instant.EPOCH).reversed());
+        if (models.size() > limit) {
+            return new ArrayList<>(models.subList(0, limit));
+        }
+        return models;
+    }
+
+    private void putBest(Map<String, ModelInfo> merged, ModelInfo candidate) {
+        if (candidate == null) {
+            return;
+        }
+        String key = dedupeKey(candidate);
+        ModelInfo existing = merged.get(key);
+        if (existing == null || isRicher(candidate, existing)) {
+            merged.put(key, candidate);
+        }
+    }
+
+    private String dedupeKey(ModelInfo model) {
+        String modelId = model.getModelId();
+        String format = model.getFormat() != null ? model.getFormat().trim().toLowerCase(Locale.ROOT) : "";
+        String base;
+        if (modelId != null && !modelId.isBlank()) {
+            String normalized = modelId.trim();
+            if (normalized.startsWith("hf:")) {
+                normalized = normalized.substring("hf:".length()).trim();
+            } else if (normalized.startsWith("huggingface:")) {
+                normalized = normalized.substring("huggingface:".length()).trim();
+            }
+            base = normalized.replace("\\", "/").toLowerCase(Locale.ROOT);
+            return base + "|" + format;
+        }
+        String name = model.getName();
+        if (name != null && !name.isBlank()) {
+            base = name.toLowerCase(Locale.ROOT);
+            return base + "|" + format;
+        }
+        String shortId = model.getShortId();
+        base = shortId != null ? shortId.toLowerCase(Locale.ROOT) : "";
+        return base + "|" + format;
+    }
+
+    private boolean isRicher(ModelInfo candidate, ModelInfo existing) {
+        int candidateScore = richnessScore(candidate);
+        int existingScore = richnessScore(existing);
+        if (candidateScore != existingScore) {
+            return candidateScore > existingScore;
+        }
+        Instant candidateUpdated = candidate.getUpdatedAt() != null ? candidate.getUpdatedAt() : Instant.EPOCH;
+        Instant existingUpdated = existing.getUpdatedAt() != null ? existing.getUpdatedAt() : Instant.EPOCH;
+        return candidateUpdated.isAfter(existingUpdated);
+    }
+
+    private int richnessScore(ModelInfo model) {
+        int score = 0;
+        if (model.getFormat() != null && !model.getFormat().isBlank()) score++;
+        if (model.getArchitecture() != null && !model.getArchitecture().isBlank()) score++;
+        if (model.getSizeBytes() != null && model.getSizeBytes() > 0) score++;
+        if (model.getUpdatedAt() != null) score++;
+        if (model.getShortId() != null && !model.getShortId().isBlank()) score++;
+        return score;
     }
 
     private List<ModelInfo> fromLocalIndex() {

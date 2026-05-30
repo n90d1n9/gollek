@@ -7,26 +7,26 @@ import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.ext.Provider;
 
-import org.eclipse.microprofile.metrics.MetricRegistry;
-import org.eclipse.microprofile.metrics.Counter;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Provider
 @Priority(Priorities.USER)
 public class RequestMetricsFilter implements ContainerRequestFilter {
 
     @Inject
-    MetricRegistry registry;
+    MeterRegistry registry;
 
     private final Counter total;
 
     @Inject
-    public RequestMetricsFilter(MetricRegistry registry) {
+    public RequestMetricsFilter(MeterRegistry registry) {
         this.registry = registry;
         this.total = registry.counter("gollek.requests.total");
     }
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        total.inc();
+        total.increment();
     }
 }

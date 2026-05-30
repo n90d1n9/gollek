@@ -69,7 +69,7 @@ public class ChatCommandHandler {
             return true;
         }
 
-        if (cmd.equals("/extensions")) {
+        if (cmd.equals("/modules") || cmd.equals("/extensions")) {
             extensionsCommand.run();
             return true;
         }
@@ -116,7 +116,7 @@ public class ChatCommandHandler {
         System.out.println(ChatUIRenderer.DIM + "  /provider <id>- Switch to a different provider" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /info         - Display system info" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /stats        - Show session usage statistics" + ChatUIRenderer.RESET);
-        System.out.println(ChatUIRenderer.DIM + "  /extensions   - Show packaged extension modules" + ChatUIRenderer.RESET);
+        System.out.println(ChatUIRenderer.DIM + "  /modules      - Show packaged runtime modules" + ChatUIRenderer.RESET);
         System.out.println(ChatUIRenderer.DIM + "  /help         - Show this help message" + ChatUIRenderer.RESET);
     }
 

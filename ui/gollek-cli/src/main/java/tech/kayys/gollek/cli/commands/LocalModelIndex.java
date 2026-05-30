@@ -9,8 +9,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import tech.kayys.gollek.sdk.util.GollekHome;
@@ -44,13 +46,13 @@ final class LocalModelIndex {
     }
 
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
-    private static final Path INDEX_PATH = GollekHome.path("models", "index.json");
 
     private LocalModelIndex() {
     }
 
     static synchronized List<Entry> refreshFromDisk() {
         List<Entry> entries = scanDiskEntries();
+        normalizeShortIds(entries);
         write(entries);
         return entries;
     }
@@ -59,35 +61,209 @@ final class LocalModelIndex {
         if (ref == null || ref.isBlank()) {
             return Optional.empty();
         }
-        String needle = ref.trim();
+        String needle = stripProviderPrefix(ref.trim());
         List<Entry> entries = readOrRefresh();
-        Optional<Entry> cached = entries.stream().filter(e -> matches(e, needle)).findFirst();
+        Optional<Entry> cached = findBestMatch(entries, needle);
         if (cached.isPresent()) {
             return cached;
         }
         List<Entry> refreshed = refreshFromDisk();
-        return refreshed.stream().filter(e -> matches(e, needle)).findFirst();
+        return findBestMatch(refreshed, needle);
     }
 
-    private static boolean matches(Entry e, String ref) {
+    static synchronized Optional<Entry> find(String ref, String preferredFormat) {
+        if (preferredFormat == null || preferredFormat.isBlank()) {
+            return find(ref);
+        }
+        if (ref == null || ref.isBlank()) {
+            return Optional.empty();
+        }
+        String needle = stripProviderPrefix(ref.trim());
+        List<Entry> entries = readOrRefresh();
+        Optional<Entry> cached = findBestMatch(entries.stream()
+                .filter(e -> formatMatches(e, preferredFormat))
+                .toList(), needle);
+        if (cached.isPresent()) {
+            return cached;
+        }
+        List<Entry> refreshed = refreshFromDisk();
+        return findBestMatch(refreshed.stream()
+                .filter(e -> formatMatches(e, preferredFormat))
+                .toList(), needle);
+    }
+
+    static synchronized List<Entry> entries() {
+        return new ArrayList<>(readOrRefresh());
+    }
+
+    private static Optional<Entry> findBestMatch(List<Entry> entries, String ref) {
+        if (entries == null || entries.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<Entry> exact = entries.stream().filter(e -> matchesExact(e, ref)).findFirst();
+        if (exact.isPresent()) {
+            return exact;
+        }
+        Optional<Entry> legacyShort = entries.stream().filter(e -> matchesLegacyShortId(e, ref)).findFirst();
+        if (legacyShort.isPresent()) {
+            return legacyShort;
+        }
+        return entries.stream().filter(e -> matchesPathSuffix(e, ref)).findFirst();
+    }
+
+    private static boolean matchesExact(Entry e, String ref) {
         if (e == null) {
             return false;
         }
-        if (ref.equals(e.id) || ref.equals(e.shortId) || ref.equals(e.name) || ref.equals(e.path)) {
+        String normalizedRef = stripProviderPrefix(ref);
+        return equalsRef(ref, e.id)
+                || equalsRef(ref, e.shortId)
+                || equalsRef(ref, e.name)
+                || equalsRef(ref, e.path)
+                || equalsRef(normalizedRef, e.id)
+                || equalsRef(normalizedRef, e.shortId)
+                || equalsRef(normalizedRef, e.name)
+                || equalsRef(normalizedRef, e.path);
+    }
+
+    private static boolean matchesPathSuffix(Entry e, String ref) {
+        if (e == null || ref == null || ref.isBlank() || looksLikeShortId(ref)) {
+            return false;
+        }
+        String normalizedRef = stripProviderPrefix(ref);
+        if (looksLikeShortId(normalizedRef)) {
+            return false;
+        }
+        String normalized = normalizedRef.replace("\\", "/").toLowerCase(Locale.ROOT);
+        String path = e.path != null ? e.path.replace("\\", "/").toLowerCase(Locale.ROOT) : "";
+        return !normalized.isBlank() && path.endsWith(normalized);
+    }
+
+    private static boolean matchesLegacyShortId(Entry e, String ref) {
+        String normalizedRef = stripProviderPrefix(ref);
+        if (e == null || !looksLikeShortId(normalizedRef)) {
+            return false;
+        }
+        for (String legacyBasis : legacyShortIdBases(e)) {
+            if (equalsRef(normalizedRef, CLIUtils.generateShortId(legacyBasis))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> legacyShortIdBases(Entry e) {
+        List<String> bases = new ArrayList<>();
+        addIfPresent(bases, e.id);
+        addIfPresent(bases, e.name);
+        addIfPresent(bases, e.path);
+        addIfPresent(bases, repositoryRelativePath(e.path));
+        return bases;
+    }
+
+    private static void addIfPresent(List<String> values, String value) {
+        if (value == null || value.isBlank() || values.contains(value)) {
+            return;
+        }
+        values.add(value);
+    }
+
+    private static String repositoryRelativePath(String absolutePath) {
+        if (absolutePath == null || absolutePath.isBlank()) {
+            return null;
+        }
+        try {
+            Path path = Path.of(absolutePath).toAbsolutePath().normalize();
+            Path root = GollekHome.path("models").toAbsolutePath().normalize();
+            if (!path.startsWith(root)) {
+                return null;
+            }
+            Path relative = root.relativize(path);
+            if (relative.getNameCount() < 3) {
+                return null;
+            }
+            return relative.subpath(1, relative.getNameCount()).toString().replace("\\", "/");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean equalsRef(String left, String right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.equals(right) || left.equalsIgnoreCase(right);
+    }
+
+    private static boolean looksLikeShortId(String ref) {
+        if (ref == null) {
+            return false;
+        }
+        String value = ref.trim();
+        if (value.length() < 4 || value.length() > 12) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (!isHexChar(value.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean matches(Entry e, String ref) {
+        if (matchesExact(e, ref)) {
             return true;
         }
-        String normalized = ref.replace("\\", "/").toLowerCase(Locale.ROOT);
-        String path = e.path != null ? e.path.replace("\\", "/").toLowerCase(Locale.ROOT) : "";
-        return path.endsWith(normalized);
+        return matchesPathSuffix(e, ref);
+    }
+
+    private static boolean formatMatches(Entry entry, String preferredFormat) {
+        if (entry == null || preferredFormat == null || preferredFormat.isBlank()) {
+            return false;
+        }
+        String entryFormat = canonicalFormat(entry.format);
+        String requestedFormat = canonicalFormat(preferredFormat);
+        return !entryFormat.isBlank() && entryFormat.equals(requestedFormat);
+    }
+
+    private static String canonicalFormat(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "safetensor" -> "safetensors";
+            case "tflite", "task", "litertlm" -> "litert";
+            case "pt", "pth", "pts", "pytorch" -> "torchscript";
+            default -> normalized;
+        };
+    }
+
+    private static String stripProviderPrefix(String ref) {
+        if (ref == null) {
+            return "";
+        }
+        String value = ref.trim();
+        if (value.startsWith("hf:")) {
+            return value.substring("hf:".length()).trim();
+        }
+        if (value.startsWith("huggingface:")) {
+            return value.substring("huggingface:".length()).trim();
+        }
+        return value;
     }
 
     private static List<Entry> readOrRefresh() {
+        Path indexPath = indexPath();
         try {
-            if (Files.exists(INDEX_PATH)) {
-                byte[] bytes = Files.readAllBytes(INDEX_PATH);
+            if (Files.exists(indexPath)) {
+                byte[] bytes = Files.readAllBytes(indexPath);
                 if (bytes.length > 0) {
                     Entry[] parsed = JSON.readValue(bytes, Entry[].class);
-                    return new ArrayList<>(List.of(parsed));
+                    List<Entry> entries = new ArrayList<>(List.of(parsed));
+                    normalizeShortIds(entries);
+                    return entries;
                 }
             }
         } catch (Exception ignored) {
@@ -97,12 +273,17 @@ final class LocalModelIndex {
     }
 
     private static void write(List<Entry> entries) {
+        Path indexPath = indexPath();
         try {
-            Files.createDirectories(INDEX_PATH.getParent());
-            JSON.writeValue(INDEX_PATH.toFile(), entries);
+            Files.createDirectories(indexPath.getParent());
+            JSON.writeValue(indexPath.toFile(), entries);
         } catch (Exception ignored) {
             // best effort cache/index only
         }
+    }
+
+    private static Path indexPath() {
+        return GollekHome.path("models", "index.json");
     }
 
     private static List<Entry> scanDiskEntries() {
@@ -115,6 +296,7 @@ final class LocalModelIndex {
         scanManifestEntries(root.resolve("manifests"), out, seenPaths);
         scanFlat(root.resolve("gguf"), "gguf", true, out, seenPaths);
         scanFlat(root.resolve("libtorchscript"), "libtorchscript", true, out, seenPaths);
+        scanFlat(root.resolve("torchscript"), "torchscript", true, out, seenPaths);
         scanFlat(root.resolve("safetensors"), "safetensors", true, out, seenPaths);
         scanFlat(root.resolve("litert"), "litert", true, out, seenPaths);
         scanFlat(root.resolve("onnx"), "onnx", true, out, seenPaths);
@@ -127,6 +309,7 @@ final class LocalModelIndex {
         if (!Files.isDirectory(base)) {
             return;
         }
+        Map<String, Entry> discovered = new LinkedHashMap<>();
         try (var files = Files.walk(base, 4)) {
             files.filter(Files::isRegularFile)
                     .filter(p -> !p.getFileName().toString().startsWith("."))
@@ -134,12 +317,14 @@ final class LocalModelIndex {
                     .forEach(p -> {
                         String normalized = normalizePath(p);
                         if (seenPaths.add(normalized)) {
-                            out.add(toEntry(base, p, fallbackFormat, runnable));
+                            Entry entry = toEntry(base, p, fallbackFormat, runnable);
+                            discovered.putIfAbsent(entryKey(entry), entry);
                         }
                     });
         } catch (Exception ignored) {
             // best effort
         }
+        out.addAll(discovered.values());
     }
 
     private static void scanManifestEntries(Path manifestsDir, List<Entry> out, Set<String> seenPaths) {
@@ -169,10 +354,9 @@ final class LocalModelIndex {
                             if (e.id == null || e.id.isBlank()) {
                                 e.id = text(node, "id");
                             }
-                            e.shortId = text(node, "shortId");
-                            if (e.shortId == null || e.shortId.isBlank()) {
-                                e.shortId = CLIUtils.generateShortId(e.id != null ? e.id : resolved.getFileName().toString());
-                            }
+                            e.shortId = normalizeShortId(
+                                    text(node, "shortId"),
+                                    e.id != null ? e.id : resolved.getFileName().toString());
                             e.name = text(node, "name");
                             if (e.name == null || e.name.isBlank()) {
                                 e.name = resolved.getFileName().toString();
@@ -190,7 +374,7 @@ final class LocalModelIndex {
                             }
                             e.sizeBytes = sizeBytes;
 
-                            if (e.architecture == null || e.architecture.isBlank()) {
+                            if (isUnknownArchitecture(e.architecture)) {
                                 detectArchitecture(e, Files.isDirectory(resolved) ? resolved : resolved.getParent());
                             }
                             populateQuantMetadata(e, Files.isDirectory(resolved) ? resolved : resolved.getParent());
@@ -206,19 +390,21 @@ final class LocalModelIndex {
 
     private static Entry toEntry(Path base, Path file, String fallbackFormat, boolean runnable) {
         Entry e = new Entry();
-        e.id = base.relativize(file).toString().replace("\\", "/");
-        e.shortId = CLIUtils.generateShortId(e.id);
-        e.name = deriveDisplayName(file);
+        Path relative = base.relativize(file);
+        e.id = deriveModelId(relative, file);
+        e.shortId = normalizeShortId(null, e.id);
+        e.name = deriveDisplayName(relative, file);
         e.format = detectFormat(file, fallbackFormat);
         e.runnable = runnable && !e.format.equalsIgnoreCase("safetensors") && !e.format.equalsIgnoreCase("bin");
-        e.path = file.toAbsolutePath().toString();
+        Path listedPath = shouldAggregateRepositoryFile(relative, file) ? file.getParent() : file;
+        e.path = listedPath.toAbsolutePath().toString();
         e.source = "local";
         double pc = QuantSuggestionDetector.parseParamCount(e.name);
         e.parameterCount = pc > 0 ? String.format("%.1fB", pc) : null;
         
         try {
-            e.sizeBytes = Files.size(file);
-            e.updatedAt = Files.getLastModifiedTime(file).toInstant().toString();
+            e.sizeBytes = computeSize(listedPath);
+            e.updatedAt = latestModified(listedPath).toString();
         } catch (Exception ignored) {
             e.sizeBytes = 0L;
         }
@@ -231,15 +417,106 @@ final class LocalModelIndex {
         return e;
     }
 
-    private static String deriveDisplayName(Path file) {
+    private static void normalizeShortIds(List<Entry> entries) {
+        if (entries == null) {
+            return;
+        }
+        for (Entry entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            String basis = entry.id;
+            if (basis == null || basis.isBlank()) {
+                basis = entry.path;
+            }
+            if (basis == null || basis.isBlank()) {
+                basis = entry.name;
+            }
+            entry.shortId = normalizeShortId(entry.shortId, basis);
+        }
+    }
+
+    private static String normalizeShortId(String candidate, String basis) {
+        if (isHexShortId(candidate)) {
+            return candidate.toLowerCase(Locale.ROOT);
+        }
+        return CLIUtils.generateShortId(basis);
+    }
+
+    private static boolean isHexShortId(String value) {
+        return value != null
+                && value.length() == 6
+                && value.toLowerCase(Locale.ROOT).chars().allMatch(LocalModelIndex::isHexChar);
+    }
+
+    private static boolean isHexChar(int ch) {
+        return (ch >= '0' && ch <= '9')
+                || (ch >= 'a' && ch <= 'f')
+                || (ch >= 'A' && ch <= 'F');
+    }
+
+    private static String deriveModelId(Path relative, Path file) {
+        if (relative == null) {
+            return "";
+        }
+        String normalized = relative.toString().replace("\\", "/");
+        if (relative.getNameCount() >= 3) {
+            String fileName = file.getFileName().toString();
+            if (!shouldUseRepositoryDisplayName(fileName)) {
+                return relative.getName(0) + "/" + fileName;
+            }
+            return relative.getName(0) + "/" + relative.getName(1);
+        }
+        return normalized;
+    }
+
+    private static String entryKey(Entry entry) {
+        String id = entry.id != null ? entry.id : "";
+        String format = entry.format != null ? entry.format : "";
+        String path = entry.path != null ? entry.path : "";
+        return id + "|" + format + "|" + path;
+    }
+
+    private static String deriveDisplayName(Path relative, Path file) {
+        if (relative != null && relative.getNameCount() >= 3 && shouldUseRepositoryDisplayName(file.getFileName().toString())) {
+            return relative.getName(1).toString();
+        }
         String fileName = file.getFileName().toString();
         String lower = fileName.toLowerCase(Locale.ROOT);
-        if ((lower.equals("model.safetensors") || lower.equals("model.safetensor"))
+        if ((lower.equals("model.safetensors")
+                || lower.equals("model.safetensor")
+                || lower.equals("model.onnx")
+                || lower.equals("model.tflite")
+                || lower.equals("model.litert")
+                || lower.equals("model.litertlm")
+                || lower.equals("model.task"))
                 && file.getParent() != null
                 && file.getParent().getFileName() != null) {
             return file.getParent().getFileName().toString();
         }
         return fileName;
+    }
+
+    private static boolean shouldUseRepositoryDisplayName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return false;
+        }
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".onnx")
+                || lower.equals("model.safetensors")
+                || lower.equals("model.safetensor")
+                || lower.equals("model.tflite")
+                || lower.equals("model.litert")
+                || lower.equals("model.litertlm")
+                || lower.equals("model.task");
+    }
+
+    private static boolean shouldAggregateRepositoryFile(Path relative, Path file) {
+        if (relative == null || relative.getNameCount() < 3 || file == null) {
+            return false;
+        }
+        String lower = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        return lower.endsWith(".onnx");
     }
 
     private static boolean isRunnableFormat(String format) {
@@ -280,6 +557,31 @@ final class LocalModelIndex {
         return 0L;
     }
 
+    private static Instant latestModified(Path path) {
+        try {
+            if (Files.isRegularFile(path)) {
+                return Files.getLastModifiedTime(path).toInstant();
+            }
+            if (Files.isDirectory(path)) {
+                try (var walk = Files.walk(path)) {
+                    return walk.filter(Files::isRegularFile)
+                            .map(p -> {
+                                try {
+                                    return Files.getLastModifiedTime(p).toInstant();
+                                } catch (Exception ignored) {
+                                    return Instant.EPOCH;
+                                }
+                            })
+                            .max(Comparator.naturalOrder())
+                            .orElse(Instant.EPOCH);
+                }
+            }
+        } catch (Exception ignored) {
+            // best effort
+        }
+        return Instant.EPOCH;
+    }
+
     private static String normalizePath(Path path) {
         return path.toAbsolutePath().normalize().toString();
     }
@@ -294,6 +596,14 @@ final class LocalModelIndex {
 
     private static void detectArchitecture(Entry e, Path modelDir) {
         if (modelDir == null) return;
+        if (Files.isRegularFile(modelDir.resolve("tts_browser_onnx_meta.json"))) {
+            e.architecture = "moss-tts";
+            return;
+        }
+        if (Files.isRegularFile(modelDir.resolve("codec_browser_onnx_meta.json"))) {
+            e.architecture = "moss-audio-tokenizer";
+            return;
+        }
         Path configJson = modelDir.resolve("config.json");
         if (!Files.isRegularFile(configJson)) return;
         try {
@@ -306,6 +616,12 @@ final class LocalModelIndex {
         } catch (Exception ignored) {
             // best effort
         }
+    }
+
+    private static boolean isUnknownArchitecture(String architecture) {
+        return architecture == null
+                || architecture.isBlank()
+                || "unknown".equalsIgnoreCase(architecture);
     }
 
     @SuppressWarnings("unchecked")
@@ -332,6 +648,11 @@ final class LocalModelIndex {
         return name.endsWith(".gguf")
                 || name.endsWith(".safetensors")
                 || name.endsWith(".safetensor")
+                || name.endsWith(".onnx")
+                || name.endsWith(".tflite")
+                || name.endsWith(".litert")
+                || name.endsWith(".pb")
+                || name.endsWith(".ckpt")
                 || name.endsWith(".pt")
                 || name.endsWith(".pth")
                 || name.endsWith(".bin")
@@ -348,14 +669,17 @@ final class LocalModelIndex {
         if (name.endsWith(".safetensors") || name.endsWith(".safetensor")) {
             return "safetensors";
         }
+        if (name.endsWith(".onnx")) {
+            return "onnx";
+        }
+        if (name.endsWith(".tflite") || name.endsWith(".litert") || name.endsWith(".litertlm") || name.endsWith(".task")) {
+            return "litert";
+        }
         if (name.endsWith(".pt") || name.endsWith(".pth")) {
-            return "libtorchscript";
+            return "torchscript";
         }
         if (name.endsWith(".bin")) {
             return "bin";
-        }
-        if (name.endsWith(".litertlm") || name.endsWith(".task")) {
-            return "litert";
         }
         return fallback;
     }

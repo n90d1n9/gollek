@@ -21,7 +21,7 @@ public class ChatTerminalHandler implements AutoCloseable {
 
     public static final List<String> COMMANDS = List.of(
             "/help", "/reset", "/retry", "/regen", "/quit", "/log", "/list", "/models", "/model",
-            "/providers", "/provider", "/info", "/stats", "/extensions");
+            "/providers", "/provider", "/info", "/stats", "/modules", "/extensions");
 
     private Terminal terminal;
     private LineReader reader;

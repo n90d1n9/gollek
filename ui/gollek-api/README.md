@@ -1,4 +1,108 @@
-# gollek-server-runtime
+# Gollek API Server
+
+Gollek API is the serving boundary for the Gollek inference engine. It should
+stay focused on model serving, provider routing, system prompts, tool-call
+schemas, embeddings, and RAG context injection. Agent frameworks can plug into
+it for inference while keeping planning, memory policy, authorization, and tool
+execution loops in their own orchestrator.
+
+## Agentic AI integration
+
+The API supports both native Gollek endpoints and OpenAI-compatible endpoints
+so agent projects can integrate without becoming tightly coupled to Gollek.
+
+| Capability | Endpoint |
+| --- | --- |
+| Agent capability discovery | `GET /v1/agent/capabilities` |
+| Agent integration contract | `GET /v1/agent/contract` |
+| Agent request validation | `POST /v1/agent/validate?surface=chat` |
+| Agent tool contract validation | `POST /v1/agent/tools/validate` |
+| OpenAI-compatible chat completions | `POST /v1/chat/completions` |
+| OpenAI-compatible chat streaming | `POST /v1/chat/completions` with `stream: true` |
+| OpenAI-compatible responses | `POST /v1/responses` |
+| OpenAI-compatible responses streaming | `POST /v1/responses` with `stream: true` |
+| OpenAI-compatible embeddings | `POST /v1/embeddings` with `input` |
+| OpenAI-compatible models | `GET /v1/models?compat=openai` |
+| Model capability matrix | `GET /v1/models/{id}/capabilities` |
+| MCP server discovery | `GET /v1/mcp/servers` |
+| MCP tool discovery | `GET /v1/mcp/tools?compat=openai` |
+| Native Gollek completions | `POST /v1/completions` |
+| Native Gollek streaming | `POST /v1/completions/stream` |
+| Native Gollek embeddings | `POST /v1/embeddings` with `inputs` |
+| Models | `GET /v1/models` |
+| Providers | `GET /v1/providers` |
+
+Auth accepts either `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+
+Agent-facing endpoints accept `X-Gollek-Request-Id`, `X-Gollek-Trace-Id`,
+`X-Gollek-Session-Id`, and `X-Gollek-User-Id` headers, with equivalent body
+fields such as `request_id`, `trace_id`, `session_id`, and `user`. Responses
+echo the correlation headers and include `metadata.gollek_trace`; errors include
+the same ids inside the `error` object.
+
+`GET /v1/agent/contract` returns a machine-readable contract for agent
+frameworks. It includes endpoint paths, request schema hints, auth options, and
+traceability rules plus the serving/orchestrator boundary for chat, Responses,
+tools, MCP discovery, embeddings, and RAG context.
+
+Streaming chat and Responses requests accept `stream_options`. Set
+`include_usage: true` when the caller wants provider token usage on final stream
+events. `include_trace` and `include_stream_metadata` default to true, adding
+`metadata.gollek_trace` and `metadata.gollek_stream` so agent clients can stitch
+SSE chunks to request/session traces. Streams terminate with `data:[DONE]`.
+
+The OpenAPI document includes examples for the agent contract, chat completions,
+Responses, embeddings, and MCP discovery endpoints. In dev mode it is available
+from `GET /q/openapi`.
+
+Agent-facing endpoints use OpenAI-style errors:
+`{"error":{"message":"...","type":"invalid_request_error"}}`.
+
+`POST /v1/agent/validate?surface=chat|responses|embeddings` validates and
+normalizes a request without invoking a model. The response redacts prompt text
+into counts, roles, and metadata so orchestrators can test mapping safely.
+
+`POST /v1/agent/tools/validate` validates and normalizes OpenAI-compatible
+function, MCP tool, code interpreter, and file search definitions before
+inference. It returns portability warnings for JSON Schema features that some
+agent clients may ignore. Tool authorization and execution are still owned by
+the calling agent orchestrator.
+
+MCP discovery endpoints are intentionally read-only. `GET /v1/mcp/tools?compat=openai`
+returns OpenAI-compatible function tool definitions with `x_gollek` metadata that
+identifies the MCP server/tool, while tool authorization, execution, and result
+looping remain owned by the calling agent orchestrator.
+
+RAG context can be supplied as `rag_context`, `retrieval_context`, or
+`context_documents` using a string, array of strings, or structured chunks with
+`text`/`content`, `source`, `title`, `id`, `score`, and `metadata`. Gollek
+injects that context into the model request and preserves source metadata, but
+retrieval policy and vector store ownership stay outside the serving engine.
+
+Example agent request:
+
+```json
+{
+  "model": "my-model",
+  "messages": [
+    {"role": "system", "content": "Answer using the supplied tools when needed."},
+    {"role": "user", "content": "Find the latest context and summarize it."}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search_context",
+        "description": "Search the external knowledge base",
+        "parameters": {"type": "object"}
+      },
+      "x_gollek": {"mcp_server": "knowledge"}
+    }
+  ],
+  "tool_choice": "auto",
+  "rag_enabled": true
+}
+```
 
 This project uses Quarkus, the Supersonic Subatomic Java Framework.
 

@@ -1,6 +1,14 @@
 package tech.kayys.gollek.cli.commands;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -8,6 +16,142 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LiteRtLmFastRunDaemonTest {
+
+    @Test
+    void runHeaderMatchesFullCliShapeForIndexedModels() {
+        LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                new String[]{"run", "--model", "7c51c9", "--prompt", "hello"});
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+        LiteRtLmFastRun.printRunHeader(
+                Path.of("/tmp/gemma-4-E2B-it.litertlm"),
+                args,
+                new PrintStream(bytes, true, StandardCharsets.UTF_8));
+
+        String output = bytes.toString(StandardCharsets.UTF_8);
+        assertTrue(output.contains("_____"));
+        assertTrue(output.contains("Resolved local model index entry: /tmp/gemma-4-E2B-it.litertlm"));
+        assertTrue(output.contains("Model: /tmp/gemma-4-E2B-it.litertlm"));
+        assertTrue(output.contains("Provider: litert, format=litertlm"));
+        assertFalse(output.contains("Execution route:"));
+    }
+
+    @Test
+    void runHeaderDoesNotPrintResolvedLineForExplicitModelFile() {
+        LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                new String[]{"run", "--modelFile", "/tmp/gemma-4-E2B-it.litertlm", "--prompt", "hello"});
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+        LiteRtLmFastRun.printRunHeader(
+                Path.of("/tmp/gemma-4-E2B-it.litertlm"),
+                args,
+                new PrintStream(bytes, true, StandardCharsets.UTF_8));
+
+        String output = bytes.toString(StandardCharsets.UTF_8);
+        assertFalse(output.contains("Resolved local model index entry:"));
+        assertTrue(output.contains("Model: /tmp/gemma-4-E2B-it.litertlm"));
+        assertTrue(output.contains("Provider: litert, format=litertlm"));
+    }
+
+    @Test
+    void runHeaderUsesConcreteLiteRtContainerFormat() {
+        assertEquals("litertlm", LiteRtLmFastRun.liteRtModelFormat(Path.of("/tmp/model.litertlm")));
+        assertEquals("tflite", LiteRtLmFastRun.liteRtModelFormat(Path.of("/tmp/model.tflite")));
+        assertEquals("tflite", LiteRtLmFastRun.liteRtModelFormat(Path.of("/tmp/model.tfl")));
+        assertEquals("task", LiteRtLmFastRun.liteRtModelFormat(Path.of("/tmp/model.task")));
+        assertEquals("litert", LiteRtLmFastRun.liteRtModelFormat(Path.of("/tmp/model.bin")));
+    }
+
+    @Test
+    void executionRouteNamesDaemonAndDirectFastPath() {
+        assertEquals(
+                "Execution route: litert (backend=GPU/Metal) [official_litert_lm_jvm_daemon]",
+                LiteRtLmFastRun.executionRouteLine("GPU/Metal", "daemon"));
+        assertEquals(
+                "Execution route: litert (backend=CPU) [official_litert_lm_jvm_fast_path]",
+                LiteRtLmFastRun.executionRouteLine("CPU", "fast path"));
+    }
+
+    @Test
+    void safetensorShortIdCanResolveMatchingLiteRtEquivalentForSpeed(@TempDir Path tempHome) throws Exception {
+        Path litertDir = tempHome.resolve("models/litert/gemma");
+        Path litertFile = litertDir.resolve("gemma-4-E2B-it.litertlm");
+        Path safetensorDir = tempHome.resolve("models/safetensors/gemma");
+        Files.createDirectories(litertDir);
+        Files.createDirectories(safetensorDir);
+        Files.writeString(litertFile, "stub");
+        writeModelIndex(tempHome, safetensorDir, litertDir);
+
+        String previousHome = System.getProperty("user.home");
+        String previousAutoEquivalent = System.getProperty("gollek.litert.fast_run.auto_equivalent");
+        System.setProperty("user.home", tempHome.toString());
+        System.clearProperty("gollek.litert.fast_run.auto_equivalent");
+        try {
+            LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                    new String[]{"run", "--model", "97cbf2", "--prompt", "hello"});
+
+            assertEquals(litertFile.toAbsolutePath().normalize(), LiteRtLmFastRun.resolveLiteRtLmModel(args).orElseThrow());
+        } finally {
+            restoreProperty("user.home", previousHome);
+            restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
+        }
+    }
+
+    @Test
+    void equivalentLiteRtResolutionCanBeDisabled(@TempDir Path tempHome) throws Exception {
+        Path litertDir = tempHome.resolve("models/litert/gemma");
+        Path litertFile = litertDir.resolve("gemma-4-E2B-it.litertlm");
+        Path safetensorDir = tempHome.resolve("models/safetensors/gemma");
+        Files.createDirectories(litertDir);
+        Files.createDirectories(safetensorDir);
+        Files.writeString(litertFile, "stub");
+        writeModelIndex(tempHome, safetensorDir, litertDir);
+
+        String previousHome = System.getProperty("user.home");
+        String previousAutoEquivalent = System.getProperty("gollek.litert.fast_run.auto_equivalent");
+        System.setProperty("user.home", tempHome.toString());
+        System.setProperty("gollek.litert.fast_run.auto_equivalent", "false");
+        try {
+            LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                    new String[]{"run", "--model", "97cbf2", "--prompt", "hello"});
+
+            assertTrue(LiteRtLmFastRun.resolveLiteRtLmModel(args).isEmpty());
+        } finally {
+            restoreProperty("user.home", previousHome);
+            restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
+        }
+    }
+
+    @Test
+    void fastRunStatsUseCliPerformanceMetricShape() {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        long start = TimeUnit.MILLISECONDS.toNanos(1_000);
+        long beforeEngine = start + TimeUnit.MILLISECONDS.toNanos(25);
+        long afterEngine = beforeEngine + TimeUnit.MILLISECONDS.toNanos(75);
+        long conversationReady = afterEngine + TimeUnit.MILLISECONDS.toNanos(20);
+        long firstChunk = conversationReady + TimeUnit.MILLISECONDS.toNanos(125);
+        long end = start + TimeUnit.MILLISECONDS.toNanos(1_000);
+
+        LiteRtLmFastRun.printFastRunStats(
+                new PrintStream(bytes, true, StandardCharsets.UTF_8),
+                4,
+                8,
+                start,
+                beforeEngine,
+                afterEngine,
+                conversationReady,
+                firstChunk,
+                end);
+
+        String output = bytes.toString(StandardCharsets.UTF_8);
+        assertTrue(output.contains("[Stream updates: 4, Duration:"));
+        assertTrue(output.contains("Performance Metrics:"));
+        assertTrue(output.contains("  load time      ="));
+        assertTrue(output.contains("  generation     ="));
+        assertTrue(output.contains("  latency (ttft) ="));
+        assertTrue(output.contains("  engine ttft    ="));
+        assertTrue(output.contains("  token latency  ="));
+    }
 
     @Test
     void staleDaemonForceKillIsEnabledByDefault() {
@@ -308,6 +452,32 @@ class LiteRtLmFastRunDaemonTest {
     }
 
     @Test
+    void approximateTokenStreamLimiterMatchesChunkedFastRunLimit() {
+        LiteRtLmFastRun.ApproximateTokenStreamLimiter limiter =
+                new LiteRtLmFastRun.ApproximateTokenStreamLimiter(3);
+
+        String output = limiter.offer("hello ")
+                + limiter.offer("world\nfrom ")
+                + limiter.offer("gollek now");
+
+        assertEquals("hello world\nfrom", output);
+        assertEquals(3, limiter.emittedTokenCount());
+        assertTrue(limiter.atLimit());
+    }
+
+    @Test
+    void approximateTokenStreamLimiterDefersTrailingWhitespace() {
+        LiteRtLmFastRun.ApproximateTokenStreamLimiter limiter =
+                new LiteRtLmFastRun.ApproximateTokenStreamLimiter(2);
+
+        assertEquals("hello", limiter.offer("hello "));
+        assertEquals("", limiter.offer("\n"));
+        assertEquals(" \nworld", limiter.offer("world"));
+        assertEquals(2, limiter.emittedTokenCount());
+        assertFalse(limiter.atLimit());
+    }
+
+    @Test
     void bareQuestionPromptsAreNormalizedForGemmaChatQuality() {
         assertEquals("Where is jakarta?", LiteRtLmFastRun.promptForModel("where is jakarta"));
     }
@@ -357,5 +527,34 @@ class LiteRtLmFastRunDaemonTest {
         } else {
             System.setProperty(name, value);
         }
+    }
+
+    private static void writeModelIndex(Path home, Path safetensorDir, Path litertDir) throws Exception {
+        Path index = home.resolve(".gollek/models/index.json");
+        Files.createDirectories(index.getParent());
+        Files.writeString(index, """
+                [
+                  {
+                    "id": "google/gemma-4-E2B-it",
+                    "shortId": "97cbf2",
+                    "name": "gemma-4-E2B-it",
+                    "format": "safetensors",
+                    "path": "%s",
+                    "architecture": "gemma"
+                  },
+                  {
+                    "id": "litert-community/gemma-4-E2B-it-litert-lm",
+                    "shortId": "7c51c9",
+                    "name": "gemma-4-E2B-it-litert-lm",
+                    "format": "litert",
+                    "path": "%s",
+                    "architecture": "gemma"
+                  }
+                ]
+                """.formatted(escapeJson(safetensorDir.toString()), escapeJson(litertDir.toString())));
+    }
+
+    private static String escapeJson(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

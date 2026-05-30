@@ -12,6 +12,7 @@ import tech.kayys.gollek.cli.commands.ChatCommand;
 import tech.kayys.gollek.cli.commands.PrepareCommand;
 import tech.kayys.gollek.cli.commands.DeleteCommand;
 import tech.kayys.gollek.cli.commands.ExtensionsCommand;
+import tech.kayys.gollek.cli.commands.FeaturesCommand;
 import tech.kayys.gollek.cli.commands.InfoCommand;
 import tech.kayys.gollek.cli.commands.ListCommand;
 import tech.kayys.gollek.cli.commands.McpCommand;
@@ -26,6 +27,7 @@ import tech.kayys.gollek.cli.commands.BatchCommand;
 import tech.kayys.gollek.cli.commands.JobsCommand;
 import tech.kayys.gollek.cli.commands.StatsCommand;
 import tech.kayys.gollek.cli.commands.LogsCommand;
+import tech.kayys.gollek.cli.commands.TrainCommand;
 import tech.kayys.gollek.cli.commands.RegisterCommand;
 import tech.kayys.gollek.cli.commands.MultimodalCommand;
 import tech.kayys.gollek.cli.commands.LiteRTCommand;
@@ -51,6 +53,7 @@ import picocli.CommandLine.Option;
         DeleteCommand.class,
         ProvidersCommand.class,
         ExtensionsCommand.class,
+        FeaturesCommand.class,
         InfoCommand.class,
         SafetensorsCommand.class,
         EmbedCommand.class,
@@ -58,6 +61,7 @@ import picocli.CommandLine.Option;
         JobsCommand.class,
         StatsCommand.class,
         LogsCommand.class,
+        TrainCommand.class,
         RegisterCommand.class,
         MultimodalCommand.class,
         LiteRTCommand.class,

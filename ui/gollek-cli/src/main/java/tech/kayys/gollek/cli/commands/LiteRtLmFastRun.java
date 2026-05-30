@@ -31,15 +31,18 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -219,7 +222,7 @@ public final class LiteRtLmFastRun {
         return "";
     }
 
-    private static Optional<Path> resolveLiteRtLmModel(FastArgs args) {
+    static Optional<Path> resolveLiteRtLmModel(FastArgs args) {
         if (args.modelFile != null) {
             Optional<Path> explicit = resolvePath(Path.of(args.modelFile));
             if (explicit.isPresent()) {
@@ -269,7 +272,7 @@ public final class LiteRtLmFastRun {
         return Optional.empty();
     }
 
-    private static Optional<Path> findIndexedLiteRtModelPath(String ref) {
+    static Optional<Path> findIndexedLiteRtModelPath(String ref) {
         if (ref == null || ref.isBlank()) {
             return Optional.empty();
         }
@@ -281,14 +284,23 @@ public final class LiteRtLmFastRun {
             String needle = ref.trim();
             String json = Files.readString(indexPath);
             Matcher objects = JSON_OBJECT_PATTERN.matcher(json);
+            List<IndexCandidate> candidates = new ArrayList<>();
             while (objects.find()) {
                 String object = objects.group();
-                String path = jsonStringField(object, "path").orElse(null);
-                if (path == null || path.isBlank()) {
-                    continue;
+                IndexCandidate candidate = IndexCandidate.from(object);
+                if (candidate.path() != null && !candidate.path().isBlank()) {
+                    candidates.add(candidate);
+                    if (matchesIndexEntry(candidate, needle) && isLiteRtIndexObject(candidate)) {
+                        return Optional.of(Path.of(candidate.path()));
+                    }
                 }
-                if (matchesIndexEntry(object, needle, path) && isLiteRtIndexObject(object, path)) {
-                    return Optional.of(Path.of(path));
+            }
+            if (equivalentLiteRtFastPathEnabled()) {
+                Optional<IndexCandidate> requested = candidates.stream()
+                        .filter(candidate -> matchesIndexEntry(candidate, needle))
+                        .findFirst();
+                if (requested.isPresent()) {
+                    return findEquivalentLiteRtModelPath(candidates, requested.get());
                 }
             }
         } catch (Exception ignored) {
@@ -297,15 +309,20 @@ public final class LiteRtLmFastRun {
         return Optional.empty();
     }
 
-    private static boolean matchesIndexEntry(String object, String ref, String path) {
-        if (ref.equals(jsonStringField(object, "id").orElse(null))
-                || ref.equals(jsonStringField(object, "shortId").orElse(null))
-                || ref.equals(jsonStringField(object, "name").orElse(null))
-                || ref.equals(path)) {
+    private static boolean matchesIndexEntry(IndexCandidate candidate, String ref) {
+        if (candidate == null) {
+            return false;
+        }
+        if (ref.equals(candidate.id())
+                || ref.equals(candidate.shortId())
+                || ref.equals(candidate.name())
+                || ref.equals(candidate.path())) {
             return true;
         }
         String normalized = ref.replace("\\", "/").toLowerCase(Locale.ROOT);
-        String normalizedPath = path.replace("\\", "/").toLowerCase(Locale.ROOT);
+        String normalizedPath = candidate.path() == null
+                ? ""
+                : candidate.path().replace("\\", "/").toLowerCase(Locale.ROOT);
         return normalizedPath.endsWith(normalized);
     }
 
@@ -319,9 +336,176 @@ public final class LiteRtLmFastRun {
         return entry.path != null && isLiteRtPathString(entry.path);
     }
 
-    private static boolean isLiteRtIndexObject(String object, String path) {
-        return isLiteRtFormat(jsonStringField(object, "format").orElse(null))
-                || isLiteRtPathString(path);
+    private static boolean isLiteRtIndexObject(IndexCandidate candidate) {
+        return candidate != null
+                && (isLiteRtFormat(candidate.format())
+                || isLiteRtPathString(candidate.path()));
+    }
+
+    private static Optional<Path> findEquivalentLiteRtModelPath(
+            List<IndexCandidate> candidates,
+            IndexCandidate requested) {
+        if (candidates == null || candidates.isEmpty() || !canUseLiteRtEquivalentFor(requested)) {
+            return Optional.empty();
+        }
+        Set<String> requestedKeys = canonicalModelKeys(requested);
+        if (requestedKeys.isEmpty()) {
+            return Optional.empty();
+        }
+        return candidates.stream()
+                .filter(LiteRtLmFastRun::isLiteRtIndexObject)
+                .filter(candidate -> !sameIndexPath(candidate, requested))
+                .filter(candidate -> compatibleArchitecture(requested, candidate))
+                .filter(candidate -> intersects(requestedKeys, canonicalModelKeys(candidate)))
+                .sorted((left, right) -> Integer.compare(
+                        equivalentLiteRtPreference(left),
+                        equivalentLiteRtPreference(right)))
+                .map(IndexCandidate::path)
+                .filter(path -> path != null && !path.isBlank())
+                .map(Path::of)
+                .findFirst();
+    }
+
+    private static boolean canUseLiteRtEquivalentFor(IndexCandidate requested) {
+        if (requested == null || isLiteRtIndexObject(requested)) {
+            return false;
+        }
+        String format = requested.format() == null ? "" : requested.format().trim().toLowerCase(Locale.ROOT);
+        if (!format.isBlank()
+                && !format.equals("safetensor")
+                && !format.equals("safetensors")
+                && !format.equals("gguf")) {
+            return false;
+        }
+        String architecture = requested.architecture() == null
+                ? ""
+                : requested.architecture().trim().toLowerCase(Locale.ROOT);
+        String identity = ((requested.id() == null ? "" : requested.id()) + " "
+                + (requested.name() == null ? "" : requested.name()) + " "
+                + (requested.path() == null ? "" : requested.path())).toLowerCase(Locale.ROOT);
+        return architecture.contains("gemma") || identity.contains("gemma");
+    }
+
+    private static boolean compatibleArchitecture(IndexCandidate requested, IndexCandidate candidate) {
+        String requestedArchitecture = normalizedArchitecture(requested.architecture());
+        String candidateArchitecture = normalizedArchitecture(candidate.architecture());
+        return requestedArchitecture.isBlank()
+                || candidateArchitecture.isBlank()
+                || requestedArchitecture.equals(candidateArchitecture);
+    }
+
+    private static String normalizedArchitecture(String architecture) {
+        if (architecture == null || architecture.isBlank()) {
+            return "";
+        }
+        String normalized = architecture.trim().toLowerCase(Locale.ROOT);
+        if (normalized.equals("unknown")) {
+            return "";
+        }
+        if (normalized.contains("gemma")) {
+            return "gemma";
+        }
+        return normalized.replaceAll("[^a-z0-9]+", "");
+    }
+
+    static Set<String> canonicalModelKeys(IndexCandidate candidate) {
+        Set<String> keys = new HashSet<>();
+        if (candidate == null) {
+            return keys;
+        }
+        addCanonicalModelKey(keys, candidate.id());
+        addCanonicalModelKey(keys, candidate.name());
+        addCanonicalModelKey(keys, lastPathSegment(candidate.path()));
+        return keys;
+    }
+
+    private static void addCanonicalModelKey(Set<String> keys, String value) {
+        String key = canonicalModelKey(value);
+        if (!key.isBlank()) {
+            keys.add(key);
+        }
+    }
+
+    static String canonicalModelKey(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String leaf = lastPathSegment(value)
+                .replace("__", "/")
+                .replace('\\', '/')
+                .toLowerCase(Locale.ROOT);
+        int slash = leaf.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < leaf.length()) {
+            leaf = leaf.substring(slash + 1);
+        }
+        leaf = leaf
+                .replaceAll("\\.(litertlm|litert|tflite|tfl|task|gguf|safetensors?|bin)$", "")
+                .replaceAll("(?i)(-?litert-?lm|-?litertlm|-?tflite|-?safetensors?|\\.safetensors?)$", "");
+        String[] tokens = leaf.split("[^a-z0-9]+");
+        StringBuilder key = new StringBuilder();
+        for (String token : tokens) {
+            if (token.isBlank() || isCanonicalNoiseToken(token)) {
+                continue;
+            }
+            key.append(token);
+        }
+        return key.toString();
+    }
+
+    private static String lastPathSegment(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        return slash >= 0 && slash + 1 < normalized.length()
+                ? normalized.substring(slash + 1)
+                : normalized;
+    }
+
+    private static boolean isCanonicalNoiseToken(String token) {
+        return switch (token) {
+            case "google", "litert", "community", "lm", "gguf", "safetensor", "safetensors",
+                    "q4", "q5", "q6", "q8", "k", "m", "f16", "fp16", "bf16" -> true;
+            default -> false;
+        };
+    }
+
+    private static int equivalentLiteRtPreference(IndexCandidate candidate) {
+        String path = candidate.path() == null ? "" : candidate.path().toLowerCase(Locale.ROOT);
+        String name = candidate.name() == null ? "" : candidate.name().toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (!path.endsWith(".litertlm") && !name.endsWith(".litertlm")) {
+            score += 20;
+        }
+        if (path.contains("qualcomm") || name.contains("qualcomm")) {
+            score += 100;
+        }
+        return score;
+    }
+
+    static boolean equivalentLiteRtFastPathEnabled() {
+        String configured = System.getProperty("gollek.litert.fast_run.auto_equivalent");
+        return configured == null || configured.isBlank() || Boolean.parseBoolean(configured);
+    }
+
+    private static boolean sameIndexPath(IndexCandidate left, IndexCandidate right) {
+        if (left == null || right == null || left.path() == null || right.path() == null) {
+            return false;
+        }
+        return left.path().equals(right.path());
+    }
+
+    private static boolean intersects(Set<String> left, Set<String> right) {
+        if (left == null || right == null || left.isEmpty() || right.isEmpty()) {
+            return false;
+        }
+        for (String value : right) {
+            if (left.contains(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isLiteRtFormat(String format) {
@@ -332,6 +516,7 @@ public final class LiteRtLmFastRun {
         return normalized.equals("litert")
                 || normalized.equals("litertlm")
                 || normalized.equals("tflite")
+                || normalized.equals("tfl")
                 || normalized.equals("task");
     }
 
@@ -340,6 +525,27 @@ public final class LiteRtLmFastRun {
             return false;
         }
         return path.replace("\\", "/").toLowerCase(Locale.ROOT).endsWith(".litertlm");
+    }
+
+    static record IndexCandidate(
+            String object,
+            String id,
+            String shortId,
+            String name,
+            String architecture,
+            String format,
+            String path) {
+
+        static IndexCandidate from(String object) {
+            return new IndexCandidate(
+                    object,
+                    jsonStringField(object, "id").orElse(null),
+                    jsonStringField(object, "shortId").orElse(null),
+                    jsonStringField(object, "name").orElse(null),
+                    jsonStringField(object, "architecture").orElse(null),
+                    jsonStringField(object, "format").orElse(null),
+                    jsonStringField(object, "path").orElse(null));
+        }
     }
 
     private static Optional<String> jsonStringField(String object, String field) {
@@ -442,6 +648,7 @@ public final class LiteRtLmFastRun {
         Engine.Companion.setNativeMinLogSeverity(nativeLogSeverity());
 
         int engineMaxNumTokens = maxNumTokens(args);
+        printRunHeader(modelPath, args, out);
         long beforeEngineInitNanos = System.nanoTime();
         String requestedBackend = normalizedBackend(args.backend);
         try (EngineLease lease = engineCache == null
@@ -449,6 +656,7 @@ public final class LiteRtLmFastRun {
                 : engineCache.acquire(modelPath, requestedBackend, engineMaxNumTokens)) {
             long afterEngineInitNanos = System.nanoTime();
             String warmSuffix = engineCache == null ? "" : ", warmEngine=" + lease.reused;
+            printExecutionRoute(out, lease, runnerName);
             out.printf("Using official LiteRT-LM JVM %s for %s (backend=%s, speculativeDecoding=%s, engineMaxNumTokens=%d%s).%n",
                     runnerName,
                     modelPath.getFileName(),
@@ -478,28 +686,24 @@ public final class LiteRtLmFastRun {
                 long afterConversationCreateNanos = System.nanoTime();
                 CountDownLatch done = new CountDownLatch(1);
                 AtomicBoolean cancelled = new AtomicBoolean(false);
+                AtomicInteger streamUpdates = new AtomicInteger(0);
                 AtomicLong firstChunkNanos = new AtomicLong(0L);
                 AtomicReference<Throwable> error = new AtomicReference<>();
-                StringBuilder accumulated = new StringBuilder();
-                StringBuilder emitted = new StringBuilder();
+                ApproximateTokenStreamLimiter tokenLimiter = new ApproximateTokenStreamLimiter(args.maxTokens);
                 conversation.sendMessageAsync(Contents.Companion.of(promptForModel(args.prompt)), new MessageCallback() {
                     @Override
                     public void onMessage(com.google.ai.edge.litertlm.Message message) {
                         if (cancelled.get()) {
                             return;
                         }
+                        streamUpdates.incrementAndGet();
                         firstChunkNanos.compareAndSet(0L, System.nanoTime());
-                        accumulated.append(message.toString());
-                        String limited = limitByApproximateTokens(accumulated.toString(), args.maxTokens);
-                        if (limited.length() > emitted.length()) {
-                            String delta = limited.substring(emitted.length());
+                        String delta = tokenLimiter.offer(message.toString());
+                        if (!delta.isEmpty()) {
                             out.print(delta);
                             out.flush();
-                            emitted.setLength(0);
-                            emitted.append(limited);
                         }
-                        if (approximateTokenCount(accumulated) >= args.maxTokens
-                                && cancelled.compareAndSet(false, true)) {
+                        if (tokenLimiter.atLimit() && cancelled.compareAndSet(false, true)) {
                             conversation.cancelProcess();
                             done.countDown();
                         }
@@ -526,8 +730,16 @@ public final class LiteRtLmFastRun {
                     throw new IllegalStateException(error.get());
                 }
                 lease.markPrewarmed(prewarmIterationCount());
-                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
-                out.printf("%n[Fast LiteRT-LM, Duration: %.2fs]%n", durationMs / 1000.0d);
+                long endNanos = System.nanoTime();
+                printFastRunStats(out,
+                        streamUpdates.get(),
+                        tokenLimiter.emittedTokenCount(),
+                        startNanos,
+                        beforeEngineInitNanos,
+                        afterEngineInitNanos,
+                        afterConversationCreateNanos,
+                        firstChunkNanos.get(),
+                        endNanos);
                 if (Boolean.getBoolean("gollek.litert.fast_run.profile")) {
                     long first = firstChunkNanos.get();
                     err.printf(Locale.ROOT,
@@ -539,6 +751,119 @@ public final class LiteRtLmFastRun {
                             seconds(System.nanoTime() - startNanos));
                 }
             }
+        }
+    }
+
+    static void printFastRunStats(
+            PrintStream out,
+            int streamUpdates,
+            int outputTokens,
+            long startNanos,
+            long beforeEngineInitNanos,
+            long afterEngineInitNanos,
+            long afterConversationCreateNanos,
+            long firstChunkNanos,
+            long endNanos) {
+        long durationMs = TimeUnit.NANOSECONDS.toMillis(Math.max(0L, endNanos - startNanos));
+        double durationSeconds = durationMs / 1000.0d;
+        double speed = durationSeconds > 0.0d ? outputTokens / durationSeconds : 0.0d;
+        double loadMs = nanosToMillis(Math.max(0L, afterEngineInitNanos - beforeEngineInitNanos));
+        boolean hasTtft = firstChunkNanos > 0L;
+        double ttftMs = hasTtft ? nanosToMillis(Math.max(0L, firstChunkNanos - startNanos)) : -1.0d;
+        double engineTtftMs = hasTtft
+                ? nanosToMillis(Math.max(0L, firstChunkNanos - afterConversationCreateNanos))
+                : -1.0d;
+        double tokenLatencyMs = outputTokens > 0
+                ? nanosToMillis(Math.max(0L, endNanos - (hasTtft ? firstChunkNanos : startNanos))) / outputTokens
+                : 0.0d;
+
+        if (hasTtft) {
+            out.printf("%n[Stream updates: %d, Duration: %.2fs, Speed: %.2f t/s, TTFT: %.2f ms]%n",
+                    streamUpdates, durationSeconds, speed, ttftMs);
+        } else {
+            out.printf("%n[Stream updates: %d, Duration: %.2fs, Speed: %.2f t/s]%n",
+                    streamUpdates, durationSeconds, speed);
+        }
+        out.println("Performance Metrics:");
+        out.printf("  load time      = %9.2f ms%n", loadMs);
+        out.printf("  generation     = %9.2f t/s (%d tokens)%n", speed, outputTokens);
+        if (hasTtft) {
+            out.printf("  latency (ttft) = %9.2f ms%n", ttftMs);
+            out.printf("  engine ttft    = %9.2f ms (model-ready)%n", engineTtftMs);
+        }
+        out.printf("  token latency  = %9.2f ms/token%n%n", tokenLatencyMs);
+    }
+
+    private static double nanosToMillis(long nanos) {
+        return nanos / 1_000_000.0d;
+    }
+
+    static void printRunHeader(Path modelPath, FastArgs args, PrintStream out) {
+        printBanner(out);
+        if (shouldPrintResolvedModelPath(modelPath, args)) {
+            out.printf("Resolved local model index entry: %s%n", modelPath);
+        }
+        out.printf("Model: %s%n", modelPath);
+        out.printf("Provider: litert, format=%s%n", liteRtModelFormat(modelPath));
+    }
+
+    static void printExecutionRoute(PrintStream out, EngineLease lease, String runnerName) {
+        out.println(executionRouteLine(lease.backendName, runnerName));
+        out.println("--------------------------------------------------");
+    }
+
+    static String liteRtModelFormat(Path modelPath) {
+        if (modelPath == null || modelPath.getFileName() == null) {
+            return "litert";
+        }
+        String name = modelPath.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".litertlm")) {
+            return "litertlm";
+        }
+        if (name.endsWith(".tflite") || name.endsWith(".tfl")) {
+            return "tflite";
+        }
+        if (name.endsWith(".task")) {
+            return "task";
+        }
+        return "litert";
+    }
+
+    static String executionRouteLine(String backendName, String runnerName) {
+        String backend = backendName == null || backendName.isBlank() ? "unknown" : backendName;
+        return "Execution route: litert (backend=" + backend + ") [" + executionRouteTag(runnerName) + "]";
+    }
+
+    private static String executionRouteTag(String runnerName) {
+        String normalized = runnerName == null ? "" : runnerName.trim().toLowerCase(Locale.ROOT);
+        if (normalized.contains("daemon")) {
+            return "official_litert_lm_jvm_daemon";
+        }
+        return "official_litert_lm_jvm_fast_path";
+    }
+
+    private static void printBanner(PrintStream out) {
+        out.println("  _____       _  _      _    ");
+        out.println(" / ____|     | || |    | |   ");
+        out.println("| |  __  ___ | || | ___| | __");
+        out.println("| | |_ |/ _ \\| || |/ _ \\ |/ /");
+        out.println("| |__| | (_) | || |  __/   < ");
+        out.println(" \\_____|\\___/|_||_|\\___|_|\\_\\");
+        out.println();
+    }
+
+    private static boolean shouldPrintResolvedModelPath(Path modelPath, FastArgs args) {
+        if (args == null || args.model == null || args.model.isBlank() || args.modelFile != null) {
+            return false;
+        }
+        try {
+            Path requested = Path.of(args.model);
+            Path resolved = requested.isAbsolute()
+                    ? requested.toAbsolutePath().normalize()
+                    : Path.of("").toAbsolutePath().resolve(requested).normalize();
+            return !resolved.equals(modelPath.toAbsolutePath().normalize());
+        } catch (Exception ignored) {
+            return true;
         }
     }
 
@@ -1167,16 +1492,15 @@ public final class LiteRtLmFastRun {
             CountDownLatch done = new CountDownLatch(1);
             AtomicBoolean cancelled = new AtomicBoolean(false);
             AtomicReference<Throwable> error = new AtomicReference<>();
-            StringBuilder accumulated = new StringBuilder();
+            ApproximateTokenStreamLimiter tokenLimiter = new ApproximateTokenStreamLimiter(maxWarmupTokens);
             conversation.sendMessageAsync(Contents.Companion.of(promptForModel(args.prompt)), new MessageCallback() {
                 @Override
                 public void onMessage(com.google.ai.edge.litertlm.Message message) {
                     if (cancelled.get()) {
                         return;
                     }
-                    accumulated.append(message.toString());
-                    if (approximateTokenCount(accumulated) >= maxWarmupTokens
-                            && cancelled.compareAndSet(false, true)) {
+                    tokenLimiter.offer(message.toString());
+                    if (tokenLimiter.atLimit() && cancelled.compareAndSet(false, true)) {
                         conversation.cancelProcess();
                         done.countDown();
                     }
@@ -1623,6 +1947,57 @@ public final class LiteRtLmFastRun {
         }
     }
 
+    static final class ApproximateTokenStreamLimiter {
+        private final int maxTokens;
+        private final StringBuilder pendingWhitespace = new StringBuilder();
+        private int emittedTokenCount;
+        private boolean inToken;
+        private boolean atLimit;
+
+        ApproximateTokenStreamLimiter(int maxTokens) {
+            this.maxTokens = Math.max(1, maxTokens);
+        }
+
+        String offer(String chunk) {
+            if (chunk == null || chunk.isEmpty() || atLimit) {
+                return "";
+            }
+            StringBuilder delta = new StringBuilder(chunk.length());
+            for (int i = 0; i < chunk.length(); i++) {
+                char ch = chunk.charAt(i);
+                if (Character.isWhitespace(ch)) {
+                    pendingWhitespace.append(ch);
+                    inToken = false;
+                    continue;
+                }
+                if (!inToken) {
+                    int nextTokenCount = emittedTokenCount + 1;
+                    if (nextTokenCount > maxTokens) {
+                        pendingWhitespace.setLength(0);
+                        atLimit = true;
+                        break;
+                    }
+                    emittedTokenCount = nextTokenCount;
+                    inToken = true;
+                }
+                if (pendingWhitespace.length() > 0) {
+                    delta.append(pendingWhitespace);
+                    pendingWhitespace.setLength(0);
+                }
+                delta.append(ch);
+            }
+            return delta.toString();
+        }
+
+        boolean atLimit() {
+            return atLimit;
+        }
+
+        int emittedTokenCount() {
+            return emittedTokenCount;
+        }
+    }
+
     static final class WarmupState {
         private int prewarmIterationsCompleted;
 
@@ -1688,7 +2063,7 @@ public final class LiteRtLmFastRun {
                 + " spec=" + System.getProperty("gollek.litert.fast_run.speculative_decoding", "");
     }
 
-    private static final class FastArgs {
+    static final class FastArgs {
         private String model;
         private String modelFile;
         private String prompt;
@@ -1704,7 +2079,7 @@ public final class LiteRtLmFastRun {
                     && ((model != null && !model.isBlank()) || (modelFile != null && !modelFile.isBlank()));
         }
 
-        private static FastArgs parse(String[] args) {
+        static FastArgs parse(String[] args) {
             FastArgs parsed = new FastArgs();
             if (args.length == 0 || !"run".equals(args[0])) {
                 parsed.supported = false;
@@ -1780,6 +2155,16 @@ public final class LiteRtLmFastRun {
                         String provider = next.value();
                         i = next.index();
                         if (provider != null && !provider.isBlank() && !"litert".equalsIgnoreCase(provider)) {
+                            parsed.supported = false;
+                        }
+                    }
+                    case "--format" -> {
+                        Value next = valueOrNext(value, args, i);
+                        String requestedFormat = next.value();
+                        i = next.index();
+                        if (requestedFormat != null
+                                && !requestedFormat.isBlank()
+                                && !isLiteRtFormat(requestedFormat)) {
                             parsed.supported = false;
                         }
                     }

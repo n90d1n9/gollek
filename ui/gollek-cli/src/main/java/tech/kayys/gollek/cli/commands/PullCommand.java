@@ -8,15 +8,20 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import tech.kayys.gollek.model.download.DownloadProgressListener;
+import tech.kayys.gollek.model.repo.local.GollekManifest;
+import tech.kayys.gollek.model.repo.local.ManifestStore;
 import tech.kayys.gollek.model.repo.hf.HuggingFaceClient;
 import tech.kayys.gollek.model.repo.hf.HuggingFaceRepository;
 import tech.kayys.gollek.sdk.model.ModelPullRequest;
 import tech.kayys.gollek.sdk.core.GollekSdk;
+import tech.kayys.gollek.sdk.util.GollekHome;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -36,6 +41,9 @@ public class PullCommand implements Runnable {
 
     @Inject
     Instance<HuggingFaceClient> huggingFaceClient;
+
+    @Inject
+    Instance<ManifestStore> manifestStore;
 
     @Parameters(index = "0", description = "Model name to pull (e.g. llama3, hf:user/repo)")
     public String modelSpec;
@@ -80,7 +88,7 @@ public class PullCommand implements Runnable {
                 }
             });
 
-            if (!hasLocalSafetensorArtifacts(effectiveModelSpec)) {
+            if (!hasLocalArtifacts(effectiveModelSpec)) {
                 if (!tryHfRepositoryFallback(effectiveModelSpec, new RuntimeException("No local artifacts after SDK pull"))) {
                     throw new RuntimeException("Pull reported success, but no local model artifacts were found for " + effectiveModelSpec);
                 }
@@ -90,8 +98,16 @@ public class PullCommand implements Runnable {
 
         } catch (Exception e) {
             String effectiveModelSpec = normalizeModelSpec(modelSpec);
-            if (tryHfRepositoryFallback(effectiveModelSpec, e)) {
-                System.out.println("\nPull complete: " + effectiveModelSpec);
+            try {
+                if (tryHfRepositoryFallback(effectiveModelSpec, e)) {
+                    System.out.println("\nPull complete: " + effectiveModelSpec);
+                    return;
+                }
+            } catch (Exception fallbackEx) {
+                System.err.println("\nFailed to pull model via fallback: " + fallbackEx.getMessage());
+                if (fallbackEx.getCause() != null) {
+                    System.err.println("Detail: " + fallbackEx.getCause().getMessage());
+                }
                 return;
             }
             System.err.println("\nFailed to pull model: " + e.getMessage());
@@ -122,16 +138,17 @@ public class PullCommand implements Runnable {
 
         System.out.println("Falling back to HuggingFace repository downloader...");
         var manifest = huggingFaceRepository.get()
-                .findById(repoId, "community")
+                .findById(effectiveModelSpec, "community")
                 .await()
                 .atMost(Duration.ofMinutes(30));
         if (manifest == null) {
             // Some build profiles can resolve to null even when HF access is valid.
-            // Fall back to direct HF client download into the local safetensor cache.
+            // Fall back to a direct HF client download and register it in the local manifest store.
             if (huggingFaceClient == null || huggingFaceClient.isUnsatisfied()) {
                 throw new RuntimeException("HuggingFace pull fallback returned no model manifest for " + repoId, original);
             }
-            Path targetDir = Path.of(System.getProperty("user.home"), ".gollek", "models", "safetensors", repoId);
+            String manifestName = GollekManifest.computeName(repoId, "main");
+            Path targetDir = ManifestStore.resolveBlobDir(repoId, manifestName);
             try {
                 Files.createDirectories(targetDir);
                 HuggingFaceClient client = huggingFaceClient.get();
@@ -139,11 +156,13 @@ public class PullCommand implements Runnable {
                 try (HfProgressRenderer progress = new HfProgressRenderer(files.size())) {
                     client.downloadRepository(repoId, targetDir, progress);
                 }
+                saveDirectDownloadManifest(repoId, targetDir, files, manifestName);
+                LocalModelIndex.refreshFromDisk();
             } catch (Exception ex) {
                 throw new RuntimeException("Direct HuggingFace download fallback failed for " + repoId, ex);
             }
         }
-        return hasLocalSafetensorArtifacts(effectiveModelSpec);
+        return hasLocalArtifacts(effectiveModelSpec);
     }
 
     private String normalizeModelSpec(String raw) {
@@ -161,7 +180,59 @@ public class PullCommand implements Runnable {
         return trimmed;
     }
 
-    private boolean hasLocalSafetensorArtifacts(String effectiveModelSpec) {
+    private void saveDirectDownloadManifest(String repoId, Path targetDir, List<String> files, String manifestName)
+            throws Exception {
+        ManifestStore store = manifestStore != null && !manifestStore.isUnsatisfied()
+                ? manifestStore.get()
+                : new ManifestStore();
+
+        String format = ManifestStore.detectFormat(targetDir);
+        GollekManifest manifest = new GollekManifest();
+        manifest.setId(manifestName);
+        manifest.setModelId(repoId);
+        manifest.setName(manifestName);
+        manifest.setFormat(format);
+        manifest.setPipeline(files != null && files.stream().anyMatch(name -> name.endsWith("model_index.json")));
+        manifest.setSource("huggingface");
+        manifest.setRepository(repoId);
+        manifest.setBranch("main");
+        manifest.setBlobPath(targetDir.toAbsolutePath().toString());
+        manifest.setFiles(ManifestStore.listBlobFiles(targetDir));
+        manifest.setCreatedAt(Instant.now());
+        manifest.setSizeBytes(computeSize(targetDir));
+        manifest.setArchitecture(ManifestStore.detectArchitecture(manifest));
+        manifest.setMetadata(Map.of(
+                "fallback", "direct-huggingface-repository",
+                "format", format != null ? format : "unknown"));
+
+        store.save(manifest);
+    }
+
+    private long computeSize(Path path) {
+        if (path == null || !Files.exists(path)) {
+            return 0L;
+        }
+        try {
+            if (Files.isRegularFile(path)) {
+                return Files.size(path);
+            }
+            try (Stream<Path> walk = Files.walk(path)) {
+                return walk.filter(Files::isRegularFile)
+                        .mapToLong(file -> {
+                            try {
+                                return Files.size(file);
+                            } catch (Exception ignored) {
+                                return 0L;
+                            }
+                        })
+                        .sum();
+            }
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
+    private boolean hasLocalArtifacts(String effectiveModelSpec) {
         if (effectiveModelSpec == null || effectiveModelSpec.isBlank()) {
             return false;
         }
@@ -172,10 +243,27 @@ public class PullCommand implements Runnable {
             return false;
         }
 
-        Path base = Path.of(System.getProperty("user.home"), ".gollek", "models", "safetensors");
-        Path direct = base.resolve(repoId);
-        Path normalized = base.resolve(repoId.replace("/", "--"));
-        return hasFiles(direct) || hasFiles(normalized);
+        if (LocalModelIndex.find(repoId).isPresent() || LocalModelIndex.find(effectiveModelSpec).isPresent()) {
+            return true;
+        }
+
+        String normalized = repoId.replace("/", "--");
+        String manifestName = GollekManifest.computeName(repoId, "main");
+        List<Path> candidates = List.of(
+                ManifestStore.resolveBlobDir(repoId, manifestName),
+                GollekHome.path("models", "safetensors").resolve(repoId),
+                GollekHome.path("models", "safetensors").resolve(normalized),
+                GollekHome.path("models", "onnx").resolve(repoId),
+                GollekHome.path("models", "onnx").resolve(normalized),
+                GollekHome.path("models", "litert").resolve(repoId),
+                GollekHome.path("models", "litert").resolve(normalized),
+                GollekHome.path("models", "gguf").resolve(repoId),
+                GollekHome.path("models", "gguf").resolve(normalized),
+                GollekHome.path("models", "torchscript").resolve(repoId),
+                GollekHome.path("models", "torchscript").resolve(normalized),
+                GollekHome.path("models", "libtorchscript").resolve(repoId),
+                GollekHome.path("models", "libtorchscript").resolve(normalized));
+        return candidates.stream().anyMatch(this::hasFiles);
     }
 
     private boolean hasFiles(Path dir) {

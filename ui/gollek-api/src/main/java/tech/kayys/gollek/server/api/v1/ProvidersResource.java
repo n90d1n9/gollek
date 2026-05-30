@@ -30,9 +30,9 @@ public class ProvidersResource {
             GollekSdk sdk = sdkProvider.getSdk();
             List<ProviderInfo> providers = sdk.listAvailableProviders();
             var out = providers.stream().map(p -> java.util.Map.of(
-                    "id", p.getProviderId(),
-                    "name", p.getName(),
-                    "description", p.getDescription())).collect(Collectors.toList());
+                    "id", p.id(),
+                    "name", p.name(),
+                    "description", p.description())).collect(Collectors.toList());
             return Response.ok(out).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)

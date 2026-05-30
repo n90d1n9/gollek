@@ -10,7 +10,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import org.jboss.resteasy.reactive.SseElementType;
+import org.jboss.resteasy.reactive.RestSseElementType;
 
 import io.smallrye.mutiny.Multi;
 import tech.kayys.gollek.server.SdkProvider;
@@ -47,7 +47,7 @@ public class InferenceResource {
     @Path("/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @SseElementType(MediaType.APPLICATION_JSON)
+    @RestSseElementType(MediaType.APPLICATION_JSON)
     public Multi<StreamingInferenceChunk> streamCompletion(@Context HttpHeaders headers, InferenceRequest request) {
         GollekSdk sdk = sdkProvider.getSdk();
         String apiKey = headers.getHeaderString("X-API-Key");

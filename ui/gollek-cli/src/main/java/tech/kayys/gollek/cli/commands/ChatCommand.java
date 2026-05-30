@@ -14,8 +14,10 @@ import tech.kayys.gollek.sdk.model.ModelResolver;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.sdk.exception.SdkException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
+import tech.kayys.gollek.spi.Message;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.sdk.model.ModelResolution;
+import tech.kayys.gollek.cli.util.CliInferenceFeatures;
 
 import org.jline.console.CmdDesc;
 import org.jline.utils.AttributedString;
@@ -73,6 +75,27 @@ public class ChatCommand implements Runnable {
 
     @Option(names = { "-s", "--system" }, description = "System prompt")
     public String systemPrompt;
+
+    @Option(names = { "--tool-file", "--tools-file" }, split = ",", description = "JSON tool definition file(s); accepts OpenAI-style tools arrays or Gollek ToolDefinition JSON")
+    public List<String> toolFiles;
+
+    @Option(names = { "--tool-choice" }, description = "Tool choice policy such as auto, none, required, or a JSON object")
+    public String toolChoice;
+
+    @Option(names = { "--mcp-tool", "--mcp-tools" }, split = ",", description = "MCP tool name(s) to expose, optionally as server/tool or server:tool")
+    public List<String> mcpTools;
+
+    @Option(names = { "--rag-context" }, split = "\\|", description = "Inline retrieval context block(s), separated with | when repeated in one argument")
+    public List<String> ragContexts;
+
+    @Option(names = { "--rag-file", "--context-file" }, split = ",", description = "Text file(s) to inject as retrieval context")
+    public List<String> ragFiles;
+
+    @Option(names = { "--rag-max-chars" }, description = "Maximum retrieval context characters to inject", defaultValue = "12000")
+    public int ragMaxChars = 12000;
+
+    @Option(names = { "--embedding-model", "--embed-model" }, description = "Embedding model id/path to attach to embedding or RAG-aware providers")
+    public String embeddingModel;
 
     @Option(names = { "--temperature" }, description = "Sampling temperature (default 0.2)")
     public double temperature = 0.2;
@@ -155,6 +178,9 @@ public class ChatCommand implements Runnable {
             + "Prefer 1-4 short sentences unless the user asks for detail.";
 
     private String modelPathOverride;
+    private List<tech.kayys.gollek.spi.tool.ToolDefinition> loadedTools = List.of();
+    private Object loadedToolChoice;
+    private CliInferenceFeatures.RagContext loadedRagContext = new CliInferenceFeatures.RagContext("", List.of());
 
     @Override
     public void run() {
@@ -384,11 +410,14 @@ public class ChatCommand implements Runnable {
         // all output goes to ~/.gollek/logs/cli.log
     }
 
-    private void setupSession() {
+    private void setupSession() throws Exception {
         uiRenderer.setJsonMode(jsonMode);
         boolean persistentSessionEnabled = enableSession == null ? true : enableSession;
         sessionManager.initialize(modelId, providerId, modelPathOverride, persistentSessionEnabled, forceGguf);
         sessionManager.setInferenceParams(autoContinue, maxTokens, temperature);
+        loadedTools = CliInferenceFeatures.loadTools(toolFiles, mcpTools);
+        loadedToolChoice = CliInferenceFeatures.parseToolChoice(toolChoice);
+        loadedRagContext = CliInferenceFeatures.loadRagContext(ragContexts, ragFiles, ragMaxChars);
 
         PrintWriter writer = null;
         if (outputFile != null) {
@@ -410,7 +439,6 @@ public class ChatCommand implements Runnable {
         } else {
             sessionManager.addMessage(tech.kayys.gollek.spi.Message.system("I'm gollek, and you are using model " + modelId + " to serve you."));
         }
-
         if (!quiet) {
             uiRenderer.printBanner();
             uiRenderer.printModelInfo(modelId, providerId, null, outputFile != null ? outputFile.getAbsolutePath() : null, true);
@@ -466,10 +494,11 @@ public class ChatCommand implements Runnable {
             }
 
             sessionManager.addMessage(tech.kayys.gollek.spi.Message.user(input));
+            CliInferenceFeatures.RagContext turnRagContext = ragContextForTurn(input);
 
             InferenceRequest.Builder reqBuilder = InferenceRequest.builder()
                     .requestId(UUID.randomUUID().toString())
-                    .messages(sessionManager.getHistory())
+                    .messages(historyWithRagContext(turnRagContext))
                     .temperature(temperature)
                     .parameter("top_p", topP)
                     .parameter("top_k", topK)
@@ -490,9 +519,41 @@ public class ChatCommand implements Runnable {
                 reqBuilder.parameter("quantize_strategy", quantizeStrategy);
                 reqBuilder.parameter("quantize_bits", quantizeBits);
             }
+            CliInferenceFeatures.applyTools(reqBuilder, loadedTools, loadedToolChoice);
+            CliInferenceFeatures.applyRagMetadata(reqBuilder, turnRagContext, embeddingModel);
 
             sessionManager.executeInference(reqBuilder, stream, enableJsonSse);
         }
+    }
+
+    private CliInferenceFeatures.RagContext ragContextForTurn(String input) {
+        if ((ragContexts == null || ragContexts.isEmpty()) && (ragFiles == null || ragFiles.isEmpty())) {
+            return loadedRagContext;
+        }
+        try {
+            return CliInferenceFeatures.loadRagContext(ragContexts, ragFiles, ragMaxChars, input);
+        } catch (Exception e) {
+            uiRenderer.printError("RAG context failed: " + e.getMessage(), quiet);
+            return loadedRagContext;
+        }
+    }
+
+    private List<Message> historyWithRagContext(CliInferenceFeatures.RagContext ragContext) {
+        List<Message> history = new ArrayList<>(sessionManager.getHistory());
+        String ragSystemPrompt = CliInferenceFeatures.ragSystemPrompt(ragContext);
+        if (ragSystemPrompt == null || ragSystemPrompt.isBlank()) {
+            return history;
+        }
+
+        int insertAt = history.size();
+        for (int i = history.size() - 1; i >= 0; i--) {
+            if (history.get(i).getRole() == Message.Role.USER) {
+                insertAt = i;
+                break;
+            }
+        }
+        history.add(insertAt, Message.system(ragSystemPrompt));
+        return history;
     }
 
     private org.jline.reader.Completer createCompleter() {

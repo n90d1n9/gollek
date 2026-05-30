@@ -155,6 +155,36 @@ gollek run --model qwen2.5-7b-instruct-GGUF --prompt "Hi"
 gollek run --model hf:Qwen/Qwen2.5-0.5B-Instruct --prompt "Describe the moon."
 ```
 
+### System Prompt, Tools, MCP, RAG, and Embeddings
+```bash
+# System prompt
+gollek run --model qwen2.5-7b-instruct-GGUF \
+  --system "You are a concise Gollek assistant." \
+  --prompt "Summarize the installer profiles."
+
+# OpenAI-style tool definitions or Gollek ToolDefinition JSON
+gollek run --model qwen2.5-7b-instruct-GGUF \
+  --tool-file ./tools.json \
+  --tool-choice auto \
+  --prompt "Use a tool if needed."
+
+# MCP tool hints, optionally scoped as server/tool or server:tool
+gollek run --model qwen2.5-7b-instruct-GGUF \
+  --mcp-tool filesystem/read_file \
+  --prompt "Check the project README."
+
+# Retrieval context from inline text and files. File context is ranked against each prompt.
+gollek chat --model qwen2.5-7b-instruct-GGUF \
+  --rag-file ./docs/install.md \
+  --rag-context "Prefer local install profiles when possible." \
+  --embedding-model text-embedding-3-small
+
+# Embeddings from text or file, with JSON output
+gollek embed --model text-embedding-3-small \
+  --input-file ./docs/install.md \
+  --json --output /tmp/gollek-install-embedding.json
+```
+
 ### Interactive Chat
 ```bash
 gollek chat --model llama-3.2-1b-instruct
@@ -240,7 +270,7 @@ meta-llama/Llama-3.2-1B
 google/gemma-2b-it
 
 
-GGUF_GPU_ENABLED=true GGUF_GPU_LAYERS=8 GGUF_BATCH_SIZE=64 \
+GGUF_GPU_ENABLED=true GGUF_GPU_LAYERS=-1 GGUF_BATCH_SIZE=1024 \
 GGUF_THREADS=8 \
 java -jar ui/gollek-cli/target/quarkus-app/quarkus-run.jar \
 chat --model meta-llama/Llama-3.2-1B-Instruct

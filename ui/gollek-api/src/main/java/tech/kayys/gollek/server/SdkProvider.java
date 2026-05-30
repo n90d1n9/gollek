@@ -2,6 +2,7 @@ package tech.kayys.gollek.server;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -19,6 +20,7 @@ import tech.kayys.gollek.spi.embedding.EmbeddingResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.time.Instant;
 
 /**
  * Application-scoped holder for a GollekSdk instance.
@@ -52,6 +54,12 @@ public class SdkProvider {
         return sdk;
     }
 
+    @Produces
+    @ApplicationScoped
+    public GollekSdk produceSdk() {
+        return sdk;
+    }
+
     /**
      * Simple demo SDK used when no real provider is available. Implements a
      * small subset of the GollekSdk API sufficient for demos and tests.
@@ -74,7 +82,14 @@ public class SdkProvider {
 
         @Override
         public io.smallrye.mutiny.Multi<tech.kayys.gollek.spi.inference.StreamingInferenceChunk> streamCompletion(InferenceRequest request) {
-            return io.smallrye.mutiny.Multi.createFrom().empty();
+            String content = "[demo] echo: " + (request.getPrompt() != null ? request.getPrompt() : "");
+            return io.smallrye.mutiny.Multi.createFrom().items(
+                    tech.kayys.gollek.spi.inference.StreamingInferenceChunk.of(request.getRequestId(), 0, content),
+                    tech.kayys.gollek.spi.inference.StreamingInferenceChunk.finalTextChunk(
+                            request.getRequestId(),
+                            1,
+                            "",
+                            new tech.kayys.gollek.spi.inference.StreamingInferenceChunk.ChunkUsage(0, 0, 0)));
         }
 
         @Override
@@ -91,7 +106,8 @@ public class SdkProvider {
 
         @Override
         public tech.kayys.gollek.spi.inference.AsyncJobStatus getJobStatus(String jobId) {
-            return new tech.kayys.gollek.spi.inference.AsyncJobStatus(jobId, "COMPLETED", null);
+            Instant now = Instant.now();
+            return new tech.kayys.gollek.spi.inference.AsyncJobStatus(jobId, null, "COMPLETED", null, null, now, now);
         }
 
         @Override
@@ -142,7 +158,7 @@ public class SdkProvider {
         public void pullModel(String modelSpec, java.util.function.Consumer<tech.kayys.gollek.sdk.model.PullProgress> progressCallback) {
             // simulate progress
             for (int i = 1; i <= 5; i++) {
-                progressCallback.accept(new tech.kayys.gollek.sdk.model.PullProgress(i * 20, "step " + i));
+                progressCallback.accept(new tech.kayys.gollek.sdk.model.PullProgress("step " + i, null, 100, i * 20L));
                 try { Thread.sleep(50); } catch (InterruptedException ignored) {}
             }
         }
@@ -168,7 +184,21 @@ public class SdkProvider {
 
         @Override
         public tech.kayys.gollek.sdk.model.SystemInfo getSystemInfo() {
-            return new tech.kayys.gollek.sdk.model.SystemInfo(java.util.Map.of(), java.util.Map.of());
+            Runtime runtime = Runtime.getRuntime();
+            return tech.kayys.gollek.sdk.model.SystemInfo.builder()
+                    .cliVersion("demo")
+                    .javaVersion(System.getProperty("java.version"))
+                    .osName(System.getProperty("os.name"))
+                    .osVersion(System.getProperty("os.version"))
+                    .osArch(System.getProperty("os.arch"))
+                    .userName(System.getProperty("user.name"))
+                    .userHome(System.getProperty("user.home"))
+                    .totalMemory(runtime.totalMemory())
+                    .freeMemory(runtime.freeMemory())
+                    .maxMemory(runtime.maxMemory())
+                    .availableProcessors(runtime.availableProcessors())
+                    .metadata(Map.of("mode", "demo"))
+                    .build();
         }
 
         // other default methods remain unimplemented for brevity

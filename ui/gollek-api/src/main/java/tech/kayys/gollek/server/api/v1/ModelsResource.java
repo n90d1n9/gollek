@@ -12,7 +12,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import io.smallrye.mutiny.Multi;
-import org.jboss.resteasy.reactive.SseElementType;
+import org.jboss.resteasy.reactive.RestSseElementType;
 
 import tech.kayys.gollek.server.SdkProvider;
 import tech.kayys.gollek.sdk.core.GollekSdk;
@@ -35,6 +35,8 @@ public class ModelsResource {
     public Response listModels(
             @jakarta.ws.rs.QueryParam("runnableOnly") boolean runnableOnly,
             @jakarta.ws.rs.QueryParam("limit") @jakarta.ws.rs.DefaultValue("50") int limit,
+            @jakarta.ws.rs.QueryParam("compat") String compat,
+            @jakarta.ws.rs.QueryParam("format") String responseFormat,
             @jakarta.ws.rs.QueryParam("namespace") String namespace) {
         GollekSdk sdk = sdkProvider.getSdk();
         try {
@@ -47,6 +49,9 @@ public class ModelsResource {
                     .build();
             
             List<ModelInfo> models = sdk.listModels(request);
+            if (isOpenAiCompat(compat) || isOpenAiCompat(responseFormat)) {
+                return Response.ok(AgenticApiMapper.toOpenAiModelsResponse(models)).build();
+            }
             return Response.ok(models).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
@@ -67,10 +72,29 @@ public class ModelsResource {
                         "modelId", m.getModelId(),
                         "format", m.getFormat(),
                         "description", m.getDescription(),
-                        "size", m.getSize())).build();
+                        "size", m.getSizeBytes())).build();
             } else {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(java.util.Map.of("error", e.getMessage())).build();
+        }
+    }
+
+    @GET
+    @Path("/{id}/capabilities")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getModelCapabilities(@PathParam("id") String id) {
+        GollekSdk sdk = sdkProvider.getSdk();
+        try {
+            Optional<ModelInfo> info = sdk.getModelInfo(id);
+            List<tech.kayys.gollek.spi.provider.ProviderInfo> providers = safeProviders(sdk);
+            return Response.ok(ModelCapabilityMapper.toCapabilityMatrix(
+                    id,
+                    info,
+                    providers,
+                    sdk.getPreferredProvider())).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(java.util.Map.of("error", e.getMessage())).build();
@@ -99,7 +123,7 @@ public class ModelsResource {
     @POST
     @Path("/pull/stream/{jobId}")
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @SseElementType(MediaType.APPLICATION_JSON)
+    @RestSseElementType(MediaType.APPLICATION_JSON)
     public Multi<PullProgress> pullModelStream(@PathParam("jobId") String jobId) {
         return jobManager.streamProgress(jobId);
     }
@@ -114,6 +138,18 @@ public class ModelsResource {
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(java.util.Map.of("error", e.getMessage())).build();
+        }
+    }
+
+    private static boolean isOpenAiCompat(String value) {
+        return value != null && "openai".equalsIgnoreCase(value.trim());
+    }
+
+    private static List<tech.kayys.gollek.spi.provider.ProviderInfo> safeProviders(GollekSdk sdk) {
+        try {
+            return sdk.listAvailableProviders();
+        } catch (Exception ignored) {
+            return List.of();
         }
     }
 }
