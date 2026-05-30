@@ -234,3 +234,6 @@ Desktop.ini
 
 *.log
 .notes
+# Ignore compiled artifacts – never commit them again
+/build/
+*/build/

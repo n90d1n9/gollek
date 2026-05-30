@@ -1,29 +1,18 @@
-#!/bin/bash
-# Jupyter Java Kernel for Gollek SDK
-# This script installs the Jupyter kernel configuration for gollek-sdk
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-KERNEL_NAME="Gollek-SDK"
-KERNEL_DIR="$(jupyter --data-dir)/kernels/gollek-sdk"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY_INSTALLER="$SCRIPT_DIR/../gollek-jupyter-kernel/install.py"
 
-echo "Installing Gollek SDK Jupyter Kernel..."
-echo "========================================="
-echo ""
+if [[ ! -f "$PY_INSTALLER" ]]; then
+  echo "❌ Standalone kernel installer not found: $PY_INSTALLER"
+  exit 1
+fi
 
-# Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+echo "Gollek Jupyter legacy installer shim"
+echo "  legacy IJava kernelspec flow has been replaced by the standalone Gollek kernel."
+echo "  delegating to: $PY_INSTALLER"
+echo
 
-# Create kernel directory
-mkdir -p "$KERNEL_DIR"
-
-# Copy kernel.json
-cp "$SCRIPT_DIR/kernel.json" "$KERNEL_DIR/"
-
-echo "✅ Kernel installed to: $KERNEL_DIR"
-echo ""
-echo "To use the kernel:"
-echo "  1. Start Jupyter: jupyter notebook"
-echo "  2. Create new notebook: New → Gollek-SDK"
-echo ""
-echo "Installation complete!"
+python3 "$PY_INSTALLER" "$@"

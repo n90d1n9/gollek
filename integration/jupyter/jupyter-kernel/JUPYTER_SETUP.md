@@ -23,6 +23,35 @@ Complete guide for setting up and using Gollek SDK with Jupyter notebooks.
 
 ## Installation
 
+> Status note
+>
+> The old IJava-based `gollek-sdk` kernelspec described in earlier versions of
+> this document is no longer the recommended path. The maintained path is the
+> standalone kernel in `../gollek-jupyter-kernel/`, which speaks the Jupyter
+> wire protocol directly through JJava.
+
+### Fast Path
+
+```bash
+cd gollek/integration/jupyter/gollek-jupyter-kernel
+./rebuild_kernel.sh doctor
+python3 install.py --dry-run
+python3 selftest.py
+python3 doctor.py
+python3 sync_active_install.py --dry-run
+python3 install.py --user
+jupyter kernelspec list
+```
+
+The self-test now retries random connection-file ports and then runs a small
+localhost bind probe before it gives up. If it reports
+`environment-localhost-bind-restriction`, the remaining issue is the current
+environment or sandbox rather than a normal stale-jar or simple port-collision
+problem.
+
+If you still enter through `jupyter-kernel/install.sh`, that script now
+delegates to the standalone kernel installer.
+
 ### Step 1: Install Jupyter
 
 **Using pip:**
@@ -35,46 +64,18 @@ pip install jupyter
 conda install jupyter
 ```
 
-### Step 2: Install IJava Kernel (Jupyter Java Support)
+### Step 2: Use The Standalone Gollek Kernel
 
 ```bash
-# Install IJava kernel
-git clone https://github.com/SpencerPark/IJava.git
-cd IJava/
-mvn clean install
-
-# Install kernel
-python install.py --sys-prefix
-```
-
-Alternatively, use the pre-built kernel:
-```bash
-pip install ijava
-# or
-conda install ijava
-```
-
-### Step 3: Setup Gollek SDK Kernel
-
-```bash
-# From gollek/sdk directory
-cd gollek/sdk
-
-# Build Gollek SDK
-mvn clean install -DskipTests
-
-# Install Gollek kernel
-bash jupyter-kernel/install.sh
-```
-
-### Step 4: Verify Installation
-
-```bash
-# List available kernels
+cd gollek/integration/jupyter/gollek-jupyter-kernel
+python3 install.py --dry-run
+python3 install.py --user
 jupyter kernelspec list
-
-# You should see "gollek-sdk" in the list
 ```
+
+### Step 3: Verify Installation
+
+You should see the standalone `gollek` kernelspec in the output.
 
 ## Quick Start
 
@@ -95,15 +96,288 @@ jupyter lab
 ### 3. First Code Cell
 
 ```java
-import tech.kayys.gollek.ml.nn.*;
-import tech.kayys.gollek.ml.autograd.*;
-
-// Create a simple neural network layer
-Linear layer = new Linear(10, 5);
-System.out.println("Layer created: " + layer);
+gollekHelp();
+gollekTensorDemo().shape()[0];
+gollekPreviewTensorDemo();
+gollekMetricsDemo();
+gollekLossCurveDemo();
+gollekImageDemo();
+gollekAudioDemo();
+gollekModelSummary();
 ```
 
 Press Shift+Enter to execute.
+
+Small notebook magics are available too:
+
+```java
+%magics
+%help %reset
+%help %cd
+%help %tree
+%help %du
+%help %cat
+%help %head
+%help %tail
+%help %grep
+%help %findfile
+%help %wc
+%help %diff
+%help %zipls
+%help %zipcat
+%help %tarls
+%help %tarcat
+%help %extract
+%help %sha256
+%help %json
+%help %csv
+%help %tsv
+%help %sample
+%help %sort
+%help %filter
+%help %describe
+%help %schema
+%help %missing
+%help %valuecounts
+%help %groupby
+%help %corr
+%help %scatter
+%help %lineplot
+%help %hist
+%help %md
+%help %html
+%help %yaml
+%help %toml
+%help %xml
+%help %ini
+%help %properties
+%help %envfile
+%help %maven
+%reset
+%time gollekLossCurveDemo()
+%timeit -n 3 gollekLossCurveDemo()
+%classpath
+%pwd
+%cd ..
+%ls
+%tree
+%du .
+%cat README.md
+%head -n 5 README.md
+%tail -n 5 README.md
+%grep Gollek README.md
+%findfile README .
+%wc README.md
+%diff baseline.yaml current.yaml
+%zipls bundle.zip
+%zipcat bundle.zip nested/report.txt
+%tarls bundle.tar.gz
+%tarcat bundle.tar.gz nested/report.txt
+%extract --dry-run bundle.tar.gz nested/report.txt extracted/report.txt
+%extract bundle.tar.gz nested/report.txt extracted/report.txt
+%sha256 bundle.tar.gz
+%json config.json
+%csv -n 20 --profile data.csv
+%tsv -n 20 --profile data.tsv
+%sample -n 5 --seed 42 data.csv
+%sample --tsv -n 5 metrics.tsv
+%sort -n 10 --desc data.csv score
+%sort --tsv -n 10 metrics.tsv latency
+%filter -n 10 data.csv score >= 0.8
+%filter --tsv metrics.tsv status == ok
+%describe data.csv
+%describe --tsv metrics.tsv
+%schema data.csv
+%schema --tsv metrics.tsv
+%missing data.csv
+%missing --tsv metrics.tsv
+%valuecounts data.csv label
+%valuecounts --tsv --top 10 metrics.tsv status
+%groupby data.csv label
+%groupby data.csv label score mean
+%groupby --tsv metrics.tsv status latency sum
+%corr data.csv
+%corr --tsv metrics.tsv
+%corr --heatmap data.csv
+%scatter data.csv weight height
+%scatter --tsv metrics.tsv step accuracy
+%lineplot data.csv epoch loss
+%lineplot --tsv metrics.tsv step accuracy
+%hist --bins 12 data.csv loss
+%hist --tsv --bins 12 metrics.tsv accuracy
+%md README.md
+%html report.html
+%yaml config.yaml
+%toml config.toml
+%xml config.xml
+%ini config.ini
+%properties app.properties
+%envfile .env
+%env PATH
+%addjar /absolute/path/to/local-lib.jar
+%maven tech.kayys.gollek:gollek-ml-autograd:0.1.0-SNAPSHOT
+%deps
+%whichclass tech.kayys.gollek.ml.autograd.GradTensor
+%maven --explain definitely.missing:artifact:0.0.1
+%maven --allow-remote definitely.missing:artifact:0.0.1
+%maven --allow-remote --fetch definitely.missing:artifact:0.0.1
+```
+
+`%reset` is the quickest in-notebook recovery path. It clears notebook
+variables, declarations, and dynamic dependency loads, then reloads the
+default Gollek imports and helper functions.
+
+`%cd <PATH>` lets you move the notebook working directory in-session so `%pwd`
+and `%ls` follow the new location immediately.
+
+`%tree [PATH]` gives a quick shallow directory tree for the current notebook
+directory or a target path.
+
+`%du [PATH]` gives a quick file count, directory count, and byte summary for
+the current notebook directory or a target path.
+
+`%cat <PATH>` gives a small in-notebook text preview for one file after you
+find it with `%tree`.
+
+`%head [-n N] <PATH>` gives a tighter line-oriented preview when the file is
+larger than you want to fully inspect with `%cat`.
+
+`%tail [-n N] <PATH>` gives the matching end-of-file view for logs and longer
+generated artifacts.
+
+`%grep <TEXT> [PATH]` lets you search for plain text in one file or a shallow
+directory tree without leaving the notebook.
+
+`%findfile <TEXT> [PATH]` lets you search by filename or path fragment across a
+small directory tree from inside the notebook.
+
+`%wc <PATH>` gives a quick line/word/character/byte summary before you preview
+the file contents in more detail.
+
+`%diff <LEFT_PATH> <RIGHT_PATH>` gives a quick line-oriented comparison for two
+text files directly in the notebook.
+
+`%zipls <PATH>` gives a quick archive entry listing for zip bundles and other
+packaged notebook-side artifacts.
+
+`%zipcat <ZIP_PATH> <ENTRY_PATH>` gives a direct text preview for one bundled
+file inside a zip archive.
+
+`%tarls <PATH>` gives the same archive listing workflow for tar and tar.gz
+bundles.
+
+`%tarcat <TAR_PATH> <ENTRY_PATH>` gives a direct text preview for one bundled
+file inside a tar or tar.gz archive.
+
+`%extract [--dry-run] <ARCHIVE_PATH> <ENTRY_PATH> [OUT_PATH]` unpacks one
+selected archive entry into the notebook working directory after an optional
+dry-run check.
+
+`%sha256 <PATH>` computes a file digest for archive, extracted-file, or
+generated-artifact verification.
+
+`%json <PATH>` gives a readable pretty-printed view of JSON configs and report
+artifacts directly in the notebook.
+
+`%csv [-n N] [--profile] <PATH>` gives a dataframe-style preview for
+lightweight CSV artifacts directly in the notebook. `-n` controls preview row
+count and `--profile` adds column-level non-empty, missing, and numeric summary
+stats.
+
+`%tsv [-n N] [--profile] <PATH>` gives the same style of preview for
+tab-separated tabular artifacts.
+
+`%sample [--tsv] [-n N] [--seed S] <PATH>` gives quick random rows from a CSV
+or TSV artifact. `-n` controls sample size, and `--seed` makes the sample
+reproducible in the notebook.
+
+`%sort [--tsv] [-n N] [--desc] <PATH> <COLUMN>` gives quick top/bottom row
+previews by one CSV or TSV column. Numeric columns are sorted numerically when
+possible, and blank values stay at the end.
+
+`%filter [--tsv] [-n N] <PATH> <COLUMN> <OP> [VALUE]` gives quick row subsets
+by one CSV or TSV column. It supports equality, numeric comparisons, text
+predicates, and `blank`/`notblank` checks.
+
+`%describe [--tsv] <PATH>` gives pandas-style numeric summaries for CSV or TSV
+artifacts: count, missing, mean, standard deviation, min, p25, median, p75, and
+max.
+
+`%schema [--tsv] <PATH>` gives a quick dtype-style view for CSV or TSV
+artifacts. It infers empty, boolean, integer, decimal, date, datetime, or text
+columns and includes missing counts plus example values.
+
+`%missing [--tsv] <PATH>` gives a pandas-style missingness check for CSV or TSV
+artifacts. It reports missing count, present count, missing percent, and an
+inline SVG bar chart by column.
+
+`%valuecounts [--tsv] [--top N] <PATH> <COLUMN>` gives pandas-style
+categorical counts for a CSV or TSV column. Blank cells are shown as `(blank)`,
+and the notebook output includes counts, percentages, and an inline SVG bar
+chart.
+
+`%groupby [--tsv] <PATH> <GROUP_COLUMN> [VALUE_COLUMN] [AGG]` gives quick
+grouped summaries for CSV or TSV data. Without a value column it counts rows;
+with a value column it defaults to `mean` and supports `count`, `sum`, `mean`,
+`min`, and `max`.
+
+`%corr [--tsv] [--heatmap] <PATH>` gives a Pearson correlation matrix for
+numeric CSV or TSV columns. Correlations are computed pairwise from rows where
+both columns are numeric. Add `--heatmap` for an inline SVG correlation
+heatmap.
+
+`%scatter [--tsv] <PATH> <X_COLUMN> <Y_COLUMN>` renders a quick inline SVG
+relationship check from paired numeric CSV or TSV columns. Rows with blank or
+non-numeric values in either column are skipped and reported.
+
+`%lineplot [--tsv] <PATH> <X_COLUMN> <Y_COLUMN>` renders a quick inline SVG
+trend from a CSV or TSV artifact. The X column is used for labels and the Y
+column must contain numeric values.
+
+`%hist [--tsv] [--bins N] <PATH> <COLUMN>` renders a quick inline SVG
+distribution view from a numeric CSV or TSV column. Non-numeric and blank
+values are skipped and reported.
+
+`%md <PATH>` gives a readable rich-text preview for Markdown notes and reports
+directly in the notebook.
+
+`%html <PATH>` gives a direct notebook preview for saved HTML reports and
+generated pages.
+
+`%yaml <PATH>` gives a more readable notebook-side preview for YAML config
+files while preserving the original source in plain output.
+
+`%toml <PATH>` gives the same kind of notebook-side preview for TOML config
+files.
+
+`%xml <PATH>` gives the same kind of notebook-side preview for XML config or
+report files.
+
+`%ini <PATH>` gives the same kind of notebook-side preview for INI config
+files.
+
+`%properties <PATH>` gives a structured notebook-side preview for Java
+`.properties` config files.
+
+`%envfile <PATH>` gives a structured notebook-side preview for `.env`-style
+config files while ignoring comments and blank lines.
+
+The standalone kernel now preloads these common notebook symbols, so they work
+without a manual import cell:
+
+- `GradTensor`
+- `Linear`
+- `ReLU`
+- `Sequential`
+
+The standalone kernel also renders:
+
+- tensors with summary stats and small 2D heatmaps
+- `Map<?, ?>` as a record table
+- `List<Map<?, ?>>` as a simple metrics/data table
+- inline SVG line charts for notebook metrics like training loss
+- inline image preview for `BufferedImage`
+- inline WAV audio preview for `NotebookAudioClip`
 
 ## Usage Examples
 
@@ -111,144 +385,38 @@ Press Shift+Enter to execute.
 
 ```java
 // Create model
-Module model = new Sequential(
+var model = new Sequential(
     new Linear(784, 256),
     new ReLU(),
-    new Dropout(0.2f),
     new Linear(256, 10)
 );
 
 System.out.println("Model created successfully!");
 ```
 
-### Example 2: Training Loop
+### Example 2: Tensor Creation
 
 ```java
-// Setup
-var optimizer = new tech.kayys.gollek.ml.nn.optim.Adam(model.parameters(), 0.001f);
-var loss = new tech.kayys.gollek.ml.nn.loss.CrossEntropyLoss();
-
-// Create dummy data
-float[] input = new float[784];
-for (int i = 0; i < 784; i++) {
-    input[i] = (float) Math.random();
-}
-
-float[] target = new float[1];
-target[0] = 3; // Target class
-
-// Forward pass
-var x = GradTensor.of(input, new long[]{1, 784});
-var y = model.forward(x);
-var y_target = GradTensor.of(target, new long[]{1});
-
-// Loss
-var lossVal = loss.compute(y, y_target);
-System.out.println("Loss: " + lossVal.item());
-
-// Backward
-lossVal.backward();
-
-// Optimize
-optimizer.step();
-optimizer.zeroGrad();
-
-System.out.println("Training step completed!");
-```
-
-### Example 3: Activation Functions
-
-```java
-// Create different activations
-ReLU relu = new ReLU();
-Sigmoid sigmoid = new Sigmoid();
-var leakyReLU = new tech.kayys.gollek.ml.nn.LeakyReLU(0.01f);
-var elu = new tech.kayys.gollek.ml.nn.ELU(1.0f);
-var mish = new tech.kayys.gollek.ml.nn.Mish();
-
-System.out.println("Available activations:");
-System.out.println("✓ ReLU");
-System.out.println("✓ Sigmoid");
-System.out.println("✓ LeakyReLU");
-System.out.println("✓ ELU");
-System.out.println("✓ Mish");
-```
-
-### Example 4: Loss Functions
-
-```java
-// Classification
-var ce = new tech.kayys.gollek.ml.nn.loss.CrossEntropyLoss();
-var bce = new tech.kayys.gollek.ml.nn.loss.BCEWithLogitsLoss();
-
-// Regression
-var mse = new tech.kayys.gollek.ml.nn.loss.MSELoss();
-var l1 = new tech.kayys.gollek.ml.nn.loss.L1Loss();
-var smoothL1 = new tech.kayys.gollek.ml.nn.loss.SmoothL1Loss();
-
-System.out.println("Available loss functions:");
-System.out.println("✓ CrossEntropyLoss (classification)");
-System.out.println("✓ BCEWithLogitsLoss (binary)");
-System.out.println("✓ MSELoss (regression)");
-System.out.println("✓ L1Loss (robust regression)");
-System.out.println("✓ SmoothL1Loss (object detection)");
-```
-
-### Example 5: Learning Rate Scheduling
-
-```java
-var optimizer = new tech.kayys.gollek.ml.nn.optim.Adam(params, 0.001f);
-
-// Step decay schedule
-var scheduler = new tech.kayys.gollek.ml.nn.optim.StepLR(optimizer, 10, 0.1f);
-
-// Or cosine annealing
-var cosineScheduler = new tech.kayys.gollek.ml.nn.optim.CosineAnnealingLR(
-    optimizer, 100, 1e-6f
-);
-
-for (int epoch = 0; epoch < 100; epoch++) {
-    // Training...
-    scheduler.step();  // Update LR
-}
-
-System.out.println("Learning rate scheduling: " + optimizer.learningRate());
-```
-
-### Example 6: Metrics and Early Stopping
-
-```java
-var metric = new tech.kayys.gollek.ml.nn.metrics.Accuracy();
-var earlyStopping = new tech.kayys.gollek.ml.nn.EarlyStopping(10, true, 0, "min");
-
-for (int epoch = 0; epoch < 100; epoch++) {
-    // Validation
-    float valLoss = 0.5f;  // Dummy value
-    
-    // Update metrics
-    if (earlyStopping.check(valLoss)) {
-        System.out.println("Early stopping at epoch: " + epoch);
-        break;
-    }
-}
+var tensor = GradTensor.ones(2, 2);
+System.out.println(tensor);
 ```
 
 ## Tips & Tricks
 
-### 1. Import All Components at Once
+### 1. Use The Built-In Helper Surface
 
 ```java
-import tech.kayys.gollek.ml.nn.*;
-import tech.kayys.gollek.ml.nn.optim.*;
-import tech.kayys.gollek.ml.nn.loss.*;
-import tech.kayys.gollek.ml.nn.metrics.*;
-import tech.kayys.gollek.ml.autograd.*;
+gollekHelp();
+gollekTensorDemo();
+gollekPreviewTensorDemo();
+gollekModelDemo();
+gollekModelSummary();
 ```
 
 ### 2. Print Model Architecture
 
 ```java
-Module model = new Sequential(
+var model = new Sequential(
     new Linear(784, 256),
     new ReLU(),
     new Linear(256, 10)
@@ -287,33 +455,33 @@ System.out.println("Accuracy: " + accuracy.compute());
 
 **Solution:**
 ```bash
-# Reinstall kernel
-jupyter kernelspec remove gollek-sdk
-bash jupyter-kernel/install.sh
+cd gollek/integration/jupyter/gollek-jupyter-kernel
+python3 doctor.py
+python3 sync_active_install.py --dry-run
+python3 install.py --user
 ```
 
 ### Issue: Import errors (class not found)
 
 **Solution:**
 ```bash
-# Rebuild Gollek SDK
-cd gollek/sdk
-mvn clean install -DskipTests
-
-# Reinstall kernel
-bash jupyter-kernel/install.sh
+cd gollek/integration/jupyter/gollek-jupyter-kernel
+./rebuild_kernel.sh local-fat
+python3 doctor.py
+python3 sync_active_install.py --dry-run
+python3 install.py --user
 ```
 
 ### Issue: Out of memory (OOM)
 
 **Solution:**
 ```bash
-# Increase Java heap size in kernel.json
-# Modify jupyter-kernel/kernel.json:
+cd gollek/integration/jupyter/gollek-jupyter-kernel
+# Increase Java heap size in the installed kernelspec's kernel.json
 "argv": [
     "java",
     "-Xmx2G",  # Increase heap to 2GB
-    "-cp",
+    "-jar",
     ...
 ]
 ```
