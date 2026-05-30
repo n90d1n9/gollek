@@ -3,6 +3,9 @@ package tech.kayys.gollek.client;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Multi;
+import tech.kayys.gollek.client.agent.AgentIntegrationClient;
+import tech.kayys.gollek.client.agent.AgentRequestOptions;
+import tech.kayys.gollek.client.agent.AgentStreamEvent;
 import tech.kayys.gollek.spi.inference.AsyncJobStatus;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
@@ -24,7 +27,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -308,6 +313,71 @@ public class GollekClient implements GollekSdk {
         }
     }
 
+    /**
+     * Streams OpenAI-compatible chat completion events from {@code /v1/chat/completions}.
+     *
+     * <p>The request map is copied and {@code stream=true} is applied automatically.
+     * Add {@code stream_options.include_usage=true} when the caller needs final
+     * token usage.
+     */
+    public Multi<AgentStreamEvent> streamOpenAiChat(Map<String, Object> request) {
+        return streamOpenAiChat(request, AgentRequestOptions.empty());
+    }
+
+    /**
+     * Streams OpenAI-compatible chat completion events from {@code /v1/chat/completions}.
+     *
+     * <p>The request map is copied and {@code stream=true} is applied automatically.
+     * Trace/session headers from {@code options} are propagated to the server.
+     */
+    public Multi<AgentStreamEvent> streamOpenAiChat(Map<String, Object> request, AgentRequestOptions options) {
+        try {
+            String requestBody = objectMapper.writeValueAsString(streamingRequest(request));
+            StreamingHelper helper = new StreamingHelper(httpClient, objectMapper, baseUrl, apiKey);
+            return helper.createOpenAiChatStreamPublisher(requestBody, options);
+        } catch (Exception e) {
+            return Multi.createFrom().failure(new SdkException("Failed to initiate OpenAI chat stream", e));
+        }
+    }
+
+    /**
+     * Streams OpenAI-compatible Responses events from {@code /v1/responses}.
+     *
+     * <p>The request map is copied and {@code stream=true} is applied automatically.
+     * Gollek remains the serving boundary; agent planning and tool execution stay
+     * with the caller.
+     */
+    public Multi<AgentStreamEvent> streamOpenAiResponses(Map<String, Object> request) {
+        return streamOpenAiResponses(request, AgentRequestOptions.empty());
+    }
+
+    /**
+     * Streams OpenAI-compatible Responses events from {@code /v1/responses}.
+     *
+     * <p>The request map is copied and {@code stream=true} is applied automatically.
+     * Gollek remains the serving boundary; agent planning and tool execution stay
+     * with the caller.
+     */
+    public Multi<AgentStreamEvent> streamOpenAiResponses(Map<String, Object> request, AgentRequestOptions options) {
+        try {
+            String requestBody = objectMapper.writeValueAsString(streamingRequest(request));
+            StreamingHelper helper = new StreamingHelper(httpClient, objectMapper, baseUrl, apiKey);
+            return helper.createOpenAiResponsesStreamPublisher(requestBody, options);
+        } catch (Exception e) {
+            return Multi.createFrom().failure(new SdkException("Failed to initiate OpenAI Responses stream", e));
+        }
+    }
+
+    /**
+     * Returns agent-facing discovery and validation operations for this server.
+     *
+     * <p>The returned client exposes contracts, MCP tool schemas, and validation
+     * endpoints only. Agent planning and tool execution remain caller-owned.
+     */
+    public AgentIntegrationClient agent() {
+        return new AgentIntegrationClient(httpClient, objectMapper, baseUrl, apiKey);
+    }
+
     private <T> T handleResponse(HttpResponse<String> response, Class<T> responseType) throws GollekClientException {
         return handleResponseUsingJavaType(response, objectMapper.getTypeFactory().constructType(responseType));
     }
@@ -354,6 +424,15 @@ public class GollekClient implements GollekSdk {
                 throw new GollekClientException(
                         "Request failed with status: " + statusCode + ", body: " + responseBody);
         }
+    }
+
+    private Map<String, Object> streamingRequest(Map<String, Object> request) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (request != null) {
+            out.putAll(request);
+        }
+        out.put("stream", true);
+        return out;
     }
 
     /**

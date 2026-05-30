@@ -365,7 +365,20 @@ public class ChatSessionImpl implements ChatSession {
     }
 
     private boolean requestUsesSessionHistory(InferenceRequest request) {
-        return request.getMessages().isEmpty() || request.getMessages().equals(getHistory());
+        if (request.getMessages().isEmpty() || request.getMessages().equals(getHistory())) {
+            return true;
+        }
+        List<Message> withoutTransientContext = request.getMessages().stream()
+                .filter(message -> !isTransientRagSystemMessage(message))
+                .toList();
+        return withoutTransientContext.equals(getHistory());
+    }
+
+    private static boolean isTransientRagSystemMessage(Message message) {
+        if (message == null || message.getRole() != Message.Role.SYSTEM || message.getContent() == null) {
+            return false;
+        }
+        return message.getContent().startsWith("Use the following retrieval context when it is relevant.");
     }
 
     private String getLastUserPrompt(InferenceRequest request) {

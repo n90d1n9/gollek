@@ -53,9 +53,104 @@ import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 Multi<StreamingInferenceChunk> stream = client.streamCompletion(request);
 
 stream.subscribe().with(
-    chunk -> System.out.println("Received: " + chunk.getContent()),
+    chunk -> System.out.println("Received: " + chunk.getDelta()),
     failure -> System.err.println("Error: " + failure.getMessage())
 );
+```
+
+### Agent/OpenAI-Compatible Streaming
+
+Use the typed agent stream helpers when integrating Gollek as a serving engine
+behind an agent framework. The helper calls the OpenAI-compatible endpoints,
+sets `stream: true`, and turns SSE payloads into `AgentStreamEvent` objects.
+
+```java
+import java.util.List;
+import java.util.Map;
+import tech.kayys.gollek.client.agent.AgentRequestOptions;
+import tech.kayys.gollek.client.agent.AgentStreamAccumulator;
+import tech.kayys.gollek.client.agent.AgentStreamEvent;
+
+AgentRequestOptions trace = AgentRequestOptions.builder()
+    .requestId("req-123")
+    .traceId("trace-456")
+    .sessionId("conversation-789")
+    .userId("user-abc")
+    .build();
+AgentStreamAccumulator accumulator = new AgentStreamAccumulator();
+
+client.streamOpenAiChat(Map.of(
+    "model", "demo-model",
+    "messages", List.of(Map.of("role", "user", "content", "Stream answer")),
+    "stream_options", Map.of("include_usage", true)
+), trace).subscribe().with(event -> {
+    AgentStreamAccumulator.Snapshot state = accumulator.accept(event);
+    if (event.hasDelta()) {
+        System.out.print(event.delta());
+    }
+    if (event.hasToolCalls()) {
+        event.toolCalls().forEach(call -> {
+            try {
+                Map<String, Object> args = call.argumentsMap();
+                System.out.println("tool: " + call.name() + " args: " + args);
+            } catch (Exception e) {
+                System.err.println("invalid tool arguments: " + call.arguments());
+            }
+        });
+    }
+    if (event.isCompleted() && event.usage() != null) {
+        System.out.println("final answer: " + state.outputText());
+        System.out.println("total tokens: " + state.usage().totalTokens());
+    }
+});
+```
+
+### Agent Integration Discovery
+
+Use `client.agent()` before wiring an agent runtime to discover the serving
+contract, validate request/tool schemas, and fetch MCP tool definitions. These
+helpers are read-only: Gollek exposes schemas and validation, while the caller's
+agent framework owns planning, authorization, and tool execution.
+
+```java
+import java.util.List;
+import java.util.Map;
+import tech.kayys.gollek.client.agent.AgentEmbeddingView;
+import tech.kayys.gollek.client.agent.AgentResponseView;
+
+Map<String, Object> capabilities = client.agent().capabilities();
+Map<String, Object> contract = client.agent().contract();
+
+Map<String, Object> toolDefinitions = client.agent().mcpTools(true, true);
+AgentEmbeddingView queryEmbedding = client.agent().createEmbeddingView(Map.of(
+    "model", "demo-embed",
+    "input", List.of("Question or search query for caller-owned retrieval")
+), trace);
+List<Double> queryVector = queryEmbedding.firstVector();
+// Use queryVector with your vector store, then pass selected chunks as rag_context.
+
+AgentResponseView chatView = client.agent().createChatCompletionView(Map.of(
+    "model", "demo-model",
+    "messages", List.of(Map.of("role", "user", "content", "Answer with the discovered tools")),
+    "rag_context", List.of(Map.of(
+        "title", "Retrieved chunk",
+        "text", "Relevant retrieved document text.")),
+    "tools", toolDefinitions.get("tools")
+), trace);
+chatView.toolCalls().forEach(call -> {
+    try {
+        Map<String, Object> args = call.argumentsMap();
+        System.out.println("tool: " + call.name() + " args: " + args);
+    } catch (Exception e) {
+        System.err.println("invalid tool arguments: " + call.arguments());
+    }
+});
+
+Map<String, Object> validation = client.agent().validateRequest("chat.completions", Map.of(
+    "model", "demo-model",
+    "messages", List.of(Map.of("role", "user", "content", "Validate this request")),
+    "tools", toolDefinitions.get("tools")
+), trace);
 ```
 
 ### Async Job Submission
@@ -70,8 +165,8 @@ var status = client.getJobStatus(jobId);
 System.out.println("Job status: " + status.getStatus());
 
 // Wait for job to complete
-var finalStatus = client.waitForJob(jobId, 
-    Duration.ofMinutes(10), 
+var finalStatus = client.waitForJob(jobId,
+    Duration.ofMinutes(10),
     Duration.ofSeconds(5));
 ```
 
@@ -86,7 +181,7 @@ var batchRequest = BatchInferenceRequest.builder()
     .build();
 
 var responses = client.batchInference(batchRequest);
-responses.forEach(response -> 
+responses.forEach(response ->
     System.out.println("Response: " + response.getContent()));
 ```
 

@@ -18,8 +18,12 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":sdk:gollek-sdk-core"))
-    implementation(project(":spi:gollek-spi"))
+    api(project(":sdk:gollek-sdk-core"))
+    api(project(":spi:gollek-spi"))
+    api(project(":spi:gollek-spi-inference"))
+    api(project(":spi:gollek-spi-model"))
+    api(project(":spi:gollek-spi-multimodal"))
+    api(project(":spi:gollek-spi-provider"))
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "io.reactivex.rxjava3", name = "rxjava", version = "3.1.8")
@@ -27,6 +31,7 @@ dependencies {
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testImplementation(group = "org.mockito", name = "mockito-core")
     testImplementation(group = "org.mockito", name = "mockito-junit-jupiter")
+    testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher")
 }
 
 publishing {

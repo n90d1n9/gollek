@@ -3,6 +3,9 @@ package tech.kayys.gollek.client;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Multi;
 
+import tech.kayys.gollek.client.agent.AgentRequestOptions;
+import tech.kayys.gollek.client.agent.AgentStreamEvent;
+import tech.kayys.gollek.client.agent.AgentStreamEventParser;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.client.exception.GollekClientException;
 import tech.kayys.gollek.sdk.model.PullProgress;
@@ -65,6 +68,48 @@ public class StreamingHelper {
     }
 
     /**
+     * Streams OpenAI-compatible chat completion events from {@code /v1/chat/completions}.
+     */
+    public Multi<AgentStreamEvent> createOpenAiChatStreamPublisher(String requestBody) {
+        return createOpenAiChatStreamPublisher(requestBody, AgentRequestOptions.empty());
+    }
+
+    /**
+     * Streams OpenAI-compatible chat completion events from {@code /v1/chat/completions}.
+     */
+    public Multi<AgentStreamEvent> createOpenAiChatStreamPublisher(
+            String requestBody,
+            AgentRequestOptions options) {
+        AgentStreamEventParser parser = new AgentStreamEventParser(objectMapper);
+        return createSseMulti(
+                baseUrl + "/v1/chat/completions",
+                requestBody,
+                parser::parse,
+                options);
+    }
+
+    /**
+     * Streams OpenAI-compatible Responses events from {@code /v1/responses}.
+     */
+    public Multi<AgentStreamEvent> createOpenAiResponsesStreamPublisher(String requestBody) {
+        return createOpenAiResponsesStreamPublisher(requestBody, AgentRequestOptions.empty());
+    }
+
+    /**
+     * Streams OpenAI-compatible Responses events from {@code /v1/responses}.
+     */
+    public Multi<AgentStreamEvent> createOpenAiResponsesStreamPublisher(
+            String requestBody,
+            AgentRequestOptions options) {
+        AgentStreamEventParser parser = new AgentStreamEventParser(objectMapper);
+        return createSseMulti(
+                baseUrl + "/v1/responses",
+                requestBody,
+                parser::parse,
+                options);
+    }
+
+    /**
      * Creates a {@link Multi} that streams {@link PullProgress} updates while a model
      * is being pulled from the {@code /v1/models/pull/stream} endpoint.
      *
@@ -98,6 +143,7 @@ public class StreamingHelper {
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(baseUrl + "/v1/models/pull/stream"))
                         .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
                         .header(ApiKeyConstants.HEADER_API_KEY, apiKey)
                         .header(ApiKeyConstants.HEADER_AUTHORIZATION, ApiKeyConstants.authorizationValue(apiKey))
                         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
@@ -116,9 +162,8 @@ public class StreamingHelper {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body()))) {
                     String line;
                     while (!emitter.isCancelled() && (line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ")) {
-                            String data = line.substring(6); // Remove "data: " prefix
-
+                        String data = dataFromSseLine(line);
+                        if (data != null) {
                             if ("[DONE]".equals(data)) {
                                 break; // End of stream
                             }
@@ -164,16 +209,30 @@ public class StreamingHelper {
      * @return a {@link Multi} emitting deserialized objects
      */
     private <T> Multi<T> createSseMulti(String endpoint, String requestBody, Class<T> responseType) {
+        return createSseMulti(
+                endpoint,
+                requestBody,
+                data -> objectMapper.readValue(data, responseType),
+                AgentRequestOptions.empty());
+    }
+
+    private <T> Multi<T> createSseMulti(
+            String endpoint,
+            String requestBody,
+            SsePayloadReader<T> payloadReader,
+            AgentRequestOptions options) {
         return Multi.createFrom().emitter(emitter -> {
             try {
-                HttpRequest request = HttpRequest.newBuilder()
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                         .uri(URI.create(endpoint))
                         .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
                         .header(ApiKeyConstants.HEADER_API_KEY, apiKey)
                         .header(ApiKeyConstants.HEADER_AUTHORIZATION, ApiKeyConstants.authorizationValue(apiKey))
                         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                        .timeout(Duration.ofMinutes(10)) // Longer timeout for streaming
-                        .build();
+                        .timeout(Duration.ofMinutes(10)); // Longer timeout for streaming
+                applyHeaders(requestBuilder, options);
+                HttpRequest request = requestBuilder.build();
 
                 HttpResponse<java.io.InputStream> response = httpClient.send(request,
                         HttpResponse.BodyHandlers.ofInputStream());
@@ -188,15 +247,14 @@ public class StreamingHelper {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body()))) {
                     String line;
                     while (!emitter.isCancelled() && (line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ")) {
-                            String data = line.substring(6); // Remove "data: " prefix
-
+                        String data = dataFromSseLine(line);
+                        if (data != null) {
                             if ("[DONE]".equals(data)) {
                                 break; // End of stream
                             }
 
                             try {
-                                T chunk = objectMapper.readValue(data, responseType);
+                                T chunk = payloadReader.read(data);
                                 emitter.emit(chunk);
                             } catch (Exception e) {
                                 emitter.fail(
@@ -218,10 +276,31 @@ public class StreamingHelper {
         });
     }
 
+    static String dataFromSseLine(String line) {
+        if (line == null || !line.startsWith("data:")) {
+            return null;
+        }
+        String data = line.substring("data:".length());
+        if (data.startsWith(" ")) {
+            data = data.substring(1);
+        }
+        return data;
+    }
+
+    private void applyHeaders(HttpRequest.Builder builder, AgentRequestOptions options) {
+        AgentRequestOptions effective = options == null ? AgentRequestOptions.empty() : options;
+        effective.toHeaders().forEach(builder::setHeader);
+    }
+
     private static String normalizeApiKey(String apiKey) {
         if (apiKey == null || apiKey.isBlank()) {
             return ApiKeyConstants.COMMUNITY_API_KEY;
         }
         return apiKey;
+    }
+
+    @FunctionalInterface
+    private interface SsePayloadReader<T> {
+        T read(String data) throws Exception;
     }
 }
