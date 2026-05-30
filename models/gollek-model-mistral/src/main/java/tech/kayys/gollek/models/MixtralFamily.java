@@ -18,14 +18,12 @@
  */
 package tech.kayys.gollek.models;
 
-import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import java.util.List;
 
 /**
  * Architecture for Mistral MoE models (Mixtral 8×7B, 8×22B).
  */
-@ApplicationScoped
 public final class MixtralFamily implements ModelArchitecture {
 
     @Override
@@ -113,6 +111,7 @@ public final class MixtralFamily implements ModelArchitecture {
      * Router gate weight for layer i.
      * Shape: [numExperts, hiddenSize]
      */
+    @Override
     public String layerMoeGateWeight(int i) {
         return "model.layers.%d.block_sparse_moe.gate.weight".formatted(i);
     }
@@ -121,6 +120,7 @@ public final class MixtralFamily implements ModelArchitecture {
      * Expert FFN gate projection weight (SwiGLU w1).
      * Shape: [intermediateSize, hiddenSize]
      */
+    @Override
     public String expertGateWeight(int layerIdx, int expertIdx) {
         return "model.layers.%d.block_sparse_moe.experts.%d.w1.weight"
                 .formatted(layerIdx, expertIdx);
@@ -130,6 +130,7 @@ public final class MixtralFamily implements ModelArchitecture {
      * Expert FFN up projection weight (SwiGLU w3).
      * Shape: [intermediateSize, hiddenSize]
      */
+    @Override
     public String expertUpWeight(int layerIdx, int expertIdx) {
         return "model.layers.%d.block_sparse_moe.experts.%d.w3.weight"
                 .formatted(layerIdx, expertIdx);
@@ -139,6 +140,7 @@ public final class MixtralFamily implements ModelArchitecture {
      * Expert FFN down projection weight (SwiGLU w2).
      * Shape: [hiddenSize, intermediateSize]
      */
+    @Override
     public String expertDownWeight(int layerIdx, int expertIdx) {
         return "model.layers.%d.block_sparse_moe.experts.%d.w2.weight"
                 .formatted(layerIdx, expertIdx);

@@ -1,0 +1,30 @@
+package tech.kayys.gollek.models;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import tech.kayys.gollek.spi.model.ModelFamilyCapability;
+import tech.kayys.gollek.spi.model.ModelFamilyDescriptor;
+import tech.kayys.gollek.spi.model.ModelFamilyPlugin;
+
+import java.util.List;
+import java.util.Map;
+
+@ApplicationScoped
+public class KimiModelFamilyPlugin implements ModelFamilyPlugin {
+
+    @Override
+    public ModelFamilyDescriptor descriptor() {
+        return new ModelFamilyDescriptor(
+                "kimi",
+                "Moonshot Kimi",
+                List.of("kimi", "kimi_k2"),
+                List.of("KimiForCausalLM", "KimiK2ForCausalLM"),
+                List.of(ModelFamilyCapability.CAUSAL_LM, ModelFamilyCapability.TOKENIZER,
+                        ModelFamilyCapability.CHAT_TEMPLATE),
+                Map.of(
+                        "bundle_profile", "experimental",
+                        "origin", "3rdparty/transformers/src/transformers/models/kimi*",
+                        "direct_safetensor", "pending_architecture_adapter",
+                        "tokenizer", "pending",
+                        "version", "0.1.0-SNAPSHOT"));
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "model-family/jamba",
+  "name": "Jamba Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Jamba hybrid attention/Mamba/MoE causal LM metadata",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.jamba.JambaModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["jamba"]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "model-family/siglip",
+  "name": "SigLIP Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "SigLIP vision-text metadata with SentencePiece tokenizer profile",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.siglip.SiglipModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["siglip"]
+  }
+}

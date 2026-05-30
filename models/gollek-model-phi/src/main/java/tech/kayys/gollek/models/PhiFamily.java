@@ -32,12 +32,17 @@ public class PhiFamily implements ModelArchitecture {
 
     @Override
     public String finalNormWeight() {
-        return "model.final_layernorm.weight";
+        return "model.norm.weight";
+    }
+
+    @Override
+    public List<String> finalNormWeightCandidates() {
+        return List.of("model.norm.weight", "model.final_layernorm.weight");
     }
 
     @Override
     public String finalNormBias() {
-        return "model.final_layernorm.bias";
+        return null;
     }
 
     @Override
@@ -97,6 +102,6 @@ public class PhiFamily implements ModelArchitecture {
 
     @Override
     public boolean usesRmsNorm() {
-        return false;
+        return true;
     }
 }

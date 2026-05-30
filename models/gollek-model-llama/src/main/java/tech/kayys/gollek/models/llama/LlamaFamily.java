@@ -5,8 +5,8 @@ import tech.kayys.gollek.spi.model.ModelArchitecture;
 import java.util.List;
 
 /**
- * LLaMA / Mistral / CodeLlama family.
- * Weight layout used by Meta's LLaMA 1, 2, 3 and derivatives.
+ * LLaMA base family.
+ * Weight layout used by Meta's LLaMA 1, 2, 3 and compatible derivatives.
  */
 @ApplicationScoped
 public class LlamaFamily implements ModelArchitecture {
@@ -17,13 +17,12 @@ public class LlamaFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedArchClassNames() {
-        return List.of("LlamaForCausalLM", "MistralForCausalLM",
-                "MixtralForCausalLM", "CodeLlamaForCausalLM");
+        return List.of("LlamaForCausalLM");
     }
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("llama", "mistral", "mixtral");
+        return List.of("llama");
     }
 
     @Override

@@ -1,0 +1,15 @@
+{
+  "id": "model-family/phi",
+  "name": "Microsoft Phi Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Phi and Phi 3 model-family adapters",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.PhiModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "core",
+    "families": ["phi", "phi3"]
+  }
+}

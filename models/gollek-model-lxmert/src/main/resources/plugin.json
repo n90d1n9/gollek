@@ -1,0 +1,15 @@
+{
+  "id": "model-family/lxmert",
+  "name": "LXMERT Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "LXMERT vision-language metadata and WordPiece tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.lxmert.LxmertModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["lxmert"]
+  }
+}

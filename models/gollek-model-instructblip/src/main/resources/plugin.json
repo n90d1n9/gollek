@@ -1,0 +1,15 @@
+{
+  "id": "model-family/instructblip",
+  "name": "InstructBLIP Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "InstructBLIP metadata with Q-Former processor routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.instructblip.InstructBlipModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["instructblip", "instructblip_vision_model", "instructblip_qformer"]
+  }
+}

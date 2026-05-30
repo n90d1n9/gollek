@@ -1,0 +1,15 @@
+{
+  "id": "model-family/dialogpt",
+  "name": "DialoGPT Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "DialoGPT GPT-2 conversational metadata and tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.dialogpt.DialogptModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["dialogpt", "dialogpt_gpt2"]
+  }
+}

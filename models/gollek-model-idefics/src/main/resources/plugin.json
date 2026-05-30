@@ -1,0 +1,15 @@
+{
+  "id": "model-family/idefics",
+  "name": "Idefics Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Idefics multimodal model-family metadata and tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.idefics.IdeficsModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["idefics", "idefics_vision", "idefics_perciever"]
+  }
+}

@@ -1,28 +1,17 @@
 package tech.kayys.gollek.models;
 
-import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import java.util.List;
 
 /**
- * Mistral-3 / Mistral-Small architecture (22B, 24B).
- *
- * Key differences from Mistral-7B-v0.3:
- * - Larger: 22B or 24B parameters
- * - Full context (no sliding window in Mistral-Small-3.1)
- * - v3 Tekken tokenizer (131K vocabulary)
- * - Flash Attention 2 trained
- *
- * HuggingFace models:
- * mistralai/Mistral-Small-3.1-22B-Instruct-2503
- * mistralai/Mistral-Small-24B-Instruct-2501
+ * Base Mistral architecture adapter retained in the core bundle.
+ * Newer Mistral 3/4 and Ministral variants are detachable metadata plugins.
  */
-@ApplicationScoped
 public class Mistral3Family implements ModelArchitecture {
 
         @Override
         public String id() {
-            return "mistral3";
+            return "mistral";
         }
 
         @Override
@@ -32,7 +21,7 @@ public class Mistral3Family implements ModelArchitecture {
 
         @Override
         public List<String> supportedModelTypes() {
-            return List.of("mistral3", "mistral");
+            return List.of("mistral");
         }
 
         // Same weight names as Mistral-7B

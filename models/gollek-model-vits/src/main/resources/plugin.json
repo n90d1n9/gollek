@@ -1,0 +1,15 @@
+{
+  "id": "model-family/vits",
+  "name": "VITS Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "VITS model-family metadata and text-to-speech tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.vits.VitsModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["vits"]
+  }
+}

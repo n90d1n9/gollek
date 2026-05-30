@@ -1,0 +1,15 @@
+{
+  "id": "model-family/encodec",
+  "name": "EnCodec Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "EnCodec neural audio codec metadata",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.encodec.EncodecModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["encodec"]
+  }
+}

@@ -3,10 +3,15 @@ package tech.kayys.gollek.models;
 import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.FFNActivationType;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits.PromptBosPolicy;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
- * Gemma / Gemma2 family (Google DeepMind).
+ * Base Gemma family (Google DeepMind).
  * Almost identical to LLaMA but uses GeGLU and different norm names.
  */
 @ApplicationScoped
@@ -29,12 +34,12 @@ public class GemmaFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedArchClassNames() {
-        return List.of("GemmaForCausalLM", "Gemma2ForCausalLM", "Gemma4ForConditionalGeneration");
+        return List.of("GemmaForCausalLM");
     }
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("gemma", "gemma2", "gemma4", "gemma4_text");
+        return List.of("gemma");
     }
 
     @Override
@@ -166,6 +171,28 @@ public class GemmaFamily implements ModelArchitecture {
     @Override
     public boolean addOneToRmsNormWeight() {
         return true;
+    }
+
+    @Override
+    public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
+        String modelType = config == null || config.modelType() == null
+                ? ""
+                : config.modelType().toLowerCase(Locale.ROOT);
+        boolean gemma4Text = modelType.startsWith("gemma4");
+        boolean perLayerInputs = config != null
+                && (config.hiddenSizePerLayerInput() > 0 || config.vocabSizePerLayerInput() > 0);
+        return new ModelRuntimeTraits(
+                gemma4Text,
+                false,
+                false,
+                perLayerInputs,
+                gemma4Text ? PromptBosPolicy.NEVER : PromptBosPolicy.GEMMA_TURN_AWARE,
+                gemma4Text ? ModelRuntimeTraits.GEMMA4_CONTROL_TOKEN_TEXTS : Set.of(),
+                gemma4Text,
+                gemma4Text,
+                gemma4Text
+                        ? ModelRuntimeTraits.AttentionRuntimeTraits.gemma4Text()
+                        : ModelRuntimeTraits.AttentionRuntimeTraits.generic(config, perLayerInputs));
     }
 
     @Override

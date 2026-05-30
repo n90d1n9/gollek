@@ -1,0 +1,21 @@
+{
+  "model_type": "flava",
+  "architectures": ["FlavaModel"],
+  "text_config": {
+    "model_type": "flava_text_model",
+    "architectures": ["FlavaTextModel"],
+    "hidden_size": 768,
+    "num_hidden_layers": 12,
+    "num_attention_heads": 12,
+    "intermediate_size": 3072,
+    "vocab_size": 30522
+  },
+  "image_config": {
+    "model_type": "flava_image_model",
+    "architectures": ["FlavaImageModel"],
+    "hidden_size": 768,
+    "num_hidden_layers": 12,
+    "num_attention_heads": 12,
+    "intermediate_size": 3072
+  }
+}

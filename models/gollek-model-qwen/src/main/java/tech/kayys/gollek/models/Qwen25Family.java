@@ -2,6 +2,8 @@ package tech.kayys.gollek.models;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import java.util.List;
 
 /**
@@ -116,6 +118,20 @@ public class Qwen25Family implements ModelArchitecture {
         @Override
         public String layerFfnDownWeight(int i) {
             return "model.layers.%d.mlp.down_proj.weight".formatted(i);
+        }
+
+        @Override
+        public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
+            return new ModelRuntimeTraits(
+                    false,
+                    false,
+                    true,
+                    false,
+                    ModelRuntimeTraits.PromptBosPolicy.DEFAULT,
+                    java.util.Set.of(),
+                    false,
+                    false,
+                    ModelRuntimeTraits.AttentionRuntimeTraits.qwenText(config));
         }
 
         @Override

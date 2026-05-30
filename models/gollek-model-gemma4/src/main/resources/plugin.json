@@ -1,0 +1,16 @@
+{
+  "id": "model-family/gemma4",
+  "name": "Gemma 4 Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Gemma 4 text adapter plus audio, vision, video processor metadata, tokenizer routing, and packed MoE runtime guards",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.gemma4.Gemma4ModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "optional",
+    "families": ["gemma4", "gemma4_text", "gemma4_vision", "gemma4_audio"],
+    "moeDirectSafetensor": "pending_packed_expert_router_runtime"
+  }
+}

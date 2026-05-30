@@ -1,0 +1,15 @@
+{
+  "id": "model-family/switch_transformers",
+  "name": "Switch Transformers Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "Switch Transformers MoE encoder-decoder metadata and SentencePiece tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.switchtransformers.SwitchTransformersModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["switch_transformers", "switch-transformers"]
+  }
+}

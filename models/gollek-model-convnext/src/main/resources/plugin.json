@@ -1,0 +1,15 @@
+{
+  "id": "model-family/convnext",
+  "name": "ConvNeXT Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "ConvNeXT/ConvNeXTV2 vision encoder metadata",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.convnext.ConvNextModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["convnext", "convnextv2", "convnext_v2"]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "model-family/mpnet",
+  "name": "MPNet Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "MPNet encoder metadata and WordPiece tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.mpnet.MpnetModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["mpnet"]
+  }
+}

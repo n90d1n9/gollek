@@ -1,0 +1,15 @@
+{
+  "id": "model-family/internvl",
+  "name": "InternVL Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "InternVL model-family metadata and processor-aware tokenizer routing",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.internvl.InternVlModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["internvl", "internvl_vision"]
+  }
+}

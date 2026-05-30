@@ -2,12 +2,12 @@ package tech.kayys.gollek.models;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import java.util.List;
 
 /**
  * Qwen-3 architecture (0.6B, 1.7B, 4B, 8B, 14B, 32B) — dense models.
- * Also MoE variants: Qwen3-30B-A3B, Qwen3-235B-A22B.
- *
  * Key new features vs Qwen-2.5:
  * - QK-norm (RMSNorm on Q and K before attention — same as Gemma-3)
  * - Thinking mode support (interleaved <think> ... </think> tokens)
@@ -16,7 +16,6 @@ import java.util.List;
  * HuggingFace models:
  * Qwen/Qwen3-8B, Qwen/Qwen3-8B-Instruct
  * Qwen/Qwen3-32B, Qwen/Qwen3-32B-Instruct
- * Qwen/Qwen3-30B-A3B (MoE), Qwen/Qwen3-235B-A22B (MoE)
  */
 @ApplicationScoped
 public class Qwen3Family implements ModelArchitecture {
@@ -28,7 +27,7 @@ public class Qwen3Family implements ModelArchitecture {
 
         @Override
         public List<String> supportedArchClassNames() {
-            return List.of("Qwen3ForCausalLM", "Qwen3MoeForCausalLM");
+            return List.of("Qwen3ForCausalLM");
         }
 
         @Override
@@ -97,11 +96,35 @@ public class Qwen3Family implements ModelArchitecture {
         }
 
         // QK-norms (new in Qwen-3)
-        public String layerQNorm(int i) {
+        @Override
+        public String layerQueryNormWeight(int i) {
             return "model.layers.%d.self_attn.q_norm.weight".formatted(i);
         }
 
-        public String layerKNorm(int i) {
+        @Override
+        public String layerKeyNormWeight(int i) {
             return "model.layers.%d.self_attn.k_norm.weight".formatted(i);
+        }
+
+        public String layerQNorm(int i) {
+            return layerQueryNormWeight(i);
+        }
+
+        public String layerKNorm(int i) {
+            return layerKeyNormWeight(i);
+        }
+
+        @Override
+        public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
+            return new ModelRuntimeTraits(
+                    false,
+                    false,
+                    true,
+                    false,
+                    ModelRuntimeTraits.PromptBosPolicy.DEFAULT,
+                    java.util.Set.of(),
+                    false,
+                    false,
+                    ModelRuntimeTraits.AttentionRuntimeTraits.qwenText(config));
         }
     }

@@ -1,0 +1,15 @@
+{
+  "id": "model-family/vit",
+  "name": "ViT Model Family",
+  "version": "0.1.0-SNAPSHOT",
+  "description": "ViT vision encoder metadata",
+  "vendor": "Kayys.tech",
+  "mainClass": "tech.kayys.gollek.models.vit.VitModelFamilyPlugin",
+  "dependencies": [],
+  "optionalDependencies": [],
+  "properties": {
+    "extensionPoint": "model-family",
+    "bundleProfile": "metadata_only",
+    "families": ["vit"]
+  }
+}

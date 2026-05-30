@@ -33,7 +33,3 @@ publishing {
         mavenLocal()
     }
 }
-
-tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
-}

@@ -78,7 +78,8 @@ public class Whisper extends NNModule {
             GradTensor transposed = x.transpose();
             
             // Add Positional Embeddings
-            GradTensor embedded = transposed.add(positionEmbeddings.data());
+            int seqLen = Math.toIntExact(transposed.shape()[1]);
+            GradTensor embedded = transposed.add(cropPositionEmbeddings(positionEmbeddings.data(), seqLen));
 
             return layers.forward(embedded);
         }
@@ -108,7 +109,8 @@ public class Whisper extends NNModule {
         public GradTensor forward(GradTensor tokens, GradTensor audioFeatures) {
             GradTensor x = tokenEmbedding.forward(tokens);
             // Add PE
-            x = x.add(positionEmbeddings.data());
+            int seqLen = Math.toIntExact(x.shape()[1]);
+            x = x.add(cropPositionEmbeddings(positionEmbeddings.data(), seqLen));
 
             // Sequence forward - passing audioFeatures to cross-attention
             for (NNModule layer : layers.getLayers()) {
@@ -163,5 +165,22 @@ public class Whisper extends NNModule {
         public static WhisperConfig base() {
             return new WhisperConfig();
         }
+    }
+
+    private static GradTensor cropPositionEmbeddings(GradTensor positionEmbeddings, int seqLen) {
+        long[] shape = positionEmbeddings.shape();
+        if (shape.length != 3 || shape[0] != 1) {
+            throw new IllegalArgumentException("Expected positional embeddings shape [1, seq, dModel], got "
+                    + java.util.Arrays.toString(shape));
+        }
+
+        int availableSeqLen = Math.toIntExact(shape[1]);
+        int dModel = Math.toIntExact(shape[2]);
+        int clampedSeqLen = Math.min(seqLen, availableSeqLen);
+
+        float[] source = positionEmbeddings.data();
+        float[] cropped = new float[clampedSeqLen * dModel];
+        System.arraycopy(source, 0, cropped, 0, cropped.length);
+        return GradTensor.of(cropped, 1, clampedSeqLen, dModel);
     }
 }
