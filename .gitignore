@@ -240,3 +240,6 @@ Desktop.ini
 # Ignore compiled artifacts – never commit them again
 /build/
 */build/
+# Ignore compiled artifacts – never commit them again
+/build/
+*/build/
