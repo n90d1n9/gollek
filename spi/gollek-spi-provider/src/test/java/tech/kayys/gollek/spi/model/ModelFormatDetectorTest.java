@@ -2,6 +2,7 @@ package tech.kayys.gollek.spi.model;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tech.kayys.gollek.core.model.ModelFormat;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

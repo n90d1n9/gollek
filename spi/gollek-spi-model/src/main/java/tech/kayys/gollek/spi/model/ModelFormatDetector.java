@@ -82,9 +82,7 @@ public final class ModelFormatDetector {
             Path dir = Files.isDirectory(modelPath) ? modelPath : modelPath.getParent();
             if (dir == null || !Files.exists(dir)) return false;
             
-            boolean exists = Files.exists(dir.resolve("model_index.json"));
-            System.err.println("Checking SD at: " + dir + " -> " + exists);
-            return exists;
+            return Files.exists(dir.resolve("model_index.json"));
         } catch (Exception e) {
             return false;
         }

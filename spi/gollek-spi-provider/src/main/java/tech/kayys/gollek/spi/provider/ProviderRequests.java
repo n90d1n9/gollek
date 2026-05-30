@@ -102,6 +102,8 @@ public final class ProviderRequests {
                 .model(providerModel != null ? providerModel : request.getModel())
                 .messages(request.getMessages())
                 .parameters(parameters)
+                .tools(request.getTools() != null ? request.getTools() : List.of())
+                .toolChoice(request.getToolChoice())
                 .streaming(streaming)
                 .timeout(request.getTimeout().orElse(defaultTimeout))
                 .userId(request.getUserId().orElse(null))

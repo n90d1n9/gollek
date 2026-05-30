@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,5 +55,57 @@ class ModelConfigGemma4TextMergeTest {
             Files.deleteIfExists(cfgPath);
             Files.deleteIfExists(dir);
         }
+    }
+
+    @Test
+    void mapsCommunityGgufFamiliesToArchitectureClasses() {
+        assertEquals("Gemma4ForConditionalGeneration", ggufPrimaryArchitecture("gemma4"));
+        assertEquals("Gemma4ForCausalLM", ggufPrimaryArchitecture("gemma4_text"));
+        assertEquals("Gemma4VisionModel", ggufPrimaryArchitecture("gemma4_vision"));
+        assertEquals("Gemma4AudioModel", ggufPrimaryArchitecture("gemma4_audio"));
+        assertEquals("YiForCausalLM", ggufPrimaryArchitecture("yi"));
+        assertEquals("Cohere2ForCausalLM", ggufPrimaryArchitecture("cohere2"));
+        assertEquals("DeepseekV3ForCausalLM", ggufPrimaryArchitecture("deepseek_v3"));
+        assertEquals("KimiForCausalLM", ggufPrimaryArchitecture("kimi"));
+    }
+
+    @Test
+    void mergesGemma4MoeAliasesFromTextConfig() throws IOException {
+        String json = """
+                {
+                  "model_type": "gemma4",
+                  "architectures": ["Gemma4ForConditionalGeneration"],
+                  "text_config": {
+                    "model_type": "gemma4_text",
+                    "enable_moe_block": true,
+                    "num_experts": 128,
+                    "top_k_experts": 8,
+                    "moe_intermediate_size": 704,
+                    "use_double_wide_mlp": true
+                  }
+                }
+                """;
+        Path dir = Files.createTempDirectory("gollek-modelconfig-test");
+        Path cfgPath = dir.resolve("config.json");
+        Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
+        try {
+            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
+            assertTrue(cfg.enableMoeBlock());
+            assertEquals(128, cfg.numLocalExperts());
+            assertEquals(8, cfg.numExpertsPerTok());
+            assertEquals(704, cfg.moeIntermediateSize());
+            assertTrue(cfg.usesDoubleWideMlp());
+            assertTrue(cfg.isMoe());
+            assertTrue(cfg.isGemma4PackedMoe());
+            assertTrue(cfg.requiresGemma4PackedMoeRuntime());
+        } finally {
+            Files.deleteIfExists(cfgPath);
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    private static String ggufPrimaryArchitecture(String architecture) {
+        return ModelConfig.fromGgufMetadata(Map.of("general.architecture", architecture))
+                .primaryArchitecture();
     }
 }

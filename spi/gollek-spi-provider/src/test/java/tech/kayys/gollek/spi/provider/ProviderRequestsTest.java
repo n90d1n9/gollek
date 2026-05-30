@@ -3,8 +3,11 @@ package tech.kayys.gollek.spi.provider;
 import org.junit.jupiter.api.Test;
 
 import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.spi.inference.InferenceRequest;
+import tech.kayys.gollek.spi.tool.ToolDefinition;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -118,5 +121,40 @@ class ProviderRequestsTest {
                 assertEquals("session-123", copy.getSessionId().orElse(null));
                 assertEquals("trace-abc", copy.getTraceId().orElse(null));
                 assertEquals("my-key", copy.getApiKey().orElse(null));
+        }
+
+        @Test
+        void fromInferenceRequestPreservesToolsToolChoiceAndRagMetadata() {
+                ToolDefinition tool = ToolDefinition.builder()
+                                .name("searchDocs")
+                                .description("Search project docs")
+                                .parameters(Map.of("type", "object"))
+                                .build();
+                InferenceRequest inference = InferenceRequest.builder()
+                                .model("user-model")
+                                .message(Message.system("Use tools when needed."))
+                                .message(Message.user("Find the install profile docs."))
+                                .tool(tool)
+                                .toolChoice("auto")
+                                .metadata("rag_enabled", true)
+                                .parameter("embedding_model", "embed-model")
+                                .build();
+
+                ProviderRequest provider = ProviderRequests.fromInferenceRequest(
+                                inference,
+                                "provider-model",
+                                true,
+                                Duration.ofSeconds(15),
+                                "native",
+                                Map.of(),
+                                Map.of());
+
+                assertEquals("provider-model", provider.getModel());
+                assertTrue(provider.isStreaming());
+                assertEquals(1, provider.getTools().size());
+                assertEquals("searchDocs", provider.getTools().get(0).getName());
+                assertEquals("auto", provider.getToolChoice());
+                assertEquals(true, provider.getMetadata().get("rag_enabled"));
+                assertEquals("embed-model", provider.getParameters().get("embedding_model"));
         }
 }
