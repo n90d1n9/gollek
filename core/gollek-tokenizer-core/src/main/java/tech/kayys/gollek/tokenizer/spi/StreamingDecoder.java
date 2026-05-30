@@ -1,10 +1,6 @@
 package tech.kayys.gollek.tokenizer.spi;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Pattern;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.Arrays;
 
 /**
  * Stateful helper for decoding generated tokens into text pieces.
@@ -17,23 +13,9 @@ public class StreamingDecoder {
 
     private final Tokenizer tokenizer;
     private final DecodeOptions options;
-    private final List<Long> tokens = new ArrayList<>();
+    private long[] tokens = new long[32];
+    private int tokenCount;
     private String lastFullText = "";
-
-    private static final Pattern SCRIPT_DETECTOR = Pattern.compile(
-            "(?:" +
-                    "\\p{L}\\p{Lo}|" + // Kana/CJK
-                    "\\p{L}\\p{IsGreek}|" + // Latin + Greek
-                    "\\p{L}\\p{IsThai}|" + // Latin + Thai
-                    "\\p{L}\\p{IsArabic}|" + // Latin + Arabic
-                    "\\p{L}\\p{IsDevanagari}" + // Latin + Devanagari
-                    ")");
-
-    private static final Set<Character> SUSPICIOUS_SEQUENCES = new HashSet<>();
-    static {
-        // Characters that shouldn't appear together in natural text
-        SUSPICIOUS_SEQUENCES.add('\uFFFD'); // Replacement character
-    }
 
     public StreamingDecoder(Tokenizer tokenizer, DecodeOptions options) {
         this.tokenizer = tokenizer;
@@ -47,11 +29,12 @@ public class StreamingDecoder {
      * @return the decoded string fragment corresponding to this token
      */
     public String decodeNext(long tokenId) {
-        tokens.add(tokenId);
+        ensureCapacity(tokenCount + 1);
+        tokens[tokenCount++] = tokenId;
 
         // We re-decode the full sequence to handle BPE merges and multi-byte UTF-8
         // correctly across token boundaries.
-        long[] currentIds = tokens.stream().mapToLong(l -> l).toArray();
+        long[] currentIds = Arrays.copyOf(tokens, tokenCount);
         String currentFullText = tokenizer.decode(currentIds, options);
 
 
@@ -74,11 +57,22 @@ public class StreamingDecoder {
      * Clear the internal state for a new generation session.
      */
     public void reset() {
-        tokens.clear();
+        tokenCount = 0;
         lastFullText = "";
     }
 
     public String currentText() {
         return lastFullText;
+    }
+
+    private void ensureCapacity(int required) {
+        if (required <= tokens.length) {
+            return;
+        }
+        int next = tokens.length;
+        while (next < required) {
+            next *= 2;
+        }
+        tokens = Arrays.copyOf(tokens, next);
     }
 }

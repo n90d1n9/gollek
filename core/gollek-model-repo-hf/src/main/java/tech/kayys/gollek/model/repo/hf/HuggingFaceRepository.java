@@ -249,6 +249,7 @@ public final class HuggingFaceRepository implements ModelRepository {
             case ModelFormat.SAFETENSORS -> cacheDir.resolve("safetensors").resolve(repoId);
             case ModelFormat.TORCHSCRIPT -> cacheDir.resolve("torchscript").resolve(repoId);
             case ModelFormat.LITERT -> cacheDir.resolve("litert").resolve(repoId);
+            case ModelFormat.ONNX -> cacheDir.resolve("onnx").resolve(repoId);
             default -> cacheDir.resolve("safetensors").resolve(repoId);
         };
 
@@ -313,7 +314,7 @@ public final class HuggingFaceRepository implements ModelRepository {
                             LOG.warnf("Failed to download optional component [%s]: %s", file, e.getMessage());
                         }
                     }
-                    if (primary == null && (isSafetensorFile(file) || isGgufFile(file))) {
+                    if (primary == null && (isSafetensorFile(file) || isGgufFile(file) || isOnnxFile(file))) {
                         primary = target;
                     }
                 }
@@ -382,7 +383,25 @@ public final class HuggingFaceRepository implements ModelRepository {
             return target;
         }
 
-        // 4. Fallback to PyTorch bin files
+        // 4. Try ONNX exports
+        Optional<String> onnxFile = files.stream()
+                .filter(this::isOnnxFile)
+                .findFirst();
+
+        if (onnxFile.isPresent()) {
+            Path target = targetDir.resolve(onnxFile.get());
+            if (target.getParent() != null)
+                Files.createDirectories(target.getParent());
+            if (!Files.exists(target)) {
+                client.downloadFile(repoId, onnxFile.get(), revision, target,
+                        progressPrinter(repoId, onnxFile.get()));
+            }
+            downloadSidecars(repoId, targetDir, files, revision);
+            validateDownloadedArtifact(target);
+            return target;
+        }
+
+        // 5. Fallback to PyTorch bin files
         Optional<String> pytorchFile = files.stream()
                 .filter(name -> name.toLowerCase().endsWith(".bin") || name.toLowerCase().endsWith(".pt")
                         || name.toLowerCase().endsWith(".pth"))
@@ -401,7 +420,7 @@ public final class HuggingFaceRepository implements ModelRepository {
             return target;
         }
 
-        // 5. Try LiteRT files
+        // 6. Try LiteRT files
         Optional<String> litertFile = files.stream()
                 .filter(this::isLitertFile)
                 .findFirst();
@@ -454,6 +473,8 @@ public final class HuggingFaceRepository implements ModelRepository {
                             return isSafetensorFile(name);
                         if (format == ModelFormat.LITERT)
                             return isLitertFile(name);
+                        if (format == ModelFormat.ONNX)
+                            return isOnnxFile(name);
                         return false;
                     })
                     .sorted((a, b) -> Integer.compare(priority(b.getFileName().toString()),
@@ -519,8 +540,8 @@ public final class HuggingFaceRepository implements ModelRepository {
         if (lower.equals("model.safetensors") || lower.equals("model.safetensor") || lower.endsWith("-web.task")) {
             return 100;
         }
-        if (lower.endsWith(".safetensors") || lower.endsWith(".safetensor") || lower.endsWith(".litertlm")
-                || lower.endsWith(".task")) {
+        if (lower.endsWith(".safetensors") || lower.endsWith(".safetensor") || lower.endsWith(".onnx")
+                || lower.endsWith(".litertlm") || lower.endsWith(".task")) {
             return 50;
         }
         return 0;

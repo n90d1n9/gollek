@@ -24,6 +24,8 @@ import java.util.List;
 public class HuggingFaceClient {
 
     private static final Logger LOG = Logger.getLogger(HuggingFaceClient.class);
+    private static final int DOWNLOAD_MAX_ATTEMPTS = 5;
+    private static final long DOWNLOAD_INITIAL_RETRY_DELAY_MS = 1_000L;
 
     @Inject
     HuggingFaceConfig config;
@@ -146,63 +148,104 @@ public class HuggingFaceClient {
 
         LOG.infof("Downloading: %s from %s", filename, modelId);
 
-        // First, get content length
-        HttpResponse<InputStream> response = httpClient.send(
-                buildGetRequest(url, true, 600),
-                HttpResponse.BodyHandlers.ofInputStream());
+        Files.createDirectories(targetPath.getParent());
+        java.nio.file.Path partialPath = targetPath.resolveSibling(targetPath.getFileName() + ".part");
+        IOException lastFailure = null;
+        long retryDelayMs = DOWNLOAD_INITIAL_RETRY_DELAY_MS;
 
-        if (response.statusCode() == 401 && hasUsableToken()) {
-            try (InputStream ignored = response.body()) {
-                // close first response before retry
-            } catch (Exception ignored) {
-            }
-            response = httpClient.send(
-                    buildGetRequest(url, true, 600),
-                    HttpResponse.BodyHandlers.ofInputStream());
-        }
+        for (int attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+            long resumeFrom = Files.exists(partialPath) ? Files.size(partialPath) : 0L;
+            HttpResponse<InputStream> response = null;
+            try {
+                response = openDownloadResponse(url, resumeFrom);
+                int status = response.statusCode();
 
-        if (response.statusCode() != 200) {
-            String detail = "";
-            try (InputStream errorBody = response.body()) {
-                byte[] bytes = errorBody.readNBytes(512);
-                if (bytes.length > 0) {
-                    detail = " - " + new String(bytes, java.nio.charset.StandardCharsets.UTF_8).replaceAll("\\s+", " ").trim();
+                if (status == 416 && resumeFrom > 0L) {
+                    long remoteTotal = parseUnsatisfiedRangeTotal(response);
+                    closeQuietly(response.body());
+                    if (remoteTotal > 0L && resumeFrom == remoteTotal) {
+                        Files.move(partialPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                        notifyDownloadComplete(progressListener, remoteTotal);
+                        LOG.infof("Downloaded: %s (%d bytes)", filename, Files.size(targetPath));
+                        return;
+                    }
+                    LOG.warnf("Discarding unusable partial download for %s (%d/%d bytes).",
+                            filename, resumeFrom, remoteTotal);
+                    Files.deleteIfExists(partialPath);
+                    continue;
                 }
-            } catch (Exception ignored) {
-                // best effort
-            }
-            throw new IOException(String.format(
-                    "Failed to download file: %d%s",
-                    response.statusCode(),
-                    detail));
-        }
 
-        long contentLength = response.headers()
-                .firstValueAsLong("Content-Length")
-                .orElse(-1L);
-
-        // Check if file already exists and matches size
-        if (Files.exists(targetPath) && contentLength > 0) {
-            long existingSize = Files.size(targetPath);
-            if (existingSize == contentLength) {
-                LOG.infof("File already exists and matches size (%d bytes), skipping download.", existingSize);
-                if (progressListener != null) {
-                    // Report 100% progress immediately
-                    progressListener.onProgress(contentLength, contentLength, 1.0);
+                if (status == 200 && resumeFrom > 0L) {
+                    LOG.warnf("Server ignored range resume for %s; restarting this file.", filename);
+                    closeQuietly(response.body());
+                    Files.deleteIfExists(partialPath);
+                    resumeFrom = 0L;
+                    response = openDownloadResponse(url, 0L);
+                    status = response.statusCode();
                 }
+
+                if (status != 200 && status != 206) {
+                    throw downloadStatusException(response);
+                }
+
+                long totalBytes = resolveTotalBytes(response, resumeFrom);
+                if (resumeFrom == 0L && Files.exists(targetPath) && totalBytes > 0L) {
+                    long existingSize = Files.size(targetPath);
+                    if (existingSize == totalBytes) {
+                        closeQuietly(response.body());
+                        LOG.infof("File already exists and matches size (%d bytes), skipping download.", existingSize);
+                        notifyDownloadComplete(progressListener, totalBytes);
+                        return;
+                    }
+                    if (existingSize > 0L && existingSize < totalBytes) {
+                        closeQuietly(response.body());
+                        LOG.infof("Resuming existing partial file %s (%d/%d bytes).",
+                                filename, existingSize, totalBytes);
+                        Files.move(targetPath, partialPath, StandardCopyOption.REPLACE_EXISTING);
+                        continue;
+                    }
+                    if (existingSize > totalBytes) {
+                        closeQuietly(response.body());
+                        LOG.warnf("Existing file %s is larger than remote (%d > %d); restarting.",
+                                filename, existingSize, totalBytes);
+                        Files.deleteIfExists(targetPath);
+                        continue;
+                    }
+                }
+
+                try (InputStream is = response.body()) {
+                    downloadWithProgress(is, partialPath, totalBytes, resumeFrom, progressListener);
+                }
+
+                long downloadedSize = Files.size(partialPath);
+                if (totalBytes > 0L && downloadedSize != totalBytes) {
+                    throw new IOException("Incomplete download for " + filename
+                            + ": expected " + totalBytes + " bytes, received " + downloadedSize);
+                }
+
+                Files.move(partialPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                notifyDownloadComplete(progressListener, downloadedSize);
+                LOG.infof("Downloaded: %s (%d bytes)", filename, Files.size(targetPath));
                 return;
-            } else {
-                LOG.infof("File exists but size mismatch (expected %d, found %d), re-downloading.", contentLength,
-                        existingSize);
+            } catch (IOException e) {
+                closeQuietly(response == null ? null : response.body());
+                lastFailure = e;
+                if (attempt >= DOWNLOAD_MAX_ATTEMPTS) {
+                    if (progressListener != null) {
+                        progressListener.onError(e);
+                    }
+                    throw e;
+                }
+                LOG.warnf("Download attempt %d/%d failed for %s: %s. Retrying with resume.",
+                        attempt, DOWNLOAD_MAX_ATTEMPTS, filename, e.getMessage());
+                Thread.sleep(retryDelayMs);
+                retryDelayMs = Math.min(retryDelayMs * 2L, 10_000L);
             }
         }
 
-        // Download with progress tracking
-        try (InputStream is = response.body()) {
-            downloadWithProgress(is, targetPath, contentLength, progressListener);
+        if (lastFailure != null) {
+            throw lastFailure;
         }
-
-        LOG.infof("Downloaded: %s (%d bytes)", filename, Files.size(targetPath));
     }
 
     /**
@@ -238,15 +281,13 @@ public class HuggingFaceClient {
             InputStream inputStream,
             java.nio.file.Path targetPath,
             long totalBytes,
+            long alreadyDownloadedBytes,
             DownloadProgressListener progressListener) throws IOException, InterruptedException {
 
         Files.createDirectories(targetPath.getParent());
 
-        // Use a temporary file for download to avoid partial files corrupting state
-        java.nio.file.Path tempPath = targetPath.resolveSibling(targetPath.getFileName() + ".part");
-
-        byte[] buffer = new byte[8192];
-        long downloadedBytes = 0;
+        byte[] buffer = new byte[1024 * 1024];
+        long downloadedBytes = alreadyDownloadedBytes;
         int bytesRead;
 
         // Register shutdown hook to interrupt download on Ctrl+C
@@ -263,7 +304,23 @@ public class HuggingFaceClient {
         });
         Runtime.getRuntime().addShutdownHook(shutdownHook);
 
-        try (var outputStream = Files.newOutputStream(tempPath)) {
+        if (progressListener != null && totalBytes > 0L && alreadyDownloadedBytes > 0L) {
+            progressListener.onProgress(alreadyDownloadedBytes, totalBytes,
+                    Math.min(1.0, (double) alreadyDownloadedBytes / totalBytes));
+        }
+
+        var options = alreadyDownloadedBytes > 0L
+                ? new java.nio.file.StandardOpenOption[] {
+                        java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.APPEND
+                }
+                : new java.nio.file.StandardOpenOption[] {
+                        java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                        java.nio.file.StandardOpenOption.WRITE
+                };
+
+        try (var outputStream = Files.newOutputStream(targetPath, options)) {
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new InterruptedException("Download interrupted");
@@ -276,13 +333,6 @@ public class HuggingFaceClient {
                     progressListener.onProgress(downloadedBytes, totalBytes, progress);
                 }
             }
-        } catch (IOException | InterruptedException e) {
-            // Clean up partial file on error or interruption
-            try {
-                Files.deleteIfExists(tempPath);
-            } catch (IOException ignored) {
-            }
-            throw e;
         } finally {
             // Remove hook if finished normally
             try {
@@ -291,12 +341,102 @@ public class HuggingFaceClient {
                 // Ignore if shutdown is in progress
             }
         }
+    }
 
-        // Move temp file to target path
-        Files.move(tempPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+    private HttpResponse<InputStream> openDownloadResponse(String url, long resumeFrom)
+            throws IOException, InterruptedException {
+        HttpResponse<InputStream> response = httpClient.send(
+                buildGetRequest(url, true, 600, resumeFrom),
+                HttpResponse.BodyHandlers.ofInputStream());
 
-        if (progressListener != null) {
-            progressListener.onComplete(downloadedBytes);
+        if (response.statusCode() == 401 && hasUsableToken()) {
+            closeQuietly(response.body());
+            response = httpClient.send(
+                    buildGetRequest(url, true, 600, resumeFrom),
+                    HttpResponse.BodyHandlers.ofInputStream());
+        }
+        return response;
+    }
+
+    private IOException downloadStatusException(HttpResponse<InputStream> response) {
+        String detail = "";
+        try (InputStream errorBody = response.body()) {
+            byte[] bytes = errorBody.readNBytes(512);
+            if (bytes.length > 0) {
+                detail = " - " + new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+                        .replaceAll("\\s+", " ")
+                        .trim();
+            }
+        } catch (Exception ignored) {
+            // best effort
+        }
+        return new IOException(String.format(
+                "Failed to download file: %d%s",
+                response.statusCode(),
+                detail));
+    }
+
+    private long resolveTotalBytes(HttpResponse<InputStream> response, long resumeFrom) {
+        long rangeTotal = parseContentRangeTotal(response);
+        if (rangeTotal > 0L) {
+            return rangeTotal;
+        }
+        long contentLength = response.headers()
+                .firstValueAsLong("Content-Length")
+                .orElse(-1L);
+        if (contentLength <= 0L) {
+            return -1L;
+        }
+        return response.statusCode() == 206 ? resumeFrom + contentLength : contentLength;
+    }
+
+    private long parseContentRangeTotal(HttpResponse<?> response) {
+        return response.headers()
+                .firstValue("Content-Range")
+                .map(this::parseContentRangeTotal)
+                .orElse(-1L);
+    }
+
+    private long parseUnsatisfiedRangeTotal(HttpResponse<?> response) {
+        return parseContentRangeTotal(response);
+    }
+
+    private long parseContentRangeTotal(String contentRange) {
+        if (contentRange == null || contentRange.isBlank()) {
+            return -1L;
+        }
+        int slash = contentRange.lastIndexOf('/');
+        if (slash < 0 || slash + 1 >= contentRange.length()) {
+            return -1L;
+        }
+        String total = contentRange.substring(slash + 1).trim();
+        if (total.equals("*")) {
+            return -1L;
+        }
+        try {
+            return Long.parseLong(total);
+        } catch (NumberFormatException ignored) {
+            return -1L;
+        }
+    }
+
+    private void notifyDownloadComplete(DownloadProgressListener progressListener, long totalBytes) {
+        if (progressListener == null) {
+            return;
+        }
+        if (totalBytes > 0L) {
+            progressListener.onProgress(totalBytes, totalBytes, 1.0);
+        }
+        progressListener.onComplete(totalBytes);
+    }
+
+    private void closeQuietly(InputStream stream) {
+        if (stream == null) {
+            return;
+        }
+        try {
+            stream.close();
+        } catch (IOException ignored) {
         }
     }
 
@@ -313,11 +453,18 @@ public class HuggingFaceClient {
     }
 
     private HttpRequest buildGetRequest(String url, boolean withAuth, int timeoutSeconds) {
+        return buildGetRequest(url, withAuth, timeoutSeconds, 0L);
+    }
+
+    private HttpRequest buildGetRequest(String url, boolean withAuth, int timeoutSeconds, long rangeStart) {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
                 .header("User-Agent", config.userAgent())
                 .GET();
+        if (rangeStart > 0L) {
+            requestBuilder.header("Range", "bytes=" + rangeStart + "-");
+        }
         if (withAuth) {
             configuredToken().ifPresent(token -> requestBuilder.header("Authorization", "Bearer " + token));
         }

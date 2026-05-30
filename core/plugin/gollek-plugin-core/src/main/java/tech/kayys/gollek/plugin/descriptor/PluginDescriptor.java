@@ -14,6 +14,10 @@
 
 package tech.kayys.gollek.plugin.descriptor;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -67,18 +71,53 @@ public record PluginDescriptor(
      * @return Plugin descriptor
      */
     public static PluginDescriptor fromJson(String json) {
-        // For now, return default descriptor
-        // In production, use Jackson to parse JSON
-        return new PluginDescriptor(
-                "unknown",
-                "Unknown Plugin",
-                "1.0.0",
-                "Plugin without descriptor",
-                "Unknown",
-                "tech.kayys.gollek.plugin.UnknownPlugin",
-                Collections.emptyList(),
-                Collections.emptyList(),
-                Collections.emptyMap()
-        );
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(json);
+            return new PluginDescriptor(
+                    text(root, "id", "unknown"),
+                    text(root, "name", "Unknown Plugin"),
+                    text(root, "version", "1.0.0"),
+                    text(root, "description", "Plugin without descriptor"),
+                    text(root, "vendor", "Unknown"),
+                    text(root, "mainClass", "tech.kayys.gollek.plugin.UnknownPlugin"),
+                    strings(mapper, root.get("dependencies")),
+                    strings(mapper, root.get("optionalDependencies")),
+                    properties(mapper, root.get("properties")));
+        } catch (Exception e) {
+            return new PluginDescriptor(
+                    "unknown",
+                    "Unknown Plugin",
+                    "1.0.0",
+                    "Plugin without descriptor",
+                    "Unknown",
+                    "tech.kayys.gollek.plugin.UnknownPlugin",
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyMap());
+        }
+    }
+
+    private static String text(JsonNode root, String field, String fallback) {
+        JsonNode value = root == null ? null : root.get(field);
+        return value != null && value.isTextual() && !value.asText().isBlank()
+                ? value.asText()
+                : fallback;
+    }
+
+    private static List<String> strings(ObjectMapper mapper, JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return Collections.emptyList();
+        }
+        return mapper.convertValue(node, new TypeReference<List<String>>() {
+        });
+    }
+
+    private static Map<String, Object> properties(ObjectMapper mapper, JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return Collections.emptyMap();
+        }
+        return mapper.convertValue(node, new TypeReference<Map<String, Object>>() {
+        });
     }
 }

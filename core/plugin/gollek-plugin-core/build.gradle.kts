@@ -21,6 +21,7 @@ dependencies {
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(project(":spi:gollek-spi"))
     implementation(project(":spi:gollek-spi-plugin"))
+    implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     implementation(group = "org.slf4j", name = "slf4j-api")
     implementation(group = "org.apache.maven", name = "maven-model", version = "3.9.9")
     implementation(group = "org.apache.maven", name = "maven-model-builder", version = "3.9.9")

@@ -139,9 +139,13 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
                 }
                 int id = at.get("id").asInt();
                 String content = at.get("content").asText();
+                boolean special = at.path("special").asBoolean(true);
                 state.tokenToId.put(content, id);
                 state.idToToken.put(id, content);
                 state.specialTokens.put(content, id);
+                if (special) {
+                    state.skippedSpecialTokenIds.add(id);
+                }
 
                 String lower = content.toLowerCase(Locale.ROOT);
                 if (lower.contains("eos") || lower.equals("</s>") || lower.equals("<|im_end|>") || lower.equals("<|endoftext|>") || lower.equals("<|eot_id|>")) {
@@ -285,6 +289,7 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
                 continue;
             }
             state.specialTokens.putIfAbsent(token, id);
+            state.skippedSpecialTokenIds.add(id);
 
             String lower = token.toLowerCase(Locale.ROOT);
             if (lower.contains("eos") || lower.contains("end_of_turn") || lower.contains("im_end")) {
@@ -309,7 +314,7 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
                 || state.stopTokenIds.contains(id)
                 || id == state.padTokenId
                 || id == state.unkTokenId
-                || state.specialTokens.containsValue(id);
+                || state.skippedSpecialTokenIds.contains(id);
     }
 
     @Override public int vocabSize() { return state.vocabSize; }
@@ -474,6 +479,7 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
         public Map<String, Integer> mergeRanks = new HashMap<>();
         public Map<Character, String> byteEncoder = new HashMap<>();
         public Map<String, Integer> specialTokens = new HashMap<>();
+        public Set<Integer> skippedSpecialTokenIds = new HashSet<>();
         public int vocabSize;
         public int bosTokenId = -1;
         public int eosTokenId = -1;

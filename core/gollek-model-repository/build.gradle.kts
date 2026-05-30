@@ -18,6 +18,9 @@ dependencies {
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
     implementation("io.quarkus:quarkus-cache:$quarkusVersion")
     implementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 sourceSets {
@@ -31,4 +34,8 @@ sourceSets {
             exclude("tech/kayys/gollek/model/registry/ModelRegistryService.java")
         }
     }
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }

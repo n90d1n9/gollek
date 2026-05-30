@@ -1,5 +1,7 @@
 package tech.kayys.gollek.tokenizer.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
 import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
@@ -46,11 +48,53 @@ public final class WordPieceTokenizer implements Tokenizer {
         Map<String, Integer> vocab = new LinkedHashMap<>(lines.size());
         for (int i = 0; i < lines.size(); i++) vocab.put(lines.get(i).strip(), i);
 
-        int padId = vocab.getOrDefault("[PAD]", 0);
-        int bosId = vocab.getOrDefault("[CLS]", 101);
-        int eosId = vocab.getOrDefault("[SEP]", 102);
-        int unkId = vocab.getOrDefault("[UNK]", 100);
+        return fromVocab(vocab);
+    }
+
+    public static WordPieceTokenizer fromTokenizerJsonFile(Path tokenizerJson) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(tokenizerJson.toFile());
+        JsonNode model = root.path("model");
+        String type = model.path("type").asText("");
+        if (!"WordPiece".equalsIgnoreCase(type)) {
+            throw new IOException("Expected WordPiece tokenizer.json model, got: " + type);
+        }
+        JsonNode vocabNode = model.path("vocab");
+        if (!vocabNode.isObject()) {
+            throw new IOException("Invalid WordPiece tokenizer.json: missing model.vocab");
+        }
+
+        Map<String, Integer> vocab = new LinkedHashMap<>();
+        vocabNode.fields().forEachRemaining(entry -> vocab.put(entry.getKey(), entry.getValue().asInt()));
+
+        JsonNode addedTokens = root.path("added_tokens");
+        if (addedTokens.isArray()) {
+            for (JsonNode token : addedTokens) {
+                if (token.hasNonNull("content") && token.hasNonNull("id")) {
+                    vocab.putIfAbsent(token.path("content").asText(), token.path("id").asInt());
+                }
+            }
+        }
+
+        return fromVocab(vocab);
+    }
+
+    private static WordPieceTokenizer fromVocab(Map<String, Integer> vocab) {
+        int padId = tokenId(vocab, 0, "[PAD]", "<pad>");
+        int bosId = tokenId(vocab, 101, "[CLS]", "<s>", "<cls>");
+        int eosId = tokenId(vocab, 102, "[SEP]", "</s>", "<sep>");
+        int unkId = tokenId(vocab, 100, "[UNK]", "<unk>");
         return new WordPieceTokenizer(vocab, padId, bosId, eosId, unkId);
+    }
+
+    private static int tokenId(Map<String, Integer> vocab, int fallback, String... names) {
+        for (String name : names) {
+            Integer id = vocab.get(name);
+            if (id != null) {
+                return id;
+            }
+        }
+        return fallback;
     }
 
     @Override
