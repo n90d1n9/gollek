@@ -21,10 +21,15 @@ Options:
   --java-probe-regex RE   Required Java-native tensor probe regex (default: real prepared mat-vec probe)
   --java-matvec-threshold-ms N
                           Fail if Java probe parallelMatVec exceeds this (default: 50)
+  --fallback-prefill-threshold-ms N
+                          Fail if measured llama.cpp fallback prefill exceeds this
+  --fallback-decode-threshold-ms N
+                          Fail if measured llama.cpp fallback decode exceeds this
   --verify-java-refusal   Verify --engine java refuses llama.cpp fallback (default)
   --no-verify-java-refusal
   --require-metal         Require Metal backend
   --no-require-metal      Do not require Metal backend
+  --summary-file PATH     Write machine-readable TSV metrics for the comparison
   --help                  Show this help
 USAGE
 }
@@ -39,7 +44,10 @@ JAVA_READY_REGEX="row-dot-primitives-ready"
 JAVA_CONFIG_REGEX='type=[^,]+, layers=[1-9][0-9]*, hidden=[1-9][0-9]*, heads=[1-9][0-9]*/[1-9][0-9]*, headDim=[1-9][0-9]*, context=[1-9][0-9]*, vocab=[1-9][0-9]*'
 JAVA_PROBE_REGEX='tensor=[^,]+, type=[^,]+, rows=[1-9][0-9]*, cols=[1-9][0-9]*, sampledRows=[1-9][0-9]*, .*matVecRows=[1-9][0-9]*, cache=[0-9]+([,.][0-9]+)?ms, preparedMatVecReady=true, parallelMatVec=[0-9]+([,.][0-9]+)?ms, .*cachedGenericMatVec=[0-9]+([,.][0-9]+)?ms'
 JAVA_MATVEC_THRESHOLD_MS=50
+FALLBACK_PREFILL_THRESHOLD_MS=""
+FALLBACK_DECODE_THRESHOLD_MS=""
 VERIFY_JAVA_REFUSAL=1
+SUMMARY_FILE=""
 case "$(uname -s)" in
   Darwin) REQUIRE_METAL=1 ;;
   *) REQUIRE_METAL=0 ;;
@@ -57,10 +65,13 @@ while [[ $# -gt 0 ]]; do
     --java-config-regex) JAVA_CONFIG_REGEX="$2"; shift 2 ;;
     --java-probe-regex) JAVA_PROBE_REGEX="$2"; shift 2 ;;
     --java-matvec-threshold-ms) JAVA_MATVEC_THRESHOLD_MS="$2"; shift 2 ;;
+    --fallback-prefill-threshold-ms) FALLBACK_PREFILL_THRESHOLD_MS="$2"; shift 2 ;;
+    --fallback-decode-threshold-ms) FALLBACK_DECODE_THRESHOLD_MS="$2"; shift 2 ;;
     --verify-java-refusal) VERIFY_JAVA_REFUSAL=1; shift ;;
     --no-verify-java-refusal) VERIFY_JAVA_REFUSAL=0; shift ;;
     --require-metal) REQUIRE_METAL=1; shift ;;
     --no-require-metal) REQUIRE_METAL=0; shift ;;
+    --summary-file) SUMMARY_FILE="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 2 ;;
   esac
@@ -81,6 +92,9 @@ fi
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-gguf-engine-compare.XXXXXX")"
 OUTPUT="$RUN_DIR/compare.log"
 JAVA_OUTPUT="$RUN_DIR/java-only.log"
+if [[ -n "$SUMMARY_FILE" ]]; then
+  printf 'case\tdurationMs\tbackend\twarmSession\tpromptCache\tmodelLoadMs\ttokenizeMs\tprefillMs\tdecodeMs\tjavaStatus\tloaderReady\tdecoderTensorsReady\trowDotReady\tgenerationReady\tbenchmarkParallelMatVecMs\tjavaOnlyParallelMatVecMs\tbestParallelMatVecMs\tjavaMatVecThresholdMs\tjavaFallbackRefusal\tlog\n' > "$SUMMARY_FILE"
+fi
 
 strip_ansi() {
   sed -E $'s/\x1B\\[[0-9;?]*[ -/]*[@-~]//g'
@@ -159,6 +173,24 @@ extract_probe_metric_ms() {
   extract_probe_metric_ms_from "$OUTPUT" "$1"
 }
 
+extract_native_metric_value_from() {
+  local file="$1"
+  local key="$2"
+  strip_ansi < "$file" \
+    | { grep -oE "${key}=[^,)]+" || true; } \
+    | tail -n 1 \
+    | sed -E "s/^${key}=//"
+}
+
+extract_native_metric_ms_from() {
+  local file="$1"
+  local key="$2"
+  strip_ansi < "$file" \
+    | { grep -oE "${key}=[0-9]+([,.][0-9]+)?ms" || true; } \
+    | tail -n 1 \
+    | sed -E "s/^${key}=//; s/ms$//; s/,/./"
+}
+
 extract_readiness_value_from() {
   local file="$1"
   local key="$2"
@@ -172,16 +204,70 @@ extract_readiness_value() {
   extract_readiness_value_from "$OUTPUT" "$1"
 }
 
-metric_le_threshold() {
+metric_exceeds() {
   local actual="$1"
   local threshold="$2"
-  awk -v actual="$actual" -v threshold="$threshold" 'BEGIN { exit (actual <= threshold) ? 0 : 1 }'
+  awk -v actual="$actual" -v threshold="$threshold" 'BEGIN { exit !(actual + 0 > threshold + 0) }'
 }
 
 metric_min() {
   local first="$1"
   local second="$2"
   awk -v first="$first" -v second="$second" 'BEGIN { printf "%.3f", (first <= second) ? first : second }'
+}
+
+assert_metric_under() {
+  local name="$1"
+  local actual="$2"
+  local threshold="$3"
+  local output="$4"
+  if [[ -z "$threshold" ]]; then
+    return 0
+  fi
+  if [[ -z "$actual" ]]; then
+    echo "FAIL: $name metric was not reported" >&2
+    tail -n 100 "$output" >&2
+    exit 1
+  fi
+  if metric_exceeds "$actual" "$threshold"; then
+    echo "FAIL: $name took ${actual}ms, threshold is ${threshold}ms" >&2
+    tail -n 100 "$output" >&2
+    exit 1
+  fi
+}
+
+summary_field() {
+  local value="${1:-}"
+  value="${value//$'\t'/ }"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
+
+write_summary_row() {
+  if [[ -z "$SUMMARY_FILE" ]]; then
+    return 0
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(summary_field "$1")" \
+    "$(summary_field "$2")" \
+    "$(summary_field "$3")" \
+    "$(summary_field "$4")" \
+    "$(summary_field "$5")" \
+    "$(summary_field "$6")" \
+    "$(summary_field "$7")" \
+    "$(summary_field "$8")" \
+    "$(summary_field "$9")" \
+    "$(summary_field "${10}")" \
+    "$(summary_field "${11}")" \
+    "$(summary_field "${12}")" \
+    "$(summary_field "${13}")" \
+    "$(summary_field "${14}")" \
+    "$(summary_field "${15}")" \
+    "$(summary_field "${16}")" \
+    "$(summary_field "${17}")" \
+    "$(summary_field "${18}")" \
+    "$(summary_field "${19}")" \
+    "$(summary_field "${20}")" >> "$SUMMARY_FILE"
 }
 
 GOLLEK_GGUF_FAST_RUN_TIMING=true "$GOLLEK_BIN" run \
@@ -243,11 +329,20 @@ if (( duration_ms > THRESHOLD_MS )); then
   tail -n 100 "$OUTPUT" >&2
   exit 1
 fi
+fallback_warm_session="$(extract_native_metric_value_from "$OUTPUT" warmSession || true)"
+fallback_prompt_cache="$(extract_native_metric_value_from "$OUTPUT" promptCache || true)"
+fallback_model_load_ms="$(extract_native_metric_ms_from "$OUTPUT" modelLoad || true)"
+fallback_tokenize_ms="$(extract_native_metric_ms_from "$OUTPUT" tokenize || true)"
+fallback_prefill_ms="$(extract_native_metric_ms_from "$OUTPUT" prefill || true)"
+fallback_decode_ms="$(extract_native_metric_ms_from "$OUTPUT" decode || true)"
+assert_metric_under "llama.cpp fallback prefill" "$fallback_prefill_ms" "$FALLBACK_PREFILL_THRESHOLD_MS" "$OUTPUT"
+assert_metric_under "llama.cpp fallback decode" "$fallback_decode_ms" "$FALLBACK_DECODE_THRESHOLD_MS" "$OUTPUT"
 
 java_status="$(extract_java_status)"
 java_config="$(extract_java_config)"
 java_probe="$(extract_probe_line)"
 matvec_ms="$(extract_probe_metric_ms 'parallelMatVec')"
+java_only_matvec_ms=""
 loader_ready="$(extract_readiness_value 'loaderReady')"
 decoder_ready="$(extract_readiness_value 'decoderTensorsReady')"
 row_dot_ready="$(extract_readiness_value 'rowDotReady')"
@@ -297,6 +392,7 @@ if [[ -z "$matvec_ms" ]]; then
   tail -n 100 "$OUTPUT" >&2
   exit 1
 fi
+assert_metric_under "Java-native GGUF benchmark parallelMatVec" "$matvec_ms" "$JAVA_MATVEC_THRESHOLD_MS" "$OUTPUT"
 best_matvec_ms="$matvec_ms"
 
 java_refusal_status="skipped"
@@ -387,6 +483,7 @@ if [[ "$VERIFY_JAVA_REFUSAL" -eq 1 ]]; then
     tail -n 100 "$JAVA_OUTPUT" >&2
     exit 1
   fi
+  assert_metric_under "Java-native GGUF --engine java parallelMatVec" "$java_only_matvec_ms" "$JAVA_MATVEC_THRESHOLD_MS" "$JAVA_OUTPUT"
   best_matvec_ms="$(metric_min "$best_matvec_ms" "$java_only_matvec_ms")"
   if ! strip_ansi < "$JAVA_OUTPUT" | grep -q 'refusing to silently use llama.cpp'; then
     echo "FAIL: --engine java did not explicitly refuse llama.cpp fallback" >&2
@@ -401,16 +498,28 @@ if [[ "$VERIFY_JAVA_REFUSAL" -eq 1 ]]; then
   java_refusal_status="checked"
 fi
 
-if ! metric_le_threshold "$best_matvec_ms" "$JAVA_MATVEC_THRESHOLD_MS"; then
-  echo "FAIL: Java-native GGUF best parallelMatVec took ${best_matvec_ms}ms, threshold is ${JAVA_MATVEC_THRESHOLD_MS}ms" >&2
-  tail -n 100 "$OUTPUT" >&2
-  if [[ "$VERIFY_JAVA_REFUSAL" -eq 1 && -f "$JAVA_OUTPUT" ]]; then
-    tail -n 100 "$JAVA_OUTPUT" >&2
-  fi
-  exit 1
-fi
-
 java_config_summary="$(printf '%s' "$java_config" | sed -E 's/, /;/g')"
+write_summary_row \
+  compare \
+  "$duration_ms" \
+  "${backend:-unknown}" \
+  "${fallback_warm_session:-n/a}" \
+  "${fallback_prompt_cache:-n/a}" \
+  "${fallback_model_load_ms:-n/a}" \
+  "${fallback_tokenize_ms:-n/a}" \
+  "${fallback_prefill_ms:-n/a}" \
+  "${fallback_decode_ms:-n/a}" \
+  "$java_status" \
+  "$loader_ready" \
+  "$decoder_ready" \
+  "$row_dot_ready" \
+  "$generation_ready" \
+  "$matvec_ms" \
+  "${java_only_matvec_ms:-n/a}" \
+  "$best_matvec_ms" \
+  "$JAVA_MATVEC_THRESHOLD_MS" \
+  "$java_refusal_status" \
+  "$OUTPUT"
 printf 'compare duration=%sms backend=%s javaStatus=%s javaConfig=%s loaderReady=%s decoderTensorsReady=%s rowDotReady=%s generationReady=%s parallelMatVec=%sms javaMatVecThreshold=%sms javaFallbackRefusal=%s log=%s\n' \
   "$duration_ms" "${backend:-unknown}" "$java_status" "$java_config_summary" "$loader_ready" "$decoder_ready" "$row_dot_ready" "$generation_ready" "$best_matvec_ms" "$JAVA_MATVEC_THRESHOLD_MS" "$java_refusal_status" "$OUTPUT"
 echo "PASS: GGUF Java-native probe vs llama.cpp fallback comparison passed"

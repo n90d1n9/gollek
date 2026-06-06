@@ -15,12 +15,20 @@ Options:
   --max-tokens N          Max generated tokens (default: 10)
   --gollek-bin PATH       Gollek executable (default: ~/.local/bin/gollek)
   --warm-threshold-ms N   Fail if warm duration exceeds this (default: 1500)
+  --warm-engine-init-threshold-ms N
+                          Fail if measured warm profile engineInit exceeds this
+  --warm-first-chunk-threshold-ms N
+                          Fail if measured warm profile firstChunk exceeds this
+  --warm-profile-total-threshold-ms N
+                          Fail if measured warm profile total exceeds this
   --cold-threshold-ms N   Fail if cold duration exceeds this (default: 60000)
   --warmup-runs N         Stabilization runs before measured warm check (default: 1)
   --require-metal         Require Metal backend
   --no-require-metal      Do not require Metal backend
   --require-warm-engine   Require daemon engine reuse on warm runs (default)
   --no-require-warm-engine
+  --warm-only             Skip daemon reset/cold run and require an already-warm daemon
+  --summary-file PATH     Write machine-readable TSV metrics for each case
   --keep-daemon           Leave daemon running after benchmark
   --help                  Show this help
 USAGE
@@ -32,10 +40,15 @@ EXPECTED_REGEX="Jakarta|Indonesia"
 MAX_TOKENS=10
 GOLLEK_BIN="${HOME}/.local/bin/gollek"
 WARM_THRESHOLD_MS=1500
+WARM_ENGINE_INIT_THRESHOLD_MS=""
+WARM_FIRST_CHUNK_THRESHOLD_MS=""
+WARM_PROFILE_TOTAL_THRESHOLD_MS=""
 COLD_THRESHOLD_MS=60000
 WARMUP_RUNS=1
 KEEP_DAEMON=0
 REQUIRE_WARM_ENGINE=1
+WARM_ONLY=0
+SUMMARY_FILE=""
 case "$(uname -s)" in
   Darwin) REQUIRE_METAL=1 ;;
   *) REQUIRE_METAL=0 ;;
@@ -49,12 +62,17 @@ while [[ $# -gt 0 ]]; do
     --max-tokens) MAX_TOKENS="$2"; shift 2 ;;
     --gollek-bin) GOLLEK_BIN="$2"; shift 2 ;;
     --warm-threshold-ms) WARM_THRESHOLD_MS="$2"; shift 2 ;;
+    --warm-engine-init-threshold-ms) WARM_ENGINE_INIT_THRESHOLD_MS="$2"; shift 2 ;;
+    --warm-first-chunk-threshold-ms) WARM_FIRST_CHUNK_THRESHOLD_MS="$2"; shift 2 ;;
+    --warm-profile-total-threshold-ms) WARM_PROFILE_TOTAL_THRESHOLD_MS="$2"; shift 2 ;;
     --cold-threshold-ms) COLD_THRESHOLD_MS="$2"; shift 2 ;;
     --warmup-runs) WARMUP_RUNS="$2"; shift 2 ;;
     --require-metal) REQUIRE_METAL=1; shift ;;
     --no-require-metal) REQUIRE_METAL=0; shift ;;
     --require-warm-engine) REQUIRE_WARM_ENGINE=1; shift ;;
     --no-require-warm-engine) REQUIRE_WARM_ENGINE=0; shift ;;
+    --warm-only) WARM_ONLY=1; shift ;;
+    --summary-file) SUMMARY_FILE="$2"; shift 2 ;;
     --keep-daemon) KEEP_DAEMON=1; shift ;;
     --help) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 2 ;;
@@ -74,6 +92,9 @@ if [[ ! -x "$GOLLEK_BIN" ]]; then
 fi
 
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-litert-fast-bench.XXXXXX")"
+if [[ -n "$SUMMARY_FILE" ]]; then
+  printf 'case\tdurationMs\tbackend\twarmEngine\tengineInitMs\tfirstChunkMs\ttotalMs\tlog\n' > "$SUMMARY_FILE"
+fi
 cleanup() {
   if [[ "$KEEP_DAEMON" -ne 1 ]]; then
     "$GOLLEK_BIN" __daemon-stop >/dev/null 2>&1 || true
@@ -128,6 +149,55 @@ extract_warm_engine() {
     | { grep -oE 'warmEngine=(true|false)' || true; } \
     | tail -n 1 \
     | sed 's/^warmEngine=//'
+}
+
+metric_exceeds() {
+  local actual="$1"
+  local limit="$2"
+  awk -v actual="$actual" -v limit="$limit" 'BEGIN { exit !(actual + 0 > limit + 0) }'
+}
+
+assert_profile_metric_under() {
+  local name="$1"
+  local label="$2"
+  local actual="$3"
+  local limit="$4"
+  local output="$5"
+  if [[ -z "$limit" ]]; then
+    return 0
+  fi
+  if [[ -z "$actual" ]]; then
+    echo "FAIL: $name did not report LiteRT profile $label timing" >&2
+    tail -n 80 "$output" >&2
+    exit 1
+  fi
+  if metric_exceeds "$actual" "$limit"; then
+    echo "FAIL: $name LiteRT profile $label took ${actual}ms, threshold is ${limit}ms" >&2
+    tail -n 80 "$output" >&2
+    exit 1
+  fi
+}
+
+summary_field() {
+  local value="${1:-}"
+  value="${value//$'\t'/ }"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
+
+write_summary_row() {
+  if [[ -z "$SUMMARY_FILE" ]]; then
+    return 0
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(summary_field "$1")" \
+    "$(summary_field "$2")" \
+    "$(summary_field "$3")" \
+    "$(summary_field "$4")" \
+    "$(summary_field "$5")" \
+    "$(summary_field "$6")" \
+    "$(summary_field "$7")" \
+    "$(summary_field "$8")" >> "$SUMMARY_FILE"
 }
 
 run_case() {
@@ -191,17 +261,33 @@ assert_case() {
   engine_ms="$(extract_profile_metric_ms "$output" engineInit || true)"
   first_chunk_ms="$(extract_profile_metric_ms "$output" firstChunk || true)"
   total_ms="$(extract_profile_metric_ms "$output" total || true)"
+  if [[ "$name" == "warm" ]]; then
+    assert_profile_metric_under "$name" "engineInit" "$engine_ms" "$WARM_ENGINE_INIT_THRESHOLD_MS" "$output"
+    assert_profile_metric_under "$name" "firstChunk" "$first_chunk_ms" "$WARM_FIRST_CHUNK_THRESHOLD_MS" "$output"
+    assert_profile_metric_under "$name" "total" "$total_ms" "$WARM_PROFILE_TOTAL_THRESHOLD_MS" "$output"
+  fi
+  write_summary_row \
+    "$name" \
+    "$duration_ms" \
+    "${backend:-unknown}" \
+    "${warm_engine:-n/a}" \
+    "${engine_ms:-n/a}" \
+    "${first_chunk_ms:-n/a}" \
+    "${total_ms:-n/a}" \
+    "$output"
   printf '%-7s duration=%sms backend=%s warmEngine=%s engineInit=%sms firstChunk=%sms total=%sms log=%s\n' \
     "$name" "$duration_ms" "${backend:-unknown}" "${warm_engine:-n/a}" "${engine_ms:-n/a}" "${first_chunk_ms:-n/a}" "${total_ms:-n/a}" "$output"
 }
 
-"$GOLLEK_BIN" __daemon-stop >/dev/null 2>&1 || true
+if [[ "$WARM_ONLY" -ne 1 ]]; then
+  "$GOLLEK_BIN" __daemon-stop >/dev/null 2>&1 || true
 
-cold_log=""
-RUN_CASE_OUTPUT=""
-run_case cold
-cold_log="$RUN_CASE_OUTPUT"
-assert_case cold "$cold_log" "$COLD_THRESHOLD_MS" 0
+  cold_log=""
+  RUN_CASE_OUTPUT=""
+  run_case cold
+  cold_log="$RUN_CASE_OUTPUT"
+  assert_case cold "$cold_log" "$COLD_THRESHOLD_MS" 0
+fi
 
 for ((i = 1; i <= WARMUP_RUNS; i++)); do
   RUN_CASE_OUTPUT=""
@@ -210,7 +296,11 @@ for ((i = 1; i <= WARMUP_RUNS; i++)); do
   # Warmup runs are stabilizers: after install or daemon replacement they may
   # be the request that repopulates the engine. The measured warm run below is
   # the hard steady-state daemon-reuse contract.
-  assert_case "warmup${i}" "$warmup_log" "$COLD_THRESHOLD_MS" 0
+  warmup_require_warm_engine=0
+  if [[ "$WARM_ONLY" -eq 1 ]]; then
+    warmup_require_warm_engine=1
+  fi
+  assert_case "warmup${i}" "$warmup_log" "$COLD_THRESHOLD_MS" "$warmup_require_warm_engine"
 done
 
 RUN_CASE_OUTPUT=""

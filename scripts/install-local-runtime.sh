@@ -135,8 +135,32 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --verify-fast[=auto|all|litert|gguf|gguf-compare]"
             echo "                  Run installed LiteRT/GGUF Metal speed checks after install"
             echo "                  Can also be set with GOLLEK_INSTALL_VERIFY_FAST_PATHS"
+            echo "                  Token counts can be tuned with"
+            echo "                  GOLLEK_INSTALL_VERIFY_LITERT_MAX_TOKENS and"
+            echo "                  GOLLEK_INSTALL_VERIFY_GGUF_MAX_TOKENS"
+            echo "                  (defaults: LiteRT=10, GGUF=1)"
+            echo "                  GGUF native warm timings can be bounded with"
+            echo "                  GOLLEK_INSTALL_VERIFY_GGUF_WARM_{TOKENIZE,PREFILL,DECODE}_THRESHOLD_MS"
+            echo "                  LiteRT warm profile timings can be bounded with"
+            echo "                  GOLLEK_INSTALL_VERIFY_LITERT_WARM_{ENGINE_INIT,FIRST_CHUNK,TOTAL}_THRESHOLD_MS"
+            echo "                  GGUF Java-vs-fallback compare can bound fallback timings with"
+            echo "                  GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_{PREFILL,DECODE}_THRESHOLD_MS"
+            echo "                  For fast repeated checks, set"
+            echo "                  GOLLEK_INSTALL_VERIFY_LITERT_WARM_ONLY=true or"
+            echo "                  GOLLEK_INSTALL_VERIFY_GGUF_WARM_ONLY=true"
             echo "                  Leaves verified fast daemons warm by default; set"
             echo "                  GOLLEK_INSTALL_VERIFY_FAST_KEEP_DAEMON=false to stop them"
+            echo "                  Set GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE=true to run"
+            echo "                  scripts/verify-fast-speed-gates.sh and collect manifest/results"
+            echo "                  TSV artifacts; optional directory:"
+            echo "                  GOLLEK_INSTALL_VERIFY_FAST_SUMMARY_DIR"
+            echo "                  Set GOLLEK_INSTALL_VERIFY_FAST_SLOWEST_LIMIT to tune"
+            echo "                  the aggregate slowest-case terminal/TSV report"
+            echo "                  Set GOLLEK_INSTALL_VERIFY_FAST_CONTINUE_ON_FAILURE=true"
+            echo "                  to collect all selected aggregate gate results before failing"
+            echo "                  GGUF verification requires first-repeat prompt-cache hits by"
+            echo "                  default; set GOLLEK_INSTALL_VERIFY_GGUF_PROMPT_CACHE=false"
+            echo "                  only for diagnostic prompts/models that cannot cache"
             echo "  --verify-fast-only[=auto|all|litert|gguf|gguf-compare]"
             echo "                  Verify the already-installed CLI and exit without building"
             echo "  --no-verify-fast Ignore GOLLEK_INSTALL_VERIFY_FAST_PATHS for this install"
@@ -622,6 +646,13 @@ install_verify_keep_daemon() {
     esac
 }
 
+install_verify_aggregate_enabled() {
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 verify_installed_fast_paths() {
     if [ -z "$VERIFY_FAST_PATHS" ]; then
         return 0
@@ -639,10 +670,111 @@ verify_installed_fast_paths() {
     local litert_bench="${GOLLEK_INSTALL_VERIFY_LITERT_BENCH:-${PROJECT_ROOT}/scripts/bench-litert-fast-run.sh}"
     local gguf_bench="${GOLLEK_INSTALL_VERIFY_GGUF_BENCH:-${PROJECT_ROOT}/scripts/bench-gguf-fast-run.sh}"
     local gguf_compare_bench="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_BENCH:-${PROJECT_ROOT}/scripts/bench-gguf-engine-compare.sh}"
+    if install_verify_aggregate_enabled; then
+        local aggregate_bench="${GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE_BENCH:-${PROJECT_ROOT}/scripts/verify-fast-speed-gates.sh}"
+        local aggregate_summary_args=()
+        local aggregate_keep_daemon_args=()
+        local aggregate_slowest_args=()
+        if [ -n "${GOLLEK_INSTALL_VERIFY_FAST_SUMMARY_DIR:-}" ]; then
+            aggregate_summary_args+=(--summary-dir "${GOLLEK_INSTALL_VERIFY_FAST_SUMMARY_DIR}")
+        fi
+        if [ -n "${GOLLEK_INSTALL_VERIFY_FAST_SLOWEST_LIMIT:-}" ]; then
+            aggregate_slowest_args+=(--slowest-limit "${GOLLEK_INSTALL_VERIFY_FAST_SLOWEST_LIMIT}")
+        fi
+        if install_verify_keep_daemon; then
+            aggregate_keep_daemon_args+=(--keep-daemon)
+        fi
+        echo -e "${BLUE}>>> Verifying installed fast inference speed with aggregate gate...${NC}"
+        GOLLEK_VERIFY_FAST_LITERT_BENCH="$litert_bench" \
+        GOLLEK_VERIFY_FAST_GGUF_BENCH="$gguf_bench" \
+        GOLLEK_VERIFY_FAST_GGUF_COMPARE_BENCH="$gguf_compare_bench" \
+        GOLLEK_VERIFY_PROMPT="${GOLLEK_INSTALL_VERIFY_PROMPT:-where is jakarta}" \
+        GOLLEK_VERIFY_LITERT_EXPECTED="${GOLLEK_INSTALL_VERIFY_LITERT_EXPECTED:-Jakarta|Indonesia}" \
+        GOLLEK_VERIFY_GGUF_EXPECTED="${GOLLEK_INSTALL_VERIFY_GGUF_EXPECTED:-Indonesia|Jakarta}" \
+        GOLLEK_VERIFY_LITERT_MAX_TOKENS="${GOLLEK_INSTALL_VERIFY_LITERT_MAX_TOKENS:-10}" \
+        GOLLEK_VERIFY_LITERT_WARM_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_LITERT_WARM_THRESHOLD_MS:-1500}" \
+        GOLLEK_VERIFY_LITERT_COLD_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_LITERT_COLD_THRESHOLD_MS:-60000}" \
+        GOLLEK_VERIFY_LITERT_WARMUP_RUNS="${GOLLEK_INSTALL_VERIFY_LITERT_WARMUP_RUNS:-1}" \
+        GOLLEK_VERIFY_LITERT_WARM_ONLY="${GOLLEK_INSTALL_VERIFY_LITERT_WARM_ONLY:-false}" \
+        GOLLEK_VERIFY_LITERT_WARM_ENGINE_INIT_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_LITERT_WARM_ENGINE_INIT_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_LITERT_WARM_FIRST_CHUNK_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_LITERT_WARM_FIRST_CHUNK_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_LITERT_WARM_TOTAL_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_LITERT_WARM_TOTAL_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_MAX_TOKENS="${GOLLEK_INSTALL_VERIFY_GGUF_MAX_TOKENS:-1}" \
+        GOLLEK_VERIFY_GGUF_WARM_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_WARM_THRESHOLD_MS:-1500}" \
+        GOLLEK_VERIFY_GGUF_COLD_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_COLD_THRESHOLD_MS:-60000}" \
+        GOLLEK_VERIFY_GGUF_WARMUP_RUNS="${GOLLEK_INSTALL_VERIFY_GGUF_WARMUP_RUNS:-1}" \
+        GOLLEK_VERIFY_GGUF_PROMPT_CACHE="${GOLLEK_INSTALL_VERIFY_GGUF_PROMPT_CACHE:-true}" \
+        GOLLEK_VERIFY_GGUF_WARM_ONLY="${GOLLEK_INSTALL_VERIFY_GGUF_WARM_ONLY:-false}" \
+        GOLLEK_VERIFY_GGUF_WARM_TOKENIZE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_WARM_TOKENIZE_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_WARM_PREFILL_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_WARM_PREFILL_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_WARM_DECODE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_WARM_DECODE_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_MAX_TOKENS="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_MAX_TOKENS:-10}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_THRESHOLD_MS:-10000}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_JAVA_MATVEC_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_MATVEC_THRESHOLD_MS:-50}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_FALLBACK_PREFILL_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_PREFILL_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_FALLBACK_DECODE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_DECODE_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_JAVA_READY_REGEX="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_READY_REGEX:-row-dot-primitives-ready}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_JAVA_CONFIG_REGEX="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_CONFIG_REGEX:-type=[^,]+, layers=[1-9][0-9]*, hidden=[1-9][0-9]*, heads=[1-9][0-9]*/[1-9][0-9]*, headDim=[1-9][0-9]*, context=[1-9][0-9]*, vocab=[1-9][0-9]*}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_JAVA_PROBE_REGEX="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_PROBE_REGEX:-}" \
+        GOLLEK_VERIFY_GGUF_COMPARE_JAVA_REFUSAL="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_REFUSAL:-true}" \
+        GOLLEK_VERIFY_CONTINUE_ON_FAILURE="${GOLLEK_INSTALL_VERIFY_FAST_CONTINUE_ON_FAILURE:-false}" \
+            bash "$aggregate_bench" \
+                --only "$VERIFY_FAST_PATHS" \
+                --gollek-bin "$GOLLEK_CLI_BIN" \
+                --litert-model "${GOLLEK_INSTALL_VERIFY_LITERT_MODEL:-7c51c9}" \
+                --gguf-model "${GOLLEK_INSTALL_VERIFY_GGUF_MODEL:-b71c9d}" \
+                "${aggregate_summary_args[@]}" \
+                "${aggregate_slowest_args[@]}" \
+                "${aggregate_keep_daemon_args[@]}"
+        return 0
+    fi
     local keep_daemon_args=()
+    local litert_profile_threshold_args=()
+    local litert_warm_only_args=()
+    local gguf_prompt_cache_args=(--require-prompt-cache)
+    local gguf_native_threshold_args=()
+    local gguf_warm_only_args=()
+    local gguf_compare_fallback_threshold_args=()
     local gguf_compare_java_refusal_args=(--verify-java-refusal)
+    local gguf_compare_summary_args=()
     if install_verify_keep_daemon; then
         keep_daemon_args=(--keep-daemon)
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_ENGINE_INIT_THRESHOLD_MS:-}" ]; then
+        litert_profile_threshold_args+=(--warm-engine-init-threshold-ms "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_ENGINE_INIT_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_FIRST_CHUNK_THRESHOLD_MS:-}" ]; then
+        litert_profile_threshold_args+=(--warm-first-chunk-threshold-ms "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_FIRST_CHUNK_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_TOTAL_THRESHOLD_MS:-}" ]; then
+        litert_profile_threshold_args+=(--warm-profile-total-threshold-ms "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_TOTAL_THRESHOLD_MS}")
+    fi
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_ONLY:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) litert_warm_only_args=(--warm-only) ;;
+    esac
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_GGUF_PROMPT_CACHE:-true}" | tr '[:upper:]' '[:lower:]')" in
+        0|false|no|off) gguf_prompt_cache_args=() ;;
+    esac
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_TOKENIZE_THRESHOLD_MS:-}" ]; then
+        gguf_native_threshold_args+=(--warm-tokenize-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_TOKENIZE_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_PREFILL_THRESHOLD_MS:-}" ]; then
+        gguf_native_threshold_args+=(--warm-prefill-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_PREFILL_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_DECODE_THRESHOLD_MS:-}" ]; then
+        gguf_native_threshold_args+=(--warm-decode-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_DECODE_THRESHOLD_MS}")
+    fi
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_ONLY:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) gguf_warm_only_args=(--warm-only) ;;
+    esac
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_PREFILL_THRESHOLD_MS:-}" ]; then
+        gguf_compare_fallback_threshold_args+=(--fallback-prefill-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_PREFILL_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_DECODE_THRESHOLD_MS:-}" ]; then
+        gguf_compare_fallback_threshold_args+=(--fallback-decode-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_DECODE_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_SUMMARY_FILE:-}" ]; then
+        gguf_compare_summary_args+=(--summary-file "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_SUMMARY_FILE}")
     fi
     case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_REFUSAL:-true}" | tr '[:upper:]' '[:lower:]')" in
         0|false|no|off) gguf_compare_java_refusal_args=(--no-verify-java-refusal) ;;
@@ -653,9 +785,12 @@ verify_installed_fast_paths() {
         bash "$litert_bench" \
             --gollek-bin "$GOLLEK_CLI_BIN" \
             --model "${GOLLEK_INSTALL_VERIFY_LITERT_MODEL:-7c51c9}" \
+            --max-tokens "${GOLLEK_INSTALL_VERIFY_LITERT_MAX_TOKENS:-10}" \
             --warm-threshold-ms "${GOLLEK_INSTALL_VERIFY_LITERT_WARM_THRESHOLD_MS:-1500}" \
             --cold-threshold-ms "${GOLLEK_INSTALL_VERIFY_LITERT_COLD_THRESHOLD_MS:-60000}" \
             --warmup-runs "${GOLLEK_INSTALL_VERIFY_LITERT_WARMUP_RUNS:-1}" \
+            "${litert_profile_threshold_args[@]}" \
+            "${litert_warm_only_args[@]}" \
             "${keep_daemon_args[@]}"
     fi
     if install_verify_should_run "gguf"; then
@@ -663,9 +798,13 @@ verify_installed_fast_paths() {
         bash "$gguf_bench" \
             --gollek-bin "$GOLLEK_CLI_BIN" \
             --model "${GOLLEK_INSTALL_VERIFY_GGUF_MODEL:-b71c9d}" \
+            --max-tokens "${GOLLEK_INSTALL_VERIFY_GGUF_MAX_TOKENS:-1}" \
             --warm-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_WARM_THRESHOLD_MS:-1500}" \
             --cold-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_COLD_THRESHOLD_MS:-60000}" \
             --warmup-runs "${GOLLEK_INSTALL_VERIFY_GGUF_WARMUP_RUNS:-1}" \
+            "${gguf_prompt_cache_args[@]}" \
+            "${gguf_native_threshold_args[@]}" \
+            "${gguf_warm_only_args[@]}" \
             "${keep_daemon_args[@]}"
     fi
     if install_verify_should_run "gguf-compare"; then
@@ -677,6 +816,8 @@ verify_installed_fast_paths() {
                 --java-ready-regex "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_READY_REGEX:-row-dot-primitives-ready}" \
                 --java-config-regex "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_CONFIG_REGEX:-type=[^,]+, layers=[1-9][0-9]*, hidden=[1-9][0-9]*, heads=[1-9][0-9]*/[1-9][0-9]*, headDim=[1-9][0-9]*, context=[1-9][0-9]*, vocab=[1-9][0-9]*}" \
                 --java-matvec-threshold-ms "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_MATVEC_THRESHOLD_MS:-50}" \
+                "${gguf_compare_fallback_threshold_args[@]}" \
+                "${gguf_compare_summary_args[@]}" \
                 "${gguf_compare_java_refusal_args[@]}"
     fi
     if [ "$ran_any" != "true" ]; then
