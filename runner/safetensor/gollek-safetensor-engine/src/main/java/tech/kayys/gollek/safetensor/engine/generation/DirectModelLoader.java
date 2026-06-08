@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.model.registry.ModelArchitectureRegistry;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
+import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;
 import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader.SafetensorShardSession;
 import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
@@ -57,7 +58,7 @@ final class DirectModelLoader {
         Arena weightArena = Arena.ofAuto();
         ModelConfig config = loadConfig(modelPath);
         ModelArchitecture architecture = architectureRegistry.get().resolve(config);
-        ModelRuntimeTraits runtimeTraits = runtimeTraits(architecture, config);
+        ModelRuntimeTraits runtimeTraits = ModelRuntimeTraitsResolver.resolve(architecture, config);
         WeightLoadResult weightLoadResult = loadWeights(modelPath, effectiveQuantStrategy, config, runtimeTraits);
         Map<String, AccelTensor> weights = weightLoadResult.weights();
         Tokenizer tokenizer = loadTokenizerWithContext(modelPath);
@@ -80,11 +81,6 @@ final class DirectModelLoader {
             return baseName;
         }
         return baseName + "#" + effectiveQuantStrategy.name().toLowerCase();
-    }
-
-    private static ModelRuntimeTraits runtimeTraits(ModelArchitecture architecture, ModelConfig config) {
-        ModelRuntimeTraits runtimeTraits = architecture.runtimeTraits(config);
-        return runtimeTraits == null ? ModelRuntimeTraits.fromConfig(config) : runtimeTraits;
     }
 
     private WeightLoadResult loadWeights(Path modelPath, QuantizationEngine.QuantStrategy quantStrategy,

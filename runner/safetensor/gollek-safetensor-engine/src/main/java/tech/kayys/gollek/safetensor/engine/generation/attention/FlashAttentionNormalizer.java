@@ -20,32 +20,18 @@ import java.util.function.Supplier;
 
 final class FlashAttentionNormalizer {
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
-    private static final String DISABLE_GEMMA4_V_NORM_PROPERTY =
-            "gollek.safetensor.disable_gemma4_v_norm";
-    private static final String DISABLE_GEMMA4_QK_NORM_PROPERTY =
-            "gollek.safetensor.disable_gemma4_qk_norm";
-    private static final String ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY =
-            "gollek.safetensor.enable_metal_per_head_rms_norm";
-    private static final String DISABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY =
-            "gollek.safetensor.disable_metal_per_head_rms_norm";
-    private static final boolean DISABLE_METAL_PER_HEAD_RMS_NORM_ENABLED =
-            Boolean.getBoolean(DISABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY);
-    private static final String ENABLE_METAL_PER_HEAD_RMS_NORM_VALUE =
-            System.getProperty(ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY);
 
     private final Supplier<MetalBinding> metalBinding;
+    private final FlashAttentionNormalizerPolicy normalizerPolicy;
     private final Map<Integer, AccelTensor> unitScaleRmsNormWeights = new ConcurrentHashMap<>();
 
     FlashAttentionNormalizer(Supplier<MetalBinding> metalBinding) {
+        this(metalBinding, FlashAttentionNormalizerOptions.fromSystemProperties());
+    }
+
+    FlashAttentionNormalizer(Supplier<MetalBinding> metalBinding, FlashAttentionNormalizerOptions options) {
         this.metalBinding = metalBinding;
-    }
-
-    boolean gemma4QkNormDisabled(FlashAttentionModelPolicy modelPolicy) {
-        return modelPolicy.gemma4Text() && Boolean.getBoolean(DISABLE_GEMMA4_QK_NORM_PROPERTY);
-    }
-
-    boolean gemma4VNormDisabled(FlashAttentionModelPolicy modelPolicy) {
-        return modelPolicy.gemma4Text() && Boolean.getBoolean(DISABLE_GEMMA4_V_NORM_PROPERTY);
+        this.normalizerPolicy = FlashAttentionNormalizerPolicy.from(options);
     }
 
     AccelTensor perHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
@@ -175,14 +161,7 @@ final class FlashAttentionNormalizer {
     }
 
     private boolean shouldUseMetalPerHeadRmsNorm(FlashAttentionModelPolicy modelPolicy) {
-        if (DISABLE_METAL_PER_HEAD_RMS_NORM_ENABLED) {
-            return false;
-        }
-        String explicit = ENABLE_METAL_PER_HEAD_RMS_NORM_VALUE;
-        if (explicit != null && !explicit.isBlank()) {
-            return Boolean.parseBoolean(explicit);
-        }
-        return modelPolicy.preferMetalPerHeadRmsNorm();
+        return normalizerPolicy.shouldUseMetalPerHeadRmsNorm(modelPolicy);
     }
 
     private AccelTensor perHeadRmsNormNoWeight(AccelTensor x, double eps) {

@@ -5,12 +5,11 @@
  */
 package tech.kayys.gollek.safetensor.engine.forward;
 
-import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardNativeBf16MatvecPolicy.describeNativeBf16MatvecPath;
+import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps.addBiasIfNeeded;
 import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps.reusableOutputTensor;
 
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.metal.binding.MetalBinding;
-import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceProfiler;
 import tech.kayys.gollek.spi.model.ModelConfig;
@@ -31,121 +30,109 @@ final class DirectForwardMetalHalfLinear {
                                  AccelTensor bias,
                                  AccelTensor outputBuffer,
                                  String profileKey) {
-        if (!DirectForwardMetalLinearPolicy.canUseMetalHalfLinearCandidate(
-                metalLinearEnabled,
-                input,
-                weight,
-                traits,
-                profileKey)) {
+        DirectForwardMetalHalfLinearAdmissionPlan admissionPlan =
+                DirectForwardMetalHalfLinearAdmissionPlan.from(
+                        traits,
+                        metalLinearEnabled,
+                        input,
+                        weight,
+                        profileKey);
+        if (!admissionPlan.admitted()) {
             return null;
         }
-        long k = input.size(-1);
-        long rows = input.numel() / Math.max(1L, k);
-        boolean allowBf16ToF16Weight = DirectForwardMetalLinearPolicy.allowGemma4Bf16ToF16LinearForRows(
-                rows,
+        DirectForwardMetalLinearShapePlan shapePlan =
+                DirectForwardMetalLinearShapePlan.single(input, weight);
+        if (shapePlan == null) {
+            return null;
+        }
+        DirectForwardMetalLinearWeightPlan weightPlan = DirectForwardMetalLinearWeightPlan.single(
                 traits,
                 profileKey,
-                decodeLogitsPhase);
-        boolean nativeBf16Weight = DirectForwardMetalLinearPolicy.shouldUseNativeMetalBf16Linear(
-                weight,
-                traits,
-                profileKey,
-                allowBf16ToF16Weight);
-        AccelTensor contiguousInput = input.contiguous();
-        long outputDim = weight.size(0);
-        long[] outputShape = input.shapeWithLastDim(outputDim);
-        AccelTensor out = reusableOutputTensor(outputBuffer, outputShape);
+                decodeLogitsPhase,
+                shapePlan.rows(),
+                weight);
+        AccelTensor out = reusableOutputTensor(outputBuffer, shapePlan.outputShape());
 
-        try {
-            int m = Math.toIntExact(rows);
-            int kk = Math.toIntExact(k);
-            int n = Math.toIntExact(outputDim);
+        try (DirectForwardContiguousTensor contiguousInput = DirectForwardContiguousTensor.from(input)) {
+            int m = Math.toIntExact(shapePlan.rows());
+            int kk = Math.toIntExact(shapePlan.inputDim());
+            int n = Math.toIntExact(shapePlan.outputDim());
+            DirectForwardMetalHalfLinearExecutionPlan executionPlan =
+                    DirectForwardMetalHalfLinearExecutionPlan.from(
+                            m,
+                            kk,
+                            n,
+                            weightPlan.nativeBf16Weights(),
+                            capabilities,
+                            DirectForwardMetalHalfMatvecPolicy.shouldUseMetalHalfMatvec(
+                                    traits, config, n, profileKey),
+                            DirectForwardMetalHalfMatvecPolicy.shouldUseMetalLogitsMpsMatvec(
+                                    traits, n, kk, profileKey),
+                            DirectForwardMetalHalfMatvecPolicy.shouldUseMetalTransposedHalfMatvec(
+                                    traits, n, profileKey));
             int rc = -2;
-            String executionPath = "metal_matmul";
+            String executionPath = executionPlan.matmulPath();
             AccelTensor metalWeight = null;
-            if (m == 1
-                    && nativeBf16Weight
-                    && DirectForwardMetalHalfMatvecPolicy.shouldUseMetalHalfMatvec(
-                            traits, config, n, profileKey)
-                    && capabilities.supportsMatvecTransposedRightBf16()) {
-                metalWeight = toMetalHalfWeight(weight, traits, true, profileKey, allowBf16ToF16Weight);
+            if (executionPlan.nativeBf16MatvecCandidate()) {
+                metalWeight = DirectForwardMetalLinearWeightPlan.toMetalHalfWeight(
+                        weight, traits, true, weightPlan.allowBf16ToF16Weights());
                 if (metalWeight != null) {
                     rc = metalBinding.matvecTransposedRightBf16(
                             out.dataPtr(),
-                            contiguousInput.dataPtr(),
+                            contiguousInput.tensor().dataPtr(),
                             metalWeight.dataPtr(),
                             kk, n);
                     if (rc == 0) {
-                        executionPath = describeNativeBf16MatvecPath(kk, n);
+                        executionPath = executionPlan.nativeBf16MatvecPath();
                     }
                 }
             }
-            if (rc != 0
-                    && m == 1
-                    && !nativeBf16Weight
-                    && DirectForwardMetalHalfMatvecPolicy.shouldUseMetalLogitsMpsMatvec(
-                            traits, n, kk, profileKey)
-                    && capabilities.supportsMatvecTransposedRightHalfMps()) {
-                metalWeight = toMetalHalfWeight(weight, traits, false, profileKey, allowBf16ToF16Weight);
+            if (rc != 0 && executionPlan.mpsHalfMatvecCandidate()) {
+                metalWeight = DirectForwardMetalLinearWeightPlan.toMetalHalfWeight(
+                        weight, traits, false, weightPlan.allowBf16ToF16Weights());
                 if (metalWeight != null) {
                     rc = metalBinding.matvecTransposedRightHalfMps(
                             out.dataPtr(),
-                            contiguousInput.dataPtr(),
+                            contiguousInput.tensor().dataPtr(),
                             metalWeight.dataPtr(),
                             kk, n);
                     if (rc == 0) {
-                        executionPath = "mps_matvec";
+                        executionPath = executionPlan.mpsHalfMatvecPath();
                     }
                 }
             }
-            if (rc != 0
-                    && m == 1
-                    && !nativeBf16Weight
-                    && DirectForwardMetalHalfMatvecPolicy.shouldUseMetalTransposedHalfMatvec(
-                            traits, n, profileKey)
-                    && capabilities.supportsMatvecTransposedWeightHalf()) {
+            if (rc != 0 && executionPlan.transposedHalfMatvecCandidate()) {
                 AccelTensor transposedWeight = DirectForwardLinearCachePolicy.cachedTransposedF16Weight(weight);
-                if (transposedWeight != null
-                        && transposedWeight.size(0) == k
-                        && transposedWeight.size(1) == outputDim) {
+                if (executionPlan.matchesTransposedWeight(transposedWeight)) {
                     rc = metalBinding.matvecTransposedWeightHalf(
                             out.dataPtr(),
-                            contiguousInput.dataPtr(),
+                            contiguousInput.tensor().dataPtr(),
                             transposedWeight.dataPtr(),
                             kk, n);
                     if (rc == 0) {
-                        executionPath = "transposed_matvec";
+                        executionPath = executionPlan.transposedHalfMatvecPath();
                     }
                 }
             }
-            if (rc != 0
-                    && m == 1
-                    && !nativeBf16Weight
-                    && DirectForwardMetalHalfMatvecPolicy.shouldUseMetalHalfMatvec(
-                            traits, config, n, profileKey)
-                    && capabilities.supportsMatvecTransposedRightHalf()) {
+            if (rc != 0 && executionPlan.halfMatvecCandidate()) {
                 if (metalWeight == null) {
-                    metalWeight = toMetalHalfWeight(weight, traits, false, profileKey, allowBf16ToF16Weight);
+                    metalWeight = DirectForwardMetalLinearWeightPlan.toMetalHalfWeight(
+                            weight, traits, false, weightPlan.allowBf16ToF16Weights());
                 }
                 if (metalWeight != null) {
                     rc = metalBinding.matvecTransposedRightHalf(
                             out.dataPtr(),
-                            contiguousInput.dataPtr(),
+                            contiguousInput.tensor().dataPtr(),
                             metalWeight.dataPtr(),
                             kk, n);
                     if (rc == 0) {
-                        executionPath = "matvec";
+                        executionPath = executionPlan.halfMatvecPath();
                     }
                 }
             }
             if (rc != 0) {
                 if (metalWeight == null) {
-                    metalWeight = toMetalHalfWeight(
-                            weight,
-                            traits,
-                            nativeBf16Weight,
-                            profileKey,
-                            allowBf16ToF16Weight);
+                    metalWeight = weightPlan.weight();
                 }
                 if (metalWeight == null) {
                     out.close();
@@ -153,43 +140,21 @@ final class DirectForwardMetalHalfLinear {
                 }
                 rc = metalBinding.matmulTransposedRightHalf(
                         out.dataPtr(),
-                        contiguousInput.dataPtr(),
+                        contiguousInput.tensor().dataPtr(),
                         metalWeight.dataPtr(),
                         m, kk, n,
                         1.0f, 0.0f,
-                        nativeBf16Weight);
+                        executionPlan.nativeBf16Weight());
             }
             if (rc != 0) {
                 throw new IllegalStateException("Metal matmulTransposedRightHalf failed with code " + rc);
             }
             DirectInferenceProfiler.recordLinearPath(profileKey, executionPath);
-            if (bias == null) {
-                return out;
-            }
-            AccelTensor biased = AccelOps.add(out, bias);
-            out.close();
-            return biased;
+            return addBiasIfNeeded(out, bias);
         } catch (RuntimeException e) {
             out.close();
             log.debugf("Falling back from Metal half linear to AccelOps: %s", e.getMessage());
             return null;
-        } finally {
-            if (contiguousInput != input && !contiguousInput.isClosed()) {
-                contiguousInput.close();
-            }
         }
-    }
-
-    private static AccelTensor toMetalHalfWeight(AccelTensor weight,
-                                                 ModelConfigTraits traits,
-                                                 boolean nativeBf16,
-                                                 String profileKey,
-                                                 boolean allowBf16ToF16) {
-        return DirectForwardLinearCachePolicy.toMetalHalfWeight(
-                weight,
-                nativeBf16,
-                traits.gemma4Text(),
-                allowBf16ToF16,
-                DirectForwardMetalLinearPolicy.allowMetalBf16Linear(traits));
     }
 }

@@ -33,158 +33,71 @@ final class DirectForwardMetalGateUpMatvecFfn {
                               AccelTensor upW,
                               AccelTensor upB,
                               AccelTensor combinedBuffer) {
-        boolean siluActivation = activationType == FFNActivationType.SILU;
-        boolean geluActivation = activationType == FFNActivationType.GELU;
-        if (!DirectForwardFfnFastPathPolicy.shouldUseMetalGateUpMatvecFfn()) {
-            trace("reject:flag_disabled", config, input, gateW, upW);
+        DirectForwardMetalGateUpMatvecFfnAdmissionPlan admissionPlan =
+                DirectForwardMetalGateUpMatvecFfnAdmissionPlan.from(
+                        metalBinding,
+                        metalLinearEnabled,
+                        activationType,
+                        gateB,
+                        upB,
+                        combinedBuffer);
+        if (!admissionPlan.admitted()) {
+            trace(admissionPlan.rejectionDecision(), config, input, gateW, upW);
             return null;
         }
-        if (!siluActivation && !geluActivation) {
-            trace("reject:unsupported_activation:" + activationType, config, input, gateW, upW);
+        DirectForwardMetalFfnActivationPlan activation = admissionPlan.activation();
+        DirectForwardMetalFfnCandidatePlan candidatePlan = DirectForwardMetalFfnCandidatePlan.gateUpMatvec(
+                metalLinearEnabled, input, gateW, upW, traits, PROFILE_KEY);
+        if (!candidatePlan.admitted()) {
+            trace(candidatePlan.rejectionDecision(), config, input, gateW, upW);
             return null;
         }
-        if (gateB != null || upB != null) {
-            trace("reject:bias_present", config, input, gateW, upW);
+        DirectForwardMetalFfnShapeAdmissionPlan shapeAdmission =
+                DirectForwardMetalFfnShapeAdmissionPlan.singleTokenGateUp(input, gateW, upW, combinedBuffer);
+        if (!shapeAdmission.admitted()) {
+            trace(shapeAdmission.rejectionDecision(), config, input, gateW, upW);
             return null;
         }
-        if (combinedBuffer == null || combinedBuffer.isClosed()) {
-            trace("reject:combined_workspace_unavailable", config, input, gateW, upW);
-            return null;
-        }
-        if (!metalLinearEnabled || metalBinding == null) {
-            trace("reject:metal_unavailable", config, input, gateW, upW);
-            return null;
-        }
-        if (!DirectForwardMetalLinearPolicy.canUseMetalHalfLinearCandidate(
-                metalLinearEnabled, input, gateW, traits, PROFILE_KEY)
-                || !DirectForwardMetalLinearPolicy.canUseMetalHalfLinearCandidate(
-                metalLinearEnabled, input, upW, traits, PROFILE_KEY)) {
-            trace("reject:candidate_ineligible", config, input, gateW, upW);
-            return null;
-        }
-        if (gateW.rank() != 2
-                || upW.rank() != 2
-                || gateW.size(0) != upW.size(0)
-                || gateW.size(1) != upW.size(1)) {
-            trace("reject:shape_mismatch", config, input, gateW, upW);
-            return null;
-        }
-        long inputDim = input.size(-1);
-        long rows = input.numel() / Math.max(1L, inputDim);
-        if (rows != 1L) {
-            trace("reject:not_single_token_rows:" + rows, config, input, gateW, upW);
-            return null;
-        }
+        DirectForwardMetalFfnShapePlan shapePlan = shapeAdmission.shapePlan();
 
-        boolean allowBf16ToF16Weights = DirectForwardMetalLinearPolicy.allowGemma4Bf16ToF16LinearForRows(
-                rows,
+        boolean allowBf16ToF16Weights = DirectForwardMetalFfnWeightPlan.allowBf16ToF16Weights(
+                shapePlan.rows(),
                 traits,
                 PROFILE_KEY,
                 decodeLogitsPhase);
-        boolean nativeBf16Weights = DirectForwardMetalLinearPolicy.shouldUseNativeMetalBf16Linear(
-                gateW, traits, PROFILE_KEY, allowBf16ToF16Weights)
-                && DirectForwardMetalLinearPolicy.shouldUseNativeMetalBf16Linear(
-                upW, traits, PROFILE_KEY, allowBf16ToF16Weights);
-        AccelTensor metalGateW = toMetalHalfWeight(gateW, traits, nativeBf16Weights, allowBf16ToF16Weights);
-        AccelTensor metalUpW = toMetalHalfWeight(upW, traits, nativeBf16Weights, allowBf16ToF16Weights);
-        if (metalGateW == null || metalUpW == null
-                || metalGateW.quantType() != metalUpW.quantType()
-                || (metalGateW.quantType() != AccelTensor.QuantType.F16
-                        && metalGateW.quantType() != AccelTensor.QuantType.BF16)) {
-            trace("reject:weight_conversion_failed:native_bf16=" + nativeBf16Weights, config, input, gateW, upW);
+        boolean nativeBf16Weights = DirectForwardMetalFfnWeightPlan.nativeBf16Weights(
+                traits, PROFILE_KEY, allowBf16ToF16Weights, gateW, upW);
+        String capabilityRejection = activation.gateUpCapabilityRejection(capabilities, nativeBf16Weights);
+        if (capabilityRejection != null) {
+            trace("reject:" + capabilityRejection, config, input, gateW, upW);
             return null;
         }
-        if (nativeBf16Weights && siluActivation && !capabilities.supportsSwigluGateUpMatvecBf16()) {
-            trace("reject:swiglu_bf16_symbol_unavailable", config, input, gateW, upW);
-            return null;
-        }
-        if (nativeBf16Weights && geluActivation && !capabilities.supportsGegluGateUpMatvecBf16()) {
-            trace("reject:geglu_bf16_symbol_unavailable", config, input, gateW, upW);
-            return null;
-        }
-        if (!nativeBf16Weights && siluActivation && !capabilities.supportsSwigluGateUpMatvecHalf()) {
-            trace("reject:swiglu_symbol_unavailable", config, input, gateW, upW);
-            return null;
-        }
-        if (!nativeBf16Weights && geluActivation && !capabilities.supportsGegluGateUpMatvecHalf()) {
-            trace("reject:geglu_symbol_unavailable", config, input, gateW, upW);
+        DirectForwardMetalFfnWeightPlan weightPlan = DirectForwardMetalFfnWeightPlan.gateUp(
+                traits, gateW, upW, nativeBf16Weights, allowBf16ToF16Weights);
+        String weightRejection = weightPlan.gateUpConversionFailureReason();
+        if (weightRejection != null) {
+            trace("reject:" + weightRejection, config, input, gateW, upW);
             return null;
         }
 
-        long intermediateDim = gateW.size(0);
-        if (!combinedBuffer.hasShape(input.shapeWithLastDim(intermediateDim))) {
-            trace("reject:combined_shape_mismatch", config, input, gateW, upW);
-            return null;
-        }
+        DirectForwardMetalGateUpMatvecKernelPlan kernelPlan =
+                DirectForwardMetalGateUpMatvecKernelPlan.from(activation, nativeBf16Weights);
 
         long t0 = System.nanoTime();
-        AccelTensor contiguousInput = input.contiguous();
-        try {
-            int rc;
-            if (nativeBf16Weights && siluActivation) {
-                rc = metalBinding.swigluGateUpMatvecBf16(
-                        combinedBuffer.dataPtr(),
-                        contiguousInput.dataPtr(),
-                        metalGateW.dataPtr(),
-                        metalUpW.dataPtr(),
-                        Math.toIntExact(inputDim),
-                        Math.toIntExact(intermediateDim));
-            } else if (nativeBf16Weights) {
-                rc = metalBinding.gegluGateUpMatvecBf16(
-                        combinedBuffer.dataPtr(),
-                        contiguousInput.dataPtr(),
-                        metalGateW.dataPtr(),
-                        metalUpW.dataPtr(),
-                        Math.toIntExact(inputDim),
-                        Math.toIntExact(intermediateDim));
-            } else if (siluActivation) {
-                rc = metalBinding.swigluGateUpMatvecHalf(
-                        combinedBuffer.dataPtr(),
-                        contiguousInput.dataPtr(),
-                        metalGateW.dataPtr(),
-                        metalUpW.dataPtr(),
-                        Math.toIntExact(inputDim),
-                        Math.toIntExact(intermediateDim));
-            } else {
-                rc = metalBinding.gegluGateUpMatvecHalf(
-                        combinedBuffer.dataPtr(),
-                        contiguousInput.dataPtr(),
-                        metalGateW.dataPtr(),
-                        metalUpW.dataPtr(),
-                        Math.toIntExact(inputDim),
-                        Math.toIntExact(intermediateDim));
-            }
+        try (DirectForwardContiguousTensor contiguousInput = DirectForwardContiguousTensor.from(input)) {
+            int rc = kernelPlan.invoke(metalBinding, combinedBuffer, contiguousInput, weightPlan, shapePlan);
             if (rc != 0) {
                 throw new IllegalStateException("Metal gated gate/up matvec failed with code " + rc);
             }
-            DirectInferenceProfiler.recordLinearPath(PROFILE_KEY,
-                    (siluActivation ? "swiglu" : "geglu") + "_gate_up_matvec"
-                            + (nativeBf16Weights ? "_bf16" : "_f16"));
+            DirectInferenceProfiler.recordLinearPath(PROFILE_KEY, kernelPlan.pathSuffix());
             DirectInferenceProfiler.recordLinearNanos(PROFILE_KEY, System.nanoTime() - t0);
-            trace("accept:" + (siluActivation ? "swiglu" : "geglu") + ":native_bf16=" + nativeBf16Weights,
-                    config, input, gateW, upW);
+            trace(kernelPlan.acceptDecision(), config, input, gateW, upW);
             return combinedBuffer;
         } catch (RuntimeException e) {
             trace("reject:runtime_failure:" + e.getClass().getSimpleName(), config, input, gateW, upW);
             log.debugf("Falling back from Metal gated gate/up matvec: %s", e.getMessage());
             return null;
-        } finally {
-            if (contiguousInput != input && !contiguousInput.isClosed()) {
-                contiguousInput.close();
-            }
         }
-    }
-
-    private static AccelTensor toMetalHalfWeight(AccelTensor weight,
-                                                 ModelConfigTraits traits,
-                                                 boolean nativeBf16,
-                                                 boolean allowBf16ToF16) {
-        return DirectForwardLinearCachePolicy.toMetalHalfWeight(
-                weight,
-                nativeBf16,
-                traits.gemma4Text(),
-                allowBf16ToF16,
-                DirectForwardMetalLinearPolicy.allowMetalBf16Linear(traits));
     }
 
     private static void trace(String decision,

@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.lang.foreign.MemorySegment;
@@ -29,7 +29,7 @@ class DirectForwardOutputProjectionTest {
                   "vocab_size": 2
                 }
                 """, ModelConfig.class);
-        KVCacheManager.KVCacheSession.ForwardWorkspace ws = new KVCacheManager.KVCacheSession.ForwardWorkspace();
+        ForwardWorkspace ws = new ForwardWorkspace();
         ws.ensureCapacity(6, 3, 4);
         MemorySegment hiddenSeg = ws.getHiddenASeg();
         for (int i = 0; i < 6; i++) {
@@ -53,17 +53,19 @@ class DirectForwardOutputProjectionTest {
                 lmHead,
                 new ResolvedLayerWeights[0]);
 
-        AccelTensor logits = DirectForwardOutputProjection.prefillLogits(
+        DirectForwardOutputProjectionContext projectionContext = new DirectForwardOutputProjectionContext(
                 runtime(),
                 ModelConfigTraits.create(config),
+                config,
+                weights,
+                ws);
+        AccelTensor logits = DirectForwardOutputProjection.prefillLogits(new DirectForwardPrefillLogitsRequest(
+                projectionContext,
                 hiddenSeg,
                 new long[] { 1, 2, 3 },
                 embeddings,
-                weights,
-                config,
-                ws,
                 2,
-                false);
+                false));
         try {
             assertArrayEquals(new float[] { 4.0f, 5.0f }, logits.toFloatArray(), 0.0001f);
         } finally {

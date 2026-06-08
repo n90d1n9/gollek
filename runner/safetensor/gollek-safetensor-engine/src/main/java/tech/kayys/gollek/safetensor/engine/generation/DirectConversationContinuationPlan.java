@@ -59,16 +59,13 @@ record DirectConversationContinuationPlan(
     }
 
     String promptTokenSource() {
-        return exactReplay ? "conversation_replay" : "conversation_delta";
+        return DirectGenerationMetadata.continuationPromptTokenSource(exactReplay);
     }
 
     Map<String, Object> retainedKvMetadata() {
-        return Map.of(
-                "prompt_token_source", promptTokenSource(),
-                "conversation_delta_prefill", !exactReplay,
-                "conversation_exact_replay", exactReplay,
-                "conversation_cached_prefix_tokens", cachedPrefixTokens,
-                "conversation_delta_prompt_tokens", deltaInputIds.length,
-                "conversation_kv_retained", true);
+        return DirectGenerationMetadata.retainedContinuation(
+                exactReplay,
+                cachedPrefixTokens,
+                deltaInputIds.length);
     }
 }

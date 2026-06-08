@@ -7,6 +7,7 @@ import tech.kayys.gollek.safetensor.engine.backend.TextExecutionPreparationPlan;
 import tech.kayys.gollek.safetensor.engine.backend.TextExecutionSessionPlan;
 import tech.kayys.gollek.safetensor.engine.session.ConversationExecutionState;
 import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 /**
  * Engine-owned policy planner for text execution preparation.
@@ -35,10 +36,12 @@ public class TextExecutionPreparationPlanner {
                 && loadedModel.config().primaryArchitecture() != null
                 ? loadedModel.config().primaryArchitecture()
                 : "unknown";
+        ModelRuntimeTraits runtimeTraits = loadedModel != null
+                ? loadedModel.runtimeTraits()
+                : ModelRuntimeTraits.EMPTY;
         boolean supportsPrefixCaching = model != null && model.capabilities().supportsTextPrefixCaching();
         boolean supportsStatefulPreparedModels = model != null && model.capabilities().supportsStatefulPreparedModels();
-        boolean multimodalArchitecture = primaryArchitecture.toLowerCase().contains("conditionalgeneration")
-                || primaryArchitecture.toLowerCase().contains("vision");
+        boolean multimodalArchitecture = runtimeTraits.multimodalModel();
         TextExecutionPreparationContext.HardwareProfile hardwareProfile = detectHardwareProfile();
         return new TextExecutionPreparationContext(
                 model != null ? model.backendId() : "unknown",

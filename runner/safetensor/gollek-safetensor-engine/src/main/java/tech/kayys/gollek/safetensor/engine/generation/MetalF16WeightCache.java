@@ -8,6 +8,7 @@ package tech.kayys.gollek.safetensor.engine.generation;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.metal.binding.MetalBinding;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
+import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;
 import tech.kayys.gollek.safetensor.loader.SafetensorShardLoader.SafetensorShardSession;
 import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
@@ -60,7 +61,7 @@ final class MetalF16WeightCache {
         if (Boolean.getBoolean(DISABLE_METAL_F16_DISK_CACHE_PROPERTY) || !isNativeMetalRuntimeActive()) {
             return weights;
         }
-        ModelRuntimeTraits effectiveTraits = traits == null ? ModelRuntimeTraits.fromConfig(config) : traits;
+        ModelRuntimeTraits effectiveTraits = ModelRuntimeTraitsResolver.resolve(config, traits);
         if (effectiveTraits.gemma4Text()
                 && !Boolean.getBoolean(ENABLE_GEMMA4_METAL_F16_DISK_CACHE_PROPERTY)) {
             LOG.debugf("Skipping Metal F16 weight cache for Gemma-4 text; BF16->F16 parity is experimental.");

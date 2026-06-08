@@ -6,6 +6,7 @@
 package tech.kayys.gollek.safetensor.spi;
 
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.nio.file.Path;
@@ -46,6 +47,11 @@ public interface SafetensorEngine {
 
         /** Model architecture and hyperparameter configuration. */
         ModelConfig config();
+
+        /** Runtime policy traits resolved by the model family. */
+        default ModelRuntimeTraits runtimeTraits() {
+            return ModelRuntimeTraits.fallbackFromConfig(config());
+        }
     }
 
     /**

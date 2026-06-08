@@ -21,6 +21,7 @@
  */
 package tech.kayys.gollek.safetensor.engine.warmup;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -44,6 +45,8 @@ import tech.kayys.gollek.spi.provider.*;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.provider.StreamingProvider;
 import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelModalityTraits;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -231,6 +234,10 @@ public class SafetensorProvider implements StreamingProvider {
             return pipeline.get().infer(pipelineRequest);
         }
 
+        ProviderException validation = validateDirectModelCompatibility(resolved);
+        if (validation != null) {
+            return Uni.createFrom().failure(validation);
+        }
         return directBackend.infer(request);
     }
 
@@ -254,6 +261,10 @@ public class SafetensorProvider implements StreamingProvider {
             return pipeline.get().inferStream(pipelineRequest);
         }
 
+        ProviderException validation = validateDirectModelCompatibility(resolved);
+        if (validation != null) {
+            return Multi.createFrom().failure(validation);
+        }
         return directBackend.inferStream(request);
     }
 
@@ -308,6 +319,33 @@ public class SafetensorProvider implements StreamingProvider {
             return Optional.empty();
         }
         return pipelineRegistry.select(request);
+    }
+
+    private ProviderException validateDirectModelCompatibility(Path resolvedModelPath) {
+        String modelName = friendlyModelName(resolvedModelPath == null ? null : resolvedModelPath.toString());
+        Path checkpointDir = resolvedModelPath == null
+                ? null
+                : (Files.isDirectory(resolvedModelPath) ? resolvedModelPath : resolvedModelPath.getParent());
+        Path configPath = checkpointDir == null ? null : checkpointDir.resolve("config.json");
+        if (configPath == null || !Files.isRegularFile(configPath)) {
+            return new ProviderException(
+                    "Incomplete safetensor checkpoint (missing config.json). Re-pull model to download metadata sidecars.");
+        }
+
+        ModelConfig modelConfig;
+        try {
+            modelConfig = ModelConfig.load(configPath, new ObjectMapper());
+        } catch (Exception e) {
+            return new ProviderException(
+                    "Invalid safetensor checkpoint config.json. Re-pull model to download metadata sidecars.", e);
+        }
+
+        if (ModelModalityTraits.detectVisionModel(modelConfig)) {
+            return new ProviderException(
+                    "Model config declares a vision/VLM architecture that is not supported by local safetensor text runtime: "
+                            + modelName);
+        }
+        return null;
     }
 
     private ModelPipelineRequest modelPipelineRequest(ProviderRequest request, Path modelPath) {

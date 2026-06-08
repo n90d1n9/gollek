@@ -9,9 +9,6 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 
 import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -68,12 +65,12 @@ final class DirectGenerationExecutor {
                 request.decodeStartBase(),
                 request.requestStartNanos(),
                 request.profile(),
-                request.collectTokenIds(),
-                request.countCompletionTokens(),
-                request.normalizeNullDelta(),
-                request.cancelled(),
-                request.deltaConsumer(),
-                request.nextTokenObserver()));
+                request.options().collectTokenIds(),
+                request.options().countCompletionTokens(),
+                request.options().normalizeNullDelta(),
+                request.options().cancelled(),
+                request.options().deltaConsumer(),
+                request.options().nextTokenObserver()));
         return new Result(prefill, loop);
     }
 
@@ -109,12 +106,12 @@ final class DirectGenerationExecutor {
                 request.continuation().fullInputIds().length,
                 request.requestStartNanos(),
                 request.profile(),
-                request.collectTokenIds(),
-                request.countCompletionTokens(),
-                request.normalizeNullDelta(),
-                request.cancelled(),
-                request.deltaConsumer(),
-                request.nextTokenObserver()));
+                request.options().collectTokenIds(),
+                request.options().countCompletionTokens(),
+                request.options().normalizeNullDelta(),
+                request.options().cancelled(),
+                request.options().deltaConsumer(),
+                request.options().nextTokenObserver()));
         return new Result(prefill, loop);
     }
 
@@ -157,12 +154,10 @@ final class DirectGenerationExecutor {
             long requestStartNanos,
             InferenceProfile profile,
             DirectGenerationTimings timings,
-            boolean collectTokenIds,
-            boolean countCompletionTokens,
-            boolean normalizeNullDelta,
-            BooleanSupplier cancelled,
-            Consumer<String> deltaConsumer,
-            BiConsumer<Integer, Integer> nextTokenObserver) {
+            DirectGenerationRunOptions options) {
+        PrefillRequest {
+            options = DirectGenerationRunOptions.orDefault(options);
+        }
     }
 
     record ContinuationRequest(
@@ -174,12 +169,10 @@ final class DirectGenerationExecutor {
             long requestStartNanos,
             InferenceProfile profile,
             DirectGenerationTimings timings,
-            boolean collectTokenIds,
-            boolean countCompletionTokens,
-            boolean normalizeNullDelta,
-            BooleanSupplier cancelled,
-            Consumer<String> deltaConsumer,
-            BiConsumer<Integer, Integer> nextTokenObserver) {
+            DirectGenerationRunOptions options) {
+        ContinuationRequest {
+            options = DirectGenerationRunOptions.orDefault(options);
+        }
     }
 
     record Result(

@@ -11,7 +11,7 @@ import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceProfiler;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.util.ArrayList;
@@ -26,7 +26,7 @@ final class DirectForwardLogits {
         AccelTensor apply(AccelTensor input, AccelTensor weight, AccelTensor bias);
     }
 
-    static AccelTensor reusableOutputTensor(KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+    static AccelTensor reusableOutputTensor(ForwardWorkspace ws,
                                             AccelTensor input,
                                             AccelTensor lmHeadW) {
         if (ws == null || input == null || input.rank() == 0 || lmHeadW == null || lmHeadW.rank() != 2) {

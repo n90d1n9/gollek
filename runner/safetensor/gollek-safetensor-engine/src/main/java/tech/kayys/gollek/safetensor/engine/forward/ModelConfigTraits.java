@@ -5,11 +5,10 @@
  */
 package tech.kayys.gollek.safetensor.engine.forward;
 
+import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-
-import java.util.Locale;
 
 record ModelConfigTraits(
         ModelConfig source,
@@ -30,20 +29,17 @@ record ModelConfigTraits(
 
     static ModelConfigTraits create(ModelConfig config, ModelArchitecture arch) {
         String modelType = config.modelType() == null ? "" : config.modelType();
-        String normalizedModelType = modelType.toLowerCase(Locale.ROOT);
         int hiddenSizePerLayerInput = config.hiddenSizePerLayerInput();
         int vocabSizePerLayerInput = config.vocabSizePerLayerInput();
-        ModelRuntimeTraits runtimeTraits = arch == null
-                ? ModelRuntimeTraits.fromConfig(config)
-                : arch.runtimeTraits(config);
+        ModelRuntimeTraits runtimeTraits = ModelRuntimeTraitsResolver.resolve(arch, config);
         return new ModelConfigTraits(
                 config,
                 modelType,
                 hiddenSizePerLayerInput,
                 vocabSizePerLayerInput,
-                runtimeTraits.gemma4Text() || normalizedModelType.startsWith("gemma4"),
-                runtimeTraits.gemma3Text() || normalizedModelType.startsWith("gemma3"),
-                runtimeTraits.qwenText() || normalizedModelType.contains("qwen"),
+                runtimeTraits.gemma4Text(),
+                runtimeTraits.gemma3Text(),
+                runtimeTraits.qwenText(),
                 runtimeTraits.perLayerInputPath() || hiddenSizePerLayerInput > 0 || vocabSizePerLayerInput > 0);
     }
 

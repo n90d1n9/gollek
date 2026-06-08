@@ -10,7 +10,6 @@ import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceProfiler;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.lang.foreign.MemorySegment;
@@ -19,81 +18,61 @@ final class DirectForwardOutputProjection {
     private DirectForwardOutputProjection() {
     }
 
-    static AccelTensor prefillLogits(DirectForwardRuntimeContext runtime,
-                                     ModelConfigTraits traits,
-                                     MemorySegment hiddenSeg,
-                                     long[] hiddenShape,
-                                     AccelTensor embeddings,
-                                     ResolvedModelWeights resolvedWeights,
-                                     ModelConfig config,
-                                     KVCacheManager.KVCacheSession.ForwardWorkspace ws,
-                                     int seqLen,
-                                     boolean verboseTokens) {
-        AccelTensor hidden = AccelTensor.view(hiddenSeg, hiddenShape);
-        AccelTensor normed = finalNorm(runtime, traits, hidden, hiddenShape,
-                resolvedWeights, config, ws, seqLen);
-        if (hidden != embeddings && hidden != normed) {
+    static AccelTensor prefillLogits(DirectForwardPrefillLogitsRequest request) {
+        DirectForwardOutputProjectionContext context = request.context();
+        AccelTensor hidden = AccelTensor.view(request.hiddenSegment(), request.hiddenShape());
+        AccelTensor normed = finalNorm(context, hidden, request.hiddenShape(), request.seqLen());
+        if (hidden != request.embeddings() && hidden != normed) {
             hidden.close();
         }
 
-        AccelTensor lmHeadW = lmHeadOrThrow(resolvedWeights);
-        if (verboseTokens && seqLen > 1) {
-            DirectForwardLogits.debugSequencePositionLogits(normed, lmHeadW, seqLen,
-                    (input, weight, bias) -> linear(runtime, traits, config,
+        AccelTensor lmHeadW = lmHeadOrThrow(context.resolvedWeights());
+        if (request.verboseTokens() && request.seqLen() > 1) {
+            DirectForwardLogits.debugSequencePositionLogits(normed, lmHeadW, request.seqLen(),
+                    (input, weight, bias) -> linear(context,
                             false, input, weight, bias, null, null));
         }
 
-        AccelTensor lastPos = selectLastToken(normed, seqLen);
-        AccelTensor logitsOutput = DirectForwardLogits.reusableOutputTensor(ws, lastPos, lmHeadW);
+        AccelTensor lastPos = selectLastToken(normed, request.seqLen());
+        AccelTensor logitsOutput = DirectForwardLogits.reusableOutputTensor(context.workspace(), lastPos, lmHeadW);
         try {
-            return projectLogits(runtime, traits, config,
-                    false, lastPos, lmHeadW, logitsOutput);
+            return projectLogits(context, false, lastPos, lmHeadW, logitsOutput);
         } finally {
             lastPos.closeWithParent();
         }
     }
 
-    static AccelTensor decodeLogits(DirectForwardRuntimeContext runtime,
-                                    ModelConfigTraits traits,
-                                    MemorySegment hiddenSeg,
-                                    long[] hiddenShape,
-                                    ResolvedModelWeights resolvedWeights,
-                                    ModelConfig config,
-                                    KVCacheManager.KVCacheSession.ForwardWorkspace ws,
-                                    boolean reuseLogitsOutput) {
-        AccelTensor finalHidden = AccelTensor.view(hiddenSeg, hiddenShape);
-        AccelTensor normed = finalNorm(runtime, traits, finalHidden, hiddenShape,
-                resolvedWeights, config, ws, 1);
+    static AccelTensor decodeLogits(DirectForwardDecodeLogitsRequest request) {
+        DirectForwardOutputProjectionContext context = request.context();
+        AccelTensor finalHidden = AccelTensor.view(request.hiddenSegment(), request.hiddenShape());
+        AccelTensor normed = finalNorm(context, finalHidden, request.hiddenShape(), 1);
         if (finalHidden != normed) {
             finalHidden.close();
         }
 
-        AccelTensor lmHeadW = lmHeadOrThrow(resolvedWeights);
-        AccelTensor logitsOutput = reuseLogitsOutput
-                ? DirectForwardLogits.reusableOutputTensor(ws, normed, lmHeadW)
+        AccelTensor lmHeadW = lmHeadOrThrow(context.resolvedWeights());
+        AccelTensor logitsOutput = request.reuseLogitsOutput()
+                ? DirectForwardLogits.reusableOutputTensor(context.workspace(), normed, lmHeadW)
                 : null;
         try {
-            return projectLogits(runtime, traits, config,
-                    true, normed, lmHeadW, logitsOutput);
+            return projectLogits(context, true, normed, lmHeadW, logitsOutput);
         } finally {
-            if (normed.dataPtr() != ws.getNormedAttnSeg()) {
+            if (normed.dataPtr() != context.workspace().getNormedAttnSeg()) {
                 normed.close();
             }
         }
     }
 
-    private static AccelTensor finalNorm(DirectForwardRuntimeContext runtime,
-                                         ModelConfigTraits traits,
+    private static AccelTensor finalNorm(DirectForwardOutputProjectionContext context,
                                          AccelTensor hidden,
                                          long[] hiddenShape,
-                                         ResolvedModelWeights resolvedWeights,
-                                         ModelConfig config,
-                                         KVCacheManager.KVCacheSession.ForwardWorkspace ws,
                                          int rows) {
-        if (runtime.canUseMetalElementwise(traits, rows)) {
-            AccelTensor normed = AccelTensor.view(ws.getNormedAttnSeg(), hiddenShape);
+        ResolvedModelWeights resolvedWeights = context.resolvedWeights();
+        ModelConfig config = context.config();
+        if (context.runtime().canUseMetalElementwise(context.traits(), rows)) {
+            AccelTensor normed = AccelTensor.view(context.workspace().getNormedAttnSeg(), hiddenShape);
             DirectForwardElementwiseOps.rmsNormRowsMetal(
-                    runtime.metalBinding(),
+                    context.runtime().metalBinding(),
                     normed.dataPtr(),
                     hidden.dataPtr(),
                     resolvedWeights.finalNorm().dataPtr(),
@@ -107,23 +86,18 @@ final class DirectForwardOutputProjection {
                 resolvedWeights.addOneRmsNorm());
     }
 
-    private static AccelTensor projectLogits(DirectForwardRuntimeContext runtime,
-                                             ModelConfigTraits traits,
-                                             ModelConfig config,
+    private static AccelTensor projectLogits(DirectForwardOutputProjectionContext context,
                                              boolean decodeLogitsPhase,
                                              AccelTensor input,
                                              AccelTensor lmHeadW,
                                              AccelTensor outputBuffer) {
         long tLogits0 = System.nanoTime();
-        AccelTensor logits = linear(runtime, traits, config,
-                decodeLogitsPhase, input, lmHeadW, null, "logits", outputBuffer);
+        AccelTensor logits = linear(context, decodeLogitsPhase, input, lmHeadW, null, "logits", outputBuffer);
         DirectInferenceProfiler.recordLogitsProjectionNanos(System.nanoTime() - tLogits0);
         return logits;
     }
 
-    private static AccelTensor linear(DirectForwardRuntimeContext runtime,
-                                      ModelConfigTraits traits,
-                                      ModelConfig config,
+    private static AccelTensor linear(DirectForwardOutputProjectionContext context,
                                       boolean decodeLogitsPhase,
                                       AccelTensor input,
                                       AccelTensor weight,
@@ -131,9 +105,9 @@ final class DirectForwardOutputProjection {
                                       String profileKey,
                                       AccelTensor outputBuffer) {
         return DirectForwardLinearProjection.linear(
-                runtime,
-                traits,
-                config,
+                context.runtime(),
+                context.traits(),
+                context.config(),
                 decodeLogitsPhase,
                 input,
                 weight,

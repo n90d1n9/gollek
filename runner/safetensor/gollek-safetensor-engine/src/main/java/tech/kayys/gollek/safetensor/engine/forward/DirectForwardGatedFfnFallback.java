@@ -9,7 +9,7 @@ import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps
 import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps.reusableWorkspaceView;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 
 final class DirectForwardGatedFfnFallback {
     private DirectForwardGatedFfnFallback() {
@@ -80,7 +80,7 @@ final class DirectForwardGatedFfnFallback {
                                                  long gateOutDim,
                                                  long gateElementCount,
                                                  long[] gateShape) {
-        KVCacheManager.KVCacheSession.ForwardWorkspace ws = request.ws();
+        ForwardWorkspace ws = request.ws();
         if (ws == null || request.gateW() == null || request.upW() == null
                 || request.gateW().rank() != 2
                 || request.upW().rank() != 2

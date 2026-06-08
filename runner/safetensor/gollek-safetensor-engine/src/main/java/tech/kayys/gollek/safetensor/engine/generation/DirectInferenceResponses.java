@@ -22,7 +22,39 @@ final class DirectInferenceResponses {
     private DirectInferenceResponses() {
     }
 
-    static InferenceResponse finalResponse(String requestId, String content, Path modelPath,
+    static InferenceResponse finalResponse(DirectGenerationRequestContext request, DirectGenerationOutput output,
+            Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        DirectGenerationOutput safeOutput = DirectGenerationOutput.orEmpty(output);
+        return finalResponse(request, safeOutput.text(), safeOutput.generatedTokenCount(), modelPath, inputTokens,
+                extraMetadata);
+    }
+
+    static InferenceResponse finalResponse(DirectGenerationRequestContext request, String content,
+            DirectGenerationOutput output, Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        DirectGenerationOutput safeOutput = DirectGenerationOutput.orEmpty(output);
+        return finalResponse(request, content, safeOutput.generatedTokenCount(), modelPath, inputTokens, extraMetadata);
+    }
+
+    static InferenceResponse finalBenchResponse(DirectGenerationRequestContext request, DirectGenerationOutput output,
+            Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        DirectGenerationOutput safeOutput = DirectGenerationOutput.orEmpty(output);
+        return finalBenchResponse(request, safeOutput.text(), safeOutput.completionTokens(), modelPath, inputTokens,
+                extraMetadata);
+    }
+
+    static InferenceResponse finalBenchResponse(DirectGenerationRequestContext request, String content,
+            DirectGenerationOutput output, Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        DirectGenerationOutput safeOutput = DirectGenerationOutput.orEmpty(output);
+        return finalBenchResponse(request, content, safeOutput.completionTokens(), modelPath, inputTokens,
+                extraMetadata);
+    }
+
+    static InferenceResponse streamDelta(DirectGenerationRequestContext request, String delta, Path modelPath,
+            int inputTokens, Map<String, Object> extraMetadata) {
+        return streamDelta(request.requestId(), delta, modelPath, inputTokens, extraMetadata);
+    }
+
+    private static InferenceResponse finalResponse(String requestId, String content, Path modelPath,
             int inputTokens, int outputTokens, Instant startedAt, InferenceProfile profile, String profileBackend,
             Map<String, Object> extraMetadata) {
         InferenceResponse.Builder builder = finalBuilder(requestId, content, modelPath, inputTokens, outputTokens,
@@ -35,7 +67,19 @@ final class DirectInferenceResponses {
         return builder.build();
     }
 
-    static InferenceResponse finalBenchResponse(String requestId, String content, Path modelPath,
+    private static InferenceResponse finalResponse(DirectGenerationRequestContext request, String content,
+            int outputTokens, Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        return finalResponse(request.requestId(), content, modelPath, inputTokens, outputTokens,
+                request.startedAt(), request.profile(), request.backend(), extraMetadata);
+    }
+
+    private static InferenceResponse finalBenchResponse(DirectGenerationRequestContext request, String content,
+            int outputTokens, Path modelPath, int inputTokens, Map<String, Object> extraMetadata) {
+        return finalBenchResponse(request.requestId(), content, modelPath, inputTokens, outputTokens,
+                request.startedAt(), request.profile(), request.backend(), request.benchTimings(), extraMetadata);
+    }
+
+    private static InferenceResponse finalBenchResponse(String requestId, String content, Path modelPath,
             int inputTokens, int outputTokens, Instant startedAt, InferenceProfile profile, String profileBackend,
             BenchTimings timings, Map<String, Object> extraMetadata) {
         InferenceResponse.Builder builder = finalBuilder(requestId, content, modelPath, inputTokens, outputTokens,
@@ -56,7 +100,7 @@ final class DirectInferenceResponses {
         return builder.build();
     }
 
-    static InferenceResponse streamDelta(String requestId, String delta, Path modelPath, int inputTokens,
+    private static InferenceResponse streamDelta(String requestId, String delta, Path modelPath, int inputTokens,
             Map<String, Object> extraMetadata) {
         InferenceResponse.Builder builder = InferenceResponse.builder()
                 .requestId(requestId)

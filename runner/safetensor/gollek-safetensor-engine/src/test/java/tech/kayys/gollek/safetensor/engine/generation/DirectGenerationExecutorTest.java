@@ -72,7 +72,7 @@ class DirectGenerationExecutorTest {
                         null, cfg, null, inputIds, stops,
                         DirectGenerationStepSampler.SamplingMode.RAW_PRETOKENIZED,
                         inputIds.length, 123L, profile, timings,
-                        true, false, false, null, null, null));
+                        DirectGenerationRunOptions.trace()));
 
         assertTrue(createdState.get());
         assertEquals(42, result.prefill().token());
@@ -124,7 +124,7 @@ class DirectGenerationExecutorTest {
                 new DirectGenerationExecutor.ContinuationRequest(
                         null, cfg, null, continuation, stops,
                         123L, null, new DirectGenerationTimings(),
-                        true, false, true, null, null, null));
+                        DirectGenerationRunOptions.streamTrace(null, null)));
 
         assertFalse(prefillCalled.get());
         assertEquals(99L, result.loop().generatedTokenIds().get(0));

@@ -1,5 +1,6 @@
 package tech.kayys.gollek.safetensor.engine.generation.attention;
 
+import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
@@ -13,17 +14,19 @@ final class FlashAttentionModelPolicy {
     private FlashAttentionModelPolicy(ModelArchitecture architecture, ModelConfig config, ModelRuntimeTraits traits) {
         this.architecture = architecture;
         this.config = config;
-        this.traits = traits == null ? ModelRuntimeTraits.fromConfig(config) : traits;
+        this.traits = ModelRuntimeTraitsResolver.resolve(config, traits);
         this.attention = this.traits.attention() == null
                 ? ModelRuntimeTraits.AttentionRuntimeTraits.EMPTY
                 : this.traits.attention();
     }
 
     static FlashAttentionModelPolicy resolve(ModelArchitecture architecture, ModelConfig config) {
-        ModelRuntimeTraits traits = architecture == null ? null : architecture.runtimeTraits(config);
-        if (traits == null) {
-            traits = ModelRuntimeTraits.fromConfig(config);
-        }
+        return new FlashAttentionModelPolicy(architecture, config,
+                ModelRuntimeTraitsResolver.resolve(architecture, config));
+    }
+
+    static FlashAttentionModelPolicy resolve(ModelArchitecture architecture, ModelConfig config,
+            ModelRuntimeTraits traits) {
         return new FlashAttentionModelPolicy(architecture, config, traits);
     }
 
@@ -69,7 +72,15 @@ final class FlashAttentionModelPolicy {
     }
 
     boolean allowLegacyMetalAttentionBridge(boolean legacyBridgeEnabled) {
-        return !attention.restrictLegacyMetalAttentionBridge() || legacyBridgeEnabled;
+        return !restrictsLegacyMetalAttentionBridge() || legacyBridgeEnabled;
+    }
+
+    boolean restrictsLegacyMetalAttentionBridge() {
+        return attention.restrictLegacyMetalAttentionBridge();
+    }
+
+    boolean restrictedMetalDecodeCandidate(int seqLen) {
+        return restrictsLegacyMetalAttentionBridge() && seqLen == 1;
     }
 
     boolean supportsForcedDenseAttention() {
@@ -96,5 +107,10 @@ final class FlashAttentionModelPolicy {
     boolean metalHalfMatvecAutoCandidate() {
         return attention.compactAttentionMatvecCandidate()
                 || attention.largeAttentionMatvecCandidate();
+    }
+
+    boolean packedQkvProjection() {
+        return attention.packedQkvProjection()
+                || (architecture != null && architecture.hasFusedQKV());
     }
 }

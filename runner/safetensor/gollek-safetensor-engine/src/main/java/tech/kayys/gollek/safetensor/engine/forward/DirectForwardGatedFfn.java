@@ -6,7 +6,7 @@
 package tech.kayys.gollek.safetensor.engine.forward;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
@@ -26,7 +26,7 @@ final class DirectForwardGatedFfn {
                                AccelTensor upB,
                                AccelTensor downW,
                                AccelTensor downB,
-                               KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+                               ForwardWorkspace ws,
                                AccelTensor downOutputBuffer) {
         DirectForwardGatedFfnRequest request = new DirectForwardGatedFfnRequest(
                 runtime,

@@ -23,20 +23,20 @@ final class DirectForwardMetalFloatLinear {
         if (!canUseCandidate(metalLinearEnabled, metalBinding, input, weight)) {
             return null;
         }
-        AccelTensor contiguousInput = input.contiguous();
-        long outputDim = weight.size(0);
-        long[] outputShape = input.shapeWithLastDim(outputDim);
-        AccelTensor out = AccelTensor.zeros(outputShape);
+        DirectForwardMetalLinearShapePlan shapePlan =
+                DirectForwardMetalLinearShapePlan.single(input, weight);
+        if (shapePlan == null) {
+            return null;
+        }
+        AccelTensor out = AccelTensor.zeros(shapePlan.outputShape());
 
-        try {
-            long k = input.size(-1);
-            long rows = input.numel() / Math.max(1L, k);
-            int m = Math.toIntExact(rows);
-            int kk = Math.toIntExact(k);
-            int n = Math.toIntExact(outputDim);
+        try (DirectForwardContiguousTensor contiguousInput = DirectForwardContiguousTensor.from(input)) {
+            int m = Math.toIntExact(shapePlan.rows());
+            int kk = Math.toIntExact(shapePlan.inputDim());
+            int n = Math.toIntExact(shapePlan.outputDim());
             int rc = metalBinding.matmulTransposedRight(
                     out.dataPtr(),
-                    contiguousInput.dataPtr(),
+                    contiguousInput.tensor().dataPtr(),
                     weight.dataPtr(),
                     m, kk, n,
                     1.0f, 0.0f);
@@ -53,10 +53,6 @@ final class DirectForwardMetalFloatLinear {
             out.close();
             log.debugf("Falling back from Metal float linear to AccelOps: %s", e.getMessage());
             return null;
-        } finally {
-            if (contiguousInput != input && !contiguousInput.isClosed()) {
-                contiguousInput.close();
-            }
         }
     }
 

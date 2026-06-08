@@ -9,13 +9,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.engine.generation.attention.FlashAttentionKernel;
 import tech.kayys.gollek.safetensor.engine.generation.moe.MoeForwardPass;
-import tech.kayys.gollek.metal.binding.MetalBinding;
 
 import java.util.Map;
 
@@ -30,36 +29,13 @@ public class DirectForwardPass {
     FlashAttentionKernel attentionKernel;
     @Inject
     MoeForwardPass moeForwardPass;
+    @Inject
+    DirectForwardRuntimeState runtimeState;
+    @Inject
+    DirectForwardModelContext modelContext;
+    @Inject
+    DirectForwardFfnService ffnService;
     
-    private MetalBinding metalBinding;
-    private boolean metalReady;
-    private DirectForwardMetalCapabilities metalCapabilities = DirectForwardMetalCapabilities.EMPTY;
-    private final DirectForwardWeightResolver weightResolver = new DirectForwardWeightResolver();
-    private volatile ModelConfigTraits lastModelConfigTraits = ModelConfigTraits.EMPTY;
-
-    @jakarta.annotation.PostConstruct
-    void init() {
-        try {
-            MetalBinding.initialize();
-            this.metalBinding = MetalBinding.getInstance();
-            this.metalBinding.init();
-            String deviceName = this.metalBinding.deviceName();
-            this.metalReady = this.metalBinding.isRuntimeActive()
-                    && deviceName != null
-                    && !deviceName.contains("CPU");
-            refreshMetalCapabilities();
-        } catch (Exception e) {
-            MetalBinding.initializeFallback();
-            this.metalBinding = MetalBinding.getInstance();
-            this.metalReady = false;
-            refreshMetalCapabilities();
-        }
-    }
-
-    private void refreshMetalCapabilities() {
-        this.metalCapabilities = DirectForwardMetalCapabilities.detect(this.metalBinding);
-    }
-
     public float[] prefill(long[] inputIds, Map<String, AccelTensor> weights, ModelConfig config,
             ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache) {
         AccelTensor logits = prefillLogitsTensor(inputIds, weights, config, arch, kvCache);
@@ -72,7 +48,7 @@ public class DirectForwardPass {
     }
 
     public void clearResolvedModelWeights(Map<String, AccelTensor> weights) {
-        weightResolver.clear(weights);
+        modelContext.clearResolvedWeights(weights);
     }
 
     public float[] prefill(AccelTensor embeddings, long[] inputIds, Map<String, AccelTensor> weights,
@@ -89,27 +65,24 @@ public class DirectForwardPass {
 
     public AccelTensor prefillLogitsTensor(long[] inputIds, Map<String, AccelTensor> weights, ModelConfig config,
             ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache) {
-        ResolvedModelWeights resolvedWeights = resolveModelWeights(weights, config, arch);
+        ResolvedModelWeights resolvedWeights = modelContext.resolveWeights(weights, config, arch);
         DirectForwardRuntimeContext runtime = runtimeContext();
         return DirectForwardSequenceRunner.prefillTokenIds(
-                runtime,
-                attentionKernel,
-                moeForwardPass,
-                modelConfigTraits(config, arch),
-                inputIds,
-                weights,
-                config,
-                arch,
-                kvCache,
-                resolvedWeights,
-                operators(runtime));
+                sequenceContext(runtime, config, arch),
+                DirectForwardPrefillRequest.tokenIds(
+                        inputIds,
+                        weights,
+                        config,
+                        arch,
+                        kvCache,
+                        resolvedWeights));
     }
 
     public AccelTensor prefillLogitsTensor(AccelTensor embeddings, long[] inputIds, AccelTensor[] perLayerInputs,
             Map<String, AccelTensor> weights, ModelConfig config, ModelArchitecture arch,
             KVCacheManager.KVCacheSession kvCache) {
         return prefillLogitsTensor(embeddings, inputIds, perLayerInputs, weights, config, arch, kvCache,
-                resolveModelWeights(weights, config, arch));
+                modelContext.resolveWeights(weights, config, arch));
     }
 
     private AccelTensor prefillLogitsTensor(AccelTensor embeddings, long[] inputIds, AccelTensor[] perLayerInputs,
@@ -125,20 +98,17 @@ public class DirectForwardPass {
             boolean embeddingsAlreadyInWorkspace) {
         DirectForwardRuntimeContext runtime = runtimeContext();
         return DirectForwardSequenceRunner.prefillEmbeddings(
-                runtime,
-                attentionKernel,
-                moeForwardPass,
-                modelConfigTraits(config, arch),
-                embeddings,
-                inputIds,
-                perLayerInputs,
-                weights,
-                config,
-                arch,
-                kvCache,
-                resolvedWeights,
-                embeddingsAlreadyInWorkspace,
-                operators(runtime));
+                sequenceContext(runtime, config, arch),
+                DirectForwardPrefillRequest.embeddings(
+                        embeddings,
+                        inputIds,
+                        perLayerInputs,
+                        weights,
+                        config,
+                        arch,
+                        kvCache,
+                        resolvedWeights,
+                        embeddingsAlreadyInWorkspace));
     }
 
     public float[] decode(long tokenId, int startPos, Map<String, AccelTensor> weights, ModelConfig config,
@@ -155,32 +125,19 @@ public class DirectForwardPass {
     public AccelTensor decodeLogitsTensor(long tokenId, int startPos, Map<String, AccelTensor> weights,
             ModelConfig config, ModelArchitecture arch, KVCacheManager.KVCacheSession kvCache,
             boolean reuseLogitsOutput) {
-        ResolvedModelWeights resolvedWeights = resolveModelWeights(weights, config, arch);
+        ResolvedModelWeights resolvedWeights = modelContext.resolveWeights(weights, config, arch);
         DirectForwardRuntimeContext runtime = runtimeContext();
         return DirectForwardSequenceRunner.decodeToken(
-                runtime,
-                attentionKernel,
-                moeForwardPass,
-                modelConfigTraits(config, arch),
-                tokenId,
-                startPos,
-                weights,
-                config,
-                arch,
-                kvCache,
-                resolvedWeights,
-                reuseLogitsOutput,
-                operators(runtime));
-    }
-
-    AccelTensor ffnNonGated(AccelTensor x, ModelConfig config, AccelTensor upW, AccelTensor downW) {
-        DirectForwardOperators operators = operators(runtimeContext());
-        AccelTensor up = operators.linear(x, upW, null, "ffn_up_nongated", config);
-        AccelTensor act = AccelOps.silu(up);
-        up.close();
-        AccelTensor out = operators.ffnDownLinear(act, downW, null, config, "ffn_down_nongated");
-        act.close();
-        return out;
+                sequenceContext(runtime, config, arch),
+                new DirectForwardDecodeRequest(
+                        tokenId,
+                        startPos,
+                        weights,
+                        config,
+                        arch,
+                        kvCache,
+                        resolvedWeights,
+                        reuseLogitsOutput));
     }
 
     public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
@@ -189,15 +146,14 @@ public class DirectForwardPass {
     }
 
     public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
-            AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws) {
+            AccelTensor downW, AccelTensor downB, ForwardWorkspace ws) {
         return swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, ws, null);
     }
 
     public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW, AccelTensor gateB, AccelTensor upW, AccelTensor upB,
-            AccelTensor downW, AccelTensor downB, KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+            AccelTensor downW, AccelTensor downB, ForwardWorkspace ws,
             AccelTensor downOutputBuffer) {
-        return operators(runtimeContext()).swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, ws,
-                downOutputBuffer);
+        return ffnService.swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, ws, downOutputBuffer);
     }
 
     // ── Embedding ─────────────────────────────────────────────────────
@@ -207,51 +163,23 @@ public class DirectForwardPass {
     }
 
     private DirectForwardRuntimeContext runtimeContext() {
-        boolean metalLinearEnabled = !DirectForwardExecutionOptions.forceCpuForwardEnabled()
-                && metalReady
-                && DirectForwardMetalLinearPolicy.experimentalMetalLinearEnabled();
-        return new DirectForwardRuntimeContext(
-                log,
-                metalBinding,
-                metalCapabilities,
-                metalReady,
-                metalLinearEnabled);
+        return runtimeState.context(log);
     }
 
     private DirectForwardOperators operators(DirectForwardRuntimeContext runtime) {
-        return new DirectForwardOperators(runtime, this::modelConfigTraits);
+        return new DirectForwardOperators(runtime, modelContext::traits);
     }
 
-    private ResolvedModelWeights resolveModelWeights(Map<String, AccelTensor> weights, ModelConfig config,
+    private DirectForwardSequenceContext sequenceContext(
+            DirectForwardRuntimeContext runtime,
+            ModelConfig config,
             ModelArchitecture arch) {
-        boolean addOneRmsNorm = useAddOneRmsNorm(arch, config);
-        return weightResolver.resolve(weights, config, arch, addOneRmsNorm);
-    }
-
-    private boolean useAddOneRmsNorm(ModelArchitecture arch, ModelConfig config) {
-        ModelConfigTraits traits = modelConfigTraits(config, arch);
-        if (traits.gemma3Text()) {
-            // Gemma3 reference RMSNorm uses output * (1 + weight).
-            return true;
-        }
-        return arch.addOneToRmsNormWeight() && !traits.gemma4Text();
-    }
-
-    private ModelConfigTraits modelConfigTraits(ModelConfig config) {
-        return modelConfigTraits(config, null);
-    }
-
-    private ModelConfigTraits modelConfigTraits(ModelConfig config, ModelArchitecture arch) {
-        if (config == null) {
-            return ModelConfigTraits.EMPTY;
-        }
-        ModelConfigTraits cached = lastModelConfigTraits;
-        if (cached.matches(config)) {
-            return cached;
-        }
-        ModelConfigTraits traits = ModelConfigTraits.create(config, arch);
-        lastModelConfigTraits = traits;
-        return traits;
+        return new DirectForwardSequenceContext(
+                runtime,
+                attentionKernel,
+                moeForwardPass,
+                modelContext.traits(config, arch),
+                operators(runtime));
     }
 
 }

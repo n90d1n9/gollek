@@ -8,101 +8,51 @@ package tech.kayys.gollek.safetensor.engine.forward;
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceProfiler;
-import tech.kayys.gollek.spi.model.ModelConfig;
 
 final class DirectForwardLinearProjection {
     private DirectForwardLinearProjection() {
     }
 
-    static AccelTensor ffnDownLinear(DirectForwardRuntimeContext runtime,
-                                     ModelConfigTraits traits,
-                                     ModelConfig config,
-                                     boolean decodeLogitsPhase,
-                                     AccelTensor input,
-                                     AccelTensor weight,
-                                     AccelTensor bias,
-                                     String profileKey,
-                                     AccelTensor outputBuffer) {
-        if (runtime.metalLinearEnabled()) {
-            return linear(
-                    runtime,
-                    traits,
-                    config,
-                    decodeLogitsPhase,
-                    input,
-                    weight,
-                    bias,
-                    profileKey,
-                    outputBuffer);
+    static AccelTensor ffnDownLinear(DirectForwardLinearRequest request) {
+        if (request.runtime().metalLinearEnabled()) {
+            return linear(request);
         }
-        AccelTensor cached = tryCachedFfnDownHalfLinear(
-                runtime,
-                decodeLogitsPhase,
-                input,
-                weight,
-                bias,
-                config,
-                profileKey);
+        AccelTensor cached = tryCachedFfnDownHalfLinear(request);
         if (cached != null) {
             return cached;
         }
-        return linear(
-                runtime,
-                traits,
-                config,
-                decodeLogitsPhase,
-                input,
-                weight,
-                bias,
-                profileKey,
-                outputBuffer);
+        return linear(request);
     }
 
-    static AccelTensor linear(DirectForwardRuntimeContext runtime,
-                              ModelConfigTraits traits,
-                              ModelConfig config,
-                              boolean decodeLogitsPhase,
-                              AccelTensor input,
-                              AccelTensor weight,
-                              AccelTensor bias,
-                              String profileKey,
-                              AccelTensor outputBuffer) {
+    static AccelTensor linear(DirectForwardLinearRequest request) {
+        String profileKey = request.profileKey();
         long t0 = profileKey != null ? System.nanoTime() : 0L;
-        boolean metalLinearEnabled = runtime.metalLinearEnabled();
-        if (weight.isQuantized()
-                && weight.quantType() != AccelTensor.QuantType.BF16
-                && weight.quantType() != AccelTensor.QuantType.F16) {
-            AccelTensor dequantized = weight.dequantize();
+        boolean metalLinearEnabled = request.runtime().metalLinearEnabled();
+        if (request.weight().isQuantized()
+                && request.weight().quantType() != AccelTensor.QuantType.BF16
+                && request.weight().quantType() != AccelTensor.QuantType.F16) {
+            AccelTensor dequantized = request.weight().dequantize();
             try {
-                return linear(
-                        runtime,
-                        traits,
-                        config,
-                        decodeLogitsPhase,
-                        input,
-                        dequantized,
-                        bias,
-                        profileKey,
-                        outputBuffer);
+                return linear(request.withWeight(dequantized));
             } finally {
-                if (dequantized != weight && !dequantized.isClosed()) {
+                if (dequantized != request.weight() && !dequantized.isClosed()) {
                     dequantized.close();
                 }
             }
         }
 
         AccelTensor metalHalf = DirectForwardMetalHalfLinear.tryLinear(
-                runtime.log(),
-                runtime.metalBinding(),
-                runtime.capabilities(),
-                traits,
-                config,
+                request.runtime().log(),
+                request.runtime().metalBinding(),
+                request.runtime().capabilities(),
+                request.traits(),
+                request.config(),
                 metalLinearEnabled,
-                decodeLogitsPhase,
-                input,
-                weight,
-                bias,
-                outputBuffer,
+                request.decodeLogitsPhase(),
+                request.input(),
+                request.weight(),
+                request.bias(),
+                request.outputBuffer(),
                 profileKey);
         if (metalHalf != null) {
             if (profileKey != null) {
@@ -112,7 +62,12 @@ final class DirectForwardLinearProjection {
         }
 
         AccelTensor metalFloat = DirectForwardMetalFloatLinear.tryLinear(
-                runtime.log(), runtime.metalBinding(), metalLinearEnabled, input, weight, bias);
+                request.runtime().log(),
+                request.runtime().metalBinding(),
+                metalLinearEnabled,
+                request.input(),
+                request.weight(),
+                request.bias());
         if (metalFloat != null) {
             if (profileKey != null) {
                 DirectInferenceProfiler.recordLinearPath(profileKey, "metal_float_matmul");
@@ -121,13 +76,7 @@ final class DirectForwardLinearProjection {
             return metalFloat;
         }
 
-        AccelTensor cachedLargeHalf = tryCachedLargeHalfLinear(
-                runtime,
-                decodeLogitsPhase,
-                input,
-                weight,
-                bias,
-                profileKey);
+        AccelTensor cachedLargeHalf = tryCachedLargeHalfLinear(request);
         if (cachedLargeHalf != null) {
             if (profileKey != null) {
                 DirectInferenceProfiler.recordLinearNanos(profileKey, System.nanoTime() - t0);
@@ -135,9 +84,9 @@ final class DirectForwardLinearProjection {
             return cachedLargeHalf;
         }
 
-        AccelTensor mm = AccelOps.linear(input, weight);
-        if (bias != null) {
-            AccelTensor out = AccelOps.add(mm, bias);
+        AccelTensor mm = AccelOps.linear(request.input(), request.weight());
+        if (request.bias() != null) {
+            AccelTensor out = AccelOps.add(mm, request.bias());
             mm.close();
             if (profileKey != null) {
                 DirectInferenceProfiler.recordLinearPath(profileKey, "accelerate_linear_with_bias");
@@ -152,55 +101,26 @@ final class DirectForwardLinearProjection {
         return mm;
     }
 
-    private static AccelTensor tryCachedFfnDownHalfLinear(DirectForwardRuntimeContext runtime,
-                                                          boolean decodeLogitsPhase,
-                                                          AccelTensor input,
-                                                          AccelTensor weight,
-                                                          AccelTensor bias,
-                                                          ModelConfig config,
-                                                          String profileKey) {
+    private static AccelTensor tryCachedFfnDownHalfLinear(DirectForwardLinearRequest request) {
         AccelTensor dequantized = DirectForwardLinearCachePolicy.cachedFfnDownHalfWeight(
-                input,
-                weight,
-                config,
-                profileKey);
+                request.input(),
+                request.weight(),
+                request.config(),
+                request.profileKey());
         if (dequantized == null) {
             return null;
         }
-        return linear(
-                runtime,
-                ModelConfigTraits.EMPTY,
-                null,
-                decodeLogitsPhase,
-                input,
-                dequantized,
-                bias,
-                profileKey,
-                null);
+        return linear(request.withFallbackContext(dequantized));
     }
 
-    private static AccelTensor tryCachedLargeHalfLinear(DirectForwardRuntimeContext runtime,
-                                                        boolean decodeLogitsPhase,
-                                                        AccelTensor input,
-                                                        AccelTensor weight,
-                                                        AccelTensor bias,
-                                                        String profileKey) {
+    private static AccelTensor tryCachedLargeHalfLinear(DirectForwardLinearRequest request) {
         AccelTensor dequantized = DirectForwardLinearCachePolicy.cachedLogitsLargeHalfWeight(
-                input,
-                weight,
-                profileKey);
+                request.input(),
+                request.weight(),
+                request.profileKey());
         if (dequantized == null) {
             return null;
         }
-        return linear(
-                runtime,
-                ModelConfigTraits.EMPTY,
-                null,
-                decodeLogitsPhase,
-                input,
-                dequantized,
-                bias,
-                profileKey,
-                null);
+        return linear(request.withFallbackContext(dequantized));
     }
 }

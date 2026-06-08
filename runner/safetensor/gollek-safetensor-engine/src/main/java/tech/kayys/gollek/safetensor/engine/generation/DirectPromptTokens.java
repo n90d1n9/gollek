@@ -47,10 +47,10 @@ record DirectPromptTokens(long[] ids) {
     }
 
     void debugSequence(Tokenizer tokenizer, String label) {
-        GenerationTokenPolicy.debugTokenSequence(tokenizer, ids, label);
+        GenerationTokenDebug.tokenSequence(tokenizer, ids, label);
     }
 
     static String printableText(String text) {
-        return GenerationTokenPolicy.printableDebugText(text);
+        return GenerationTokenDebug.printableText(text);
     }
 }

@@ -7,7 +7,7 @@ package tech.kayys.gollek.safetensor.engine.forward;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
@@ -101,7 +101,7 @@ final class DirectForwardPerLayerInputs {
 
     static void applyResidual(MemorySegment hiddenSeg, long[] hiddenShape, int seqLen,
             ModelConfig config, ModelArchitecture arch, ResolvedLayerWeights layerWeights,
-            AccelTensor perLayerInput, KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+            AccelTensor perLayerInput, ForwardWorkspace ws,
             boolean useMetalElementwise, boolean useNativeElementwiseAdd, boolean addOneRmsNorm,
             DirectForwardRuntimeContext runtime, DirectForwardOperators operators) {
         if (perLayerInput == null) {
@@ -153,7 +153,7 @@ final class DirectForwardPerLayerInputs {
     }
 
     private static AccelTensor activationMultiply(AccelTensor gate, AccelTensor perLayerInput,
-            ModelArchitecture arch, KVCacheManager.KVCacheSession.ForwardWorkspace ws, boolean useMetalElementwise,
+            ModelArchitecture arch, ForwardWorkspace ws, boolean useMetalElementwise,
             DirectForwardRuntimeContext runtime) {
         long[] shape = gate.shape();
         int elements = Math.toIntExact(gate.numel());

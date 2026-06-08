@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
+import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
 import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
@@ -49,7 +50,7 @@ public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
         this.quantCachePath = quantCachePath;
         this.config = config != null ? config : new ModelConfig();
         this.architecture = Objects.requireNonNull(architecture, "architecture must not be null");
-        this.runtimeTraits = runtimeTraits == null ? ModelRuntimeTraits.fromConfig(this.config) : runtimeTraits;
+        this.runtimeTraits = ModelRuntimeTraitsResolver.resolve(this.architecture, this.config, runtimeTraits);
         this.baseStopTokenIds = buildBaseStopTokenIds(tokenizer, this.config);
         this.baseGreedySamplingMasks = buildGreedySamplingMasks(tokenizer, this.baseStopTokenIds,
                 this.config.vocabSize(), this.runtimeTraits);
@@ -94,7 +95,8 @@ public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
         return architecture;
     }
 
-    ModelRuntimeTraits runtimeTraits() {
+    @Override
+    public ModelRuntimeTraits runtimeTraits() {
         return runtimeTraits;
     }
 

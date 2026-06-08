@@ -29,6 +29,7 @@ final class InferenceProfile {
     long logitsMaterializationNanos;
     final Map<String, Long> linearNanosByOperation = new LinkedHashMap<>();
     final Map<String, Integer> linearPathCounts = new LinkedHashMap<>();
+    final Map<String, Integer> logitsPathCounts = new LinkedHashMap<>();
     final Map<String, Integer> ffnPathCounts = new LinkedHashMap<>();
     final Map<String, Integer> attentionPathCounts = new LinkedHashMap<>();
     int decodeSteps;
@@ -79,6 +80,8 @@ final class InferenceProfile {
                 .put("profile_linear_" + sanitizeMetricKey(operation) + "_ms", roundMillis(nanos)));
         linearPathCounts.forEach((path, count) -> metadata
                 .put("profile_linear_path_" + sanitizeMetricKey(path) + "_count", count));
+        logitsPathCounts.forEach((path, count) -> metadata
+                .put("profile_logits_path_" + sanitizeMetricKey(path) + "_count", count));
         ffnPathCounts.forEach((path, count) -> metadata
                 .put("profile_ffn_path_" + sanitizeMetricKey(path) + "_count", count));
         attentionPathCounts.forEach((path, count) -> metadata
@@ -110,7 +113,7 @@ final class InferenceProfile {
 
     String summary(String backend) {
         return String.format(Locale.ROOT,
-                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s",
+                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s%s",
                 backend, mode,
                 roundMillis(modelLoadNanos),
                 roundMillis(tokenizeNanos),
@@ -129,6 +132,7 @@ final class InferenceProfile {
                 hostLoadSummarySuffix(),
                 linearSummarySuffix(),
                 linearPathSummarySuffix(),
+                logitsPathSummarySuffix(),
                 ffnPathSummarySuffix(),
                 attentionPathSummarySuffix());
     }
@@ -171,39 +175,15 @@ final class InferenceProfile {
     }
 
     private String linearPathSummarySuffix() {
-        if (linearPathCounts.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(" linear_paths={");
-        linearPathCounts.entrySet().stream()
-                .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
-                .limit(16)
-                .forEachOrdered(entry -> {
-                    if (sb.length() > " linear_paths={".length()) {
-                        sb.append(", ");
-                    }
-                    sb.append(entry.getKey()).append('=').append(entry.getValue());
-                });
-        sb.append('}');
-        return sb.toString();
+        return pathSummarySuffix("linear_paths", linearPathCounts, 16);
+    }
+
+    private String logitsPathSummarySuffix() {
+        return pathSummarySuffix("logits_paths", logitsPathCounts, 8);
     }
 
     private String ffnPathSummarySuffix() {
-        if (ffnPathCounts.isEmpty()) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(" ffn_paths={");
-        ffnPathCounts.entrySet().stream()
-                .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
-                .limit(16)
-                .forEachOrdered(entry -> {
-                    if (sb.length() > " ffn_paths={".length()) {
-                        sb.append(", ");
-                    }
-                    sb.append(entry.getKey()).append('=').append(entry.getValue());
-                });
-        sb.append('}');
-        return sb.toString();
+        return pathSummarySuffix("ffn_paths", ffnPathCounts, 16);
     }
 
     private HostLoadSnapshot hostLoadEnd() {
@@ -228,15 +208,20 @@ final class InferenceProfile {
     }
 
     private String attentionPathSummarySuffix() {
-        if (attentionPathCounts.isEmpty()) {
+        return pathSummarySuffix("attention_paths", attentionPathCounts, 8);
+    }
+
+    private static String pathSummarySuffix(String label, Map<String, Integer> counts, int limit) {
+        if (counts.isEmpty()) {
             return "";
         }
-        StringBuilder sb = new StringBuilder(" attention_paths={");
-        attentionPathCounts.entrySet().stream()
+        String prefix = " " + label + "={";
+        StringBuilder sb = new StringBuilder(prefix);
+        counts.entrySet().stream()
                 .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
-                .limit(8)
+                .limit(limit)
                 .forEachOrdered(entry -> {
-                    if (sb.length() > " attention_paths={".length()) {
+                    if (sb.length() > prefix.length()) {
                         sb.append(", ");
                     }
                     sb.append(entry.getKey()).append('=').append(entry.getValue());

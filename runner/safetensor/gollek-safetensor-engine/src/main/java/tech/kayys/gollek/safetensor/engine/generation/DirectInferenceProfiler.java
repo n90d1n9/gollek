@@ -67,6 +67,9 @@ public final class DirectInferenceProfiler {
         InferenceProfile profile = ACTIVE_PROFILE.get();
         if (profile != null && profile.detailed) {
             profile.linearPathCounts.merge(operation + ":" + path, 1, Integer::sum);
+            if ("logits".equals(operation)) {
+                profile.logitsPathCounts.merge(path, 1, Integer::sum);
+            }
         }
     }
 

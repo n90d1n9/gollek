@@ -8,15 +8,25 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
-record FlashAttentionHeadLayout(int numQueryHeads, int numKeyValueHeads, int headDim) {
+record FlashAttentionHeadLayout(int numQueryHeads, int numKeyValueHeads, int headDim,
+        boolean packedQkvProjection) {
 
     static FlashAttentionHeadLayout resolve(AttentionInput in, ModelConfig config, int layerIdx) {
+        FlashAttentionModelPolicy policy = FlashAttentionModelPolicy.resolve(in == null ? null : in.arch, config);
+        return resolve(in, config, layerIdx, policy);
+    }
+
+    static FlashAttentionHeadLayout resolve(AttentionInput in, ModelConfig config, int layerIdx,
+            FlashAttentionModelPolicy modelPolicy) {
         int numQueryHeads = config.numAttentionHeads();
         int numKeyValueHeads = config.resolvedNumKvHeadsForLayer(layerIdx);
-        int headDim = usesPackedQkv(in)
-                ? resolvePackedHeadDim(in.qW, config, numQueryHeads, numKeyValueHeads)
-                : resolveProjectedHeadDim(in.qW, config, numQueryHeads);
-        return new FlashAttentionHeadLayout(numQueryHeads, numKeyValueHeads, headDim);
+        boolean packedQkv = FlashAttentionPackedQkvPolicy.shouldUse(
+                in, config, numQueryHeads, numKeyValueHeads, modelPolicy);
+        AccelTensor queryWeight = in == null ? null : in.qW;
+        int headDim = packedQkv
+                ? FlashAttentionPackedQkvPolicy.resolveHeadDim(queryWeight, config, numQueryHeads, numKeyValueHeads)
+                : resolveProjectedHeadDim(queryWeight, config, numQueryHeads, layerIdx);
+        return new FlashAttentionHeadLayout(numQueryHeads, numKeyValueHeads, headDim, packedQkv);
     }
 
     int queryProjectionDim() {
@@ -31,33 +41,14 @@ record FlashAttentionHeadLayout(int numQueryHeads, int numKeyValueHeads, int hea
         return queryProjectionDim() + keyValueProjectionDim() + keyValueProjectionDim();
     }
 
-    boolean matchesPackedProjection(AccelTensor tensor) {
-        return tensor != null && tensor.size(-1) == packedQkvProjectionDim();
-    }
-
-    private static boolean usesPackedQkv(AttentionInput in) {
-        return in != null && in.arch != null && in.arch.hasFusedQKV();
-    }
-
-    private static int resolvePackedHeadDim(AccelTensor packedWeight, ModelConfig config,
-            int numQueryHeads, int numKeyValueHeads) {
-        int configured = config.resolvedHeadDim();
-        long expectedRows = (long) (numQueryHeads + 2 * numKeyValueHeads) * configured;
-        if (configured > 0 && packedWeight != null && packedWeight.size(0) == expectedRows) {
-            return configured;
+    private static int resolveProjectedHeadDim(AccelTensor queryWeight, ModelConfig config,
+            int numQueryHeads, int layerIdx) {
+        FlashAttentionShapeAdmissionPlan admission =
+                FlashAttentionShapeAdmissionPlan.separateQueryWeightLayout(
+                        queryWeight, config, numQueryHeads, layerIdx);
+        if (!admission.admitted()) {
+            throw admission.asException();
         }
-
-        int denominator = numQueryHeads + 2 * numKeyValueHeads;
-        if (packedWeight != null && denominator > 0 && packedWeight.size(0) % denominator == 0) {
-            return Math.toIntExact(packedWeight.size(0) / denominator);
-        }
-        return configured;
-    }
-
-    private static int resolveProjectedHeadDim(AccelTensor queryWeight, ModelConfig config, int numQueryHeads) {
-        if (queryWeight != null && numQueryHeads > 0 && queryWeight.size(0) % numQueryHeads == 0) {
-            return Math.toIntExact(queryWeight.size(0) / numQueryHeads);
-        }
-        return config.resolvedHeadDim();
+        return admission.resolvedHeadDim();
     }
 }

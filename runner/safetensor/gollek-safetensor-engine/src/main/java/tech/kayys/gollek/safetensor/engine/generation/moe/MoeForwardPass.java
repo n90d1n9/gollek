@@ -17,10 +17,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
+import tech.kayys.gollek.safetensor.engine.forward.DirectForwardFfnService;
 import tech.kayys.gollek.safetensor.engine.weights.WeightTensorResolver;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
-import tech.kayys.gollek.safetensor.engine.forward.DirectForwardPass;
 
 import java.util.*;
 
@@ -33,7 +33,7 @@ public class MoeForwardPass {
     private static final Logger log = Logger.getLogger(MoeForwardPass.class);
 
     @Inject
-    DirectForwardPass forwardPass;
+    DirectForwardFfnService ffnService;
 
     /**
      * Compute the MoE FFN for one transformer layer using AccelTensor.
@@ -146,7 +146,7 @@ public class MoeForwardPass {
             log.warnf("Expert %d weights not found for layer %d", expertIdx, layerIdx);
             return hidden;
         }
-        return forwardPass.swigluFfn(hidden, arch, config, gateW, null, upW, null, downW, null);
+        return ffnService.swigluFfn(hidden, arch, config, gateW, null, upW, null, downW, null);
     }
 
     private float[] runExpertOnToken(float[] tokenHidden, Map<String, AccelTensor> weights,

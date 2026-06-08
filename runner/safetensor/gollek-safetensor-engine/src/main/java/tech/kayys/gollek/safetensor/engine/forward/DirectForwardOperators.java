@@ -6,7 +6,7 @@
 package tech.kayys.gollek.safetensor.engine.forward;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
+import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
@@ -32,16 +32,14 @@ record DirectForwardOperators(
                        String profileKey,
                        ModelConfig config,
                        AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.linear(
-                runtime,
-                traitsResolver.resolve(config),
-                config,
+        return DirectForwardLinearProjection.linear(new DirectForwardLinearRequest(
+                linearContext(config),
                 false,
                 input,
                 weight,
                 bias,
                 profileKey,
-                outputBuffer);
+                outputBuffer));
     }
 
     AccelTensor ffnDownLinear(AccelTensor input,
@@ -58,16 +56,14 @@ record DirectForwardOperators(
                               ModelConfig config,
                               String profileKey,
                               AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.ffnDownLinear(
-                runtime,
-                traitsResolver.resolve(config),
-                config,
+        return DirectForwardLinearProjection.ffnDownLinear(new DirectForwardLinearRequest(
+                linearContext(config),
                 false,
                 input,
                 weight,
                 bias,
                 profileKey,
-                outputBuffer);
+                outputBuffer));
     }
 
     AccelTensor swigluFfn(AccelTensor input,
@@ -79,7 +75,7 @@ record DirectForwardOperators(
                           AccelTensor upB,
                           AccelTensor downW,
                           AccelTensor downB,
-                          KVCacheManager.KVCacheSession.ForwardWorkspace ws,
+                          ForwardWorkspace ws,
                           AccelTensor downOutputBuffer) {
         return DirectForwardGatedFfn.forward(
                 runtime,
@@ -96,5 +92,9 @@ record DirectForwardOperators(
                 downB,
                 ws,
                 downOutputBuffer);
+    }
+
+    private DirectForwardLinearContext linearContext(ModelConfig config) {
+        return new DirectForwardLinearContext(runtime, traitsResolver.resolve(config), config);
     }
 }
