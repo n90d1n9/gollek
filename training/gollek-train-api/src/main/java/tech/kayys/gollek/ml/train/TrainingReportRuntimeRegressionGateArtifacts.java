@@ -467,31 +467,26 @@ public final class TrainingReportRuntimeRegressionGateArtifacts {
             String expectedJunitXmlSha256,
             String expectedManifestSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        String normalizedJunitXmlSha = normalizeChecksum(expectedJunitXmlSha256);
-        String normalizedManifestSha = normalizeChecksum(expectedManifestSha256);
-        boolean jsonMatches = normalizedJsonSha == null || normalizedJsonSha.equalsIgnoreCase(inspection.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(inspection.markdownSha256());
-        boolean junitXmlMatches = normalizedJunitXmlSha == null
-                || normalizedJunitXmlSha.equalsIgnoreCase(inspection.junitXmlSha256());
-        boolean manifestMatches = normalizedManifestSha == null
-                || normalizedManifestSha.equalsIgnoreCase(String.valueOf(inspection.manifestSha256()));
+        TrainingReportArtifactDescriptor.ChecksumMatch checksums =
+                inspection.artifact().checksumMatch(
+                        expectedJsonSha256,
+                        expectedMarkdownSha256,
+                        expectedJunitXmlSha256,
+                        expectedManifestSha256);
         boolean junitXmlWellFormed = TrainingReportXml.isWellFormed(inspection.junitXml());
         boolean manifestMatchesFiles = !inspection.hasManifest()
                 || manifestMatchesFiles(inspection);
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
-        if (!junitXmlMatches) {
+        if (!checksums.junitXmlMatches()) {
             failures.add("JUnit XML checksum mismatch for " + inspection.junitXmlFile());
         }
-        if (!manifestMatches) {
+        if (!checksums.manifestMatches()) {
             failures.add("Manifest checksum mismatch for " + inspection.manifestFile());
         }
         if (!junitXmlWellFormed) {
@@ -520,13 +515,13 @@ public final class TrainingReportRuntimeRegressionGateArtifacts {
         }
         return new ArtifactVerification(
                 inspection,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                normalizedJunitXmlSha,
-                jsonMatches,
-                markdownMatches,
-                junitXmlMatches,
-                manifestMatches,
+                checksums.expectedJsonSha256(),
+                checksums.expectedMarkdownSha256(),
+                checksums.expectedJunitXmlSha256(),
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
+                checksums.junitXmlMatches(),
+                checksums.manifestMatches(),
                 junitXmlWellFormed,
                 manifestMatchesFiles,
                 markdownMatchesJson,
