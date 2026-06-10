@@ -19,6 +19,7 @@ import java.util.OptionalLong;
  */
 public record TrainingReportRuntimeProfile(
         Balance balance,
+        WallClock wallClock,
         int groupCount,
         Optional<Group> primaryGroup,
         List<Group> groups,
@@ -27,6 +28,7 @@ public record TrainingReportRuntimeProfile(
         List<Hotspot> hotspots) {
     public TrainingReportRuntimeProfile {
         balance = balance == null ? Balance.empty() : balance;
+        wallClock = wallClock == null ? WallClock.empty() : wallClock;
         groupCount = Math.max(0, groupCount);
         primaryGroup = primaryGroup == null ? Optional.empty() : primaryGroup;
         groups = groups == null ? List.of() : List.copyOf(groups);
@@ -42,12 +44,13 @@ public record TrainingReportRuntimeProfile(
             int hotspotCount,
             Optional<Hotspot> primaryHotspot,
             List<Hotspot> hotspots) {
-        this(Balance.empty(), groupCount, primaryGroup, groups, hotspotCount, primaryHotspot, hotspots);
+        this(Balance.empty(), WallClock.empty(), groupCount, primaryGroup, groups, hotspotCount, primaryHotspot, hotspots);
     }
 
     public static TrainingReportRuntimeProfile empty() {
         return new TrainingReportRuntimeProfile(
                 Balance.empty(),
+                WallClock.empty(),
                 0,
                 Optional.empty(),
                 List.of(),
@@ -66,6 +69,7 @@ public record TrainingReportRuntimeProfile(
         Optional<Hotspot> primary = primaryHotspot(metadata, hotspots);
         return new TrainingReportRuntimeProfile(
                 Balance.fromMetadata(metadata),
+                WallClock.fromMetadata(metadata),
                 intValue(metadata.get("runtimeProfile.groupCount"), groups.size()),
                 primaryGroup,
                 groups,
@@ -81,13 +85,15 @@ public record TrainingReportRuntimeProfile(
                 || hotspotCount > 0
                 || !hotspots.isEmpty()
                 || primaryHotspot.isPresent()
-                || balance.available();
+                || balance.available()
+                || wallClock.available();
     }
 
     public Map<String, Object> toMap() {
         return Map.of(
                 "available", available(),
                 "balance", balance.toMap(),
+                "wallClock", wallClock.toMap(),
                 "groupCount", groupCount,
                 "primaryGroup", primaryGroup.map(Group::toMap).orElse(Map.of()),
                 "groups", groups.stream().map(Group::toMap).toList(),
@@ -154,6 +160,156 @@ public record TrainingReportRuntimeProfile(
             }
         }
         return List.copyOf(hotspots);
+    }
+
+    public record WallClock(
+            boolean available,
+            OptionalDouble totalMillis,
+            int scopeCount,
+            String primaryOverheadScope,
+            WallScope primaryOverhead,
+            WallScope trainBatch,
+            WallScope validationBatch,
+            WallScope optimizerStep) {
+        public WallClock {
+            totalMillis = totalMillis == null ? OptionalDouble.empty() : totalMillis;
+            scopeCount = Math.max(0, scopeCount);
+            primaryOverheadScope = primaryOverheadScope == null || primaryOverheadScope.isBlank()
+                    ? "none"
+                    : primaryOverheadScope.trim();
+            primaryOverhead = primaryOverhead == null ? WallScope.empty() : primaryOverhead;
+            trainBatch = trainBatch == null ? WallScope.empty() : trainBatch;
+            validationBatch = validationBatch == null ? WallScope.empty() : validationBatch;
+            optimizerStep = optimizerStep == null ? WallScope.empty() : optimizerStep;
+            available = available
+                    || totalMillis.isPresent()
+                    || scopeCount > 0
+                    || primaryOverhead.available()
+                    || trainBatch.available()
+                    || validationBatch.available()
+                    || optimizerStep.available();
+        }
+
+        static WallClock empty() {
+            return new WallClock(
+                    false,
+                    OptionalDouble.empty(),
+                    0,
+                    "none",
+                    WallScope.empty(),
+                    WallScope.empty(),
+                    WallScope.empty(),
+                    WallScope.empty());
+        }
+
+        static WallClock fromMetadata(Map<String, ?> metadata) {
+            Objects.requireNonNull(metadata, "metadata must not be null");
+            return new WallClock(
+                    false,
+                    optionalDouble(metadata.get("runtimeProfile.wall.totalMillis")),
+                    intValue(metadata.get("runtimeProfile.wall.scopeCount"), 0),
+                    stringValue(metadata.get("runtimeProfile.wall.primaryOverhead.scope"), "none"),
+                    WallScope.fromMetadata(metadata, "runtimeProfile.wall.primaryOverhead"),
+                    WallScope.fromMetadata(metadata, "runtimeProfile.wall.trainBatch"),
+                    WallScope.fromMetadata(metadata, "runtimeProfile.wall.validationBatch"),
+                    WallScope.fromMetadata(metadata, "runtimeProfile.wall.optimizerStep"));
+        }
+
+        Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("available", available);
+            totalMillis.ifPresent(value -> map.put("totalMillis", value));
+            map.put("scopeCount", scopeCount);
+            map.put("primaryOverheadScope", primaryOverheadScope);
+            map.put("primaryOverhead", primaryOverhead.toMap());
+            map.put("trainBatch", trainBatch.toMap());
+            map.put("validationBatch", validationBatch.toMap());
+            map.put("optimizerStep", optimizerStep.toMap());
+            return Map.copyOf(map);
+        }
+    }
+
+    public record WallScope(
+            OptionalLong count,
+            OptionalDouble totalMillis,
+            OptionalDouble averageMillis,
+            OptionalDouble minMillis,
+            OptionalDouble maxMillis,
+            OptionalDouble lastMillis,
+            OptionalDouble stddevMillis,
+            OptionalDouble profiledMillis,
+            OptionalDouble overheadMillis,
+            OptionalDouble overheadPercent) {
+        public WallScope {
+            count = count == null ? OptionalLong.empty() : count;
+            totalMillis = totalMillis == null ? OptionalDouble.empty() : totalMillis;
+            averageMillis = averageMillis == null ? OptionalDouble.empty() : averageMillis;
+            minMillis = minMillis == null ? OptionalDouble.empty() : minMillis;
+            maxMillis = maxMillis == null ? OptionalDouble.empty() : maxMillis;
+            lastMillis = lastMillis == null ? OptionalDouble.empty() : lastMillis;
+            stddevMillis = stddevMillis == null ? OptionalDouble.empty() : stddevMillis;
+            profiledMillis = profiledMillis == null ? OptionalDouble.empty() : profiledMillis;
+            overheadMillis = overheadMillis == null ? OptionalDouble.empty() : overheadMillis;
+            overheadPercent = overheadPercent == null ? OptionalDouble.empty() : overheadPercent;
+        }
+
+        static WallScope empty() {
+            return new WallScope(
+                    OptionalLong.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty(),
+                    OptionalDouble.empty());
+        }
+
+        static WallScope fromMetadata(Map<String, ?> metadata, String prefix) {
+            Objects.requireNonNull(metadata, "metadata must not be null");
+            return new WallScope(
+                    optionalLong(metadata.get(prefix + ".count")),
+                    optionalDouble(metadata.get(prefix + ".totalMillis")),
+                    optionalDouble(metadata.get(prefix + ".averageMillis")),
+                    optionalDouble(metadata.get(prefix + ".minMillis")),
+                    optionalDouble(metadata.get(prefix + ".maxMillis")),
+                    optionalDouble(metadata.get(prefix + ".lastMillis")),
+                    optionalDouble(metadata.get(prefix + ".stddevMillis")),
+                    optionalDouble(metadata.get(prefix + ".profiledMillis")),
+                    optionalDouble(metadata.get(prefix + ".overheadMillis")),
+                    optionalDouble(metadata.get(prefix + ".overheadPercent")));
+        }
+
+        boolean available() {
+            return count.isPresent()
+                    || totalMillis.isPresent()
+                    || averageMillis.isPresent()
+                    || minMillis.isPresent()
+                    || maxMillis.isPresent()
+                    || lastMillis.isPresent()
+                    || stddevMillis.isPresent()
+                    || profiledMillis.isPresent()
+                    || overheadMillis.isPresent()
+                    || overheadPercent.isPresent();
+        }
+
+        Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("available", available());
+            count.ifPresent(value -> map.put("count", value));
+            totalMillis.ifPresent(value -> map.put("totalMillis", value));
+            averageMillis.ifPresent(value -> map.put("averageMillis", value));
+            minMillis.ifPresent(value -> map.put("minMillis", value));
+            maxMillis.ifPresent(value -> map.put("maxMillis", value));
+            lastMillis.ifPresent(value -> map.put("lastMillis", value));
+            stddevMillis.ifPresent(value -> map.put("stddevMillis", value));
+            profiledMillis.ifPresent(value -> map.put("profiledMillis", value));
+            overheadMillis.ifPresent(value -> map.put("overheadMillis", value));
+            overheadPercent.ifPresent(value -> map.put("overheadPercent", value));
+            return Map.copyOf(map);
+        }
     }
 
     public record Balance(

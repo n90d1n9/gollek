@@ -16,6 +16,7 @@ final class TrainerOptimizationRuntime {
     private final boolean mixedPrecision;
     private final GradScaler gradScaler;
     private final BooleanSupplier nonFiniteDetected;
+    private final TrainerRuntimeProfiler profiler;
     private int pendingGradientAccumulationBatches;
     private int optimizerStepCount;
     private int mixedPrecisionOverflowSkipCount;
@@ -38,12 +39,25 @@ final class TrainerOptimizationRuntime {
             boolean mixedPrecision,
             GradScaler gradScaler,
             BooleanSupplier nonFiniteDetected) {
+        this(optimizer, stepRunner, gradientAccumulationSteps, mixedPrecision, gradScaler,
+                nonFiniteDetected, new TrainerRuntimeProfiler());
+    }
+
+    TrainerOptimizationRuntime(
+            Optimizer optimizer,
+            TrainerOptimizerStepRunner stepRunner,
+            int gradientAccumulationSteps,
+            boolean mixedPrecision,
+            GradScaler gradScaler,
+            BooleanSupplier nonFiniteDetected,
+            TrainerRuntimeProfiler profiler) {
         this.optimizer = Objects.requireNonNull(optimizer, "optimizer must not be null");
         this.stepRunner = Objects.requireNonNull(stepRunner, "stepRunner must not be null");
         this.gradientAccumulationSteps = Math.max(1, gradientAccumulationSteps);
         this.mixedPrecision = mixedPrecision;
         this.gradScaler = gradScaler;
         this.nonFiniteDetected = Objects.requireNonNull(nonFiniteDetected, "nonFiniteDetected must not be null");
+        this.profiler = Objects.requireNonNull(profiler, "profiler must not be null");
         if (gradScaler != null) {
             this.latestMixedPrecisionLossScale = gradScaler.getScale();
         }
@@ -137,6 +151,10 @@ final class TrainerOptimizationRuntime {
     }
 
     private void applyOptimizerStep() {
+        profiler.time(TrainerRuntimeProfiler.Scope.OPTIMIZER_STEP, this::applyOptimizerStepProfiled);
+    }
+
+    private void applyOptimizerStepProfiled() {
         if (!hasPendingGradients()) {
             return;
         }

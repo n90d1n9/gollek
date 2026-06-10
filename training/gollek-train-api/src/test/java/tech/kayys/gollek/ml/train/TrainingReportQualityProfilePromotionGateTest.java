@@ -65,6 +65,42 @@ class TrainingReportQualityProfilePromotionGateTest {
     }
 
     @Test
+    void runsCustomCatalogProfilePromotionGateFromJsonFile() throws IOException {
+        Map<String, Path> reports = reportFiles(warningDataHealthMetadata());
+        TrainingReportQualityProfile custom = new TrainingReportQualityProfile(
+                "Catalog Research Promotion",
+                "Catalog Research Promotion",
+                "Custom catalog promotion policy that tolerates warning data health.",
+                TrainingReportValidationPolicy.permissive(),
+                TrainingReportPerformanceGate.Policy.permissive(),
+                TrainingReportPortfolio.PromotionPolicy.defaultPolicy()
+                        .withMaxCandidateDiagnosticSeverity(TrainingReportDiagnostics.Severity.WARNING)
+                        .withMaxComparisonFindingSeverity(TrainingReportDiagnostics.Severity.WARNING)
+                        .withRequireTrackedMetricImprovement(false)
+                        .withRequireCandidateDataHealthGate(false)
+                        .withRequireCandidateDataHealthClean(false));
+        TrainingReportQualityProfileArtifacts.ArtifactBundle catalog =
+                Gollek.DL.writeTrainingReportQualityProfileArtifacts(
+                        tempDir.resolve("promotion-catalog"),
+                        List.of(custom));
+
+        TrainingReportQualityProfilePromotionGate.Result result =
+                Gollek.DL.runTrainingReportQualityProfilePromotionGate(
+                        reports,
+                        "baseline",
+                        catalog.jsonFile(),
+                        "CATALOG_RESEARCH_PROMOTION",
+                        tempDir.resolve("catalog-promotion-gate"));
+
+        assertEquals("catalog-research-promotion", result.profile().id());
+        assertTrue(result.passed());
+        assertTrue(result.promotable());
+        assertEquals("candidate", result.decision().candidate().orElseThrow().name());
+        assertTrue(result.verification().passed());
+        assertTrue(result.sourceVerification().passed());
+    }
+
+    @Test
     void requestDefaultsToProductionPromotionProfile() throws IOException {
         Map<String, Path> reports = reportFiles(warningDataHealthMetadata());
 

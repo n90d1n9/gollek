@@ -112,6 +112,10 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
             return booleanValue(result.get("validationPassed"));
         }
 
+        public boolean performancePassed() {
+            return booleanValue(result.get("performancePassed"));
+        }
+
         public Optional<String> profileId() {
             String id = stringValue(profile().get("id"), "");
             return id.isBlank() ? Optional.empty() : Optional.of(id);
@@ -146,6 +150,7 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
             map.put("markdownSha256", markdownSha256);
             map.put("passed", passed());
             map.put("validationPassed", validationPassed());
+            map.put("performancePassed", performancePassed());
             profileId().ifPresent(id -> map.put("profileId", id));
             map.put("failureCodes", failureCodes());
             map.put("result", result);
@@ -338,9 +343,7 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
 
-        boolean profileKnown = inspection.profileId()
-                .flatMap(TrainingReportQualityProfile::find)
-                .isPresent();
+        boolean profileKnown = profileKnown(inspection);
         if (!profileKnown) {
             failures.add("Quality profile is unknown or missing in " + inspection.jsonFile());
         }
@@ -390,18 +393,33 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
         Map<String, Object> validation = mapValue(result, "validation");
         Map<String, Object> artifacts = mapValue(result, "artifacts");
         Map<String, Object> verification = mapValue(result, "verification");
-        if (validation.isEmpty() || artifacts.isEmpty() || verification.isEmpty()) {
+        Map<String, Object> performance = mapValue(result, "performance");
+        Map<String, Object> performanceArtifacts = mapValue(result, "performanceArtifacts");
+        Map<String, Object> performanceVerification = mapValue(result, "performanceVerification");
+        if (validation.isEmpty()
+                || artifacts.isEmpty()
+                || verification.isEmpty()
+                || performance.isEmpty()
+                || performanceArtifacts.isEmpty()
+                || performanceVerification.isEmpty()) {
             return false;
         }
         boolean validationPassed = booleanValue(result.get("validationPassed"));
+        boolean performancePassed = booleanValue(result.get("performancePassed"));
         boolean artifactVerificationPassed = booleanValue(verification.get("passed"));
+        boolean performanceArtifactVerificationPassed = booleanValue(performanceVerification.get("passed"));
         String message = stringValue(result.get("message"), "");
         String validationMessage = stringValue(validation.get("message"), "");
         return validationPassed == booleanValue(validation.get("passed"))
                 && validationPassed == booleanValue(artifacts.get("passed"))
-                && booleanValue(result.get("passed")) == (validationPassed && artifactVerificationPassed)
+                && performancePassed == booleanValue(performance.get("passed"))
+                && performancePassed == booleanValue(performanceArtifacts.get("passed"))
+                && booleanValue(result.get("passed")) == (validationPassed
+                        && artifactVerificationPassed
+                        && performancePassed
+                        && performanceArtifactVerificationPassed)
                 && !validationMessage.isBlank()
-                && message.contains(validationMessage);
+                && (message.contains(validationMessage) || message.contains(stringValue(performance.get("message"), "")));
     }
 
     private static String renderMarkdown(Map<String, Object> result) {
@@ -410,6 +428,9 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
         Map<String, Object> policy = mapValue(validation, "policy");
         Map<String, Object> artifacts = mapValue(result, "artifacts");
         Map<String, Object> verification = mapValue(result, "verification");
+        Map<String, Object> performance = mapValue(result, "performance");
+        Map<String, Object> performanceArtifacts = mapValue(result, "performanceArtifacts");
+        Map<String, Object> performanceVerification = mapValue(result, "performanceVerification");
 
         StringBuilder markdown = new StringBuilder();
         appendLine(markdown, "# Gollek Training Quality Profile Validation Gate");
@@ -419,8 +440,12 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
         appendLine(markdown, "**Gate:** `" + (booleanValue(result.get("passed")) ? "PASS" : "FAIL") + "`");
         appendLine(markdown, "**Validation:** `" + (booleanValue(result.get("validationPassed")) ? "PASS" : "FAIL")
                 + "`");
+        appendLine(markdown, "**Performance:** `" + (booleanValue(result.get("performancePassed")) ? "PASS" : "FAIL")
+                + "`");
         appendLine(markdown, "**Artifact verification:** `"
                 + (booleanValue(verification.get("passed")) ? "PASS" : "FAIL") + "`");
+        appendLine(markdown, "**Performance artifact verification:** `"
+                + (booleanValue(performanceVerification.get("passed")) ? "PASS" : "FAIL") + "`");
         appendLine(markdown, "");
         appendLine(markdown, "## Profile Contract");
         appendLine(markdown, "");
@@ -448,14 +473,43 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
                 + escapeInline(shortSha(stringValue(artifacts.get("markdownSha256"), "n/a"))) + "`");
         appendLine(markdown, "- JUnit XML SHA-256: `"
                 + escapeInline(shortSha(stringValue(artifacts.get("junitXmlSha256"), "n/a"))) + "`");
+        appendLine(markdown, "- Performance JSON: `"
+                + escapeInline(stringValue(performanceArtifacts.get("jsonFile"), "n/a")) + "`");
+        appendLine(markdown, "- Performance Markdown: `"
+                + escapeInline(stringValue(performanceArtifacts.get("markdownFile"), "n/a")) + "`");
+        appendLine(markdown, "- Performance JUnit XML: `"
+                + escapeInline(stringValue(performanceArtifacts.get("junitXmlFile"), "n/a")) + "`");
+        appendLine(markdown, "- Performance JSON SHA-256: `"
+                + escapeInline(shortSha(stringValue(performanceArtifacts.get("jsonSha256"), "n/a"))) + "`");
         appendListSection(markdown, "Validation Failures", stringList(validation.get("failureCodes")));
         appendListSection(markdown, "Validation Reasons", stringList(validation.get("reasons")));
         appendListSection(markdown, "Artifact Verification Failures", stringList(verification.get("failures")));
+        appendListSection(markdown, "Performance Findings", findingCodes(performance.get("findings")));
+        appendListSection(
+                markdown,
+                "Performance Artifact Verification Failures",
+                stringList(performanceVerification.get("failures")));
         appendLine(markdown, "");
         appendLine(markdown, "## Message");
         appendLine(markdown, "");
         appendLine(markdown, stringValue(result.get("message"), "No quality-profile validation gate message recorded."));
         return markdown.toString();
+    }
+
+    private static List<String> findingCodes(Object value) {
+        if (!(value instanceof Iterable<?> iterable)) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : iterable) {
+            if (item instanceof Map<?, ?> map) {
+                String code = stringValue(map.get("code"), "");
+                if (!code.isBlank()) {
+                    values.add(code);
+                }
+            }
+        }
+        return List.copyOf(values);
     }
 
     private static void appendPolicyRow(StringBuilder markdown, Map<String, Object> policy, String key) {
@@ -527,6 +581,25 @@ public final class TrainingReportQualityProfileValidationGateArtifacts {
         }
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? fallback : text;
+    }
+
+    private static boolean profileKnown(ArtifactInspection inspection) {
+        return inspection.profileId()
+                .filter(id -> TrainingReportQualityProfile.find(id).isPresent()
+                        || embeddedProfileMatches(inspection.profile(), id))
+                .isPresent();
+    }
+
+    private static boolean embeddedProfileMatches(Map<String, Object> profile, String expectedId) {
+        if (profile == null || profile.isEmpty()) {
+            return false;
+        }
+        try {
+            return TrainingReportQualityProfile.fromMap(profile).id()
+                    .equals(TrainingReportQualityProfile.normalizeId(expectedId));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static String shortSha(String sha256) {

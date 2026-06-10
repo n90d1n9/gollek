@@ -98,7 +98,9 @@ class TrainingReportRuntimeProfileBudgetGateTest {
                         "maxPrimaryHotspotTotalMillis", 123.0,
                         "maxInputBalancePercent", 55.0,
                         "maxOptimizerBalancePercent", 35.0,
-                        "maxValidationBalancePercent", 50.0));
+                        "maxValidationBalancePercent", 50.0,
+                        "maxWallClockOverheadPercent", 30.0,
+                        "maxWallClockOverheadMillis", 42.0));
 
         assertEquals(75.5, policy.maxPrimaryGroupPercent());
         assertEquals(44.0, policy.maxPrimaryHotspotPercent());
@@ -106,8 +108,11 @@ class TrainingReportRuntimeProfileBudgetGateTest {
         assertEquals(55.0, policy.maxInputBalancePercent());
         assertEquals(35.0, policy.maxOptimizerBalancePercent());
         assertEquals(50.0, policy.maxValidationBalancePercent());
+        assertEquals(30.0, policy.maxWallClockOverheadPercent());
+        assertEquals(42.0, policy.maxWallClockOverheadMillis());
         assertEquals(70.0, TrainingReportRuntimeProfileBudgetGate.Policy.strict().maxPrimaryGroupPercent());
         assertEquals(45.0, TrainingReportRuntimeProfileBudgetGate.Policy.strict().maxInputBalancePercent());
+        assertEquals(25.0, TrainingReportRuntimeProfileBudgetGate.Policy.strict().maxWallClockOverheadPercent());
         assertEquals(90.0, TrainingReportRuntimeProfileBudgetGate.Policy.permissive()
                 .maxPrimaryHotspotPercent());
         assertEquals(85.0, TrainingReportRuntimeProfileBudgetGate.Policy.permissive()
@@ -116,6 +121,8 @@ class TrainingReportRuntimeProfileBudgetGateTest {
         assertEquals(40.0, policy.withMaxInputBalancePercent(40.0).maxInputBalancePercent());
         assertEquals(30.0, policy.withMaxOptimizerBalancePercent(30.0).maxOptimizerBalancePercent());
         assertEquals(25.0, policy.withMaxValidationBalancePercent(25.0).maxValidationBalancePercent());
+        assertEquals(22.0, policy.withMaxWallClockOverheadPercent(22.0).maxWallClockOverheadPercent());
+        assertEquals(11.0, policy.withMaxWallClockOverheadMillis(11.0).maxWallClockOverheadMillis());
     }
 
     @Test
@@ -145,6 +152,37 @@ class TrainingReportRuntimeProfileBudgetGateTest {
     }
 
     @Test
+    void warnsWhenWallClockOverheadBudgetIsExceeded() {
+        TrainingReport report = reportWithWallClockOverhead();
+        TrainingReportRuntimeProfileBudgetGate.Policy policy =
+                new TrainingReportRuntimeProfileBudgetGate.Policy(
+                        95.0,
+                        95.0,
+                        500.0,
+                        95.0,
+                        95.0,
+                        95.0,
+                        35.0,
+                        5.0);
+
+        TrainingReportRuntimeProfileBudgetGate.Result result = report.runtimeProfileBudgetGate(policy);
+
+        assertTrue(result.available());
+        assertFalse(result.passed());
+        assertEquals(List.of("runtime-profile-wall-clock-overhead-budget"),
+                result.findings().stream()
+                        .map(TrainingReportRuntimeProfileBudgetGate.Finding::code)
+                        .toList());
+        assertEquals("trainBatch", result.findings().getFirst().evidence().get("scope"));
+        assertEquals(40.0, (double) result.findings().getFirst().evidence().get("overheadPercent"), 1e-12);
+        assertEquals(8.0, (double) result.findings().getFirst().evidence().get("overheadMillis"), 1e-12);
+        assertTrue(result.findings().getFirst().action().contains("trainer batch orchestration"));
+        assertTrue(result.markdown().contains("| Wall-clock overhead | `35.000%` |"));
+        assertTrue(result.markdown().contains("| Wall overhead | `trainBatch` (`8.000 ms`, `40.000%`) |"));
+        assertTrue(result.junitXml().contains("policy.maxWallClockOverheadPercent"));
+    }
+
+    @Test
     void writesVerifiesAndRefreshesRuntimeProfileBudgetGateArtifacts() throws IOException {
         TrainingReportRuntimeProfileBudgetGate.Result result = report(86.0, 72.0, 320.0)
                 .runtimeProfileBudgetGate(new TrainingReportRuntimeProfileBudgetGate.Policy(80.0, 60.0, 250.0));
@@ -166,6 +204,9 @@ class TrainingReportRuntimeProfileBudgetGateTest {
         assertTrue(verification.passed(), verification.message());
         assertTrue(verification.markdownMatchesJson());
         assertTrue(verification.junitXmlMatchesJson());
+        assertFalse(verification.artifact().hasManifest());
+        assertEquals(bundle.jsonSha256(), verification.artifactMap().get("jsonSha256"));
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         verification.requirePassed();
 
         Files.writeString(bundle.markdownFile(), inspection.markdown() + "\n<!-- tampered -->\n");
@@ -271,6 +312,55 @@ class TrainingReportRuntimeProfileBudgetGateTest {
                         Map.entry("runtimeProfile.balance.validation.percentTotal", validationPercent),
                         Map.entry("runtimeProfile.balance.optimizer.totalMillis", optimizerPercent),
                         Map.entry("runtimeProfile.balance.optimizer.percentTotal", optimizerPercent)));
+        return TrainingReport.of(TrainerTrainingReport.payload(
+                summary,
+                Instant.parse("2026-05-26T11:12:13Z")));
+    }
+
+    private static TrainingReport reportWithWallClockOverhead() {
+        TrainingSummary summary = new TrainingSummary(
+                1,
+                0.8,
+                0,
+                0.7,
+                0.8,
+                100L,
+                Map.ofEntries(
+                        Map.entry("epochHistory", List.of(
+                                Map.of("epoch", 0, "trainLoss", 0.7, "validationLoss", 0.8, "learningRate", 0.01))),
+                        Map.entry("runtimeProfile.totalMillis", 12.0),
+                        Map.entry("runtimeProfile.groupCount", 1),
+                        Map.entry("runtimeProfile.primaryGroup.name", "train"),
+                        Map.entry("runtimeProfile.primaryGroup.totalMillis", 12.0),
+                        Map.entry("runtimeProfile.primaryGroup.percentTotal", 20.0),
+                        Map.entry("runtimeProfile.groups", List.of(Map.of(
+                                "name", "train",
+                                "count", 3L,
+                                "totalMillis", 12.0,
+                                "percentTotal", 20.0,
+                                "averageMillis", 4.0))),
+                        Map.entry("runtimeProfile.hotspotCount", 1),
+                        Map.entry("runtimeProfile.primaryHotspot.phase", "train.forward"),
+                        Map.entry("runtimeProfile.primaryHotspot.totalMillis", 9.0),
+                        Map.entry("runtimeProfile.primaryHotspot.percentTotal", 15.0),
+                        Map.entry("runtimeProfile.hotspots", List.of(Map.of(
+                                "phase", "train.forward",
+                                "count", 2L,
+                                "totalMillis", 9.0,
+                                "percentTotal", 15.0,
+                                "averageMillis", 4.5))),
+                        Map.entry("runtimeProfile.wall.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.scopeCount", 1),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.scope", "trainBatch"),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.profiledMillis", 12.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.overheadMillis", 8.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.overheadPercent", 40.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.count", 2L),
+                        Map.entry("runtimeProfile.wall.trainBatch.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.profiledMillis", 12.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.overheadMillis", 8.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.overheadPercent", 40.0)));
         return TrainingReport.of(TrainerTrainingReport.payload(
                 summary,
                 Instant.parse("2026-05-26T11:12:13Z")));

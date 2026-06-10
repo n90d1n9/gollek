@@ -72,6 +72,38 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     false);
         }
 
+        public static PromotionPolicy fromMap(Map<String, ?> policy) {
+            if (policy == null || policy.isEmpty()) {
+                return defaultPolicy();
+            }
+            PromotionPolicy defaults = defaultPolicy();
+            return new PromotionPolicy(
+                    severityValue(
+                            policy.get("maxCandidateDiagnosticSeverity"),
+                            defaults.maxCandidateDiagnosticSeverity()),
+                    severityValue(
+                            policy.get("maxComparisonFindingSeverity"),
+                            defaults.maxComparisonFindingSeverity()),
+                    TrainingReportValues.optionalDouble(policy.get("minimumValidationImprovement"))
+                            .orElse(defaults.minimumValidationImprovement()),
+                    TrainingReportMapValues.booleanValue(
+                            policy,
+                            "requireTrackedMetricImprovement",
+                            defaults.requireTrackedMetricImprovement()),
+                    TrainingReportMapValues.booleanValue(
+                            policy,
+                            "requireCandidateDataHealthAvailable",
+                            defaults.requireCandidateDataHealthAvailable()),
+                    TrainingReportMapValues.booleanValue(
+                            policy,
+                            "requireCandidateDataHealthGate",
+                            defaults.requireCandidateDataHealthGate()),
+                    TrainingReportMapValues.booleanValue(
+                            policy,
+                            "requireCandidateDataHealthClean",
+                            defaults.requireCandidateDataHealthClean()));
+        }
+
         public PromotionPolicy withMaxCandidateDiagnosticSeverity(
                 TrainingReportDiagnostics.Severity severity) {
             return new PromotionPolicy(
@@ -161,6 +193,19 @@ public record TrainingReportPortfolio(List<Entry> entries) {
             map.put("requireCandidateDataHealthGate", requireCandidateDataHealthGate);
             map.put("requireCandidateDataHealthClean", requireCandidateDataHealthClean);
             return Map.copyOf(map);
+        }
+
+        private static TrainingReportDiagnostics.Severity severityValue(
+                Object value,
+                TrainingReportDiagnostics.Severity fallback) {
+            if (value == null) {
+                return fallback;
+            }
+            try {
+                return TrainingReportDiagnostics.Severity.valueOf(String.valueOf(value).trim().toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+                return fallback;
+            }
         }
     }
 

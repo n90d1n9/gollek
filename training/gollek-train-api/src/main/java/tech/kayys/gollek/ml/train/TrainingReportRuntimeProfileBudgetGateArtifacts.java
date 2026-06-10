@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,6 +161,7 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("passed", passed());
             map.put("message", message());
+            map.put("artifact", artifact().toMap());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
             map.put("junitXmlSha256Matches", junitXmlSha256Matches);
@@ -168,6 +170,21 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
             map.put("junitXmlMatchesJson", junitXmlMatchesJson);
             map.put("failures", failures);
             return Map.copyOf(map);
+        }
+
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    inspection.directory(),
+                    inspection.jsonFile(),
+                    inspection.markdownFile(),
+                    inspection.junitXmlFile(),
+                    inspection.jsonSha256(),
+                    inspection.markdownSha256(),
+                    inspection.junitXmlSha256());
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 
@@ -396,7 +413,9 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
                 optionalDouble(map.get("maxPrimaryHotspotTotalMillis")).orElse(Double.POSITIVE_INFINITY),
                 optionalDouble(map.get("maxInputBalancePercent")).orElse(60.0),
                 optionalDouble(map.get("maxOptimizerBalancePercent")).orElse(50.0),
-                optionalDouble(map.get("maxValidationBalancePercent")).orElse(60.0));
+                optionalDouble(map.get("maxValidationBalancePercent")).orElse(60.0),
+                optionalDouble(map.get("maxWallClockOverheadPercent")).orElse(35.0),
+                optionalDouble(map.get("maxWallClockOverheadMillis")).orElse(Double.POSITIVE_INFINITY));
     }
 
     private static TrainingReportRuntimeProfileBudgetGate.Finding findingFromMap(Map<String, Object> map) {
@@ -447,7 +466,7 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
         for (Map.Entry<?, ?> entry : source.entrySet()) {
             values.put(String.valueOf(entry.getKey()), entry.getValue());
         }
-        return Map.copyOf(values);
+        return Collections.unmodifiableMap(values);
     }
 
     private static String normalizeChecksum(String value) {

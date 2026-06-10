@@ -21,7 +21,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
             double maxPrimaryHotspotTotalMillis,
             double maxInputBalancePercent,
             double maxOptimizerBalancePercent,
-            double maxValidationBalancePercent) {
+            double maxValidationBalancePercent,
+            double maxWallClockOverheadPercent,
+            double maxWallClockOverheadMillis) {
         public Policy {
             maxPrimaryGroupPercent = positiveOrDefault(maxPrimaryGroupPercent, 80.0);
             maxPrimaryHotspotPercent = positiveOrDefault(maxPrimaryHotspotPercent, 60.0);
@@ -29,6 +31,8 @@ public final class TrainingReportRuntimeProfileBudgetGate {
             maxInputBalancePercent = positiveOrDefault(maxInputBalancePercent, 60.0);
             maxOptimizerBalancePercent = positiveOrDefault(maxOptimizerBalancePercent, 50.0);
             maxValidationBalancePercent = positiveOrDefault(maxValidationBalancePercent, 60.0);
+            maxWallClockOverheadPercent = positiveOrDefault(maxWallClockOverheadPercent, 35.0);
+            maxWallClockOverheadMillis = positiveOrDefault(maxWallClockOverheadMillis, Double.POSITIVE_INFINITY);
         }
 
         public Policy(
@@ -41,19 +45,41 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     60.0,
                     50.0,
-                    60.0);
+                    60.0,
+                    35.0,
+                    Double.POSITIVE_INFINITY);
+        }
+
+        public Policy(
+                double maxPrimaryGroupPercent,
+                double maxPrimaryHotspotPercent,
+                double maxPrimaryHotspotTotalMillis,
+                double maxInputBalancePercent,
+                double maxOptimizerBalancePercent,
+                double maxValidationBalancePercent) {
+            this(
+                    maxPrimaryGroupPercent,
+                    maxPrimaryHotspotPercent,
+                    maxPrimaryHotspotTotalMillis,
+                    maxInputBalancePercent,
+                    maxOptimizerBalancePercent,
+                    maxValidationBalancePercent,
+                    35.0,
+                    Double.POSITIVE_INFINITY);
         }
 
         public static Policy defaults() {
-            return new Policy(80.0, 60.0, Double.POSITIVE_INFINITY, 60.0, 50.0, 60.0);
+            return new Policy(80.0, 60.0, Double.POSITIVE_INFINITY, 60.0, 50.0, 60.0, 35.0,
+                    Double.POSITIVE_INFINITY);
         }
 
         public static Policy strict() {
-            return new Policy(70.0, 45.0, 250.0, 45.0, 35.0, 45.0);
+            return new Policy(70.0, 45.0, 250.0, 45.0, 35.0, 45.0, 25.0, 100.0);
         }
 
         public static Policy permissive() {
-            return new Policy(95.0, 90.0, Double.POSITIVE_INFINITY, 85.0, 80.0, 85.0);
+            return new Policy(95.0, 90.0, Double.POSITIVE_INFINITY, 85.0, 80.0, 85.0, 60.0,
+                    Double.POSITIVE_INFINITY);
         }
 
         public static Policy fromMap(Map<String, ?> policy) {
@@ -66,7 +92,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     doubleEntry(policy, "maxPrimaryHotspotTotalMillis", defaults().maxPrimaryHotspotTotalMillis()),
                     doubleEntry(policy, "maxInputBalancePercent", defaults().maxInputBalancePercent()),
                     doubleEntry(policy, "maxOptimizerBalancePercent", defaults().maxOptimizerBalancePercent()),
-                    doubleEntry(policy, "maxValidationBalancePercent", defaults().maxValidationBalancePercent()));
+                    doubleEntry(policy, "maxValidationBalancePercent", defaults().maxValidationBalancePercent()),
+                    doubleEntry(policy, "maxWallClockOverheadPercent", defaults().maxWallClockOverheadPercent()),
+                    doubleEntry(policy, "maxWallClockOverheadMillis", defaults().maxWallClockOverheadMillis()));
         }
 
         public Policy withMaxPrimaryGroupPercent(double threshold) {
@@ -76,7 +104,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     maxInputBalancePercent,
                     maxOptimizerBalancePercent,
-                    maxValidationBalancePercent);
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
         }
 
         public Policy withMaxPrimaryHotspotPercent(double threshold) {
@@ -86,7 +116,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     maxInputBalancePercent,
                     maxOptimizerBalancePercent,
-                    maxValidationBalancePercent);
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
         }
 
         public Policy withMaxPrimaryHotspotTotalMillis(double threshold) {
@@ -96,7 +128,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     threshold,
                     maxInputBalancePercent,
                     maxOptimizerBalancePercent,
-                    maxValidationBalancePercent);
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
         }
 
         public Policy withMaxInputBalancePercent(double threshold) {
@@ -106,7 +140,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     threshold,
                     maxOptimizerBalancePercent,
-                    maxValidationBalancePercent);
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
         }
 
         public Policy withMaxOptimizerBalancePercent(double threshold) {
@@ -116,7 +152,9 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     maxInputBalancePercent,
                     threshold,
-                    maxValidationBalancePercent);
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
         }
 
         public Policy withMaxValidationBalancePercent(double threshold) {
@@ -126,6 +164,32 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                     maxPrimaryHotspotTotalMillis,
                     maxInputBalancePercent,
                     maxOptimizerBalancePercent,
+                    threshold,
+                    maxWallClockOverheadPercent,
+                    maxWallClockOverheadMillis);
+        }
+
+        public Policy withMaxWallClockOverheadPercent(double threshold) {
+            return new Policy(
+                    maxPrimaryGroupPercent,
+                    maxPrimaryHotspotPercent,
+                    maxPrimaryHotspotTotalMillis,
+                    maxInputBalancePercent,
+                    maxOptimizerBalancePercent,
+                    maxValidationBalancePercent,
+                    threshold,
+                    maxWallClockOverheadMillis);
+        }
+
+        public Policy withMaxWallClockOverheadMillis(double threshold) {
+            return new Policy(
+                    maxPrimaryGroupPercent,
+                    maxPrimaryHotspotPercent,
+                    maxPrimaryHotspotTotalMillis,
+                    maxInputBalancePercent,
+                    maxOptimizerBalancePercent,
+                    maxValidationBalancePercent,
+                    maxWallClockOverheadPercent,
                     threshold);
         }
 
@@ -137,6 +201,8 @@ public final class TrainingReportRuntimeProfileBudgetGate {
             map.put("maxInputBalancePercent", maxInputBalancePercent);
             map.put("maxOptimizerBalancePercent", maxOptimizerBalancePercent);
             map.put("maxValidationBalancePercent", maxValidationBalancePercent);
+            map.put("maxWallClockOverheadPercent", maxWallClockOverheadPercent);
+            map.put("maxWallClockOverheadMillis", maxWallClockOverheadMillis);
             return Map.copyOf(map);
         }
     }
@@ -238,6 +304,7 @@ public final class TrainingReportRuntimeProfileBudgetGate {
         addPrimaryHotspotPercentFinding(findings, profile, plan, resolvedPolicy);
         addPrimaryHotspotMillisFinding(findings, profile, plan, resolvedPolicy);
         addBalanceFindings(findings, profile, plan, resolvedPolicy);
+        addWallClockOverheadFinding(findings, profile, plan, resolvedPolicy);
         return new Result(resolvedPolicy, true, findings, profile.toMap(), plan.toMap());
     }
 
@@ -352,6 +419,36 @@ public final class TrainingReportRuntimeProfileBudgetGate {
                 "runtime-profile-validation-balance-budget",
                 "Validation",
                 "Reduce validation frequency, cache validation preprocessing, or inspect validation-only metrics.");
+    }
+
+    private static void addWallClockOverheadFinding(
+            List<Finding> findings,
+            TrainingReportRuntimeProfile profile,
+            TrainingReportRuntimeProfileActionPlan plan,
+            Policy policy) {
+        TrainingReportRuntimeProfile.WallClock wallClock = profile.wallClock();
+        TrainingReportRuntimeWallClockAssessment assessment =
+                TrainingReportRuntimeWallClockAssessment.assess(wallClock);
+        if (!assessment.available()
+                || !assessment.exceedsBudget(
+                        policy.maxWallClockOverheadPercent(),
+                        policy.maxWallClockOverheadMillis())) {
+            return;
+        }
+        findings.add(new Finding(
+                "runtime-profile-wall-clock-overhead-budget",
+                assessment.severity().name().toLowerCase(java.util.Locale.ROOT),
+                "Wall-clock overhead in `" + assessment.scopeKey() + "` is "
+                        + format(assessment.overhead().overheadPercent().orElse(Double.NaN)) + "% / "
+                        + format(assessment.overhead().overheadMillis().orElse(Double.NaN))
+                        + " ms above the configured budget.",
+                firstAction(plan, assessment.scopeKey(),
+                        "Inspect trainer orchestration around `" + assessment.scopeKey()
+                                + "` before tuning tensor kernels."),
+                assessment.budgetEvidence(
+                        wallClock.totalMillis(),
+                        policy.maxWallClockOverheadPercent(),
+                        policy.maxWallClockOverheadMillis())));
     }
 
     private static void addBalanceFinding(

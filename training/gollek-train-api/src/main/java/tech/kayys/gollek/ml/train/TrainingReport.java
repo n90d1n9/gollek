@@ -165,6 +165,15 @@ public record TrainingReport(Map<String, Object> payload) {
         return TrainingReportAccelerationMarkdown.render(acceleration());
     }
 
+    public TrainingReportPerformanceGate.Result performanceGate() {
+        return TrainingReportPerformanceGate.evaluate(this);
+    }
+
+    public TrainingReportPerformanceGate.Result performanceGate(
+            TrainingReportPerformanceGate.Policy policy) {
+        return TrainingReportPerformanceGate.evaluate(this, policy);
+    }
+
     public Map<String, Object> trainLossSummary() {
         return TrainingReportReader.trainLossSummary(payload);
     }
@@ -267,6 +276,27 @@ public record TrainingReport(Map<String, Object> payload) {
 
     public TrainingReportRuntimeProfile runtimeProfile() {
         return TrainingReportReader.runtimeProfileView(payload);
+    }
+
+    public TrainingReportRuntimeEfficiency runtimeEfficiency() {
+        return TrainingReportRuntimeEfficiency.from(runtimeProfile());
+    }
+
+    public Map<String, Object> runtimeEfficiencyMap() {
+        return runtimeEfficiency().toMap();
+    }
+
+    public String runtimeEfficiencyMarkdown() {
+        return TrainingReportRuntimeEfficiencyMarkdown.render(runtimeEfficiency());
+    }
+
+    public TrainingReportRuntimeEfficiencyGate.Result runtimeEfficiencyGate() {
+        return TrainingReportRuntimeEfficiencyGate.evaluate(this);
+    }
+
+    public TrainingReportRuntimeEfficiencyGate.Result runtimeEfficiencyGate(
+            TrainingReportRuntimeEfficiencyGate.Policy policy) {
+        return TrainingReportRuntimeEfficiencyGate.evaluate(this, policy);
     }
 
     public TrainingReportRuntimeProfile.Balance runtimeProfileBalance() {

@@ -24,6 +24,7 @@ public final class TrainingReportRuntimeProfileMarkdown {
         StringBuilder markdown = new StringBuilder();
         appendLine(markdown, "## Runtime Profile");
         appendLine(markdown, "");
+        markdown.append(TrainingReportRuntimeEfficiencyMarkdown.render(TrainingReportRuntimeEfficiency.from(profile)));
         profile.primaryGroup().ifPresent(group -> appendLine(
                 markdown,
                 "**Primary group:** `" + escapeInline(group.name()) + "`"
@@ -36,6 +37,7 @@ public final class TrainingReportRuntimeProfileMarkdown {
             appendLine(markdown, "");
         }
         appendBalance(markdown, profile.balance());
+        appendWallClock(markdown, profile.wallClock());
         appendInputPipeline(markdown, inputProfile);
         appendGroups(markdown, profile);
         profile.primaryHotspot().ifPresent(hotspot -> appendLine(
@@ -101,6 +103,42 @@ public final class TrainingReportRuntimeProfileMarkdown {
         appendLine(markdown, balanceRow("validation", balance.validation()));
         appendLine(markdown, balanceRow("optimizer", balance.optimizer()));
         appendLine(markdown, "");
+    }
+
+    private static void appendWallClock(
+            StringBuilder markdown,
+            TrainingReportRuntimeProfile.WallClock wallClock) {
+        if (wallClock == null || !wallClock.available()) {
+            return;
+        }
+        appendLine(markdown, "### Wall-Clock Overhead");
+        appendLine(markdown, "");
+        appendLine(markdown, "**Largest overhead scope:** `" + escapeInline(wallClock.primaryOverheadScope()) + "`"
+                + wallClock.primaryOverhead().overheadMillis()
+                        .stream()
+                        .mapToObj(value -> " (" + formatMillis(value) + " ms overhead)")
+                        .findFirst()
+                        .orElse(""));
+        appendLine(markdown, "");
+        appendLine(markdown, "| Scope | Count | Wall ms | Profiled ms | Overhead ms | Overhead % | Avg ms |");
+        appendLine(markdown, "| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+        appendLine(markdown, wallRow("trainBatch", wallClock.trainBatch()));
+        appendLine(markdown, wallRow("validationBatch", wallClock.validationBatch()));
+        appendLine(markdown, wallRow("optimizerStep", wallClock.optimizerStep()));
+        appendLine(markdown, "");
+    }
+
+    private static String wallRow(
+            String scope,
+            TrainingReportRuntimeProfile.WallScope value) {
+        return "| `" + escapeTable(scope) + "`"
+                + " | " + value.count().stream().mapToObj(String::valueOf).findFirst().orElse("")
+                + " | " + value.totalMillis().stream().mapToObj(TrainingReportRuntimeProfileMarkdown::formatMillis).findFirst().orElse("")
+                + " | " + value.profiledMillis().stream().mapToObj(TrainingReportRuntimeProfileMarkdown::formatMillis).findFirst().orElse("")
+                + " | " + value.overheadMillis().stream().mapToObj(TrainingReportRuntimeProfileMarkdown::formatMillis).findFirst().orElse("")
+                + " | " + value.overheadPercent().stream().mapToObj(TrainingReportRuntimeProfileMarkdown::formatMillis).findFirst().orElse("")
+                + " | " + value.averageMillis().stream().mapToObj(TrainingReportRuntimeProfileMarkdown::formatMillis).findFirst().orElse("")
+                + " |";
     }
 
     private static String balanceRow(

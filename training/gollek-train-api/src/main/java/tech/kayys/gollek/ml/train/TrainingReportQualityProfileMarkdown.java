@@ -32,8 +32,8 @@ public final class TrainingReportQualityProfileMarkdown {
         appendLine(markdown, "");
         appendLine(markdown, "Use these named profiles to keep local experiments, CI validation, and production promotion gates consistent.");
         appendLine(markdown, "");
-        appendLine(markdown, "| Profile | Purpose | Validation Policy | Promotion Policy |");
-        appendLine(markdown, "| --- | --- | --- | --- |");
+        appendLine(markdown, "| Profile | Purpose | Validation Policy | Performance Policy | Promotion Policy |");
+        appendLine(markdown, "| --- | --- | --- | --- | --- |");
         for (TrainingReportQualityProfile profile : catalog.profiles()) {
             appendLine(markdown, row(profile));
         }
@@ -44,6 +44,7 @@ public final class TrainingReportQualityProfileMarkdown {
         return "| `" + escapeTable(profile.id()) + "`"
                 + " | " + escapeTable(profile.description())
                 + " | " + validationPolicy(profile.validationPolicy())
+                + " | " + performancePolicy(profile.performancePolicy())
                 + " | " + promotionPolicy(profile.promotionPolicy())
                 + " |";
     }
@@ -66,6 +67,13 @@ public final class TrainingReportQualityProfileMarkdown {
                 + ", data health evidence `" + policy.requireCandidateDataHealthAvailable() + "`"
                 + ", data health gate `" + policy.requireCandidateDataHealthGate() + "`"
                 + ", clean data health `" + policy.requireCandidateDataHealthClean() + "`";
+    }
+
+    private static String performancePolicy(TrainingReportPerformanceGate.Policy policy) {
+        return "accelerator fallback fails `" + policy.failOnAcceleratorFallback() + "`"
+                + ", min train samples/s `" + formatNumber(policy.minTrainSamplesPerSecond()) + "`"
+                + ", max validation/train batch ms ratio `"
+                + formatNumber(policy.maxValidationToTrainAverageBatchMillisRatio()) + "`";
     }
 
     private static String formatNumber(double value) {

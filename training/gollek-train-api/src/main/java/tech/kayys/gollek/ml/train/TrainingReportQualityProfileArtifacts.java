@@ -324,7 +324,7 @@ public final class TrainingReportQualityProfileArtifacts {
             jsonMatchesCatalog = catalog.toMap().equals(inspection.catalog());
             markdownMatchesJson = catalog.toMarkdown().equals(inspection.markdown());
             if (!jsonMatchesCatalog) {
-                failures.add("Quality profile catalog JSON does not match built-in profile definitions: "
+                failures.add("Quality profile catalog JSON does not match its normalized profile definitions: "
                         + inspection.jsonFile());
             }
             if (!markdownMatchesJson) {

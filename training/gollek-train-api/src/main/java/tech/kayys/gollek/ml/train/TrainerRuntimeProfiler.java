@@ -14,6 +14,7 @@ import java.util.function.Supplier;
  */
 final class TrainerRuntimeProfiler {
     private final EnumMap<Phase, PhaseCounters> phases = new EnumMap<>(Phase.class);
+    private final EnumMap<Scope, PhaseCounters> scopes = new EnumMap<>(Scope.class);
     private long sequence;
 
     <T> T time(Phase phase, Supplier<T> action) {
@@ -36,15 +37,47 @@ final class TrainerRuntimeProfiler {
         }
     }
 
+    <T> T time(Scope scope, Supplier<T> action) {
+        Objects.requireNonNull(action, "action must not be null");
+        long startedAt = System.nanoTime();
+        try {
+            return action.get();
+        } finally {
+            record(scope, System.nanoTime() - startedAt);
+        }
+    }
+
+    void time(Scope scope, Runnable action) {
+        Objects.requireNonNull(action, "action must not be null");
+        long startedAt = System.nanoTime();
+        try {
+            action.run();
+        } finally {
+            record(scope, System.nanoTime() - startedAt);
+        }
+    }
+
     synchronized void record(Phase phase, long elapsedNanos) {
         Objects.requireNonNull(phase, "phase must not be null");
         phases.computeIfAbsent(phase, ignored -> new PhaseCounters())
                 .add(Math.max(0L, elapsedNanos), ++sequence);
     }
 
+    synchronized void record(Scope scope, long elapsedNanos) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        scopes.computeIfAbsent(scope, ignored -> new PhaseCounters())
+                .add(Math.max(0L, elapsedNanos), ++sequence);
+    }
+
     synchronized PhaseSnapshot snapshot(Phase phase) {
         Objects.requireNonNull(phase, "phase must not be null");
         PhaseCounters counters = phases.get(phase);
+        return counters == null ? PhaseSnapshot.empty() : counters.snapshot();
+    }
+
+    synchronized PhaseSnapshot snapshot(Scope scope) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        PhaseCounters counters = scopes.get(scope);
         return counters == null ? PhaseSnapshot.empty() : counters.snapshot();
     }
 
@@ -59,8 +92,20 @@ final class TrainerRuntimeProfiler {
         return Map.copyOf(snapshots);
     }
 
+    synchronized Map<Scope, PhaseSnapshot> scopeSnapshot() {
+        Map<Scope, PhaseSnapshot> snapshots = new EnumMap<>(Scope.class);
+        for (Scope scope : Scope.values()) {
+            PhaseSnapshot snapshot = snapshot(scope);
+            if (snapshot.count() > 0L) {
+                snapshots.put(scope, snapshot);
+            }
+        }
+        return Map.copyOf(snapshots);
+    }
+
     synchronized void reset() {
         phases.clear();
+        scopes.clear();
         sequence = 0L;
     }
 
@@ -68,8 +113,10 @@ final class TrainerRuntimeProfiler {
         String normalizedPrefix = prefix == null || prefix.isBlank() ? "trainerProfile" : prefix.trim();
         Map<String, Object> metadata = new LinkedHashMap<>();
         Map<Phase, PhaseSnapshot> snapshots = snapshot();
+        Map<Scope, PhaseSnapshot> scopeSnapshots = scopeSnapshot();
         long totalProfiledNanos = totalNanos(snapshots);
         metadata.putAll(TrainerRuntimeProfileBalanceMetadata.from(normalizedPrefix, snapshots));
+        metadata.putAll(TrainerRuntimeWallClockMetadata.from(normalizedPrefix, scopeSnapshots, snapshots));
         for (Map.Entry<Phase, PhaseSnapshot> entry : snapshots.entrySet()) {
             String key = normalizedPrefix + "." + entry.getKey().metadataKey();
             PhaseSnapshot snapshot = entry.getValue();
@@ -193,6 +240,63 @@ final class TrainerRuntimeProfiler {
 
     private static double percentTotal(PhaseSnapshot snapshot, long totalProfiledNanos) {
         return totalProfiledNanos <= 0L ? 0.0 : (snapshot.totalNanos() * 100.0) / totalProfiledNanos;
+    }
+
+    enum Scope {
+        TRAIN_BATCH("trainBatch", List.of(
+                Phase.TRAIN_BATCH_ADAPT,
+                Phase.TRAIN_VALIDATE_BATCH,
+                Phase.TRAIN_ZERO_GRAD,
+                Phase.TRAIN_FORWARD,
+                Phase.TRAIN_VALIDATE_PREDICTION,
+                Phase.TRAIN_LOSS,
+                Phase.TRAIN_VALIDATE_LOSS,
+                Phase.TRAIN_METRICS,
+                Phase.TRAIN_BACKWARD,
+                Phase.TRAIN_THROUGHPUT)),
+        VALIDATION_BATCH("validationBatch", List.of(
+                Phase.VALIDATION_BATCH_ADAPT,
+                Phase.VALIDATION_VALIDATE_BATCH,
+                Phase.VALIDATION_FORWARD,
+                Phase.VALIDATION_VALIDATE_PREDICTION,
+                Phase.VALIDATION_LOSS,
+                Phase.VALIDATION_VALIDATE_LOSS,
+                Phase.VALIDATION_METRICS,
+                Phase.VALIDATION_THROUGHPUT)),
+        OPTIMIZER_STEP("optimizerStep", List.of(
+                Phase.OPTIMIZER_GRADIENT_ACCUMULATION_SCALE,
+                Phase.OPTIMIZER_AMP_UNSCALE_CHECK,
+                Phase.OPTIMIZER_AMP_OVERFLOW_UPDATE,
+                Phase.OPTIMIZER_GRADIENT_DIAGNOSTICS_BEFORE_CLIP,
+                Phase.OPTIMIZER_GRADIENT_VALIDATE_BEFORE_CLIP,
+                Phase.OPTIMIZER_GRADIENT_NORM_CLIP,
+                Phase.OPTIMIZER_GRADIENT_VALUE_CLIP,
+                Phase.OPTIMIZER_GRADIENT_DIAGNOSTICS_AFTER_CLIP,
+                Phase.OPTIMIZER_GRADIENT_VALIDATE_AFTER_CLIP,
+                Phase.OPTIMIZER_PARAMETER_SNAPSHOT,
+                Phase.OPTIMIZER_STEP,
+                Phase.OPTIMIZER_PARAMETER_UPDATE_DIAGNOSTICS,
+                Phase.OPTIMIZER_PARAMETER_DIAGNOSTICS,
+                Phase.OPTIMIZER_PARAMETER_VALIDATE,
+                Phase.OPTIMIZER_SCHEDULER_STEP,
+                Phase.OPTIMIZER_AMP_UPDATE,
+                Phase.OPTIMIZER_ZERO_GRAD));
+
+        private final String metadataKey;
+        private final List<Phase> profiledPhases;
+
+        Scope(String metadataKey, List<Phase> profiledPhases) {
+            this.metadataKey = metadataKey;
+            this.profiledPhases = List.copyOf(profiledPhases);
+        }
+
+        String metadataKey() {
+            return metadataKey;
+        }
+
+        List<Phase> profiledPhases() {
+            return profiledPhases;
+        }
     }
 
     enum Phase {

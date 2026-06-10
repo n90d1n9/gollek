@@ -49,6 +49,24 @@ public final class TrainingReportAdvisor {
         return runtimeRegressionSummary(baselineReport, candidateReport).toMap();
     }
 
+    public static TrainingReportRuntimeRegressionGate.Result runtimeRegressionGate(
+            Map<String, ?> baselineReport,
+            Map<String, ?> candidateReport) {
+        return TrainingReportRuntimeRegressionGate.evaluate(baselineReport, candidateReport);
+    }
+
+    public static String runtimeRegressionGateMarkdown(
+            Map<String, ?> baselineReport,
+            Map<String, ?> candidateReport) {
+        return runtimeRegressionGate(baselineReport, candidateReport).markdown();
+    }
+
+    public static String runtimeRegressionGateJUnitXml(
+            Map<String, ?> baselineReport,
+            Map<String, ?> candidateReport) {
+        return runtimeRegressionGate(baselineReport, candidateReport).junitXml();
+    }
+
     public static String runtimeRegressionMarkdown(
             Map<String, ?> baselineReport,
             Map<String, ?> candidateReport) {

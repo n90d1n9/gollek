@@ -47,6 +47,12 @@ final class TrainerBatchRuntime {
     }
 
     double train(Object rawBatch, boolean zeroGradBeforeBackward) {
+        return profiler.time(
+                TrainerRuntimeProfiler.Scope.TRAIN_BATCH,
+                () -> trainProfiled(rawBatch, zeroGradBeforeBackward));
+    }
+
+    private double trainProfiled(Object rawBatch, boolean zeroGradBeforeBackward) {
         Batch batch = profiler.time(TrainerRuntimeProfiler.Phase.TRAIN_BATCH_ADAPT, () -> toBatch(rawBatch, "train"));
         long startedAt = System.nanoTime();
         boolean counted = false;
@@ -92,6 +98,12 @@ final class TrainerBatchRuntime {
     }
 
     double validation(Object rawBatch) {
+        return profiler.time(
+                TrainerRuntimeProfiler.Scope.VALIDATION_BATCH,
+                () -> validationProfiled(rawBatch));
+    }
+
+    private double validationProfiled(Object rawBatch) {
         Batch batch = profiler.time(
                 TrainerRuntimeProfiler.Phase.VALIDATION_BATCH_ADAPT,
                 () -> toBatch(rawBatch, "validation"));

@@ -43,20 +43,105 @@ class TrainingReportQualityProfileValidationGateTest {
         assertFalse(strict.validationPassed());
         assertTrue(strict.validation().failureCodes().contains("data_health.missing"));
         assertTrue(strict.verification().passed());
+        assertTrue(strict.performancePassed());
+        assertTrue(strict.performanceVerification().passed());
         assertTrue(Files.isRegularFile(strict.artifacts().jsonFile()));
         assertTrue(Files.isRegularFile(strict.artifacts().markdownFile()));
         assertTrue(Files.isRegularFile(strict.artifacts().junitXmlFile()));
+        assertTrue(Files.isRegularFile(strict.performanceArtifacts().jsonFile()));
         assertTrue(strict.message().contains("Profile `strict-ci` validation gate failed"));
         assertThrows(IllegalStateException.class, strict::requirePassed);
 
         assertEquals(TrainingReportQualityProfile.LOCAL_EXPERIMENT, local.profile().id());
         assertTrue(local.passed());
         assertTrue(local.validationPassed());
+        assertTrue(local.performancePassed());
         assertTrue(local.verification().passed());
+        assertTrue(local.performanceVerification().passed());
         assertDoesNotThrow(local::requirePassed);
         assertTrue(Gollek.DL.trainingReportQualityProfileValidationGateMarkdown(local)
                 .contains("# Training Report Quality Profile Validation Gate"));
         assertEquals(Boolean.TRUE, local.toMap().get("passed"));
+    }
+
+    @Test
+    void profileValidationGateFailsWhenPerformanceGateFails() throws IOException {
+        Path reportFile = writeReport(
+                "performance-fallback-report.json",
+                Map.ofEntries(
+                        Map.entry("requestedDevice", "metal"),
+                        Map.entry("executionBackend", "cpu"),
+                        Map.entry("executionDeviceName", "CPU"),
+                        Map.entry("executionAccelerated", false),
+                        Map.entry("requestedDeviceAvailable", false),
+                        Map.entry("executionFallback", true),
+                        Map.entry("trainBatchCount", 2L),
+                        Map.entry("trainSampleCount", 16L),
+                        Map.entry("trainSamplesPerSecond", 16.0),
+                        Map.entry("trainAverageBatchMillis", 500.0)));
+
+        TrainingReportQualityProfileValidationGate.Result result =
+                Gollek.DL.runTrainingReportQualityProfileValidationGate(
+                        reportFile,
+                        new TrainingReportQualityProfile(
+                                "local-validation-strict-performance",
+                                "Local Validation Strict Performance",
+                                "Allows local report validation while enforcing accelerator placement.",
+                                TrainingReportValidationPolicy.permissive().withRequireDataHealthGate(false),
+                                TrainingReportPerformanceGate.Policy.strict(),
+                                TrainingReportPortfolio.PromotionPolicy.defaultPolicy()),
+                        tempDir.resolve("performance-validation"));
+
+        assertFalse(result.passed());
+        assertTrue(result.validationPassed());
+        assertFalse(result.performancePassed());
+        assertEquals("performance.accelerator_fallback", result.performance().findings().get(0).code());
+        assertTrue(result.message().contains("Trainer performance gate found"));
+        assertTrue(result.markdown().contains("# Gollek Trainer Performance Gate"));
+        assertTrue(result.toMap().containsKey("performance"));
+        assertThrows(IllegalStateException.class, result::requirePassed);
+    }
+
+    @Test
+    void runsCustomCatalogProfileValidationGateFromJsonFile() throws IOException {
+        Path reportFile = writeReport(
+                "catalog-performance-fallback-report.json",
+                Map.ofEntries(
+                        Map.entry("requestedDevice", "metal"),
+                        Map.entry("executionBackend", "cpu"),
+                        Map.entry("executionDeviceName", "CPU"),
+                        Map.entry("executionAccelerated", false),
+                        Map.entry("requestedDeviceAvailable", false),
+                        Map.entry("executionFallback", true),
+                        Map.entry("trainBatchCount", 2L),
+                        Map.entry("trainSampleCount", 16L),
+                        Map.entry("trainSamplesPerSecond", 16.0),
+                        Map.entry("trainAverageBatchMillis", 500.0)));
+        TrainingReportQualityProfile custom = new TrainingReportQualityProfile(
+                "Catalog Strict Metal",
+                "Catalog Strict Metal",
+                "Permissive validation with strict accelerator placement from a catalog file.",
+                TrainingReportValidationPolicy.permissive()
+                        .withRequireDataHealthGate(false),
+                TrainingReportPerformanceGate.Policy.strict(),
+                TrainingReportPortfolio.PromotionPolicy.defaultPolicy());
+        TrainingReportQualityProfileArtifacts.ArtifactBundle catalog =
+                Gollek.DL.writeTrainingReportQualityProfileArtifacts(
+                        tempDir.resolve("catalog-profiles"),
+                        List.of(custom));
+
+        TrainingReportQualityProfileValidationGate.Result result =
+                Gollek.DL.runTrainingReportQualityProfileValidationGate(
+                        reportFile,
+                        catalog.jsonFile(),
+                        "CATALOG_STRICT_METAL",
+                        tempDir.resolve("catalog-validation"));
+
+        assertEquals("catalog-strict-metal", result.profile().id());
+        assertTrue(result.validationPassed());
+        assertFalse(result.performancePassed());
+        assertEquals("performance.accelerator_fallback", result.performance().findings().getFirst().code());
+        assertTrue(Files.isRegularFile(result.performanceArtifacts().jsonFile()));
     }
 
     @Test
@@ -100,8 +185,10 @@ class TrainingReportQualityProfileValidationGateTest {
         assertEquals(TrainingReportQualityProfile.LOCAL_EXPERIMENT, inspection.profileId().orElseThrow());
         assertTrue(inspection.passed());
         assertTrue(inspection.validationPassed());
+        assertTrue(inspection.performancePassed());
         assertTrue(inspection.failureCodes().isEmpty());
         assertTrue(inspection.markdown().contains("# Gollek Training Quality Profile Validation Gate"));
+        assertTrue(inspection.markdown().contains("**Performance:** `PASS`"));
 
         TrainingReportQualityProfileValidationGateArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportQualityProfileValidationGateArtifacts(bundle);
@@ -134,9 +221,15 @@ class TrainingReportQualityProfileValidationGateTest {
     }
 
     private Path writeReport(String fileName) throws IOException {
+        return writeReport(fileName, Map.of());
+    }
+
+    private Path writeReport(String fileName, Map<String, Object> metadataOverrides) throws IOException {
         List<Map<String, Object>> epochHistory = List.of(
                 Map.of("epoch", 0, "trainLoss", 0.9, "validationLoss", 1.0),
                 Map.of("epoch", 1, "trainLoss", 0.6, "validationLoss", 0.7));
+        java.util.LinkedHashMap<String, Object> metadata = new java.util.LinkedHashMap<>(metadataOverrides);
+        metadata.put("epochHistory", epochHistory);
         TrainingSummary summary = new TrainingSummary(
                 epochHistory.size(),
                 0.7,
@@ -144,7 +237,7 @@ class TrainingReportQualityProfileValidationGateTest {
                 0.6,
                 0.7,
                 120L,
-                Map.of("epochHistory", epochHistory));
+                metadata);
         Path reportFile = tempDir.resolve(fileName);
         Files.writeString(
                 reportFile,

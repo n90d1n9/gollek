@@ -14,13 +14,19 @@ import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCiGateManifestVeri
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCiGateManifestVerificationReportReceipt;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfile;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCatalogAdviceArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCatalogAdvisor;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCatalog;
+import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCatalogValidationArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportQualityProfileCatalogValidator;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfilePromotionGate;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfilePromotionGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileValidationGate;
 import tech.kayys.gollek.ml.train.TrainingReportQualityProfileValidationGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportReader;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeEfficiency;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeEfficiencyMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportValidationMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportValidationPolicy;
 
@@ -39,20 +45,195 @@ public class GollekDlQualityProfileFacade extends GollekDlTrainingFacade {
         return TrainingReportQualityProfile.require(id);
     }
 
+    public static TrainingReportQualityProfile trainingReportQualityProfile(
+            TrainingReportQualityProfileCatalog catalog,
+            String id) {
+        TrainingReportQualityProfileCatalog resolvedCatalog = catalog == null
+                ? TrainingReportQualityProfileCatalog.defaults()
+                : catalog;
+        return resolvedCatalog.require(id);
+    }
+
+    public static TrainingReportQualityProfile trainingReportQualityProfile(
+            Path catalogJsonFile,
+            String id) throws IOException {
+        return trainingReportQualityProfile(trainingReportQualityProfileCatalog(catalogJsonFile), id);
+    }
+
+    public static TrainingReportQualityProfile trainingReportQualityProfile(Map<String, ?> profile) {
+        return TrainingReportQualityProfile.fromMap(profile);
+    }
+
     public static TrainingReportQualityProfileCatalog trainingReportQualityProfileCatalog() {
         return TrainingReportQualityProfileCatalog.defaults();
+    }
+
+    public static TrainingReportQualityProfileCatalog trainingReportQualityProfileCatalog(Map<String, ?> catalog) {
+        return TrainingReportQualityProfileCatalog.fromMap(catalog);
+    }
+
+    public static TrainingReportQualityProfileCatalog trainingReportQualityProfileCatalog(Path jsonFile)
+            throws IOException {
+        return TrainingReportQualityProfileCatalog.readJson(jsonFile);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidator.Result validateTrainingReportQualityProfileCatalog(
+            TrainingReportQualityProfileCatalog catalog) {
+        return TrainingReportQualityProfileCatalogValidator.validate(catalog);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidator.Result validateTrainingReportQualityProfileCatalog(
+            Map<String, ?> catalog) {
+        return TrainingReportQualityProfileCatalogValidator.validate(catalog);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidator.Result validateTrainingReportQualityProfileCatalog(
+            Path catalogJsonFile) throws IOException {
+        return TrainingReportQualityProfileCatalogValidator.validateJson(catalogJsonFile);
+    }
+
+    public static String trainingReportQualityProfileCatalogValidationMarkdown(
+            TrainingReportQualityProfileCatalogValidator.Result result) {
+        return result.markdown();
+    }
+
+    public static String trainingReportQualityProfileCatalogValidationJUnitXml(
+            TrainingReportQualityProfileCatalogValidator.Result result) {
+        return result.junitXml();
+    }
+
+    public static TrainingReportQualityProfileCatalogAdvisor.Result adviseTrainingReportQualityProfileCatalog(
+            TrainingReportQualityProfileCatalog catalog) {
+        return TrainingReportQualityProfileCatalogAdvisor.advise(catalog);
+    }
+
+    public static TrainingReportQualityProfileCatalogAdvisor.Result adviseTrainingReportQualityProfileCatalog(
+            Map<String, ?> catalog) {
+        return TrainingReportQualityProfileCatalogAdvisor.advise(catalog);
+    }
+
+    public static String trainingReportQualityProfileCatalogAdviceMarkdown(
+            TrainingReportQualityProfileCatalogAdvisor.Result result) {
+        return result.markdown();
+    }
+
+    public static TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactBundle
+            writeTrainingReportQualityProfileCatalogAdviceArtifacts(
+                    Path outputDirectory,
+                    TrainingReportQualityProfileCatalogAdvisor.Result result) throws IOException {
+        return TrainingReportQualityProfileCatalogAdviceArtifacts.write(outputDirectory, result);
+    }
+
+    public static TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactInspection
+            readTrainingReportQualityProfileCatalogAdviceArtifacts(Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCatalogAdviceArtifacts.read(outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactBundle
+            refreshTrainingReportQualityProfileCatalogAdviceArtifacts(Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCatalogAdviceArtifacts.refreshDerived(outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactVerification
+            verifyTrainingReportQualityProfileCatalogAdviceArtifacts(
+                    TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportQualityProfileCatalogAdviceArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportQualityProfileCatalogAdviceArtifacts.ArtifactVerification
+            verifyTrainingReportQualityProfileCatalogAdviceArtifacts(
+                    Path outputDirectory,
+                    String expectedJsonSha256,
+                    String expectedMarkdownSha256) throws IOException {
+        return TrainingReportQualityProfileCatalogAdviceArtifacts.verify(
+                outputDirectory,
+                expectedJsonSha256,
+                expectedMarkdownSha256);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactBundle
+            writeTrainingReportQualityProfileCatalogValidationArtifacts(
+                    Path outputDirectory,
+                    TrainingReportQualityProfileCatalogValidator.Result result) throws IOException {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.write(outputDirectory, result);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactInspection
+            readTrainingReportQualityProfileCatalogValidationArtifacts(Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.read(outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactBundle
+            refreshTrainingReportQualityProfileCatalogValidationArtifacts(Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.refreshDerived(outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactVerification
+            verifyTrainingReportQualityProfileCatalogValidationArtifacts(
+                    TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactVerification
+            verifyTrainingReportQualityProfileCatalogValidationArtifacts(
+                    Path outputDirectory,
+                    String expectedJsonSha256,
+                    String expectedMarkdownSha256) throws IOException {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.verify(
+                outputDirectory,
+                expectedJsonSha256,
+                expectedMarkdownSha256);
+    }
+
+    public static TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactVerification
+            verifyTrainingReportQualityProfileCatalogValidationArtifacts(
+                    TrainingReportQualityProfileCatalogValidationArtifacts.ArtifactInspection inspection,
+                    String expectedJsonSha256,
+                    String expectedMarkdownSha256,
+                    String expectedJunitXmlSha256) {
+        return TrainingReportQualityProfileCatalogValidationArtifacts.verify(
+                inspection,
+                expectedJsonSha256,
+                expectedMarkdownSha256,
+                expectedJunitXmlSha256);
     }
 
     public static String trainingReportQualityProfilesJson() {
         return trainingReportQualityProfileCatalog().toJson();
     }
 
+    public static String trainingReportQualityProfilesJson(TrainingReportQualityProfileCatalog catalog) {
+        TrainingReportQualityProfileCatalog resolvedCatalog = catalog == null
+                ? TrainingReportQualityProfileCatalog.defaults()
+                : catalog;
+        return resolvedCatalog.toJson();
+    }
+
     public static String trainingReportQualityProfilesMarkdown() {
         return TrainingReportQualityProfileMarkdown.render(trainingReportQualityProfileCatalog());
     }
 
+    public static String trainingReportQualityProfilesMarkdown(TrainingReportQualityProfileCatalog catalog) {
+        TrainingReportQualityProfileCatalog resolvedCatalog = catalog == null
+                ? TrainingReportQualityProfileCatalog.defaults()
+                : catalog;
+        return TrainingReportQualityProfileMarkdown.render(resolvedCatalog);
+    }
+
     public static String trainingReportQualityProfilesMarkdown(List<TrainingReportQualityProfile> profiles) {
         return TrainingReportQualityProfileMarkdown.render(profiles);
+    }
+
+    public static TrainingReportRuntimeEfficiency trainingReportRuntimeEfficiency(TrainingReport report) {
+        return report.runtimeEfficiency();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeEfficiencyMap(TrainingReport report) {
+        return report.runtimeEfficiencyMap();
+    }
+
+    public static String trainingReportRuntimeEfficiencyMarkdown(TrainingReport report) {
+        return TrainingReportRuntimeEfficiencyMarkdown.render(report.runtimeEfficiency());
     }
 
     public static TrainingReportQualityProfileArtifacts.ArtifactBundle writeTrainingReportQualityProfileArtifacts(
@@ -146,6 +327,30 @@ public class GollekDlQualityProfileFacade extends GollekDlTrainingFacade {
             String profileId,
             Path outputDirectory) throws IOException {
         return TrainingReportQualityProfileValidationGate.evaluateProfile(reportFile, profileId, outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileValidationGate.Result runTrainingReportQualityProfileValidationGate(
+            Path reportFile,
+            TrainingReportQualityProfileCatalog catalog,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileValidationGate.evaluateCatalogProfile(
+                reportFile,
+                catalog,
+                profileId,
+                outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileValidationGate.Result runTrainingReportQualityProfileValidationGate(
+            Path reportFile,
+            Path catalogJsonFile,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileValidationGate.evaluateCatalogProfile(
+                reportFile,
+                catalogJsonFile,
+                profileId,
+                outputDirectory);
     }
 
     public static String trainingReportQualityProfileValidationGateMarkdown(
@@ -246,6 +451,34 @@ public class GollekDlQualityProfileFacade extends GollekDlTrainingFacade {
                 outputDirectory);
     }
 
+    public static TrainingReportQualityProfilePromotionGate.Result runTrainingReportQualityProfilePromotionGate(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            TrainingReportQualityProfileCatalog catalog,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfilePromotionGate.evaluateCatalogProfile(
+                reportFiles,
+                baselineName,
+                catalog,
+                profileId,
+                outputDirectory);
+    }
+
+    public static TrainingReportQualityProfilePromotionGate.Result runTrainingReportQualityProfilePromotionGate(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            Path catalogJsonFile,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfilePromotionGate.evaluateCatalogProfile(
+                reportFiles,
+                baselineName,
+                catalogJsonFile,
+                profileId,
+                outputDirectory);
+    }
+
     public static TrainingReportQualityProfileCiGate.Result runTrainingReportQualityProfileCiGate(
             TrainingReportQualityProfileCiGate.Request request) throws IOException {
         return TrainingReportQualityProfileCiGate.evaluate(request);
@@ -271,6 +504,34 @@ public class GollekDlQualityProfileFacade extends GollekDlTrainingFacade {
         return TrainingReportQualityProfileCiGate.evaluateProfile(
                 reportFiles,
                 baselineName,
+                profileId,
+                outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCiGate.Result runTrainingReportQualityProfileCiGate(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            TrainingReportQualityProfileCatalog catalog,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCiGate.evaluateCatalogProfile(
+                reportFiles,
+                baselineName,
+                catalog,
+                profileId,
+                outputDirectory);
+    }
+
+    public static TrainingReportQualityProfileCiGate.Result runTrainingReportQualityProfileCiGate(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            Path catalogJsonFile,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return TrainingReportQualityProfileCiGate.evaluateCatalogProfile(
+                reportFiles,
+                baselineName,
+                catalogJsonFile,
                 profileId,
                 outputDirectory);
     }

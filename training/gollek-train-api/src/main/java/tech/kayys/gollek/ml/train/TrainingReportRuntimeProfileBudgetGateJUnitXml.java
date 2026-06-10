@@ -29,6 +29,10 @@ public final class TrainingReportRuntimeProfileBudgetGateJUnitXml {
                 Double.toString(result.policy().maxPrimaryHotspotPercent()));
         property(xml, "policy.maxPrimaryHotspotTotalMillis",
                 Double.toString(result.policy().maxPrimaryHotspotTotalMillis()));
+        property(xml, "policy.maxWallClockOverheadPercent",
+                Double.toString(result.policy().maxWallClockOverheadPercent()));
+        property(xml, "policy.maxWallClockOverheadMillis",
+                Double.toString(result.policy().maxWallClockOverheadMillis()));
         appendLine(xml, "  </properties>");
         appendLine(xml, "  <testcase classname=\"gollek.training.runtime.profile\" "
                 + "name=\"validate runtime profile budget\" time=\"0\">");

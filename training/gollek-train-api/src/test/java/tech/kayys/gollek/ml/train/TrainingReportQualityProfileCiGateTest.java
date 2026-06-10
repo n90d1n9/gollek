@@ -74,6 +74,46 @@ class TrainingReportQualityProfileCiGateTest {
     }
 
     @Test
+    void runsCustomCatalogProfileCiGateFromJsonFile() throws IOException {
+        Map<String, Path> reports = reportFiles(
+                TrainingReportQualityProfileTestFixtures.cleanDataHealthMetadata(),
+                TrainingReportQualityProfileTestFixtures.warningDataHealthMetadata());
+        TrainingReportQualityProfile custom = new TrainingReportQualityProfile(
+                "Catalog CI Research",
+                "Catalog CI Research",
+                "Custom CI profile that validates and promotes warning data-health candidates.",
+                TrainingReportValidationPolicy.permissive()
+                        .withRequireDataHealthGate(false),
+                TrainingReportPerformanceGate.Policy.permissive(),
+                TrainingReportPortfolio.PromotionPolicy.defaultPolicy()
+                        .withMaxCandidateDiagnosticSeverity(TrainingReportDiagnostics.Severity.WARNING)
+                        .withMaxComparisonFindingSeverity(TrainingReportDiagnostics.Severity.WARNING)
+                        .withRequireTrackedMetricImprovement(false)
+                        .withRequireCandidateDataHealthGate(false)
+                        .withRequireCandidateDataHealthClean(false));
+        TrainingReportQualityProfileArtifacts.ArtifactBundle catalog =
+                Gollek.DL.writeTrainingReportQualityProfileArtifacts(
+                        tempDir.resolve("ci-catalog"),
+                        List.of(custom));
+
+        TrainingReportQualityProfileCiGate.Result result =
+                Gollek.DL.runTrainingReportQualityProfileCiGate(
+                        reports,
+                        "baseline",
+                        catalog.jsonFile(),
+                        "CATALOG_CI_RESEARCH",
+                        tempDir.resolve("catalog-ci"));
+
+        assertEquals("catalog-ci-research", result.profile().id());
+        assertTrue(result.passed());
+        assertTrue(result.validationPassed());
+        assertTrue(result.promotionPassed());
+        assertTrue(result.artifactsVerified());
+        assertEquals("candidate", result.promotion().decision().candidate().orElseThrow().name());
+        assertDoesNotThrow(result::requirePassed);
+    }
+
+    @Test
     void rejectsUnknownBaselineBeforeWritingArtifacts() throws IOException {
         Map<String, Path> reports = reportFiles(Map.of(), Map.of());
 

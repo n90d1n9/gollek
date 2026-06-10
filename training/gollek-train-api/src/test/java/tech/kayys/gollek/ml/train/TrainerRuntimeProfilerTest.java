@@ -155,6 +155,37 @@ class TrainerRuntimeProfilerTest {
     }
 
     @Test
+    void exportsWallClockScopeOverheadWithoutChangingPhaseBalance() {
+        TrainerRuntimeProfiler profiler = new TrainerRuntimeProfiler();
+
+        profiler.record(TrainerRuntimeProfiler.Phase.TRAIN_FORWARD, 3_000_000L);
+        profiler.record(TrainerRuntimeProfiler.Phase.TRAIN_BACKWARD, 4_000_000L);
+        profiler.record(TrainerRuntimeProfiler.Scope.TRAIN_BATCH, 10_000_000L);
+        profiler.record(TrainerRuntimeProfiler.Phase.OPTIMIZER_STEP, 2_000_000L);
+        profiler.record(TrainerRuntimeProfiler.Scope.OPTIMIZER_STEP, 5_000_000L);
+
+        Map<String, Object> metadata = profiler.toMetadata("runtimeProfile");
+
+        assertEquals(7.0, (double) metadata.get("runtimeProfile.balance.train.totalMillis"), 1e-6);
+        assertEquals(2.0, (double) metadata.get("runtimeProfile.balance.optimizer.totalMillis"), 1e-6);
+        assertEquals(15.0, (double) metadata.get("runtimeProfile.wall.totalMillis"), 1e-6);
+        assertEquals(2, metadata.get("runtimeProfile.wall.scopeCount"));
+        assertEquals(10.0, (double) metadata.get("runtimeProfile.wall.trainBatch.totalMillis"), 1e-6);
+        assertEquals(7.0, (double) metadata.get("runtimeProfile.wall.trainBatch.profiledMillis"), 1e-6);
+        assertEquals(3.0, (double) metadata.get("runtimeProfile.wall.trainBatch.overheadMillis"), 1e-6);
+        assertEquals(30.0, (double) metadata.get("runtimeProfile.wall.trainBatch.overheadPercent"), 1e-6);
+        assertEquals(5.0, (double) metadata.get("runtimeProfile.wall.optimizerStep.totalMillis"), 1e-6);
+        assertEquals(2.0, (double) metadata.get("runtimeProfile.wall.optimizerStep.profiledMillis"), 1e-6);
+        assertEquals("trainBatch", metadata.get("runtimeProfile.wall.primaryOverhead.scope"));
+
+        TrainingReportRuntimeProfile profile = TrainingReportRuntimeProfile.fromMetadata(metadata);
+        assertTrue(profile.wallClock().available());
+        assertEquals(15.0, profile.wallClock().totalMillis().orElseThrow(), 1e-6);
+        assertEquals(3.0, profile.wallClock().trainBatch().overheadMillis().orElseThrow(), 1e-6);
+        assertTrue(TrainingReportRuntimeProfileMarkdown.render(profile).contains("### Wall-Clock Overhead"));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void groupedLastDurationUsesObservationOrder() {
         TrainerRuntimeProfiler profiler = new TrainerRuntimeProfiler();
@@ -184,6 +215,8 @@ class TrainerRuntimeProfilerTest {
         assertEquals(0, profiler.toMetadata("runtimeProfile").get("runtimeProfile.hotspotCount"));
         assertEquals(0, profiler.toMetadata("runtimeProfile").get("runtimeProfile.groupCount"));
         assertEquals(0.0, (double) profiler.toMetadata("runtimeProfile").get("runtimeProfile.totalMillis"), 1e-6);
+        assertEquals(0.0, (double) profiler.toMetadata("runtimeProfile").get("runtimeProfile.wall.totalMillis"), 1e-6);
+        assertEquals(0, profiler.toMetadata("runtimeProfile").get("runtimeProfile.wall.scopeCount"));
         assertEquals("none", profiler.toMetadata("runtimeProfile").get("runtimeProfile.balance.bottleneckGroup"));
     }
 

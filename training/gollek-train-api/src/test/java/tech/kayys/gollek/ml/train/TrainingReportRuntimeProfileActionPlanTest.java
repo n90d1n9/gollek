@@ -86,6 +86,27 @@ class TrainingReportRuntimeProfileActionPlanTest {
                 .anyMatch(action -> action.contains("DataLoader.prefetch")));
     }
 
+    @Test
+    void addsWallClockOverheadTargetWhenScopeTimeExceedsProfiledPhases() {
+        TrainingReport report = reportWithTrainBatchWallClockOverhead();
+
+        TrainingReportRuntimeProfileActionPlan plan = report.runtimeProfileActionPlan();
+        String markdown = report.runtimeProfileActionPlanMarkdown();
+
+        assertEquals(TrainingReportRuntimeProfileActionPlan.Status.NEEDS_OPTIMIZATION, plan.status());
+        assertTrue(plan.targets().stream()
+                .anyMatch(target -> target.kind() == TrainingReportRuntimeProfileActionPlan.TargetKind.OVERHEAD
+                        && target.name().equals("trainBatch")
+                        && target.diagnosticCode().equals("runtime_profile.wall_clock.overhead")
+                        && target.totalMillis().orElseThrow() == 8.0
+                        && target.percentTotal().orElseThrow() == 40.0
+                        && target.evidence().get("profiledMillis").equals(12.0)));
+        assertTrue(plan.nextActions().stream()
+                .anyMatch(action -> action.contains("trainer batch orchestration")));
+        assertTrue(markdown.contains("| 1 | `OVERHEAD` | `trainBatch` | `HIGH`"));
+        assertTrue(markdown.contains("runtime_profile.wall_clock.overhead"));
+    }
+
     private static TrainingReport reportWithRuntimeProfile() {
         TrainingSummary summary = new TrainingSummary(
                 1,
@@ -184,6 +205,56 @@ class TrainingReportRuntimeProfileActionPlanTest {
                         Map.entry("runtimeProfile.balance.optimizer.percentTotal", 0.0),
                         Map.entry("runtimeProfile.input.train.next.count", 4L),
                         Map.entry("runtimeProfile.input.train.next.totalMillis", 40.0)));
+        return TrainingReport.of(TrainerTrainingReport.payload(
+                summary,
+                Instant.parse("2026-05-26T11:12:13Z")));
+    }
+
+    private static TrainingReport reportWithTrainBatchWallClockOverhead() {
+        TrainingSummary summary = new TrainingSummary(
+                1,
+                0.8,
+                0,
+                0.7,
+                0.8,
+                100L,
+                Map.ofEntries(
+                        Map.entry("epochHistory", List.of(
+                                Map.of("epoch", 0, "trainLoss", 0.7, "validationLoss", 0.8, "learningRate", 0.01))),
+                        Map.entry("runtimeProfile.totalMillis", 12.0),
+                        Map.entry("runtimeProfile.groupCount", 1),
+                        Map.entry("runtimeProfile.primaryGroup.name", "train"),
+                        Map.entry("runtimeProfile.primaryGroup.totalMillis", 12.0),
+                        Map.entry("runtimeProfile.primaryGroup.percentTotal", 100.0),
+                        Map.entry("runtimeProfile.groups", List.of(Map.of(
+                                "name", "train",
+                                "count", 3L,
+                                "totalMillis", 12.0,
+                                "percentTotal", 100.0,
+                                "averageMillis", 4.0))),
+                        Map.entry("runtimeProfile.hotspotCount", 1),
+                        Map.entry("runtimeProfile.primaryHotspot.phase", "train.forward"),
+                        Map.entry("runtimeProfile.primaryHotspot.totalMillis", 9.0),
+                        Map.entry("runtimeProfile.primaryHotspot.percentTotal", 75.0),
+                        Map.entry("runtimeProfile.hotspots", List.of(Map.of(
+                                "phase", "train.forward",
+                                "count", 2L,
+                                "totalMillis", 9.0,
+                                "percentTotal", 75.0,
+                                "averageMillis", 4.5))),
+                        Map.entry("runtimeProfile.wall.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.scopeCount", 1),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.scope", "trainBatch"),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.profiledMillis", 12.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.overheadMillis", 8.0),
+                        Map.entry("runtimeProfile.wall.primaryOverhead.overheadPercent", 40.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.count", 2L),
+                        Map.entry("runtimeProfile.wall.trainBatch.totalMillis", 20.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.averageMillis", 10.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.profiledMillis", 12.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.overheadMillis", 8.0),
+                        Map.entry("runtimeProfile.wall.trainBatch.overheadPercent", 40.0)));
         return TrainingReport.of(TrainerTrainingReport.payload(
                 summary,
                 Instant.parse("2026-05-26T11:12:13Z")));

@@ -28,6 +28,9 @@ final class TrainingReportRuntimeProfileAdvisor {
                 .ifPresent(recommendations::add);
         recommendations.addAll(TrainingReportRuntimeProfileStabilityAdvisor.recommendations(profile));
         recommendations.addAll(TrainingReportRuntimeProfileBalanceAdvisor.recommendations(report));
+        recommendations.addAll(TrainingReportRuntimeWallClockAdvisor.recommendations(profile));
+        recommendations.addAll(TrainingReportRuntimeEfficiencyAdvisor.recommendations(
+                TrainingReportRuntimeEfficiency.from(profile)));
         return List.copyOf(recommendations);
     }
 

@@ -195,7 +195,8 @@ public final class CanonicalTrainer implements AutoCloseable {
                 this.gradientAccumulationSteps,
                 this.mixedPrecision,
                 this.gradScaler,
-                failureState::nonFiniteDetected);
+                failureState::nonFiniteDetected,
+                runtimeProfiler);
         this.checkpointResume = new TrainerCheckpointResumeCoordinator(
                 new TrainerCheckpointResumeCoordinator.Request(
                         this.resumeFromCheckpoint,

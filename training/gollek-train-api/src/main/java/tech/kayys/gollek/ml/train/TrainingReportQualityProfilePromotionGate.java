@@ -51,6 +51,32 @@ public final class TrainingReportQualityProfilePromotionGate {
                     outputDirectory);
         }
 
+        public static Request ofCatalogProfile(
+                Map<String, Path> reportFiles,
+                String baselineName,
+                TrainingReportQualityProfileCatalog catalog,
+                String profileId,
+                Path outputDirectory) {
+            TrainingReportQualityProfileCatalog resolvedCatalog = catalog == null
+                    ? TrainingReportQualityProfileCatalog.defaults()
+                    : catalog;
+            return of(reportFiles, baselineName, resolvedCatalog.require(profileId), outputDirectory);
+        }
+
+        public static Request ofCatalogProfile(
+                Map<String, Path> reportFiles,
+                String baselineName,
+                Path catalogJsonFile,
+                String profileId,
+                Path outputDirectory) throws IOException {
+            return ofCatalogProfile(
+                    reportFiles,
+                    baselineName,
+                    TrainingReportQualityProfileCatalog.readJson(catalogJsonFile),
+                    profileId,
+                    outputDirectory);
+        }
+
         TrainingReportPromotionGate.Request toPromotionGateRequest() {
             return new TrainingReportPromotionGate.Request(
                     reportFiles,
@@ -157,5 +183,23 @@ public final class TrainingReportQualityProfilePromotionGate {
             String profileId,
             Path outputDirectory) throws IOException {
         return evaluate(Request.ofProfile(reportFiles, baselineName, profileId, outputDirectory));
+    }
+
+    public static Result evaluateCatalogProfile(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            TrainingReportQualityProfileCatalog catalog,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return evaluate(Request.ofCatalogProfile(reportFiles, baselineName, catalog, profileId, outputDirectory));
+    }
+
+    public static Result evaluateCatalogProfile(
+            Map<String, Path> reportFiles,
+            String baselineName,
+            Path catalogJsonFile,
+            String profileId,
+            Path outputDirectory) throws IOException {
+        return evaluate(Request.ofCatalogProfile(reportFiles, baselineName, catalogJsonFile, profileId, outputDirectory));
     }
 }

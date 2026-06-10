@@ -341,9 +341,7 @@ public final class TrainingReportQualityProfilePromotionGateArtifacts {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
 
-        boolean profileKnown = inspection.profileId()
-                .flatMap(TrainingReportQualityProfile::find)
-                .isPresent();
+        boolean profileKnown = profileKnown(inspection);
         if (!profileKnown) {
             failures.add("Quality profile is unknown or missing in " + inspection.jsonFile());
         }
@@ -511,6 +509,25 @@ public final class TrainingReportQualityProfilePromotionGateArtifacts {
         }
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? fallback : text;
+    }
+
+    private static boolean profileKnown(ArtifactInspection inspection) {
+        return inspection.profileId()
+                .filter(id -> TrainingReportQualityProfile.find(id).isPresent()
+                        || embeddedProfileMatches(inspection.profile(), id))
+                .isPresent();
+    }
+
+    private static boolean embeddedProfileMatches(Map<String, Object> profile, String expectedId) {
+        if (profile == null || profile.isEmpty()) {
+            return false;
+        }
+        try {
+            return TrainingReportQualityProfile.fromMap(profile).id()
+                    .equals(TrainingReportQualityProfile.normalizeId(expectedId));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static String shortSha(String sha256) {

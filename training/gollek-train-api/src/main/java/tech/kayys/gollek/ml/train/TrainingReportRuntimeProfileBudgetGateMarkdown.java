@@ -35,7 +35,13 @@ final class TrainingReportRuntimeProfileBudgetGateMarkdown {
                 .append("` |\n");
         markdown.append("| Input balance | `").append(format(policy.maxInputBalancePercent())).append("%` |\n");
         markdown.append("| Optimizer balance | `").append(format(policy.maxOptimizerBalancePercent())).append("%` |\n");
-        markdown.append("| Validation balance | `").append(format(policy.maxValidationBalancePercent())).append("%` |\n\n");
+        markdown.append("| Validation balance | `").append(format(policy.maxValidationBalancePercent())).append("%` |\n");
+        markdown.append("| Wall-clock overhead | `")
+                .append(format(policy.maxWallClockOverheadPercent()))
+                .append("%` |\n");
+        markdown.append("| Wall-clock overhead total | `")
+                .append(formatBudget(policy.maxWallClockOverheadMillis()))
+                .append("` |\n\n");
     }
 
     private static void appendRuntimeSummary(StringBuilder markdown, Map<String, Object> runtimeProfile) {
@@ -49,6 +55,7 @@ final class TrainingReportRuntimeProfileBudgetGateMarkdown {
         appendPrimary(markdown, "Primary group", runtimeProfile.get("primaryGroup"), "name");
         appendPrimary(markdown, "Primary hotspot", runtimeProfile.get("primaryHotspot"), "phase");
         appendBalance(markdown, runtimeProfile.get("balance"));
+        appendWallClock(markdown, runtimeProfile.get("wallClock"));
         markdown.append("\n");
     }
 
@@ -125,6 +132,31 @@ final class TrainingReportRuntimeProfileBudgetGateMarkdown {
         markdown.append("| ").append(label).append(" | `").append(format(percent.doubleValue())).append("%`");
         if (totalMillis instanceof Number total) {
             markdown.append(" (`").append(format(total.doubleValue())).append(" ms`)");
+        }
+        markdown.append(" |\n");
+    }
+
+    private static void appendWallClock(StringBuilder markdown, Object value) {
+        if (!(value instanceof Map<?, ?> wallClock) || !Boolean.TRUE.equals(wallClock.get("available"))) {
+            return;
+        }
+        Object scope = wallClock.get("primaryOverheadScope");
+        Object primary = wallClock.get("primaryOverhead");
+        if (!(primary instanceof Map<?, ?> overhead) || scope == null || String.valueOf(scope).isBlank()) {
+            return;
+        }
+        Object overheadMillis = overhead.get("overheadMillis");
+        Object overheadPercent = overhead.get("overheadPercent");
+        if (!(overheadMillis instanceof Number millis) && !(overheadPercent instanceof Number)) {
+            return;
+        }
+        markdown.append("| Wall overhead | `").append(escapeCell(String.valueOf(scope))).append("`");
+        if (overheadMillis instanceof Number millisValue) {
+            markdown.append(" (`").append(format(millisValue.doubleValue())).append(" ms`");
+            if (overheadPercent instanceof Number percentValue) {
+                markdown.append(", `").append(format(percentValue.doubleValue())).append("%`");
+            }
+            markdown.append(")");
         }
         markdown.append(" |\n");
     }

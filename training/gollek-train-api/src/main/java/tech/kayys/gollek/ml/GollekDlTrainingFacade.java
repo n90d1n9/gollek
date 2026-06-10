@@ -24,6 +24,8 @@ import tech.kayys.gollek.ml.train.TrainingReportComparisonMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportDiagnostics;
 import tech.kayys.gollek.ml.train.TrainingReportEpochSnapshot;
 import tech.kayys.gollek.ml.train.TrainingReportHistoryOverview;
+import tech.kayys.gollek.ml.train.TrainingReportPerformanceGate;
+import tech.kayys.gollek.ml.train.TrainingReportPerformanceGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportPortfolio;
 import tech.kayys.gollek.ml.train.TrainingReportPortfolioArtifactPackage;
 import tech.kayys.gollek.ml.train.TrainingReportPortfolioArtifactPackageReport;
@@ -43,6 +45,10 @@ import tech.kayys.gollek.ml.train.TrainingReportRecommendation;
 import tech.kayys.gollek.ml.train.TrainingReportReader;
 import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGate;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeEfficiency;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeEfficiencyGate;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeRegressionGate;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeRegressionGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileActionPlan;
 import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBalanceAssessment;
 import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBudgetGate;
@@ -167,6 +173,99 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
         return report.accelerationMarkdown();
     }
 
+    public static TrainingReportPerformanceGate.Result trainingReportPerformanceGate(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).performanceGate();
+    }
+
+    public static TrainingReportPerformanceGate.Result trainingReportPerformanceGate(
+            Path reportFile,
+            TrainingReportPerformanceGate.Policy policy) throws IOException {
+        return TrainingReportReader.readReport(reportFile).performanceGate(policy);
+    }
+
+    public static TrainingReportPerformanceGate.Result trainingReportPerformanceGate(TrainingReport report) {
+        return report.performanceGate();
+    }
+
+    public static TrainingReportPerformanceGate.Result trainingReportPerformanceGate(
+            TrainingReport report,
+            TrainingReportPerformanceGate.Policy policy) {
+        return report.performanceGate(policy);
+    }
+
+    public static String trainingReportPerformanceGateMarkdown(Path reportFile) throws IOException {
+        return trainingReportPerformanceGate(reportFile).markdown();
+    }
+
+    public static String trainingReportPerformanceGateMarkdown(
+            Path reportFile,
+            TrainingReportPerformanceGate.Policy policy) throws IOException {
+        return trainingReportPerformanceGate(reportFile, policy).markdown();
+    }
+
+    public static String trainingReportPerformanceGateMarkdown(TrainingReport report) {
+        return report.performanceGate().markdown();
+    }
+
+    public static String trainingReportPerformanceGateMarkdown(
+            TrainingReport report,
+            TrainingReportPerformanceGate.Policy policy) {
+        return report.performanceGate(policy).markdown();
+    }
+
+    public static String trainingReportPerformanceGateJUnitXml(Path reportFile) throws IOException {
+        return trainingReportPerformanceGate(reportFile).junitXml();
+    }
+
+    public static String trainingReportPerformanceGateJUnitXml(
+            Path reportFile,
+            TrainingReportPerformanceGate.Policy policy) throws IOException {
+        return trainingReportPerformanceGate(reportFile, policy).junitXml();
+    }
+
+    public static String trainingReportPerformanceGateJUnitXml(TrainingReport report) {
+        return report.performanceGate().junitXml();
+    }
+
+    public static String trainingReportPerformanceGateJUnitXml(
+            TrainingReport report,
+            TrainingReportPerformanceGate.Policy policy) {
+        return report.performanceGate(policy).junitXml();
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactBundle writeTrainingReportPerformanceGateArtifacts(
+            Path directory,
+            TrainingReportPerformanceGate.Result result) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.write(directory, result);
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactBundle writeTrainingReportPerformanceGateArtifacts(
+            Path directory,
+            TrainingReport report) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.write(directory, report.performanceGate());
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactBundle refreshTrainingReportPerformanceGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.refreshDerived(directory);
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactInspection readTrainingReportPerformanceGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.read(directory);
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactVerification verifyTrainingReportPerformanceGateArtifacts(
+            TrainingReportPerformanceGateArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportPerformanceGateArtifacts.ArtifactVerification verifyTrainingReportPerformanceGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportPerformanceGateArtifacts.verify(directory);
+    }
+
     public static TrainingReportActionPlan trainingReportActionPlan(Path reportFile) throws IOException {
         return TrainingReportReader.readReport(reportFile).actionPlan();
     }
@@ -282,6 +381,92 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
 
     public static String trainingReportRuntimeProfileActionPlanMarkdown(TrainingReport report) {
         return report.runtimeProfileActionPlanMarkdown();
+    }
+
+    public static TrainingReportRuntimeEfficiency trainingReportRuntimeEfficiency(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeEfficiency();
+    }
+
+    public static TrainingReportRuntimeEfficiency trainingReportRuntimeEfficiency(TrainingReport report) {
+        return report.runtimeEfficiency();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeEfficiencyMap(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeEfficiencyMap();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeEfficiencyMap(TrainingReport report) {
+        return report.runtimeEfficiencyMap();
+    }
+
+    public static String trainingReportRuntimeEfficiencyMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeEfficiencyMarkdown();
+    }
+
+    public static String trainingReportRuntimeEfficiencyMarkdown(TrainingReport report) {
+        return report.runtimeEfficiencyMarkdown();
+    }
+
+    public static TrainingReportRuntimeEfficiencyGate.Result trainingReportRuntimeEfficiencyGate(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeEfficiencyGate();
+    }
+
+    public static TrainingReportRuntimeEfficiencyGate.Result trainingReportRuntimeEfficiencyGate(
+            Path reportFile,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeEfficiencyGate(policy);
+    }
+
+    public static TrainingReportRuntimeEfficiencyGate.Result trainingReportRuntimeEfficiencyGate(
+            TrainingReport report) {
+        return report.runtimeEfficiencyGate();
+    }
+
+    public static TrainingReportRuntimeEfficiencyGate.Result trainingReportRuntimeEfficiencyGate(
+            TrainingReport report,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) {
+        return report.runtimeEfficiencyGate(policy);
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateMarkdown(Path reportFile) throws IOException {
+        return trainingReportRuntimeEfficiencyGate(reportFile).markdown();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateMarkdown(
+            Path reportFile,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) throws IOException {
+        return trainingReportRuntimeEfficiencyGate(reportFile, policy).markdown();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateMarkdown(TrainingReport report) {
+        return report.runtimeEfficiencyGate().markdown();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateMarkdown(
+            TrainingReport report,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) {
+        return report.runtimeEfficiencyGate(policy).markdown();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateJUnitXml(Path reportFile) throws IOException {
+        return trainingReportRuntimeEfficiencyGate(reportFile).junitXml();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateJUnitXml(
+            Path reportFile,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) throws IOException {
+        return trainingReportRuntimeEfficiencyGate(reportFile, policy).junitXml();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateJUnitXml(TrainingReport report) {
+        return report.runtimeEfficiencyGate().junitXml();
+    }
+
+    public static String trainingReportRuntimeEfficiencyGateJUnitXml(
+            TrainingReport report,
+            TrainingReportRuntimeEfficiencyGate.Policy policy) {
+        return report.runtimeEfficiencyGate(policy).junitXml();
     }
 
     public static TrainingReportRuntimeProfileBudgetGate.Result trainingReportRuntimeProfileBudgetGate(Path reportFile)
@@ -698,6 +883,104 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
             TrainingReport baseline,
             TrainingReport candidate) {
         return TrainingReportAdvisor.comparisonActionPlanMarkdown(baseline.payload(), candidate.payload());
+    }
+
+    public static TrainingReportRuntimeRegressionGate.Result trainingReportRuntimeRegressionGate(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.runtimeRegressionGate(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static TrainingReportRuntimeRegressionGate.Result trainingReportRuntimeRegressionGate(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.runtimeRegressionGate(baseline.payload(), candidate.payload());
+    }
+
+    public static String trainingReportRuntimeRegressionGateMarkdown(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.runtimeRegressionGateMarkdown(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static String trainingReportRuntimeRegressionGateMarkdown(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.runtimeRegressionGateMarkdown(baseline.payload(), candidate.payload());
+    }
+
+    public static String trainingReportRuntimeRegressionGateJUnitXml(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.runtimeRegressionGateJUnitXml(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static String trainingReportRuntimeRegressionGateJUnitXml(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.runtimeRegressionGateJUnitXml(baseline.payload(), candidate.payload());
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactBundle writeTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory,
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.write(
+                directory,
+                trainingReportRuntimeRegressionGate(baselineReportFile, candidateReportFile));
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactBundle writeTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory,
+            TrainingReport baseline,
+            TrainingReport candidate) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.write(
+                directory,
+                trainingReportRuntimeRegressionGate(baseline, candidate));
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactBundle writeTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory,
+            TrainingReportRuntimeRegressionGate.Result result) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.write(directory, result);
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactInspection readTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.read(directory);
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactBundle refreshTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.refreshDerived(directory);
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeRegressionGateArtifacts(
+            TrainingReportRuntimeRegressionGateArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeRegressionGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeRegressionGateArtifacts.verify(directory);
+    }
+
+    public static TrainingReportRuntimeRegressionGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeRegressionGateArtifacts(
+            TrainingReportRuntimeRegressionGateArtifacts.ArtifactInspection inspection,
+            String expectedJsonSha256,
+            String expectedMarkdownSha256,
+            String expectedJunitXmlSha256) {
+        return TrainingReportRuntimeRegressionGateArtifacts.verify(
+                inspection,
+                expectedJsonSha256,
+                expectedMarkdownSha256,
+                expectedJunitXmlSha256);
     }
 
     public static String readTrainingReportComparisonActionPlanMarkdown(Path markdownFile) throws IOException {

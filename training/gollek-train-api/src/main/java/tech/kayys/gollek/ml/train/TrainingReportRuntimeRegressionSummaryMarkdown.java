@@ -24,8 +24,25 @@ public final class TrainingReportRuntimeRegressionSummaryMarkdown {
         appendLine(markdown, "| --- | --- | ---: | ---: | ---: | ---: | --- |");
         summary.primaryGroupAverage().ifPresent(entry -> appendLine(markdown, row("primary group", entry)));
         summary.primaryHotspotAverage().ifPresent(entry -> appendLine(markdown, row("primary hotspot", entry)));
+        appendEfficiencyRows(markdown, summary);
         appendLine(markdown, "");
         return markdown.toString();
+    }
+
+    private static void appendEfficiencyRows(
+            StringBuilder markdown,
+            TrainingReportRuntimeRegressionSummary summary) {
+        if (summary.accountedWallTime().isEmpty()
+                && summary.wallClockOverhead().isEmpty()
+                && summary.dominantBottleneck().isEmpty()) {
+            return;
+        }
+        appendLine(markdown, "");
+        appendLine(markdown, "| Efficiency Signal | Key | Baseline | Candidate | Delta | Threshold | Regressed |");
+        appendLine(markdown, "| --- | --- | ---: | ---: | ---: | ---: | --- |");
+        summary.accountedWallTime().ifPresent(entry -> appendLine(markdown, efficiencyRow("accounted wall time", entry)));
+        summary.wallClockOverhead().ifPresent(entry -> appendLine(markdown, efficiencyRow("wall-clock overhead", entry)));
+        summary.dominantBottleneck().ifPresent(entry -> appendLine(markdown, efficiencyRow("dominant bottleneck", entry)));
     }
 
     private static String row(String scope, TrainingReportRuntimeRegressionSummary.Entry entry) {
@@ -37,6 +54,23 @@ public final class TrainingReportRuntimeRegressionSummaryMarkdown {
                 + " | " + format(entry.threshold())
                 + " | `" + (entry.regressed() ? "yes" : "no") + "`"
                 + " |";
+    }
+
+    private static String efficiencyRow(
+            String scope,
+            TrainingReportRuntimeRegressionSummary.EfficiencyEntry entry) {
+        return "| " + escapeTable(scope)
+                + " | `" + escapeTable(entry.key()) + "`"
+                + " | " + format(entry.baselineValue()) + unit(entry)
+                + " | " + format(entry.candidateValue()) + unit(entry)
+                + " | " + format(entry.delta()) + unit(entry)
+                + " | " + format(entry.threshold()) + unit(entry)
+                + " | `" + (entry.regressed() ? "yes" : "no") + "`"
+                + " |";
+    }
+
+    private static String unit(TrainingReportRuntimeRegressionSummary.EfficiencyEntry entry) {
+        return "percent".equals(entry.unit()) ? "%" : "";
     }
 
     private static String format(double value) {

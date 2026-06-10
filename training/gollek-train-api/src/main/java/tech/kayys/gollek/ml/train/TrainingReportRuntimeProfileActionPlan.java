@@ -26,6 +26,7 @@ public record TrainingReportRuntimeProfileActionPlan(
         HOTSPOT,
         GROUP,
         STABILITY,
+        OVERHEAD,
         OTHER
     }
 
@@ -144,8 +145,8 @@ public record TrainingReportRuntimeProfileActionPlan(
                     recommendation.category(),
                     recommendation.diagnosticCode(),
                     recommendation.title(),
-                    optionalDouble(evidence.get("totalMillis")),
-                    optionalDouble(evidence.get("percentTotal")),
+                    duration(recommendation.diagnosticCode(), evidence),
+                    percent(recommendation.diagnosticCode(), evidence),
                     recommendation.actions(),
                     evidence);
         }
@@ -172,6 +173,9 @@ public record TrainingReportRuntimeProfileActionPlan(
             if (diagnosticCode.contains("variability")) {
                 return TargetKind.STABILITY;
             }
+            if (diagnosticCode.contains("overhead") || diagnosticCode.contains("wall_clock")) {
+                return TargetKind.OVERHEAD;
+            }
             if (diagnosticCode.contains("group")) {
                 return TargetKind.GROUP;
             }
@@ -189,6 +193,10 @@ public record TrainingReportRuntimeProfileActionPlan(
             if (group instanceof String value && !value.isBlank()) {
                 return value;
             }
+            Object scope = evidence.get("scope");
+            if (scope instanceof String value && !value.isBlank()) {
+                return value;
+            }
             return recommendation.title();
         }
 
@@ -196,6 +204,26 @@ public record TrainingReportRuntimeProfileActionPlan(
             return value instanceof Number number
                     ? OptionalDouble.of(number.doubleValue())
                     : OptionalDouble.empty();
+        }
+
+        private static OptionalDouble duration(String diagnosticCode, Map<String, Object> evidence) {
+            if (diagnosticCode != null && diagnosticCode.contains("wall_clock")) {
+                OptionalDouble overhead = optionalDouble(evidence.get("overheadMillis"));
+                if (overhead.isPresent()) {
+                    return overhead;
+                }
+            }
+            return optionalDouble(evidence.get("totalMillis"));
+        }
+
+        private static OptionalDouble percent(String diagnosticCode, Map<String, Object> evidence) {
+            if (diagnosticCode != null && diagnosticCode.contains("wall_clock")) {
+                OptionalDouble overhead = optionalDouble(evidence.get("overheadPercent"));
+                if (overhead.isPresent()) {
+                    return overhead;
+                }
+            }
+            return optionalDouble(evidence.get("percentTotal"));
         }
     }
 }
