@@ -40,13 +40,34 @@ final class DirectForwardGatedFfnFastPaths {
             DirectInferenceProfiler.recordFfnPath("matvec-gated-ffn:skip:attempt_gate");
         }
 
-        if (traceFfnFastPath || DirectForwardMetalMatvecRowsGatedFfn.shouldAttempt(request)) {
+        boolean rowPrefillCandidate = traceFfnFastPath || DirectForwardMetalMatvecRowsGatedFfn.shouldAttempt(request);
+        boolean fusedBeforeRows = !traceFfnFastPath
+                && rowPrefillCandidate
+                && DirectForwardMetalMatvecRowsGatedFfn.shouldDeferToFusedPrefill(request);
+        if (fusedBeforeRows) {
+            DirectForwardMetalMatvecRowsGatedFfn.recordStrategySkip(
+                    request, "strategy_prefers_fused_geglu_prefill");
+            AccelTensor metalFused = tryFused(request, traceFfnFastPath);
+            if (metalFused != null) {
+                return metalFused;
+            }
+        }
+
+        if (rowPrefillCandidate) {
             AccelTensor metalMatvecRowsFfn = DirectForwardMetalMatvecRowsGatedFfn.tryFfn(request);
             if (metalMatvecRowsFfn != null) {
                 return metalMatvecRowsFfn;
             }
         }
 
+        if (fusedBeforeRows) {
+            return null;
+        }
+
+        return tryFused(request, traceFfnFastPath);
+    }
+
+    private static AccelTensor tryFused(DirectForwardGatedFfnRequest request, boolean traceFfnFastPath) {
         String fusedSkipReason = traceFfnFastPath
                 ? null
                 : DirectForwardMetalFusedGatedFfn.skipReason(

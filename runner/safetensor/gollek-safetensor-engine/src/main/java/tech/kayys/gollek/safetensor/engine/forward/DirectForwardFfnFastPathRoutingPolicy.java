@@ -114,6 +114,15 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         return rows > 1L && rows <= maxRows;
     }
 
+    boolean shouldPreferMetalFusedFfnPrefillOverMatvecRows(ModelConfigTraits traits, long rows) {
+        return rows > 1L
+                && isGemma4FfnPolicyTarget(traits)
+                && !Boolean.TRUE.equals(preferMetalMatvecFfnPrefillRowsExplicit())
+                && !options.disableMetalFusedFfn()
+                && shouldUseMetalFusedFfnPrefill(traits)
+                && allowGemma4FusedHalfFfn(rows, traits);
+    }
+
     boolean shouldValidateMetalMatvecFfn(boolean traceFfnFastPath) {
         return options.validateMetalMatvecFfn() || traceFfnFastPath;
     }
@@ -152,6 +161,12 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         return runtimeOptionalBooleanProperty(
                 DirectForwardFfnFastPathOptions.ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY,
                 options.enableMetalMatvecFfnPrefillRows());
+    }
+
+    private Boolean preferMetalMatvecFfnPrefillRowsExplicit() {
+        return runtimeOptionalBooleanProperty(
+                DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY,
+                options.preferMetalMatvecFfnPrefillRows());
     }
 
     private int gemma4FusedFfnPrefillMinRows() {

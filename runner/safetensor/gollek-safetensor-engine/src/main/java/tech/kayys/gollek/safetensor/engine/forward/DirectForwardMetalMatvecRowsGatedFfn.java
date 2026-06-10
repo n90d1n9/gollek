@@ -39,6 +39,17 @@ final class DirectForwardMetalMatvecRowsGatedFfn {
                         request.traits(), shapeAdmission.shapePlan().rows());
     }
 
+    static boolean shouldDeferToFusedPrefill(DirectForwardGatedFfnRequest request) {
+        DirectForwardMetalFfnShapeAdmissionPlan shapeAdmission = shapeAdmission(request);
+        return shapeAdmission.admitted()
+                && DirectForwardFfnFastPathPolicy.shouldPreferMetalFusedFfnPrefillOverMatvecRows(
+                        request.traits(), shapeAdmission.shapePlan().rows());
+    }
+
+    static void recordStrategySkip(DirectForwardGatedFfnRequest request, String reason) {
+        trace(request, "skip:" + reason);
+    }
+
     static AccelTensor tryFfn(DirectForwardGatedFfnRequest request) {
         DirectForwardMetalFfnShapeAdmissionPlan shapeAdmission = shapeAdmission(request);
         if (!shapeAdmission.admitted()) {

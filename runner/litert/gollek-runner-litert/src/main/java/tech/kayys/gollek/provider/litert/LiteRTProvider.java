@@ -42,7 +42,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * LiteRT Provider for Wayang/Gollek.
+ * LiteRT provider for Gollek inference.
  *
  * <p>Implements the LLMProvider SPI using LiteRT 2.0.
  * This class has been refactored to be POJO-first, allowing manual instantiation

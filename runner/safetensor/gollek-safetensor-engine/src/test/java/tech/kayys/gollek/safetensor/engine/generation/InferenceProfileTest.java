@@ -97,6 +97,7 @@ class InferenceProfileTest {
                     "path_status={core=metal, linear=metal, logits=metal, ffn=metal, attention=metal, argmax=missing}"));
             assertTrue(summary.contains(
                     "path_coverage={core=6/6, linear=3/3, logits=1/1, ffn=1/1, attention=1/1, argmax=0/0}"));
+            assertTrue(summary.contains("ffn_strategy=fused_geglu_prefill_active"));
 
             Map<String, Object> metadata = profile.metadata("metal");
             assertEquals("metal", metadata.get("profile_core_path_status"));
@@ -134,6 +135,89 @@ class InferenceProfileTest {
             assertEquals(60.0, (Double) metadata.get("profile_bottleneck_share_percent"), 1.0e-9);
             assertTrue(((String) metadata.get("profile_bottleneck_advice"))
                     .contains("batched native FFN kernel"));
+        } finally {
+            DirectInferenceProfiler.clearProfile();
+            restoreProfileProperty(previousProfile);
+        }
+    }
+
+    @Test
+    void reportsFfnStrategyAdviceWhenFusedPrefillWinsOverRowMatvec() {
+        String previousProfile = System.getProperty("gollek.profile");
+        System.setProperty("gollek.profile", "true");
+        try {
+            InferenceProfile profile = DirectInferenceProfiler.startProfile("test");
+            profile.firstTokenNanos = 20_000_000_000L;
+            profile.prefillNanos = 19_000_000_000L;
+            profile.ffnNanos = 12_000_000_000L;
+            profile.attentionNanos = 5_000_000_000L;
+            profile.logitsProjectionNanos = 1_000_000_000L;
+
+            DirectInferenceProfiler.recordFfnPath(
+                    "matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill");
+            DirectInferenceProfiler.recordFfnPath("fused-gated-ffn:accept:geglu:native_bf16=true");
+
+            String summary = profile.summary("metal");
+            assertTrue(summary.contains("ffn_strategy=fused_geglu_prefill_over_row_prefill"));
+
+            Map<String, Object> metadata = profile.metadata("metal");
+            assertEquals("ffn", metadata.get("profile_bottleneck_stage"));
+            assertEquals("fused_geglu_prefill_over_row_prefill", metadata.get("profile_ffn_strategy"));
+            assertEquals(false, metadata.get("profile_ffn_strategy_row_prefill_active"));
+            assertEquals(true, metadata.get("profile_ffn_strategy_fused_prefill_active"));
+            assertEquals(
+                    "gollek.safetensor.prefer_metal_matvec_ffn_prefill_rows",
+                    metadata.get("profile_ffn_strategy_ab_test_property"));
+            assertTrue(((String) metadata.get("profile_bottleneck_advice"))
+                    .contains("prefer_metal_matvec_ffn_prefill_rows=true"));
+        } finally {
+            DirectInferenceProfiler.clearProfile();
+            restoreProfileProperty(previousProfile);
+        }
+    }
+
+    @Test
+    void exposesRowPrefillStrategyVariantMetadata() {
+        String previousProfile = System.getProperty("gollek.profile");
+        System.setProperty("gollek.profile", "true");
+        try {
+            InferenceProfile profile = DirectInferenceProfiler.startProfile("test");
+
+            DirectInferenceProfiler.recordFfnPath(
+                    "matvec-gated-ffn-prefill-rows:accept:geglu:native_bf16=true:native_rows=12:variant=x4");
+
+            String summary = profile.summary("metal");
+            assertTrue(summary.contains("ffn_strategy=row_prefill_matvec_active"));
+
+            Map<String, Object> metadata = profile.metadata("metal");
+            assertEquals("row_prefill_matvec_active", metadata.get("profile_ffn_strategy"));
+            assertEquals(true, metadata.get("profile_ffn_strategy_row_prefill_active"));
+            assertEquals(false, metadata.get("profile_ffn_strategy_fused_prefill_active"));
+            assertEquals(12, metadata.get("profile_ffn_strategy_row_prefill_native_rows"));
+            assertEquals("x4", metadata.get("profile_ffn_strategy_row_prefill_variant"));
+        } finally {
+            DirectInferenceProfiler.clearProfile();
+            restoreProfileProperty(previousProfile);
+        }
+    }
+
+    @Test
+    void ignoresStrategySkipsWhenClassifyingFfnCoverage() {
+        String previousProfile = System.getProperty("gollek.profile");
+        System.setProperty("gollek.profile", "true");
+        try {
+            InferenceProfile profile = DirectInferenceProfiler.startProfile("test");
+
+            DirectInferenceProfiler.recordFfnPath(
+                    "matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill");
+            DirectInferenceProfiler.recordFfnPath("fused-gated-ffn:accept:geglu:native_bf16=true");
+
+            Map<String, Object> metadata = profile.metadata("metal");
+            assertEquals("metal", metadata.get("profile_ffn_path_status"));
+            assertEquals(1, metadata.get("profile_ffn_metal_path_count"));
+            assertEquals(0, metadata.get("profile_ffn_fallback_path_count"));
+            assertEquals(0, metadata.get("profile_ffn_unknown_path_count"));
+            assertEquals(1, metadata.get("profile_ffn_total_path_count"));
         } finally {
             DirectInferenceProfiler.clearProfile();
             restoreProfileProperty(previousProfile);

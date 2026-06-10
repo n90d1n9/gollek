@@ -462,8 +462,7 @@ public final class NativeLibraryLoader {
         String os = System.getProperty("os.name", "").toLowerCase();
         String userHome = System.getProperty("user.home");
         String vendorBase = resolveSourceVendorPath();
-        String wayangVendorBase = Path.of(userHome, ".wayang", "gollek", "source", "vendor", "libtorch").toString();
-        String legacyVendorBase = Path.of(userHome, ".gollek", "source", "vendor", "libtorch").toString();
+        String defaultVendorBase = Path.of(userHome, ".gollek", "source", "vendor", "libtorch").toString();
         Path gollekHome = resolveGollekHome();
 
         // Standard Gollek native library location
@@ -486,12 +485,9 @@ public final class NativeLibraryLoader {
                     vendorBase + "/lib",
                     vendorBase + "/libtorch-macos/lib",
                     vendorBase + "/libtorch-macos",
-                    wayangVendorBase + "/lib",
-                    wayangVendorBase + "/libtorch-macos/lib",
-                    wayangVendorBase + "/libtorch-macos",
-                    legacyVendorBase + "/lib",
-                    legacyVendorBase + "/libtorch-macos/lib",
-                    legacyVendorBase + "/libtorch-macos",
+                    defaultVendorBase + "/lib",
+                    defaultVendorBase + "/libtorch-macos/lib",
+                    defaultVendorBase + "/libtorch-macos",
                     "/usr/local/lib",
                     "/opt/homebrew/lib",
                     "/opt/libtorch/lib",
@@ -503,8 +499,7 @@ public final class NativeLibraryLoader {
                     envSource != null && !envSource.isBlank() ? Path.of(envSource).resolve("lib").toString() : "",
                     envSource != null && !envSource.isBlank() ? envSource : "",
                     vendorBase + "/lib",
-                    wayangVendorBase + "/lib",
-                    legacyVendorBase + "/lib",
+                    defaultVendorBase + "/lib",
                     vendorBase + "/libtorch-windows/lib",
                     "C:\\libtorch\\lib",
                     System.getenv("LOCALAPPDATA") + "\\libtorch\\lib"
@@ -515,8 +510,7 @@ public final class NativeLibraryLoader {
                     envSource != null && !envSource.isBlank() ? Path.of(envSource).resolve("lib").toString() : "",
                     envSource != null && !envSource.isBlank() ? envSource : "",
                     vendorBase + "/lib",
-                    wayangVendorBase + "/lib",
-                    legacyVendorBase + "/lib",
+                    defaultVendorBase + "/lib",
                     vendorBase + "/libtorch-linux/lib",
                     "/usr/local/lib",
                     "/usr/lib",
@@ -545,23 +539,7 @@ public final class NativeLibraryLoader {
             return Path.of(configuredEnv.trim()).toAbsolutePath();
         }
 
-        String wayangGollekHome = System.getenv("WAYANG_GOLLEK_HOME");
-        if (wayangGollekHome != null && !wayangGollekHome.isBlank()) {
-            return Path.of(wayangGollekHome.trim()).toAbsolutePath();
-        }
-
-        Path userHome = Path.of(System.getProperty("user.home"));
-        Path gollekHome = userHome.resolve(".gollek");
-
-        String wayangHome = System.getenv("WAYANG_HOME");
-        Path legacyWayangHome = (wayangHome != null && !wayangHome.isBlank())
-                ? Path.of(wayangHome.trim(), "gollek").toAbsolutePath()
-                : userHome.resolve(".wayang").resolve("gollek");
-
-        if (Files.isDirectory(gollekHome) || !Files.isDirectory(legacyWayangHome)) {
-            return gollekHome;
-        }
-        return legacyWayangHome;
+        return Path.of(System.getProperty("user.home")).resolve(".gollek");
     }
 
     private static void ensurePlatformCompatibility(Path libDir, String sourceLabel) {

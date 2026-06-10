@@ -16,6 +16,7 @@ record DirectForwardFfnFastPathOptions(
         Boolean enableMetalFusedFfnPrefill,
         int gemma4FusedFfnPrefillMinRows,
         Boolean enableMetalMatvecFfnPrefillRows,
+        Boolean preferMetalMatvecFfnPrefillRows,
         int metalMatvecFfnPrefillMaxRows,
         Boolean enableMetalGegluMatvecFfn,
         Boolean enableMetalSwigluMatvecFfn,
@@ -40,6 +41,8 @@ record DirectForwardFfnFastPathOptions(
     private static final int DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS = 2;
     static final String ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY =
             "gollek.safetensor.enable_metal_matvec_ffn_prefill_rows";
+    static final String PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY =
+            "gollek.safetensor.prefer_metal_matvec_ffn_prefill_rows";
     static final String METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY =
             "gollek.safetensor.metal_matvec_ffn_prefill_max_rows";
     private static final int DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS = 16;
@@ -65,6 +68,7 @@ record DirectForwardFfnFastPathOptions(
                 Integer.getInteger(GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY,
                         DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY)),
+                parseOptionalBoolean(System.getProperty(PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY)),
                 Integer.getInteger(METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY,
                         DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_GEGLU_MATVEC_FFN_PROPERTY)),
@@ -77,7 +81,7 @@ record DirectForwardFfnFastPathOptions(
     static DirectForwardFfnFastPathOptions defaults() {
         return new DirectForwardFfnFastPathOptions(
                 null, false, false, false, false, null,
-                DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS, null,
+                DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS, null, null,
                 DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS, null, null, null, false, false);
     }
 
@@ -91,6 +95,7 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
+                preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
@@ -110,6 +115,7 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
+                preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
@@ -128,6 +134,7 @@ record DirectForwardFfnFastPathOptions(
                 enabled,
                 minRows,
                 enableMetalMatvecFfnPrefillRows,
+                preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
@@ -137,6 +144,11 @@ record DirectForwardFfnFastPathOptions(
     }
 
     DirectForwardFfnFastPathOptions withMetalMatvecFfnPrefillRows(Boolean enabled, int maxRows) {
+        return withMetalMatvecFfnPrefillRows(enabled, maxRows, preferMetalMatvecFfnPrefillRows);
+    }
+
+    DirectForwardFfnFastPathOptions withMetalMatvecFfnPrefillRows(
+            Boolean enabled, int maxRows, Boolean preferRows) {
         return new DirectForwardFfnFastPathOptions(
                 gemma4FusedHalfFfnExplicit,
                 disableGemma4FusedHalfFfn,
@@ -146,6 +158,7 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
                 enabled,
+                preferRows,
                 maxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
@@ -165,6 +178,7 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
+                preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
                 gegluEnabled,
                 swigluEnabled,
@@ -183,6 +197,7 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
+                preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,

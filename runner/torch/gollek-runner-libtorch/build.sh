@@ -18,14 +18,6 @@ resolve_gollek_home() {
         echo "$GOLLEK_HOME"
         return
     fi
-    if [ -n "${WAYANG_HOME:-}" ]; then
-        echo "$WAYANG_HOME/gollek"
-        return
-    fi
-    if [ -d "$HOME/.wayang/gollek" ] || [ ! -d "$HOME/.gollek" ]; then
-        echo "$HOME/.wayang/gollek"
-        return
-    fi
     echo "$HOME/.gollek"
 }
 

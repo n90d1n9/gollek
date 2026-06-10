@@ -116,6 +116,54 @@ class DirectForwardFfnFastPathRoutingPolicyTest {
     }
 
     @Test
+    void gemma4PrefillPrefersFusedFfnBeforeExperimentalRowMatvec() {
+        DirectForwardFfnFastPathRoutingPolicy defaults = policy(DirectForwardFfnFastPathOptions.defaults());
+        DirectForwardFfnFastPathRoutingPolicy rowPrefillEnabled = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalMatvecFfnPrefillRows(true, 16));
+        DirectForwardFfnFastPathRoutingPolicy rowPrefillPreferred = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalMatvecFfnPrefillRows(true, 16, true));
+
+        assertTrue(defaults.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+        assertTrue(rowPrefillEnabled.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+        assertFalse(rowPrefillPreferred.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+        assertFalse(rowPrefillEnabled.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 1));
+        assertFalse(rowPrefillEnabled.shouldPreferMetalFusedFfnPrefillOverMatvecRows(generic(), 12));
+    }
+
+    @Test
+    void runtimeRowPrefillPreferenceOverridesFusedFfnStrategy() {
+        String previous = System.getProperty(
+                DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY);
+        try {
+            DirectForwardFfnFastPathRoutingPolicy defaults = policy(DirectForwardFfnFastPathOptions.defaults());
+
+            System.clearProperty(DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY);
+            assertTrue(defaults.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+
+            System.setProperty(DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY, "true");
+            assertFalse(defaults.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+        } finally {
+            if (previous == null) {
+                System.clearProperty(DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY);
+            } else {
+                System.setProperty(DirectForwardFfnFastPathOptions.PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY,
+                        previous);
+            }
+        }
+    }
+
+    @Test
+    void fusedFfnPreferenceHonorsExplicitDisables() {
+        DirectForwardFfnFastPathRoutingPolicy fusedPrefillDisabled = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalFusedFfnPrefill(false, 2));
+        DirectForwardFfnFastPathRoutingPolicy fusedDisabled = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalFusedFfn(true, false, true));
+
+        assertFalse(fusedPrefillDisabled.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+        assertFalse(fusedDisabled.shouldPreferMetalFusedFfnPrefillOverMatvecRows(gemma4(), 12));
+    }
+
+    @Test
     void validationCanBeForcedOrEnabledByTrace() {
         assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()).shouldValidateMetalMatvecFfn(false));
         assertTrue(policy(DirectForwardFfnFastPathOptions.defaults()).shouldValidateMetalMatvecFfn(true));

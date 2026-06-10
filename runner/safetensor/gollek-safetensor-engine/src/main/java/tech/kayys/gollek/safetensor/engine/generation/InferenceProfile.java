@@ -92,6 +92,7 @@ final class InferenceProfile {
         greedyArgmaxPathCounts.forEach((path, count) -> metadata
                 .put("profile_argmax_path_" + sanitizeMetricKey(path) + "_count", count));
         putPathStatusMetadata(metadata);
+        FfnStrategyEvidence.putMetadata(metadata, ffnPathCounts);
         putBottleneckMetadata(metadata);
         metadata.put("profile_decode_steps", decodeSteps);
         metadata.put("profile_summary", summary(backend));
@@ -120,7 +121,7 @@ final class InferenceProfile {
 
     String summary(String backend) {
         return String.format(Locale.ROOT,
-                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms argmax=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s%s%s%s%s",
+                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms argmax=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s%s%s%s%s%s",
                 backend, mode,
                 roundMillis(modelLoadNanos),
                 roundMillis(tokenizeNanos),
@@ -142,6 +143,7 @@ final class InferenceProfile {
                 linearPathSummarySuffix(),
                 logitsPathSummarySuffix(),
                 ffnPathSummarySuffix(),
+                ffnStrategySummarySuffix(),
                 attentionPathSummarySuffix(),
                 greedyArgmaxPathSummarySuffix(),
                 pathStatusSummarySuffix(),
@@ -195,6 +197,10 @@ final class InferenceProfile {
 
     private String ffnPathSummarySuffix() {
         return pathSummarySuffix("ffn_paths", ffnPathCounts, 16);
+    }
+
+    private String ffnStrategySummarySuffix() {
+        return FfnStrategyEvidence.summarySuffix(ffnPathCounts);
     }
 
     private HostLoadSnapshot hostLoadEnd() {
@@ -339,14 +345,7 @@ final class InferenceProfile {
     }
 
     private String ffnBottleneckAdvice() {
-        if (ffnPathCounts.keySet().stream().anyMatch(path -> path.startsWith("matvec-gated-ffn-prefill-rows:accept"))) {
-            return "row-prefill matvec FFN is active; disable it if TTFT regresses and compare against fused GEGLU prefill";
-        }
-        if (ffnPathCounts.keySet().stream().anyMatch(
-                path -> path.startsWith("fused-gated-ffn:accept:geglu:native_bf16=true"))) {
-            return "FFN prefill dominates; keep fused GEGLU BF16 enabled and prioritize a batched native FFN kernel";
-        }
-        return "FFN dominates TTFT; inspect gated projection/down projection fusion and FFN weight format";
+        return FfnStrategyEvidence.bottleneckAdvice(ffnPathCounts);
     }
 
     private static String pathSummarySuffix(String label, Map<String, Integer> counts, int limit) {
