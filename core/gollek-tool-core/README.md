@@ -26,7 +26,7 @@ This module contains the core tool-related functionality for the Gollek inferenc
 - Throws `ToolValidationException` on validation failure
 
 ### ✅ Tool Execution
-- Executor: `tech.kayys.wayang.tool.impl.DefaultToolExecutor`
+- Executor: `tech.kayys.gollek.tool.impl.DefaultToolExecutor`
 - Executes tools after validating arguments
 - Handles success and failure cases
 - Returns structured execution results

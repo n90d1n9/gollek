@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@ConfigMapping(prefix = "wayang.inference.mcp")
+@ConfigMapping(prefix = "gollek.mcp")
 public interface MCPProviderConfiguration {
 
     @WithDefault("false")

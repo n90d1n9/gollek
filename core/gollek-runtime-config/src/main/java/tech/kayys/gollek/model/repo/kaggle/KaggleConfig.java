@@ -5,7 +5,7 @@ import io.smallrye.config.WithDefault;
 
 import java.util.Optional;
 
-@ConfigMapping(prefix = "wayang.inference.repository.kaggle")
+@ConfigMapping(prefix = "gollek.repository.kaggle")
 public interface KaggleConfig {
 
     @WithDefault("https://www.kaggle.com")
@@ -33,7 +33,7 @@ public interface KaggleConfig {
     @WithDefault("10")
     int chunkSizeMB();
 
-    @WithDefault("wayang-inference/1.0")
+    @WithDefault("gollek/1.0")
     String userAgent();
 
     @WithDefault("true")

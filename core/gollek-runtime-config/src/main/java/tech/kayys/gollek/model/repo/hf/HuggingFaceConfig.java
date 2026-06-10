@@ -5,7 +5,7 @@ import io.smallrye.config.WithDefault;
 
 import java.util.Optional;
 
-@ConfigMapping(prefix = "wayang.inference.repository.huggingface")
+@ConfigMapping(prefix = "gollek.repository.huggingface")
 public interface HuggingFaceConfig {
 
     @WithDefault("https://huggingface.co")
@@ -28,7 +28,7 @@ public interface HuggingFaceConfig {
     @WithDefault("10")
     int chunkSizeMB();
 
-    @WithDefault("wayang-inference/1.0")
+    @WithDefault("gollek/1.0")
     String userAgent();
 
     @WithDefault("true")
