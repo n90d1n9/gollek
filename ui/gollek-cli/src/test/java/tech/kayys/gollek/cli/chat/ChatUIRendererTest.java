@@ -78,6 +78,7 @@ class ChatUIRendererTest {
         metadata.put("profile_engine_ttft_ms", 18_620.0);
         metadata.put("profile_attention_ms", 5_500.0);
         metadata.put("profile_ffn_ms", 11_500.0);
+        metadata.put("profile_ffn_strategy", "fused_geglu_prefill_over_row_prefill");
         metadata.put("profile_logits_ms", 1_200.0);
         metadata.put("profile_bottleneck_stage", "ffn");
         metadata.put("profile_bottleneck_value_ms", 11_500.0);
@@ -89,9 +90,26 @@ class ChatUIRendererTest {
 
         assertTrue(output.contains("profile:"));
         assertTrue(output.contains("ffn           =  11500.00 ms"));
+        assertTrue(output.contains("ffn strategy  = fused_geglu_prefill_over_row_prefill"));
         assertTrue(output.contains("bottleneck    = ffn, 11500.00 ms (61.8%)"));
         assertTrue(output.contains(
                 "profile advice = FFN prefill dominates; keep fused GEGLU BF16 enabled and prioritize a batched native FFN kernel"));
+    }
+
+    @Test
+    void printBenchmarksIncludesDirectFfnRowPrefillStrategyDetails() {
+        ChatUIRenderer.disableColor();
+        ChatUIRenderer renderer = new ChatUIRenderer();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("profile_ffn_strategy", "row_prefill_matvec_active");
+        metadata.put("profile_ffn_strategy_row_prefill_native_rows", 12);
+        metadata.put("profile_ffn_strategy_row_prefill_variant", "x4");
+
+        String output = captureStdout(() -> withoutProfileProperty(() -> renderer.printBenchmarks(metadata, false)));
+
+        assertTrue(output.contains("profile:"));
+        assertTrue(output.contains("ffn strategy  = row_prefill_matvec_active"));
+        assertTrue(output.contains("ffn row path  = native_rows=12 variant=x4"));
     }
 
     private static String captureStdout(Runnable action) {

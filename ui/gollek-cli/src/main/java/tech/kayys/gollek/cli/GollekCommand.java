@@ -88,15 +88,15 @@ public class GollekCommand implements Runnable {
     }
 
     private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(GollekCommand.class);
-    private static final String HF_TOKEN_PROPERTY = "wayang.inference.repository.huggingface.token";
+    private static final String HF_TOKEN_PROPERTY = "gollek.repository.huggingface.token";
     private static final String GGUF_LIB_DIR_PROPERTY = "gguf.provider.native.library-dir";
-    private static final String MCP_SERVERS_JSON_PROPERTY = "wayang.inference.mcp.mcp-servers-json";
-    private static final String MCP_SERVERS_JSON_FILE_PROPERTY = "wayang.inference.mcp.mcp-servers-json-file";
+    private static final String MCP_SERVERS_JSON_PROPERTY = "gollek.mcp.mcp-servers-json";
+    private static final String MCP_SERVERS_JSON_FILE_PROPERTY = "gollek.mcp.mcp-servers-json-file";
     private static final String GOLLEK_MCP_SERVERS_JSON = "GOLLEK_MCP_SERVERS_JSON";
     private static final String GOLLEK_MCP_SERVERS_FILE = "GOLLEK_MCP_SERVERS_FILE";
     private static final Path DEFAULT_MCP_REGISTRY_FILE = GollekHome.path("mcp", "servers.json");
     private static final List<String> HF_TOKEN_KEYS = List.of(
-            "WAYANG_INFERENCE_REPOSITORY_HUGGINGFACE_TOKEN",
+            "GOLLEK_REPOSITORY_HUGGINGFACE_TOKEN",
             "HF_TOKEN",
             "HUGGING_FACE_HUB_TOKEN",
             HF_TOKEN_PROPERTY);

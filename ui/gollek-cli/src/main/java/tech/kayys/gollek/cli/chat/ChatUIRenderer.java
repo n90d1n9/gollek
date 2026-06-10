@@ -163,6 +163,9 @@ public class ChatUIRenderer {
         Double engineExcludedMs = metaDouble(metadata, "profile_engine_ttft_excluded_ms");
         Double attentionMs = metaDouble(metadata, "profile_attention_ms");
         Double ffnMs = metaDouble(metadata, "profile_ffn_ms");
+        String ffnStrategy = metaString(metadata, "profile_ffn_strategy");
+        Integer ffnRowPrefillNativeRows = metaInt(metadata, "profile_ffn_strategy_row_prefill_native_rows");
+        String ffnRowPrefillVariant = metaString(metadata, "profile_ffn_strategy_row_prefill_variant");
         Double logitsMs = metaDouble(metadata, "profile_logits_ms");
         Double logitsCopyMs = metaDouble(metadata, "profile_logits_materialization_ms");
         String bottleneckStage = metaString(metadata, "profile_bottleneck_stage");
@@ -171,7 +174,9 @@ public class ChatUIRenderer {
         String bottleneckAdvice = metaString(metadata, "profile_bottleneck_advice");
 
         boolean hasBreakdown = prefillMs != null || decodeMs != null || samplingMs != null
-                || attentionMs != null || ffnMs != null || logitsMs != null || logitsCopyMs != null;
+                || attentionMs != null || ffnMs != null || ffnStrategy != null
+                || ffnRowPrefillNativeRows != null || ffnRowPrefillVariant != null
+                || logitsMs != null || logitsCopyMs != null;
         if (!hasBreakdown) {
             return;
         }
@@ -195,6 +200,11 @@ public class ChatUIRenderer {
             System.out.printf(DIM + "    attention     = %9.2f ms" + RESET + "%n", attentionMs);
         if (ffnMs != null)
             System.out.printf(DIM + "    ffn           = %9.2f ms" + RESET + "%n", ffnMs);
+        if (ffnStrategy != null && !ffnStrategy.isBlank())
+            System.out.printf(DIM + "    ffn strategy  = %9s" + RESET + "%n", ffnStrategy);
+        if (ffnRowPrefillNativeRows != null || (ffnRowPrefillVariant != null && !ffnRowPrefillVariant.isBlank()))
+            System.out.printf(DIM + "    ffn row path  = %9s" + RESET + "%n",
+                    ffnRowPrefillSummary(ffnRowPrefillNativeRows, ffnRowPrefillVariant));
         if (logitsMs != null)
             System.out.printf(DIM + "    logits        = %9.2f ms" + RESET + "%n", logitsMs);
         if (logitsCopyMs != null)
@@ -307,9 +317,26 @@ public class ChatUIRenderer {
                 || metadata.containsKey("profile_sampling_ms")
                 || metadata.containsKey("profile_attention_ms")
                 || metadata.containsKey("profile_ffn_ms")
+                || metadata.containsKey("profile_ffn_strategy")
+                || metadata.containsKey("profile_ffn_strategy_row_prefill_native_rows")
+                || metadata.containsKey("profile_ffn_strategy_row_prefill_variant")
                 || metadata.containsKey("profile_logits_ms")
                 || metadata.containsKey("profile_logits_materialization_ms")
                 || metadata.containsKey("profile_bottleneck_stage");
+    }
+
+    private static String ffnRowPrefillSummary(Integer nativeRows, String variant) {
+        StringBuilder summary = new StringBuilder();
+        if (nativeRows != null) {
+            summary.append("native_rows=").append(Math.max(0, nativeRows));
+        }
+        if (variant != null && !variant.isBlank()) {
+            if (summary.length() > 0) {
+                summary.append(' ');
+            }
+            summary.append("variant=").append(variant);
+        }
+        return summary.toString();
     }
 
     private static String profileStepSummary(Integer prefillSteps, Integer decodeSteps) {
