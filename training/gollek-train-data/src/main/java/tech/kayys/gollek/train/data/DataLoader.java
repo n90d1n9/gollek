@@ -3,7 +3,12 @@ package tech.kayys.gollek.train.data;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.autograd.VectorOps;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -185,6 +190,16 @@ public class DataLoader<T> implements Iterable<List<T>> {
      * <p>Use try-with-resources when a loop may exit early so the worker thread can
      * be interrupted immediately.</p>
      */
+    public PrefetchingIterable<List<T>> prefetch() {
+        return prefetch(this);
+    }
+
+    /**
+     * Wrap this loader with bounded asynchronous prefetching.
+     *
+     * <p>Use try-with-resources when a loop may exit early so the worker thread can
+     * be interrupted immediately.</p>
+     */
     public PrefetchingIterable<List<T>> prefetch(int bufferSize) {
         return prefetch(this, bufferSize);
     }
@@ -221,6 +236,10 @@ public class DataLoader<T> implements Iterable<List<T>> {
 
     public static <B> PrefetchingIterable<B> prefetch(Iterable<? extends B> source, int bufferSize) {
         return PrefetchingIterable.of(source, bufferSize);
+    }
+
+    public static <B> PrefetchingIterable<B> prefetch(Iterable<? extends B> source) {
+        return PrefetchingIterable.of(source);
     }
 
     public static CollateFn defaultTensorCollate() {
@@ -425,14 +444,14 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int numSamples,
             boolean replacement,
             long seed) {
-        return new WeightedRandomSampler(sampleWeights, numSamples, replacement, seed);
+        return SamplerFactories.weightedRandom(sampleWeights, numSamples, replacement, seed);
     }
 
     public static LengthBucketBatchSampler lengthBucketBatchSampler(
             int[] lengths,
             int batchSize,
             long seed) {
-        return new LengthBucketBatchSampler(lengths, batchSize, seed);
+        return SamplerFactories.lengthBucket(lengths, batchSize, seed);
     }
 
     public static <T> LengthBucketBatchSampler lengthBucketBatchSampler(
@@ -440,7 +459,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             ToIntFunction<? super T> lengthExtractor,
             int batchSize,
             long seed) {
-        return lengthBucketBatchSampler(sequenceLengths(dataset, lengthExtractor), batchSize, seed);
+        return SamplerFactories.lengthBucket(dataset, lengthExtractor, batchSize, seed);
     }
 
     public static LengthBucketBatchSampler lengthBucketBatchSampler(
@@ -448,7 +467,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             boolean dropLast,
             long seed) {
-        return new LengthBucketBatchSampler(lengths, batchSize, dropLast, seed);
+        return SamplerFactories.lengthBucket(lengths, batchSize, dropLast, seed);
     }
 
     public static <T> LengthBucketBatchSampler lengthBucketBatchSampler(
@@ -457,7 +476,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             boolean dropLast,
             long seed) {
-        return lengthBucketBatchSampler(sequenceLengths(dataset, lengthExtractor), batchSize, dropLast, seed);
+        return SamplerFactories.lengthBucket(dataset, lengthExtractor, batchSize, dropLast, seed);
     }
 
     public static LengthBucketBatchSampler lengthBucketBatchSampler(
@@ -468,7 +487,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean shuffleWithinBuckets,
             boolean dropLast,
             long seed) {
-        return new LengthBucketBatchSampler(
+        return SamplerFactories.lengthBucket(
                 lengths,
                 batchSize,
                 bucketSizeMultiplier,
@@ -487,8 +506,9 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean shuffleWithinBuckets,
             boolean dropLast,
             long seed) {
-        return lengthBucketBatchSampler(
-                sequenceLengths(dataset, lengthExtractor),
+        return SamplerFactories.lengthBucket(
+                dataset,
+                lengthExtractor,
                 batchSize,
                 bucketSizeMultiplier,
                 shuffleBatches,
@@ -498,7 +518,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
     }
 
     public static TokenBudgetBatchSampler tokenBudgetBatchSampler(int[] lengths, int maxTokens, long seed) {
-        return new TokenBudgetBatchSampler(lengths, maxTokens, seed);
+        return SamplerFactories.tokenBudget(lengths, maxTokens, seed);
     }
 
     public static <T> TokenBudgetBatchSampler tokenBudgetBatchSampler(
@@ -506,7 +526,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             ToIntFunction<? super T> lengthExtractor,
             int maxTokens,
             long seed) {
-        return tokenBudgetBatchSampler(sequenceLengths(dataset, lengthExtractor), maxTokens, seed);
+        return SamplerFactories.tokenBudget(dataset, lengthExtractor, maxTokens, seed);
     }
 
     public static TokenBudgetBatchSampler tokenBudgetBatchSampler(
@@ -514,7 +534,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int maxTokens,
             int maxExamples,
             long seed) {
-        return new TokenBudgetBatchSampler(lengths, maxTokens, maxExamples, seed);
+        return SamplerFactories.tokenBudget(lengths, maxTokens, maxExamples, seed);
     }
 
     public static <T> TokenBudgetBatchSampler tokenBudgetBatchSampler(
@@ -523,7 +543,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int maxTokens,
             int maxExamples,
             long seed) {
-        return tokenBudgetBatchSampler(sequenceLengths(dataset, lengthExtractor), maxTokens, maxExamples, seed);
+        return SamplerFactories.tokenBudget(dataset, lengthExtractor, maxTokens, maxExamples, seed);
     }
 
     public static TokenBudgetBatchSampler tokenBudgetBatchSampler(
@@ -533,7 +553,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean shuffleBatches,
             boolean shuffleWithinBatches,
             long seed) {
-        return new TokenBudgetBatchSampler(
+        return SamplerFactories.tokenBudget(
                 lengths,
                 maxTokens,
                 maxExamples,
@@ -550,8 +570,9 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean shuffleBatches,
             boolean shuffleWithinBatches,
             long seed) {
-        return tokenBudgetBatchSampler(
-                sequenceLengths(dataset, lengthExtractor),
+        return SamplerFactories.tokenBudget(
+                dataset,
+                lengthExtractor,
                 maxTokens,
                 maxExamples,
                 shuffleBatches,
@@ -564,7 +585,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             int batchesPerEpoch,
             long seed) {
-        return new ClassBalancedBatchSampler(labels, batchSize, batchesPerEpoch, seed);
+        return SamplerFactories.classBalanced(labels, batchSize, batchesPerEpoch, seed);
     }
 
     public static ClassBalancedBatchSampler classBalancedBatchSampler(
@@ -573,7 +594,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchesPerEpoch,
             boolean replacement,
             long seed) {
-        return new ClassBalancedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+        return SamplerFactories.classBalanced(labels, batchSize, batchesPerEpoch, replacement, seed);
     }
 
     public static StratifiedBatchSampler stratifiedBatchSampler(
@@ -581,7 +602,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             int batchesPerEpoch,
             long seed) {
-        return new StratifiedBatchSampler(labels, batchSize, batchesPerEpoch, seed);
+        return SamplerFactories.stratified(labels, batchSize, batchesPerEpoch, seed);
     }
 
     public static StratifiedBatchSampler stratifiedBatchSampler(
@@ -590,7 +611,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchesPerEpoch,
             boolean replacement,
             long seed) {
-        return new StratifiedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+        return SamplerFactories.stratified(labels, batchSize, batchesPerEpoch, replacement, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -598,7 +619,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             int batchesPerEpoch,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -607,7 +628,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchesPerEpoch,
             boolean replacement,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, replacement, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -615,7 +636,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             int batchesPerEpoch,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -624,7 +645,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchesPerEpoch,
             boolean replacement,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, replacement, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -632,7 +653,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchSize,
             int batchesPerEpoch,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, seed);
     }
 
     public static MultiLabelBalancedBatchSampler multiLabelBalancedBatchSampler(
@@ -641,27 +662,27 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int batchesPerEpoch,
             boolean replacement,
             long seed) {
-        return new MultiLabelBalancedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+        return SamplerFactories.multiLabelBalanced(labels, batchSize, batchesPerEpoch, replacement, seed);
     }
 
     public static SequentialSampler sequentialSampler() {
-        return new SequentialSampler();
+        return SamplerFactories.sequential();
     }
 
     public static RandomSampler randomSampler(long seed) {
-        return new RandomSampler(seed);
+        return SamplerFactories.random(seed);
     }
 
     public static RandomSampler randomSampler(int numSamples, boolean replacement, long seed) {
-        return new RandomSampler(numSamples, replacement, seed);
+        return SamplerFactories.random(numSamples, replacement, seed);
     }
 
     public static SubsetSampler subsetSampler(int... indices) {
-        return new SubsetSampler(indices);
+        return SamplerFactories.subset(indices);
     }
 
     public static DistributedSampler distributedSampler(int numReplicas, int rank) {
-        return new DistributedSampler(numReplicas, rank);
+        return SamplerFactories.distributed(numReplicas, rank);
     }
 
     public static DistributedSampler distributedSampler(
@@ -670,7 +691,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean shuffle,
             boolean dropLast,
             long seed) {
-        return new DistributedSampler(numReplicas, rank, shuffle, dropLast, seed);
+        return SamplerFactories.distributed(numReplicas, rank, shuffle, dropLast, seed);
     }
 
     public static DistributedSampler distributedSampler(
@@ -680,7 +701,7 @@ public class DataLoader<T> implements Iterable<List<T>> {
             boolean dropLast,
             long seed,
             long epoch) {
-        return new DistributedSampler(numReplicas, rank, shuffle, dropLast, seed, epoch);
+        return SamplerFactories.distributed(numReplicas, rank, shuffle, dropLast, seed, epoch);
     }
 
     public static TensorDataset tensorDataset(GradTensor inputs, GradTensor labels) {
@@ -1743,38 +1764,21 @@ public class DataLoader<T> implements Iterable<List<T>> {
      * batch object, such as a padded tensor batch or a domain-specific record.
      */
     public static class CollatingDataLoader<T, B> implements Iterable<B> {
-        private final GenericDataLoaderRuntime<T> runtime;
-        private final Function<? super List<T>, ? extends B> collateFn;
+        private final CollatingDataLoaderRuntime<T, B> runtime;
 
         private CollatingDataLoader(
-                GenericDataLoaderRuntime<T> runtime,
+                GenericDataLoaderRuntime<T> source,
                 Function<? super List<T>, ? extends B> collateFn) {
-            this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
-            this.collateFn = Objects.requireNonNull(collateFn, "collateFn must not be null");
+            this.runtime = new CollatingDataLoaderRuntime<>(source, collateFn);
         }
 
         @Override
         public Iterator<B> iterator() {
-            return iterator(runtime);
+            return runtime.iterator();
         }
 
         public Iterable<B> epoch(long epoch) {
-            return () -> iterator(runtime.epoch(epoch));
-        }
-
-        private Iterator<B> iterator(Iterable<List<T>> source) {
-            Iterator<List<T>> batches = source.iterator();
-            return new Iterator<>() {
-                @Override
-                public boolean hasNext() {
-                    return batches.hasNext();
-                }
-
-                @Override
-                public B next() {
-                    return collateFn.apply(batches.next());
-                }
-            };
+            return runtime.epoch(epoch);
         }
 
         public int numBatches() {
@@ -1818,11 +1822,15 @@ public class DataLoader<T> implements Iterable<List<T>> {
         }
 
         public DataLoaderPlan plan() {
-            return runtime.plan("collating");
+            return runtime.plan();
         }
 
         public PrefetchingIterable<B> prefetch(int bufferSize) {
             return DataLoader.prefetch(this, bufferSize);
+        }
+
+        public PrefetchingIterable<B> prefetch() {
+            return DataLoader.prefetch(this);
         }
     }
 
@@ -1903,6 +1911,10 @@ public class DataLoader<T> implements Iterable<List<T>> {
 
         public PrefetchingIterable<Batch> prefetch(int bufferSize) {
             return DataLoader.prefetch(this, bufferSize);
+        }
+
+        public PrefetchingIterable<Batch> prefetch() {
+            return DataLoader.prefetch(this);
         }
     }
 
@@ -2068,10 +2080,11 @@ public class DataLoader<T> implements Iterable<List<T>> {
      * @param labels target/label tensor (usually [N, ...])
      */
     public record Batch(GradTensor inputs, GradTensor labels) {
-        /** @return inputs tensor */
-        @Override public GradTensor inputs() { return inputs; }
-        /** @return labels tensor */
-        @Override public GradTensor labels() { return labels; }
+        public Batch {
+            inputs = BatchSupport.requireTensor("inputs", inputs);
+            labels = BatchSupport.requireTensor("labels", labels);
+            BatchSupport.requireCompatibleBatchDimensions(inputs, labels);
+        }
     }
 
     /**
@@ -2092,14 +2105,15 @@ public class DataLoader<T> implements Iterable<List<T>> {
             int[] inputLengths,
             int[] labelLengths) {
         public PaddedBatch {
-            Objects.requireNonNull(inputs, "inputs must not be null");
-            Objects.requireNonNull(labels, "labels must not be null");
-            Objects.requireNonNull(inputMask, "inputMask must not be null");
-            Objects.requireNonNull(labelMask, "labelMask must not be null");
-            inputLengths = Objects.requireNonNull(inputLengths, "inputLengths must not be null").clone();
-            labelLengths = Objects.requireNonNull(labelLengths, "labelLengths must not be null").clone();
-            validatePaddedTensor("inputs", inputs, inputMask, inputLengths);
-            validatePaddedTensor("labels", labels, labelMask, labelLengths);
+            inputs = PaddedBatchSupport.requireTensor("inputs", inputs);
+            labels = PaddedBatchSupport.requireTensor("labels", labels);
+            inputMask = PaddedBatchSupport.requireTensor("inputMask", inputMask);
+            labelMask = PaddedBatchSupport.requireTensor("labelMask", labelMask);
+            inputLengths = PaddedBatchSupport.copyLengths("inputLengths", inputLengths);
+            labelLengths = PaddedBatchSupport.copyLengths("labelLengths", labelLengths);
+            PaddedBatchSupport.validate("inputs", inputs, inputMask, inputLengths);
+            PaddedBatchSupport.validate("labels", labels, labelMask, labelLengths);
+            PaddedBatchSupport.validateAlignedBatchSize(inputs, labels);
         }
 
         public Batch batch() {
@@ -2107,11 +2121,11 @@ public class DataLoader<T> implements Iterable<List<T>> {
         }
 
         public PaddingStats inputPaddingStats() {
-            return PaddingStats.fromLengths(paddedLength("inputs", inputs), inputLengths);
+            return PaddedBatchSupport.stats("inputs", inputs, inputLengths);
         }
 
         public PaddingStats labelPaddingStats() {
-            return PaddingStats.fromLengths(paddedLength("labels", labels), labelLengths);
+            return PaddedBatchSupport.stats("labels", labels, labelLengths);
         }
 
         public PaddingEfficiencyReport paddingEfficiency() {
@@ -2126,41 +2140,6 @@ public class DataLoader<T> implements Iterable<List<T>> {
         @Override
         public int[] labelLengths() {
             return labelLengths.clone();
-        }
-
-        private static void validatePaddedTensor(
-                String name,
-                GradTensor values,
-                GradTensor mask,
-                int[] lengths) {
-            long[] valueShape = values.shape();
-            if (valueShape.length < 2) {
-                throw new IllegalArgumentException(name + " must include batch and padded sequence dimensions");
-            }
-            if (valueShape[0] != lengths.length) {
-                throw new IllegalArgumentException(name + " batch dimension must match lengths");
-            }
-            long[] maskShape = mask.shape();
-            if (maskShape.length != 2 || maskShape[0] != valueShape[0]) {
-                throw new IllegalArgumentException(name + " mask must be shaped [batch, maxLength]");
-            }
-            long maxLength = valueShape[1];
-            if (maskShape[1] != maxLength) {
-                throw new IllegalArgumentException(name + " mask length must match padded sequence length");
-            }
-            for (int length : lengths) {
-                if (length < 0 || length > maxLength) {
-                    throw new IllegalArgumentException(name + " lengths must be within the padded sequence length");
-                }
-            }
-        }
-
-        private static int paddedLength(String name, GradTensor values) {
-            try {
-                return Math.toIntExact(values.shape()[1]);
-            } catch (ArithmeticException e) {
-                throw new IllegalArgumentException(name + " padded sequence length is too large", e);
-            }
         }
     }
 }

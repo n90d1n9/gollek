@@ -1,6 +1,8 @@
 package tech.kayys.gollek.spi.model;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -10,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -30,6 +33,16 @@ public final class ModelFamilyPluginRegistry {
         return GLOBAL;
     }
 
+    public static ModelFamilyPluginRegistry create() {
+        return new ModelFamilyPluginRegistry();
+    }
+
+    public ModelFamilyPluginRegistry snapshot() {
+        ModelFamilyPluginRegistry registry = create();
+        registry.registerAll(all());
+        return registry;
+    }
+
     public void register(ModelFamilyPlugin plugin) {
         if (plugin != null) {
             String pluginId = safePluginId(plugin);
@@ -37,6 +50,12 @@ public final class ModelFamilyPluginRegistry {
                 pluginId = plugin.getClass().getName() + "@" + System.identityHashCode(plugin);
             }
             plugins.put(normalizePluginId(pluginId), plugin);
+        }
+    }
+
+    public void registerAll(Collection<? extends ModelFamilyPlugin> plugins) {
+        if (plugins != null) {
+            plugins.forEach(this::register);
         }
     }
 
@@ -112,6 +131,95 @@ public final class ModelFamilyPluginRegistry {
         return List.copyOf(adapters.values());
     }
 
+    public ModelFamilyRuntimeCompatibility directSafetensorCompatibility(ModelConfig config) {
+        return directSafetensorCompatibility(config, null);
+    }
+
+    public ModelFamilyRuntimeCompatibility directSafetensorCompatibility(ModelConfig config, Path modelDir) {
+        return directSafetensorCompatibility(resolve(config), modelDir);
+    }
+
+    public ModelFamilyRuntimeCompatibility directSafetensorCompatibility(ModelFamilyResolution resolution) {
+        return directSafetensorCompatibility(resolution, null);
+    }
+
+    public ModelFamilyRuntimeCompatibility directSafetensorCompatibility(
+            ModelFamilyResolution resolution,
+            Path modelDir) {
+        ModelFamilyResolution resolved = resolution == null ? resolve(null, null) : resolution;
+        return ModelFamilyRuntimeCompatibility.directSafetensor(
+                resolved,
+                architectureAdaptersFor(resolved.modelType(), resolved.architectureClassName()),
+                modelDir);
+    }
+
+    public List<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilities() {
+        return directSafetensorCompatibilities(null);
+    }
+
+    public List<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilities(Path modelDir) {
+        return all().stream()
+                .map(plugin -> safeDirectSafetensorCompatibility(plugin, modelDir))
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    public List<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilitiesForFamilies(
+            Collection<String> familyIds) {
+        return directSafetensorCompatibilitiesForFamilies(familyIds, null);
+    }
+
+    public List<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilitiesForFamilies(
+            Collection<String> familyIds,
+            Path modelDir) {
+        Set<String> selected = familyIds == null ? Set.of() : familyIds.stream()
+                .map(ModelFamilyPluginRegistry::normalize)
+                .filter(id -> !id.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (selected.isEmpty()) {
+            return List.of();
+        }
+        return directSafetensorCompatibilities(modelDir).stream()
+                .filter(compatibility -> compatibility.modelFamily().primaryFamilyId()
+                        .map(ModelFamilyPluginRegistry::normalize)
+                        .filter(selected::contains)
+                        .isPresent())
+                .toList();
+    }
+
+    public Optional<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilityForPlugin(String pluginId) {
+        return directSafetensorCompatibilityForPlugin(pluginId, null);
+    }
+
+    public Optional<ModelFamilyRuntimeCompatibility> directSafetensorCompatibilityForPlugin(
+            String pluginId,
+            Path modelDir) {
+        return plugin(pluginId).flatMap(plugin -> safeDirectSafetensorCompatibility(plugin, modelDir));
+    }
+
+    public ModelFamilyRuntimeCompatibilitySummary directSafetensorCompatibilitySummary() {
+        return directSafetensorCompatibilitySummary(null);
+    }
+
+    public ModelFamilyRuntimeCompatibilitySummary directSafetensorCompatibilitySummary(Path modelDir) {
+        return ModelFamilyRuntimeCompatibilitySummary.from(
+                ModelFamilyRuntimeCompatibility.DIRECT_SAFETENSOR_RUNTIME,
+                directSafetensorCompatibilities(modelDir));
+    }
+
+    public ModelFamilyRuntimeCompatibilitySummary directSafetensorCompatibilitySummaryForFamilies(
+            Collection<String> familyIds) {
+        return directSafetensorCompatibilitySummaryForFamilies(familyIds, null);
+    }
+
+    public ModelFamilyRuntimeCompatibilitySummary directSafetensorCompatibilitySummaryForFamilies(
+            Collection<String> familyIds,
+            Path modelDir) {
+        return ModelFamilyRuntimeCompatibilitySummary.from(
+                ModelFamilyRuntimeCompatibility.DIRECT_SAFETENSOR_RUNTIME,
+                directSafetensorCompatibilitiesForFamilies(familyIds, modelDir));
+    }
+
     public List<ModelFamilyPlugin> pluginsFor(String modelType, String architectureClassName) {
         String normalizedModelType = normalize(modelType);
         String normalizedArch = normalize(architectureClassName);
@@ -177,6 +285,10 @@ public final class ModelFamilyPluginRegistry {
                         .flatMap(Optional::stream)
                         .toList(),
                 matches.stream()
+                        .map(ModelFamilyPluginRegistry::safeRuntimeManifest)
+                        .flatMap(Optional::stream)
+                        .toList(),
+                matches.stream()
                         .flatMap(plugin -> safeTokenizerDescriptors(plugin).stream())
                         .toList());
     }
@@ -191,6 +303,24 @@ public final class ModelFamilyPluginRegistry {
             descriptors.addAll(safeTokenizerDescriptors(plugin));
         }
         return List.copyOf(descriptors);
+    }
+
+    public List<ModelFamilyRuntimeManifest> runtimeManifests() {
+        return all().stream()
+                .map(ModelFamilyPluginRegistry::safeRuntimeManifest)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    public Optional<ModelFamilyRuntimeManifest> runtimeManifest(String pluginId) {
+        return plugin(pluginId).flatMap(ModelFamilyPluginRegistry::safeRuntimeManifest);
+    }
+
+    public List<ModelFamilyRuntimeManifest> runtimeManifestsFor(String modelType, String architectureClassName) {
+        return pluginsFor(modelType, architectureClassName).stream()
+                .map(ModelFamilyPluginRegistry::safeRuntimeManifest)
+                .flatMap(Optional::stream)
+                .toList();
     }
 
     public List<ModelFamilySupportReport> supportReports() {
@@ -228,6 +358,27 @@ public final class ModelFamilyPluginRegistry {
         if (loader == null) {
             loader = ModelFamilyPlugin.class.getClassLoader();
         }
+        discoverServiceLoaderPluginsFrom(loader);
+        serviceLoaderScanned = true;
+        return all();
+    }
+
+    /**
+     * Discover model-family plugins from an explicit plugin classloader.
+     *
+     * <p>This is intentionally separate from the process-wide one-shot context
+     * classloader scan so detachable bundles can be attached after the CLI or
+     * inference engine has already discovered its packaged families.</p>
+     */
+    public synchronized List<ModelFamilyPlugin> discoverServiceLoaderPlugins(ClassLoader loader) {
+        ClassLoader effectiveLoader = loader == null
+                ? ModelFamilyPlugin.class.getClassLoader()
+                : loader;
+        discoverServiceLoaderPluginsFrom(effectiveLoader);
+        return all();
+    }
+
+    private void discoverServiceLoaderPluginsFrom(ClassLoader loader) {
         var iterator = ServiceLoader.load(ModelFamilyPlugin.class, loader).iterator();
         while (true) {
             try {
@@ -240,8 +391,6 @@ public final class ModelFamilyPluginRegistry {
                 // families that are packaged correctly.
             }
         }
-        serviceLoaderScanned = true;
-        return all();
     }
 
     public Map<String, List<String>> modelTypeClaims() {
@@ -298,6 +447,36 @@ public final class ModelFamilyPluginRegistry {
         } catch (RuntimeException error) {
             return Optional.empty();
         }
+    }
+
+    private static Optional<ModelFamilyRuntimeManifest> safeRuntimeManifest(ModelFamilyPlugin plugin) {
+        try {
+            return Optional.ofNullable(plugin.runtimeManifest());
+        } catch (RuntimeException error) {
+            return Optional.empty();
+        }
+    }
+
+    private static Optional<ModelFamilyRuntimeCompatibility> safeDirectSafetensorCompatibility(
+            ModelFamilyPlugin plugin,
+            Path modelDir) {
+        Optional<ModelFamilyDescriptor> descriptor = safeDescriptor(plugin);
+        if (descriptor.isEmpty()) {
+            return Optional.empty();
+        }
+        ModelFamilyDescriptor value = descriptor.orElseThrow();
+        ModelFamilyResolution resolution = new ModelFamilyResolution(
+                first(value.modelTypes()),
+                first(value.architectureClassNames()),
+                ModelFamilyResolution.Status.RESOLVED,
+                List.of(value.id()),
+                safeSupportReport(plugin).stream().toList(),
+                safeRuntimeManifest(plugin).stream().toList(),
+                safeTokenizerDescriptors(plugin));
+        return Optional.of(ModelFamilyRuntimeCompatibility.directSafetensor(
+                resolution,
+                safeArchitectureAdapters(plugin),
+                modelDir));
     }
 
     private static Optional<ModelFamilyDescriptor> safeDescriptor(ModelFamilyPlugin plugin) {
@@ -369,5 +548,9 @@ public final class ModelFamilyPluginRegistry {
         return normalized.startsWith("model-family/")
                 ? normalized
                 : "model-family/" + normalized;
+    }
+
+    private static String first(List<String> values) {
+        return values == null ? "" : values.stream().findFirst().orElse("");
     }
 }

@@ -11,7 +11,7 @@ import tech.kayys.gollek.trainer.api.TrainingSummary;
  * Builds the persisted trainer report payload.
  */
 final class TrainerTrainingReport {
-    static final String SCHEMA = "gollek.canonical-trainer.report.v1";
+    static final String SCHEMA = TrainingReportSchema.CANONICAL_REPORT_V1;
 
     private TrainerTrainingReport() {
     }

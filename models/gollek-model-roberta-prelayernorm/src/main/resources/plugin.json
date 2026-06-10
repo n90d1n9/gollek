@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["roberta_prelayernorm", "roberta-prelayernorm", "roberta_pre_layer_norm", "roberta-pre-layer-norm"]
+    "families": ["roberta_prelayernorm", "roberta-prelayernorm", "roberta_pre_layer_norm", "roberta-pre-layer-norm"],
+    "tokenizerKind": "hf-bpe"
   }
 }

@@ -92,7 +92,7 @@ final class TensorSamplerPlan {
         }
 
         ClassBalancedBatchSampler toSampler(int batchSize) {
-            return DataLoader.classBalancedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+            return SamplerFactories.classBalanced(labels, batchSize, batchesPerEpoch, replacement, seed);
         }
     }
 
@@ -106,7 +106,7 @@ final class TensorSamplerPlan {
         }
 
         StratifiedBatchSampler toSampler(int batchSize) {
-            return DataLoader.stratifiedBatchSampler(labels, batchSize, batchesPerEpoch, replacement, seed);
+            return SamplerFactories.stratified(labels, batchSize, batchesPerEpoch, replacement, seed);
         }
     }
 
@@ -122,7 +122,7 @@ final class TensorSamplerPlan {
         }
 
         MultiLabelBalancedBatchSampler toSampler(int batchSize) {
-            return new MultiLabelBalancedBatchSampler(
+            return SamplerFactories.multiLabelBalanced(
                     labels, rows, columns, batchSize, batchesPerEpoch, replacement, seed);
         }
     }

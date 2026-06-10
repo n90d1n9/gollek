@@ -27,11 +27,13 @@ final class InferenceProfile {
     long ffnNanos;
     long logitsProjectionNanos;
     long logitsMaterializationNanos;
+    long greedyArgmaxNanos;
     final Map<String, Long> linearNanosByOperation = new LinkedHashMap<>();
     final Map<String, Integer> linearPathCounts = new LinkedHashMap<>();
     final Map<String, Integer> logitsPathCounts = new LinkedHashMap<>();
     final Map<String, Integer> ffnPathCounts = new LinkedHashMap<>();
     final Map<String, Integer> attentionPathCounts = new LinkedHashMap<>();
+    final Map<String, Integer> greedyArgmaxPathCounts = new LinkedHashMap<>();
     int decodeSteps;
 
     InferenceProfile(String mode, boolean detailed) {
@@ -75,6 +77,7 @@ final class InferenceProfile {
         metadata.put("profile_ffn_ms", roundMillis(ffnNanos));
         metadata.put("profile_logits_ms", roundMillis(logitsProjectionNanos));
         metadata.put("profile_logits_materialization_ms", roundMillis(logitsMaterializationNanos));
+        metadata.put("profile_argmax_ms", roundMillis(greedyArgmaxNanos));
         putHostLoadMetadata(metadata, hostLoadStart, hostLoadEnd());
         linearNanosByOperation.forEach((operation, nanos) -> metadata
                 .put("profile_linear_" + sanitizeMetricKey(operation) + "_ms", roundMillis(nanos)));
@@ -86,6 +89,10 @@ final class InferenceProfile {
                 .put("profile_ffn_path_" + sanitizeMetricKey(path) + "_count", count));
         attentionPathCounts.forEach((path, count) -> metadata
                 .put("profile_attention_path_" + sanitizeMetricKey(path) + "_count", count));
+        greedyArgmaxPathCounts.forEach((path, count) -> metadata
+                .put("profile_argmax_path_" + sanitizeMetricKey(path) + "_count", count));
+        putPathStatusMetadata(metadata);
+        putBottleneckMetadata(metadata);
         metadata.put("profile_decode_steps", decodeSteps);
         metadata.put("profile_summary", summary(backend));
         if (promptTokens >= 0) {
@@ -113,7 +120,7 @@ final class InferenceProfile {
 
     String summary(String backend) {
         return String.format(Locale.ROOT,
-                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s%s",
+                "backend=%s mode=%s load=%.2fms tokenize=%.2fms session=%.2fms ttft=%.2fms engine_ttft=%.2fms prefill=%.2fms decode=%.2fms tpot=%.2fms sampling=%.2fms argmax=%.2fms attention=%.2fms ffn=%.2fms logits=%.2fms logits_copy=%.2fms steps=%d%s%s%s%s%s%s%s%s%s",
                 backend, mode,
                 roundMillis(modelLoadNanos),
                 roundMillis(tokenizeNanos),
@@ -124,6 +131,7 @@ final class InferenceProfile {
                 roundMillis(decodeNanos),
                 decodeSteps > 0 ? roundMillis(decodeNanos) / decodeSteps : 0.0,
                 roundMillis(samplingNanos),
+                roundMillis(greedyArgmaxNanos),
                 roundMillis(attentionNanos),
                 roundMillis(ffnNanos),
                 roundMillis(logitsProjectionNanos),
@@ -134,7 +142,10 @@ final class InferenceProfile {
                 linearPathSummarySuffix(),
                 logitsPathSummarySuffix(),
                 ffnPathSummarySuffix(),
-                attentionPathSummarySuffix());
+                attentionPathSummarySuffix(),
+                greedyArgmaxPathSummarySuffix(),
+                pathStatusSummarySuffix(),
+                pathCoverageSummarySuffix());
     }
 
     private static double roundMillis(long nanos) {
@@ -211,6 +222,133 @@ final class InferenceProfile {
         return pathSummarySuffix("attention_paths", attentionPathCounts, 8);
     }
 
+    private String greedyArgmaxPathSummarySuffix() {
+        return pathSummarySuffix("argmax_paths", greedyArgmaxPathCounts, 4);
+    }
+
+    private String pathStatusSummarySuffix() {
+        ProfilePathEvidence.Status linear = ProfilePathEvidence.classify(linearPathCounts);
+        ProfilePathEvidence.Status logits = ProfilePathEvidence.classify(logitsPathCounts);
+        ProfilePathEvidence.Status ffn = ProfilePathEvidence.classify(ffnPathCounts);
+        ProfilePathEvidence.Status attention = ProfilePathEvidence.classify(attentionPathCounts);
+        ProfilePathEvidence.Status argmax = ProfilePathEvidence.classify(greedyArgmaxPathCounts);
+        ProfilePathEvidence.Status core = ProfilePathEvidence.combine(linear, logits, ffn, attention);
+        return " path_status={core=" + core.label()
+                + ", linear=" + linear.label()
+                + ", logits=" + logits.label()
+                + ", ffn=" + ffn.label()
+                + ", attention=" + attention.label()
+                + ", argmax=" + argmax.label()
+                + "}";
+    }
+
+    private String pathCoverageSummarySuffix() {
+        ProfilePathEvidence.Coverage linear = ProfilePathEvidence.coverage(linearPathCounts);
+        ProfilePathEvidence.Coverage logits = ProfilePathEvidence.coverage(logitsPathCounts);
+        ProfilePathEvidence.Coverage ffn = ProfilePathEvidence.coverage(ffnPathCounts);
+        ProfilePathEvidence.Coverage attention = ProfilePathEvidence.coverage(attentionPathCounts);
+        ProfilePathEvidence.Coverage argmax = ProfilePathEvidence.coverage(greedyArgmaxPathCounts);
+        ProfilePathEvidence.Coverage core = ProfilePathEvidence.combine(linear, logits, ffn, attention);
+        return " path_coverage={core=" + core.label()
+                + ", linear=" + linear.label()
+                + ", logits=" + logits.label()
+                + ", ffn=" + ffn.label()
+                + ", attention=" + attention.label()
+                + ", argmax=" + argmax.label()
+                + "}";
+    }
+
+    private void putPathStatusMetadata(Map<String, Object> metadata) {
+        ProfilePathEvidence.Status linear = ProfilePathEvidence.classify(linearPathCounts);
+        ProfilePathEvidence.Status logits = ProfilePathEvidence.classify(logitsPathCounts);
+        ProfilePathEvidence.Status ffn = ProfilePathEvidence.classify(ffnPathCounts);
+        ProfilePathEvidence.Status attention = ProfilePathEvidence.classify(attentionPathCounts);
+        ProfilePathEvidence.Status argmax = ProfilePathEvidence.classify(greedyArgmaxPathCounts);
+        metadata.put("profile_core_path_status",
+                ProfilePathEvidence.combine(linear, logits, ffn, attention).label());
+        metadata.put("profile_linear_path_status", linear.label());
+        metadata.put("profile_logits_path_status", logits.label());
+        metadata.put("profile_ffn_path_status", ffn.label());
+        metadata.put("profile_attention_path_status", attention.label());
+        metadata.put("profile_argmax_path_status", argmax.label());
+        putCoverageMetadata(metadata, "core", ProfilePathEvidence.combine(
+                ProfilePathEvidence.coverage(linearPathCounts),
+                ProfilePathEvidence.coverage(logitsPathCounts),
+                ProfilePathEvidence.coverage(ffnPathCounts),
+                ProfilePathEvidence.coverage(attentionPathCounts)));
+        putCoverageMetadata(metadata, "linear", ProfilePathEvidence.coverage(linearPathCounts));
+        putCoverageMetadata(metadata, "logits", ProfilePathEvidence.coverage(logitsPathCounts));
+        putCoverageMetadata(metadata, "ffn", ProfilePathEvidence.coverage(ffnPathCounts));
+        putCoverageMetadata(metadata, "attention", ProfilePathEvidence.coverage(attentionPathCounts));
+        putCoverageMetadata(metadata, "argmax", ProfilePathEvidence.coverage(greedyArgmaxPathCounts));
+    }
+
+    private static void putCoverageMetadata(Map<String, Object> metadata, String prefix,
+            ProfilePathEvidence.Coverage coverage) {
+        metadata.put("profile_" + prefix + "_metal_path_count", coverage.metal());
+        metadata.put("profile_" + prefix + "_fallback_path_count", coverage.fallback());
+        metadata.put("profile_" + prefix + "_unknown_path_count", coverage.unknown());
+        metadata.put("profile_" + prefix + "_total_path_count", coverage.total());
+        metadata.put("profile_" + prefix + "_metal_path_ratio", coverage.metalRatio());
+    }
+
+    private void putBottleneckMetadata(Map<String, Object> metadata) {
+        long denominator = engineFirstTokenNanos();
+        if (denominator <= 0L) {
+            denominator = prefillNanos + decodeNanos + samplingNanos;
+        }
+        Bottleneck bottleneck = primaryBottleneck();
+        if (denominator <= 0L || bottleneck == null || bottleneck.nanos() <= 0L) {
+            return;
+        }
+        double sharePercent = bottleneck.nanos() * 100.0 / denominator;
+        metadata.put("profile_bottleneck_stage", bottleneck.stage());
+        metadata.put("profile_bottleneck_value_ms", roundMillis(bottleneck.nanos()));
+        metadata.put("profile_bottleneck_share_percent", sharePercent);
+        String advice = bottleneckAdvice(bottleneck.stage());
+        if (advice != null && !advice.isBlank()) {
+            metadata.put("profile_bottleneck_advice", advice);
+        }
+    }
+
+    private Bottleneck primaryBottleneck() {
+        Bottleneck best = null;
+        best = Bottleneck.max(best, "ffn", ffnNanos);
+        best = Bottleneck.max(best, "attention", attentionNanos);
+        best = Bottleneck.max(best, "logits", logitsProjectionNanos);
+        best = Bottleneck.max(best, "logits_copy", logitsMaterializationNanos);
+        best = Bottleneck.max(best, "decode", decodeNanos);
+        best = Bottleneck.max(best, "sampling", samplingNanos);
+        if (best == null || best.nanos() <= 0L) {
+            best = Bottleneck.max(best, "prefill", prefillNanos);
+        }
+        return best;
+    }
+
+    private String bottleneckAdvice(String stage) {
+        return switch (stage) {
+            case "ffn" -> ffnBottleneckAdvice();
+            case "attention" -> "attention dominates TTFT; inspect FlashAttention gather/projection fusion before FFN tuning";
+            case "logits" -> "logits projection dominates TTFT; prioritize vocab projection and last-token logits path";
+            case "logits_copy" -> "logits materialization dominates TTFT; avoid full logits host copies on the hot path";
+            case "decode" -> "decode dominates the profile; inspect KV-cache and per-token matvec paths";
+            case "sampling" -> "sampling dominates the profile; use greedy/native argmax when benchmarking runner throughput";
+            case "prefill" -> "prefill dominates TTFT; enable detailed stage profiling to split attention, FFN, and logits";
+            default -> null;
+        };
+    }
+
+    private String ffnBottleneckAdvice() {
+        if (ffnPathCounts.keySet().stream().anyMatch(path -> path.startsWith("matvec-gated-ffn-prefill-rows:accept"))) {
+            return "row-prefill matvec FFN is active; disable it if TTFT regresses and compare against fused GEGLU prefill";
+        }
+        if (ffnPathCounts.keySet().stream().anyMatch(
+                path -> path.startsWith("fused-gated-ffn:accept:geglu:native_bf16=true"))) {
+            return "FFN prefill dominates; keep fused GEGLU BF16 enabled and prioritize a batched native FFN kernel";
+        }
+        return "FFN dominates TTFT; inspect gated projection/down projection fusion and FFN weight format";
+    }
+
     private static String pathSummarySuffix(String label, Map<String, Integer> counts, int limit) {
         if (counts.isEmpty()) {
             return "";
@@ -269,5 +407,17 @@ final class InferenceProfile {
             }
         }
         return out.toString();
+    }
+
+    private record Bottleneck(String stage, long nanos) {
+        static Bottleneck max(Bottleneck current, String stage, long nanos) {
+            if (nanos <= 0L) {
+                return current;
+            }
+            if (current == null || nanos > current.nanos()) {
+                return new Bottleneck(stage, nanos);
+            }
+            return current;
+        }
     }
 }

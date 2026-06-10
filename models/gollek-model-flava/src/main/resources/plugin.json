@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["flava", "flava_text_model", "flava_image_model", "flava_multimodal_model"]
+    "families": ["flava", "flava_text_model", "flava_image_model", "flava_multimodal_model"],
+    "tokenizerKind": "wordpiece"
   }
 }

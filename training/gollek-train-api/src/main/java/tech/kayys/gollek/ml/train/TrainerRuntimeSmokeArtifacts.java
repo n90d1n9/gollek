@@ -233,14 +233,20 @@ public final class TrainerRuntimeSmokeArtifacts {
         TrainerCheckpointIO.writeStringAtomically(resolvedJsonFile, TrainerJson.toJson(resolvedResult.toMap()) + "\n");
         TrainerCheckpointIO.writeStringAtomically(resolvedMarkdownFile, TrainerRuntimeSmoke.renderMarkdown(resolvedResult));
         TrainerCheckpointIO.writeStringAtomically(resolvedJunitXmlFile, TrainerRuntimeSmoke.renderJUnitXml(resolvedResult));
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
         return new ArtifactBundle(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile, resolvedJunitXmlFile),
                 resolvedJsonFile,
                 resolvedMarkdownFile,
                 resolvedJunitXmlFile,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
                 resolvedResult);
     }
 
@@ -290,14 +296,20 @@ public final class TrainerRuntimeSmokeArtifacts {
         TrainerRuntimeSmoke.Result result = resultFromJsonFile(resolvedJsonFile);
         TrainerCheckpointIO.writeStringAtomically(resolvedMarkdownFile, TrainerRuntimeSmoke.renderMarkdown(result));
         TrainerCheckpointIO.writeStringAtomically(resolvedJunitXmlFile, TrainerRuntimeSmoke.renderJUnitXml(result));
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
         return new ArtifactBundle(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile, resolvedJunitXmlFile),
                 resolvedJsonFile,
                 resolvedMarkdownFile,
                 resolvedJunitXmlFile,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
                 result);
     }
 
@@ -317,6 +329,12 @@ public final class TrainerRuntimeSmokeArtifacts {
         String json = Files.readString(resolvedJsonFile, StandardCharsets.UTF_8);
         String markdown = Files.readString(resolvedMarkdownFile, StandardCharsets.UTF_8);
         String junitXml = Files.readString(resolvedJunitXmlFile, StandardCharsets.UTF_8);
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
         return new ArtifactInspection(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile, resolvedJunitXmlFile),
                 resolvedJsonFile,
@@ -325,9 +343,9 @@ public final class TrainerRuntimeSmokeArtifacts {
                 readJsonMap(json, resolvedJsonFile),
                 markdown,
                 junitXml,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256());
     }
 
     public static ArtifactVerification verify(ArtifactBundle bundle) throws IOException {

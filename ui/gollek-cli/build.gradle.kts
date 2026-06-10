@@ -1,5 +1,7 @@
 import java.security.MessageDigest
 import java.util.Properties
+import org.gradle.api.provider.Provider
+import org.gradle.api.tasks.PathSensitivity
 
 plugins {
     java
@@ -39,9 +41,27 @@ data class ModelFamilyBundleAliasCoverage(
     }
 }
 
+val modelFamilyPluginDescriptorRelativePath = "src/main/resources/plugin.json"
+val modelFamilyServiceDescriptorRelativePath =
+    "src/main/resources/META-INF/services/tech.kayys.gollek.spi.model.ModelFamilyPlugin"
+val gollekPluginServiceDescriptorRelativePath =
+    "src/main/resources/META-INF/services/tech.kayys.gollek.spi.plugin.GollekPlugin"
+val pendingModelFamilyTokenizerMetadataReasons: Map<String, String> by lazy {
+    modelFamilyModules
+        .filter { module -> modelFamilyProject(module) != null }
+        .filter { module -> modelFamilyPluginDescriptorTokenizerMetadataPending(module.path) }
+        .associate { module -> module.id to modelFamilyPluginDescriptorTokenizerMetadataPendingReason(module.path) }
+}
+val pendingModelFamilyTokenizerMetadata: Set<String> by lazy {
+    pendingModelFamilyTokenizerMetadataReasons.keys
+}
+
 data class ModelFamilyBundlePresetValidation(
     val preset: ModelFamilyBundlePreset,
     val selectedFamilyIds: Set<String>,
+    val productionTokenizerMetadataRequired: Boolean,
+    val pendingTokenizerFamilyIds: Set<String>,
+    val pendingTokenizerReasons: Map<String, String>,
     val configurationProblems: List<String>,
     val missingRequiredFamilyIds: Set<String>,
     val selectedForbiddenFamilyIds: Set<String>,
@@ -56,6 +76,12 @@ data class ModelFamilyBundlePresetValidation(
                 selectedForbiddenAliases.size
     val passed: Boolean
         get() = violationCount == 0
+    val productionTokenizerMetadataReady: Boolean
+        get() = pendingTokenizerFamilyIds.isEmpty()
+    val productionSafetyPassed: Boolean
+        get() = !productionTokenizerMetadataRequired || productionTokenizerMetadataReady
+    val productionSafetyViolationCount: Int
+        get() = if (productionTokenizerMetadataRequired) pendingTokenizerFamilyIds.size else 0
 }
 
 data class ModelFamilyBundlePresetConformanceValidation(
@@ -446,6 +472,41 @@ val modelFamilyModules = listOf(
 
 val modelFamilyIds = modelFamilyModules.map { it.id }.toSet()
 
+val duplicateModelFamilyModuleIds = modelFamilyModules
+    .groupingBy { it.id }
+    .eachCount()
+    .filterValues { it > 1 }
+    .keys
+    .sorted()
+if (duplicateModelFamilyModuleIds.isNotEmpty()) {
+    throw GradleException(
+        "Model-family modules must have unique IDs: ${duplicateModelFamilyModuleIds.joinToString(", ")}"
+    )
+}
+
+val duplicateModelFamilyModulePaths = modelFamilyModules
+    .groupingBy { it.path }
+    .eachCount()
+    .filterValues { it > 1 }
+    .keys
+    .sorted()
+if (duplicateModelFamilyModulePaths.isNotEmpty()) {
+    throw GradleException(
+        "Model-family modules must have unique Gradle paths: ${duplicateModelFamilyModulePaths.joinToString(", ")}"
+    )
+}
+
+val knownModelFamilyProfiles = setOf("core", "optional", "metadata_only", "experimental")
+val unknownModelFamilyProfiles = modelFamilyModules
+    .filter { it.profile !in knownModelFamilyProfiles }
+    .map { "${it.id}:${it.profile}" }
+    .sorted()
+if (unknownModelFamilyProfiles.isNotEmpty()) {
+    throw GradleException(
+        "Model-family modules reference unknown profiles: ${unknownModelFamilyProfiles.joinToString(", ")}"
+    )
+}
+
 fun familySet(vararg ids: String): Set<String> {
     return ids.toSet()
 }
@@ -554,6 +615,18 @@ if (unknownModelFamilyBundleAliasMembers.isNotEmpty()) {
     )
 }
 
+val duplicateModelFamilyBundleAliasIds = modelFamilyBundleAliases
+    .groupingBy { it.id }
+    .eachCount()
+    .filterValues { it > 1 }
+    .keys
+    .sorted()
+if (duplicateModelFamilyBundleAliasIds.isNotEmpty()) {
+    throw GradleException(
+        "Model-family bundle aliases must have unique IDs: ${duplicateModelFamilyBundleAliasIds.joinToString(", ")}"
+    )
+}
+
 val modelFamilyBundleAliasMap = modelFamilyBundleAliases.associateBy { it.id }
 val modelFamilyBundleAliasIds = modelFamilyBundleAliasMap.keys
 
@@ -597,6 +670,18 @@ val modelFamilyBundlePresets = listOf(
         selectors = setOf("none")
     )
 )
+val duplicateModelFamilyBundlePresetIds = modelFamilyBundlePresets
+    .groupingBy { it.id }
+    .eachCount()
+    .filterValues { it > 1 }
+    .keys
+    .sorted()
+if (duplicateModelFamilyBundlePresetIds.isNotEmpty()) {
+    throw GradleException(
+        "Model-family bundle presets must have unique IDs: ${duplicateModelFamilyBundlePresetIds.joinToString(", ")}"
+    )
+}
+
 val modelFamilyBundlePresetMap = modelFamilyBundlePresets.associateBy { it.id }
 val modelFamilyBundlePresetIds = modelFamilyBundlePresetMap.keys
 
@@ -698,6 +783,9 @@ val requiredModelFamilyTokens = presetRequiredModelFamilyTokens + explicitRequir
 val forbiddenModelFamilyTokens = presetForbiddenModelFamilyTokens + explicitForbiddenModelFamilyTokens
 val requiredModelFamilyAliasTokens = presetRequiredModelFamilyAliasTokens + explicitRequiredModelFamilyAliasTokens
 val forbiddenModelFamilyAliasTokens = presetForbiddenModelFamilyAliasTokens + explicitForbiddenModelFamilyAliasTokens
+val requiresDirectSafetensorRuntime =
+    requestedModelFamilyBundlePreset?.id == "prod_llm" ||
+            ("direct" in requestedModelFamilyTokens && "direct" in requiredModelFamilyAliasTokens)
 
 val reservedModelFamilySelectors = setOf("all", "none")
 
@@ -903,7 +991,7 @@ fun validateScopedDirectSafetensorMetadata(
 }
 
 val modelFamilyBundleManifestSchemaVersion = "1"
-val modelFamilyBundleLockSchemaVersion = "5"
+val modelFamilyBundleLockSchemaVersion = "6"
 val modelFamilyFixtureFingerprintLockSchemaVersion = "1"
 val modelFamilyBundleLockPath = providers.gradleProperty("gollek.modelFamilyBundleLock")
     .orElse("model-family-bundle.lock.properties")
@@ -963,6 +1051,226 @@ fun csvProperty(properties: Properties, key: String): List<String> {
 
 fun selectedModelFamilyModules(): List<ModelFamilyModule> {
     return modelFamilyModules.filter { it.id in bundledModelFamilies }
+}
+
+fun modelFamilyProject(module: ModelFamilyModule) = findProject(module.path)
+
+fun existingModelFamilyModules(): List<ModelFamilyModule> {
+    return modelFamilyModules.filter { module -> modelFamilyProject(module) != null }
+}
+
+fun catalogModelFamilyProjectPaths(): Set<String> {
+    return modelFamilyModules.map { it.path }.toSet()
+}
+
+fun includedModelFamilyProjectPaths(): Set<String> {
+    return rootProject.subprojects
+        .map { it.path }
+        .filter { it.startsWith(":models:gollek-model-") }
+        .toSet()
+}
+
+fun includedCatalogedModelFamilyProjectPaths(): Set<String> {
+    return rootProject.subprojects
+        .filter { project ->
+            project.path.startsWith(":models:gollek-model-") &&
+                    project.layout.projectDirectory.file(modelFamilyPluginDescriptorRelativePath).asFile.isFile
+        }
+        .map { it.path }
+        .toSet()
+}
+
+fun modelFamilyModuleCatalogMissingProjects(): Set<String> {
+    return catalogModelFamilyProjectPaths() - includedModelFamilyProjectPaths()
+}
+
+fun modelFamilyModuleCatalogUncatalogedProjects(): Set<String> {
+    return includedCatalogedModelFamilyProjectPaths() - catalogModelFamilyProjectPaths()
+}
+
+fun modelFamilyModuleCatalogSupportOnlyProjects(): Set<String> {
+    return includedModelFamilyProjectPaths() - includedCatalogedModelFamilyProjectPaths()
+}
+
+fun catalogedIncludedModelFamilyProjectPaths(): Set<String> {
+    return catalogModelFamilyProjectPaths().intersect(includedModelFamilyProjectPaths())
+}
+
+fun modelFamilyProjectResourceFile(projectPath: String, relativePath: String): File {
+    return rootProject.findProject(projectPath)
+        ?.layout
+        ?.projectDirectory
+        ?.file(relativePath)
+        ?.asFile
+        ?: rootDir
+            .resolve(projectPath.trimStart(':').replace(':', File.separatorChar))
+            .resolve(relativePath)
+}
+
+fun modelFamilyPluginDescriptorPresent(projectPath: String): Boolean {
+    return modelFamilyProjectResourceFile(projectPath, modelFamilyPluginDescriptorRelativePath).isFile
+}
+
+fun modelFamilyServiceDescriptorPresent(projectPath: String): Boolean {
+    return modelFamilyProjectResourceFile(projectPath, modelFamilyServiceDescriptorRelativePath).isFile
+}
+
+fun gollekPluginServiceDescriptorPresent(projectPath: String): Boolean {
+    return modelFamilyProjectResourceFile(projectPath, gollekPluginServiceDescriptorRelativePath).isFile
+}
+
+fun modelFamilyServiceDescriptorsComplete(projectPath: String): Boolean {
+    return modelFamilyPluginDescriptorPresent(projectPath) &&
+            modelFamilyServiceDescriptorPresent(projectPath) &&
+            gollekPluginServiceDescriptorPresent(projectPath)
+}
+
+fun modelFamilyPluginDescriptorTokenizerKinds(projectPath: String): List<String> {
+    val pluginJson = modelFamilyProjectResourceFile(projectPath, modelFamilyPluginDescriptorRelativePath)
+    if (!pluginJson.isFile) {
+        return emptyList()
+    }
+    val json = pluginJson.readText()
+    return (jsonFieldStringValues(json, "tokenizerKind") +
+            jsonFieldStringArrayValues(json, "tokenizerKinds"))
+        .distinct()
+        .sorted()
+}
+
+fun modelFamilyPluginDescriptorHasTokenizerMetadata(projectPath: String): Boolean {
+    return modelFamilyPluginDescriptorTokenizerKinds(projectPath).isNotEmpty()
+}
+
+fun modelFamilyPluginDescriptorStringValue(projectPath: String, key: String): String {
+    val pluginJson = modelFamilyProjectResourceFile(projectPath, modelFamilyPluginDescriptorRelativePath)
+    if (!pluginJson.isFile) {
+        return ""
+    }
+    return jsonStringValue(pluginJson.readText(), key)?.trim().orEmpty()
+}
+
+fun modelFamilyPluginDescriptorTokenizerMetadataPending(projectPath: String): Boolean {
+    return modelFamilyPluginDescriptorStringValue(projectPath, "tokenizerMetadataStatus")
+        .equals("pending", ignoreCase = true)
+}
+
+fun modelFamilyPluginDescriptorTokenizerMetadataPendingReason(projectPath: String): String {
+    return modelFamilyPluginDescriptorStringValue(projectPath, "tokenizerMetadataPendingReason")
+}
+
+fun modelFamilyTokenizerMetadataPendingReason(familyId: String): String {
+    return pendingModelFamilyTokenizerMetadataReasons[familyId] ?: ""
+}
+
+fun pendingModelFamilyTokenizerMetadataInput(): String {
+    return pendingModelFamilyTokenizerMetadataReasons.entries
+        .sortedBy { it.key }
+        .joinToString("|") { "${it.key}:${it.value}" }
+}
+
+fun modelFamilyModuleCatalogServiceIncompleteProjects(): Set<String> {
+    return catalogedIncludedModelFamilyProjectPaths()
+        .filterNot { modelFamilyServiceDescriptorsComplete(it) }
+        .toSet()
+}
+
+fun modelFamilyModuleCatalogTokenizerMetadataMissingFamilies(): Set<String> {
+    return modelFamilyModules
+        .filter { module -> modelFamilyProject(module) != null }
+        .filterNot { module -> module.id in pendingModelFamilyTokenizerMetadata }
+        .filterNot { module -> modelFamilyPluginDescriptorHasTokenizerMetadata(module.path) }
+        .map { it.id }
+        .toSet()
+}
+
+fun modelFamilyModuleCatalogTokenizerMetadataPendingFamilies(): Set<String> {
+    return modelFamilyModules
+        .filter { module -> modelFamilyProject(module) != null }
+        .filter { module -> module.id in pendingModelFamilyTokenizerMetadata }
+        .map { it.id }
+        .toSet()
+}
+
+fun modelFamilyModuleCatalogTokenizerMetadataPendingReasons(): Map<String, String> {
+    return modelFamilyModuleCatalogTokenizerMetadataPendingFamilies()
+        .associateWith(::modelFamilyTokenizerMetadataPendingReason)
+}
+
+val directSafetensorModelFamilies: Set<String> by lazy {
+    modelFamilyBundleAliasMap["direct"]?.familyIds ?: emptySet()
+}
+
+fun modelFamilyModuleIncluded(module: ModelFamilyModule): Boolean {
+    return modelFamilyProject(module) != null
+}
+
+fun modelFamilyModuleMetadataOnly(module: ModelFamilyModule): Boolean {
+    return module.profile == "metadata_only"
+}
+
+fun modelFamilyModuleProductionCandidate(module: ModelFamilyModule): Boolean {
+    return modelFamilyModuleIncluded(module) &&
+            !modelFamilyModuleMetadataOnly(module) &&
+            module.profile != "experimental"
+}
+
+fun modelFamilyModuleTokenizerReady(module: ModelFamilyModule): Boolean {
+    return modelFamilyModuleIncluded(module) &&
+            module.id !in pendingModelFamilyTokenizerMetadata &&
+            modelFamilyPluginDescriptorHasTokenizerMetadata(module.path)
+}
+
+fun modelFamilyModuleProductionReady(module: ModelFamilyModule): Boolean {
+    return modelFamilyModuleProductionCandidate(module) &&
+            modelFamilyServiceDescriptorsComplete(module.path) &&
+            modelFamilyModuleTokenizerReady(module)
+}
+
+fun modelFamilyModuleDirectSafetensorReady(module: ModelFamilyModule): Boolean {
+    return module.id in directSafetensorModelFamilies &&
+            modelFamilyModuleProductionReady(module)
+}
+
+fun modelFamilyModuleReadiness(module: ModelFamilyModule): String {
+    val included = modelFamilyModuleIncluded(module)
+    val tokenizerMetadataPending = module.id in pendingModelFamilyTokenizerMetadata
+    val tokenizerMetadataPresent = modelFamilyPluginDescriptorHasTokenizerMetadata(module.path)
+    return when {
+        !included -> "not_included"
+        !modelFamilyServiceDescriptorsComplete(module.path) -> "service_incomplete"
+        tokenizerMetadataPending -> "tokenizer_pending"
+        !tokenizerMetadataPresent -> "tokenizer_missing"
+        modelFamilyModuleMetadataOnly(module) -> "metadata_only"
+        module.profile == "experimental" -> "experimental_ready"
+        modelFamilyModuleDirectSafetensorReady(module) -> "direct_safetensor_ready"
+        modelFamilyModuleProductionReady(module) -> "production_ready"
+        else -> "descriptor_ready"
+    }
+}
+
+fun modelFamilyModuleCatalogProductionReadinessPendingFamilies(): Set<String> {
+    return modelFamilyModules
+        .filter(::modelFamilyModuleProductionCandidate)
+        .filterNot(::modelFamilyModuleProductionReady)
+        .map { it.id }
+        .toSet()
+}
+
+fun modelFamilyModuleCatalogDirectSafetensorPendingFamilies(): Set<String> {
+    return modelFamilyModules
+        .filter { module -> module.id in directSafetensorModelFamilies }
+        .filterNot(::modelFamilyModuleDirectSafetensorReady)
+        .map { it.id }
+        .toSet()
+}
+
+fun modelFamilyFallbackProjectDir(module: ModelFamilyModule): File {
+    return rootDir.resolve(module.path.trimStart(':').replace(':', File.separatorChar))
+}
+
+fun modelFamilyProjectDir(module: ModelFamilyModule): File {
+    return modelFamilyProject(module)?.layout?.projectDirectory?.asFile
+        ?: modelFamilyFallbackProjectDir(module)
 }
 
 fun modelFamilyBundleAliasCoverage(selectedFamilyIds: Set<String>): List<ModelFamilyBundleAliasCoverage> {
@@ -1087,6 +1395,7 @@ fun modelFamilyBundlePresetValidation(preset: ModelFamilyBundlePreset): ModelFam
     val selectedFamilyIds = selectedModelFamilyIdsForSelectors(preset.selectors)
     val requiredFamilyIds = expandModelFamilyPolicyTokens(preset.requiredFamilies)
     val forbiddenFamilyIds = expandModelFamilyPolicyTokens(preset.forbiddenFamilies)
+    val pendingTokenizerFamilyIds = selectedFamilyIds.intersect(pendingModelFamilyTokenizerMetadata)
     val configurationProblems = mutableListOf<String>()
 
     if ("none" in preset.selectors && preset.selectors.size > 1) {
@@ -1110,6 +1419,9 @@ fun modelFamilyBundlePresetValidation(preset: ModelFamilyBundlePreset): ModelFam
     return ModelFamilyBundlePresetValidation(
         preset = preset,
         selectedFamilyIds = selectedFamilyIds,
+        productionTokenizerMetadataRequired = preset.id.startsWith("prod_"),
+        pendingTokenizerFamilyIds = pendingTokenizerFamilyIds,
+        pendingTokenizerReasons = pendingTokenizerFamilyIds.associateWith(::modelFamilyTokenizerMetadataPendingReason),
         configurationProblems = configurationProblems,
         missingRequiredFamilyIds = modelFamilyPolicyMissingRequiredFor(selectedFamilyIds, requiredFamilyIds),
         selectedForbiddenFamilyIds = modelFamilyPolicySelectedForbiddenFor(selectedFamilyIds, forbiddenFamilyIds),
@@ -1218,6 +1530,20 @@ fun jsonStringArray(values: Iterable<String>): String {
     return values.joinToString(prefix = "[", postfix = "]") { jsonString(it) }
 }
 
+fun jsonStringMap(values: Map<String, String>): String {
+    return values.entries.sortedBy { it.key }
+        .joinToString(prefix = "{", postfix = "}") { (key, value) ->
+            "${jsonString(key)}: ${jsonString(value)}"
+        }
+}
+
+fun jsonIntMap(values: Map<String, Int>): String {
+    return values.entries.sortedBy { it.key }
+        .joinToString(prefix = "{", postfix = "}") { (key, value) ->
+            "${jsonString(key)}: $value"
+        }
+}
+
 fun jsonAliasPolicyViolations(values: Map<String, Set<String>>, familyField: String): String {
     return values.entries.sortedBy { it.key }
         .joinToString(prefix = "[", postfix = "]") { (aliasId, families) ->
@@ -1264,11 +1590,7 @@ fun jsonFieldStringArrayValues(json: String, key: String): List<String> {
 }
 
 fun modelFamilyFixtureDir(module: ModelFamilyModule): File {
-    return project(module.path)
-        .layout
-        .projectDirectory
-        .dir("src/test/resources/model-family-fixtures/${module.id}")
-        .asFile
+    return modelFamilyProjectDir(module).resolve("src/test/resources/model-family-fixtures/${module.id}")
 }
 
 fun relativeRootPath(file: File): String {
@@ -1619,6 +1941,12 @@ fun modelFamilyFixtureFingerprintLockInput(): String {
         .joinToString("\n") { (key, value) -> "$key=$value" }
 }
 
+fun modelFamilyTokenizerPendingReasonsValue(reasons: Map<String, String>): String {
+    return reasons.entries
+        .sortedBy { it.key }
+        .joinToString(",") { (familyId, reason) -> "$familyId=$reason" }
+}
+
 fun jsonModelFamilyBundlePresets(): String {
     return modelFamilyBundlePresets.sortedBy { it.id }
         .joinToString(prefix = "[", postfix = "]") { preset ->
@@ -1634,6 +1962,17 @@ fun jsonModelFamilyBundlePresets(): String {
                 append("\"forbiddenAliases\": ${jsonStringArray(preset.forbiddenAliases.sorted())}, ")
                 append("\"selectedFamilies\": ${jsonStringArray(validation.selectedFamilyIds.sorted())}, ")
                 append("\"selectedCount\": ${validation.selectedFamilyIds.size}, ")
+                append(
+                    "\"productionSafety\": {\"tokenizerMetadataRequired\": ${
+                        validation.productionTokenizerMetadataRequired
+                    }, \"tokenizerMetadataReady\": ${validation.productionTokenizerMetadataReady}, " +
+                            "\"passed\": ${validation.productionSafetyPassed}, " +
+                            "\"violationCount\": ${validation.productionSafetyViolationCount}, " +
+                            "\"pendingTokenizerFamilyCount\": ${validation.pendingTokenizerFamilyIds.size}, " +
+                            "\"pendingTokenizerFamilies\": ${
+                                jsonStringArray(validation.pendingTokenizerFamilyIds.sorted())
+                            }, \"pendingTokenizerReasons\": ${jsonStringMap(validation.pendingTokenizerReasons)}}, "
+                )
                 append(
                     "\"policyStatus\": {\"passed\": ${validation.passed}, " +
                             "\"violationCount\": ${validation.violationCount}}, "
@@ -1717,6 +2056,12 @@ fun modelFamilyBundleLockEntries(selected: List<ModelFamilyModule>): Map<String,
     val missingRequiredAliases = modelFamilyPolicyMissingRequiredAliases()
     val selectedForbiddenAliases = modelFamilyPolicySelectedForbiddenAliases()
     val conformance = modelFamilyBundlePresetConformanceValidation()
+    val selectedFamilyIds = selected.map { it.id }.toSet()
+    val pendingTokenizerFamilyIds = selectedFamilyIds.intersect(pendingModelFamilyTokenizerMetadata)
+    val productionTokenizerMetadataRequired = requestedModelFamilyBundlePreset?.id?.startsWith("prod_") == true
+    val productionTokenizerMetadataReady = pendingTokenizerFamilyIds.isEmpty()
+    val productionSafetyPassed = !productionTokenizerMetadataRequired || productionTokenizerMetadataReady
+    val pendingTokenizerReasons = pendingTokenizerFamilyIds.associateWith(::modelFamilyTokenizerMetadataPendingReason)
     val policyViolationCount = modelFamilyPolicyViolationCount(
         missingRequired,
         selectedForbidden,
@@ -1758,6 +2103,12 @@ fun modelFamilyBundleLockEntries(selected: List<ModelFamilyModule>): Map<String,
         "explicitForbiddenFamilies" to explicitForbiddenModelFamilyTokens.sorted().joinToString(","),
         "explicitRequiredAliases" to explicitRequiredModelFamilyAliasTokens.sorted().joinToString(","),
         "explicitForbiddenAliases" to explicitForbiddenModelFamilyAliasTokens.sorted().joinToString(","),
+        "requiresDirectSafetensorRuntime" to requiresDirectSafetensorRuntime.toString(),
+        "productionTokenizerMetadataRequired" to productionTokenizerMetadataRequired.toString(),
+        "productionTokenizerMetadataReady" to productionTokenizerMetadataReady.toString(),
+        "productionSafetyPassed" to productionSafetyPassed.toString(),
+        "pendingTokenizerFamilies" to pendingTokenizerFamilyIds.sorted().joinToString(","),
+        "pendingTokenizerReasons" to modelFamilyTokenizerPendingReasonsValue(pendingTokenizerReasons),
         "requiredFamilies" to requiredModelFamilies.sorted().joinToString(","),
         "forbiddenFamilies" to forbiddenModelFamilies.sorted().joinToString(","),
         "requiredAliases" to requiredModelFamilyAliasTokens.sorted().joinToString(","),
@@ -1799,6 +2150,14 @@ fun isModelFamilyBundleLockConformanceKey(key: String): Boolean {
 
 fun isModelFamilyBundleLockFixtureKey(key: String): Boolean {
     return key == "lockSchemaVersion" || key.startsWith("fixture")
+}
+
+fun isModelFamilyBundleLockProductionSafetyKey(key: String): Boolean {
+    return key == "productionTokenizerMetadataRequired" ||
+            key == "productionTokenizerMetadataReady" ||
+            key == "productionSafetyPassed" ||
+            key == "pendingTokenizerFamilies" ||
+            key == "pendingTokenizerReasons"
 }
 
 fun modelFamilyBundleLockDriftEntries(
@@ -1896,6 +2255,10 @@ fun modelFamilyBundleLockDriftSummaries(expected: Map<String, String>, actual: P
     summarizeKey("presetConformanceRequiredAliasOmissions", "required alias omissions")
     summarizeKey("presetConformanceForbiddenAliasAdditions", "forbidden alias additions")
     summarizeKey("presetConformanceForbiddenAliasOmissions", "forbidden alias omissions")
+    summarizeKey("productionTokenizerMetadataRequired", "production tokenizer metadata requirement")
+    summarizeKey("productionTokenizerMetadataReady", "production tokenizer metadata readiness")
+    summarizeKey("productionSafetyPassed", "production tokenizer safety gate")
+    summarizeKey("pendingTokenizerReasons", "pending tokenizer reasons")
 
     return summaries
 }
@@ -1918,6 +2281,7 @@ fun modelFamilyBundleLockSelectionDriftEntries(
         "selectors" to "selector",
         "families" to "family",
         "profiles" to "profile",
+        "pendingTokenizerFamilies" to "pendingTokenizerFamily",
         "requiredFamilies" to "requiredFamily",
         "forbiddenFamilies" to "forbiddenFamily",
         "requiredAliases" to "requiredAlias",
@@ -1967,6 +2331,7 @@ fun modelFamilyBundleLockSelectionDriftSummaries(
                 "selectors" -> "selectors"
                 "families" -> "selected families"
                 "profiles" -> "selected profiles"
+                "pendingTokenizerFamilies" -> "pending tokenizer families"
                 "requiredFamilies" -> "required family policy"
                 "forbiddenFamilies" -> "forbidden family policy"
                 "requiredAliases" -> "required alias policy"
@@ -1988,6 +2353,47 @@ fun modelFamilyBundleLockSelectionDriftSummaries(
         .sorted()
 }
 
+fun modelFamilyBundleLockProductionSafetyDriftSummaries(
+    expected: Map<String, String>,
+    actual: Properties
+): List<String> {
+    val summaries = mutableListOf<String>()
+
+    fun summarizeKey(key: String, label: String) {
+        val expectedValue = expected[key]
+        val actualValue = actual.getProperty(key)
+        if (expectedValue != null && actualValue != expectedValue) {
+            summaries += "$label changed from '${displayModelFamilyBundleLockValue(actualValue)}' " +
+                    "to '${displayModelFamilyBundleLockValue(expectedValue)}'"
+        }
+    }
+
+    summarizeKey("productionTokenizerMetadataRequired", "production tokenizer metadata requirement")
+    summarizeKey("productionTokenizerMetadataReady", "production tokenizer metadata readiness")
+    summarizeKey("productionSafetyPassed", "production tokenizer safety gate")
+    summarizeKey("pendingTokenizerReasons", "pending tokenizer reasons")
+
+    val pendingFamilyExpected = expected["pendingTokenizerFamilies"]
+    val pendingFamilyActual = actual.getProperty("pendingTokenizerFamilies")
+    if (pendingFamilyExpected != null && pendingFamilyActual != pendingFamilyExpected) {
+        val expectedFamilies = modelFamilyBundleLockListValue(pendingFamilyExpected)
+        val actualFamilies = modelFamilyBundleLockListValue(pendingFamilyActual)
+        val added = (expectedFamilies - actualFamilies).sorted()
+        val removed = (actualFamilies - expectedFamilies).sorted()
+        val detail = listOfNotNull(
+            added.takeIf { it.isNotEmpty() }?.let { "added ${it.joinToString(", ")}" },
+            removed.takeIf { it.isNotEmpty() }?.let { "removed ${it.joinToString(", ")}" }
+        ).joinToString("; ")
+        summaries += if (detail.isBlank()) {
+            "pending tokenizer families changed"
+        } else {
+            "pending tokenizer families changed ($detail)"
+        }
+    }
+
+    return summaries.sorted()
+}
+
 fun modelFamilyBundleLockScalarDriftEntries(
     expected: Map<String, String>,
     actual: Properties
@@ -2001,6 +2407,10 @@ fun modelFamilyBundleLockScalarDriftEntries(
         Triple("policySource", "policy", "policy source"),
         Triple("policyPassed", "policy", "policy gate"),
         Triple("policyViolationCount", "policy", "policy violation count"),
+        Triple("productionTokenizerMetadataRequired", "production", "production tokenizer metadata requirement"),
+        Triple("productionTokenizerMetadataReady", "production", "production tokenizer metadata readiness"),
+        Triple("productionSafetyPassed", "production", "production tokenizer safety gate"),
+        Triple("pendingTokenizerReasons", "production", "pending tokenizer reasons"),
         Triple("presetConformanceStatus", "conformance", "preset conformance status"),
         Triple("presetConformanceMatchesPreset", "conformance", "preset match"),
         Triple("presetConformanceCleanPresetBuild", "conformance", "clean preset build"),
@@ -2263,10 +2673,18 @@ fun modelFamilyBundleLockDriftReportJson(
     } else {
         modelFamilyBundleLockSelectionDriftSummaries(expected, actual)
     }
+    val productionSafetySummaries = if (actual == null) {
+        emptyList()
+    } else {
+        modelFamilyBundleLockProductionSafetyDriftSummaries(expected, actual)
+    }
     val bundleSelectionDrift = if (actual == null) {
         emptyList()
     } else {
         modelFamilyBundleLockSelectionDriftEntries(expected, actual)
+    }
+    val productionSafetyDrift = entries.filter {
+        isModelFamilyBundleLockProductionSafetyKey(it.key)
     }
     val bundleScalarDrift = if (actual == null) {
         emptyList()
@@ -2292,11 +2710,14 @@ fun modelFamilyBundleLockDriftReportJson(
         appendLine("  \"driftCount\": ${entries.size},")
         appendLine("  \"bundleSelectionDriftCount\": ${bundleSelectionDrift.size},")
         appendLine("  \"bundleScalarDriftCount\": ${bundleScalarDrift.size},")
+        appendLine("  \"productionSafetyDriftCount\": ${productionSafetyDrift.size},")
         appendLine("  \"conformanceDriftCount\": ${entries.count { it.conformanceRelated }},")
         appendLine("  \"fixtureDriftCount\": ${entries.count { it.fixtureRelated }},")
         appendLine("  \"fixtureFingerprintDriftCount\": ${fixtureFingerprintDrift.size},")
         appendLine("  \"conformanceSummaries\": ${jsonStringArray(conformanceSummaries)},")
         appendLine("  \"selectionSummaries\": ${jsonStringArray(selectionSummaries)},")
+        appendLine("  \"productionSafetySummaries\": ${jsonStringArray(productionSafetySummaries)},")
+        appendLine("  \"productionSafetyDrift\": ${jsonModelFamilyBundleLockDriftEntries(productionSafetyDrift)},")
         appendLine("  \"bundleSelectionDrift\": ${jsonModelFamilyBundleSelectionDriftEntries(bundleSelectionDrift)},")
         appendLine("  \"bundleScalarDrift\": ${jsonModelFamilyBundleScalarDriftEntries(bundleScalarDrift)},")
         appendLine("  \"fixtureSummaries\": ${jsonStringArray(fixtureSummaries)},")
@@ -2321,6 +2742,18 @@ fun modelFamilyBundleLockDriftReportJson(
 
 fun jsonModelFamilyBundleLockCurrentStatus(selected: List<ModelFamilyModule>): String {
     val selectedIds = selected.map { it.id }
+    val selectedFamilyIds = selectedIds.toSet()
+    val pendingTokenizerFamilyIds = selectedFamilyIds.intersect(pendingModelFamilyTokenizerMetadata).sorted()
+    val pendingTokenizerReasons = pendingTokenizerFamilyIds.associateWith(::modelFamilyTokenizerMetadataPendingReason)
+    val productionTokenizerMetadataRequired = requestedModelFamilyBundlePreset?.id?.startsWith("prod_") == true
+    val productionTokenizerMetadataReady = pendingTokenizerFamilyIds.isEmpty()
+    val productionSafetyPassed = !productionTokenizerMetadataRequired || productionTokenizerMetadataReady
+    val productionSafetySummary = when {
+        !productionTokenizerMetadataRequired -> "not required"
+        productionTokenizerMetadataReady -> "passed (tokenizer metadata ready)"
+        else -> "failed (${pendingTokenizerFamilyIds.size} pending tokenizer family(s): " +
+                pendingTokenizerFamilyIds.joinToString(", ") + ")"
+    }
     val missingRequired = modelFamilyPolicyMissingRequired()
     val selectedForbidden = modelFamilyPolicySelectedForbidden()
     val missingRequiredAliases = modelFamilyPolicyMissingRequiredAliases()
@@ -2344,6 +2777,16 @@ fun jsonModelFamilyBundleLockCurrentStatus(selected: List<ModelFamilyModule>): S
         append("\"familyCount\": ${selected.size}, ")
         append("\"families\": ${jsonStringArray(selectedIds)}, ")
         append("\"profiles\": ${jsonStringArray(selected.map { it.profile }.distinct().sorted())}, ")
+        append("\"productionSafety\": {")
+        append("\"tokenizerMetadataRequired\": $productionTokenizerMetadataRequired, ")
+        append("\"tokenizerMetadataReady\": $productionTokenizerMetadataReady, ")
+        append("\"passed\": $productionSafetyPassed, ")
+        append("\"status\": ${jsonString(if (productionSafetyPassed) "passed" else "failed")}, ")
+        append("\"summary\": ${jsonString(productionSafetySummary)}, ")
+        append("\"pendingTokenizerFamilyCount\": ${pendingTokenizerFamilyIds.size}, ")
+        append("\"pendingTokenizerFamilies\": ${jsonStringArray(pendingTokenizerFamilyIds)}, ")
+        append("\"pendingTokenizerReasons\": ${jsonStringMap(pendingTokenizerReasons)}")
+        append("}, ")
         append("\"policyStatus\": {")
         append("\"passed\": ${policyViolationCount == 0}, ")
         append("\"violationCount\": $policyViolationCount, ")
@@ -2415,6 +2858,233 @@ fun modelFamilyBundlePresetInput(): String {
         }
 }
 
+fun jsonModelFamilyModuleCatalogEntries(): String {
+    return modelFamilyModules.sortedBy { it.id }
+        .joinToString(prefix = "[", postfix = "]") { module ->
+            val included = modelFamilyProject(module) != null
+            val pluginDescriptorPresent = modelFamilyPluginDescriptorPresent(module.path)
+            val modelFamilyServicePresent = modelFamilyServiceDescriptorPresent(module.path)
+            val gollekPluginServicePresent = gollekPluginServiceDescriptorPresent(module.path)
+            val serviceDescriptorComplete = modelFamilyServiceDescriptorsComplete(module.path)
+            val tokenizerKinds = modelFamilyPluginDescriptorTokenizerKinds(module.path)
+            val tokenizerMetadataPending = module.id in pendingModelFamilyTokenizerMetadata
+            val tokenizerMetadataPendingReason = modelFamilyTokenizerMetadataPendingReason(module.id)
+            val tokenizerReady = modelFamilyModuleTokenizerReady(module)
+            val metadataOnly = modelFamilyModuleMetadataOnly(module)
+            val directSafetensorReady = modelFamilyModuleDirectSafetensorReady(module)
+            val productionReady = modelFamilyModuleProductionReady(module)
+            val readiness = modelFamilyModuleReadiness(module)
+            buildString {
+                append("{")
+                append("\"id\": ${jsonString(module.id)}, ")
+                append("\"profile\": ${jsonString(module.profile)}, ")
+                append("\"path\": ${jsonString(module.path)}, ")
+                append("\"included\": $included, ")
+                append("\"selected\": ${module.id in bundledModelFamilies}, ")
+                append("\"pluginDescriptorPresent\": $pluginDescriptorPresent, ")
+                append("\"modelFamilyServiceDescriptorPresent\": $modelFamilyServicePresent, ")
+                append("\"gollekPluginServiceDescriptorPresent\": $gollekPluginServicePresent, ")
+                append("\"serviceDescriptorComplete\": $serviceDescriptorComplete, ")
+                append("\"tokenizerMetadataPresent\": ${tokenizerKinds.isNotEmpty()}, ")
+                append("\"tokenizerMetadataPending\": $tokenizerMetadataPending, ")
+                append("\"tokenizerMetadataPendingReason\": ${jsonString(tokenizerMetadataPendingReason)}, ")
+                append("\"tokenizerKinds\": ${jsonStringArray(tokenizerKinds)}, ")
+                append("\"tokenizerReady\": $tokenizerReady, ")
+                append("\"metadataOnly\": $metadataOnly, ")
+                append("\"directSafetensorReady\": $directSafetensorReady, ")
+                append("\"productionReady\": $productionReady, ")
+                append("\"readiness\": ${jsonString(readiness)}")
+                append("}")
+            }
+        }
+}
+
+fun jsonIncludedModelFamilyProjectEntries(): String {
+    val catalogPaths = catalogModelFamilyProjectPaths()
+    val catalogByPath = modelFamilyModules.associateBy { it.path }
+    val catalogedPluginPaths = includedCatalogedModelFamilyProjectPaths()
+    return includedModelFamilyProjectPaths().sorted()
+        .joinToString(prefix = "[", postfix = "]") { path ->
+            val module = catalogByPath[path]
+            val pluginDescriptorPresent = modelFamilyPluginDescriptorPresent(path)
+            val modelFamilyServicePresent = modelFamilyServiceDescriptorPresent(path)
+            val gollekPluginServicePresent = gollekPluginServiceDescriptorPresent(path)
+            buildString {
+                append("{")
+                append("\"path\": ${jsonString(path)}, ")
+                append("\"cataloged\": ${path in catalogPaths}, ")
+                append("\"supportOnly\": ${path !in catalogedPluginPaths}, ")
+                append("\"pluginDescriptorPresent\": $pluginDescriptorPresent, ")
+                append("\"modelFamilyServiceDescriptorPresent\": $modelFamilyServicePresent, ")
+                append("\"gollekPluginServiceDescriptorPresent\": $gollekPluginServicePresent, ")
+                append("\"serviceDescriptorComplete\": ${modelFamilyServiceDescriptorsComplete(path)}")
+                if (module != null) {
+                    append(", \"id\": ${jsonString(module.id)}")
+                    append(", \"profile\": ${jsonString(module.profile)}")
+                    append(", \"selected\": ${module.id in bundledModelFamilies}")
+                }
+                append("}")
+            }
+        }
+}
+
+fun jsonModelFamilyModuleCatalogSummary(): String {
+    val catalogPaths = catalogModelFamilyProjectPaths()
+    val includedPaths = includedModelFamilyProjectPaths()
+    val missingProjects = modelFamilyModuleCatalogMissingProjects()
+    val uncatalogedProjects = modelFamilyModuleCatalogUncatalogedProjects()
+    val supportOnlyProjects = modelFamilyModuleCatalogSupportOnlyProjects()
+    val serviceIncompleteProjects = modelFamilyModuleCatalogServiceIncompleteProjects()
+    val tokenizerMissingFamilies = modelFamilyModuleCatalogTokenizerMetadataMissingFamilies()
+    val tokenizerPendingFamilies = modelFamilyModuleCatalogTokenizerMetadataPendingFamilies()
+    val tokenizerPendingReasons = modelFamilyModuleCatalogTokenizerMetadataPendingReasons()
+    val tokenizerReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleTokenizerReady)
+        .map { it.id }
+        .toSet()
+    val productionReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleProductionReady)
+        .map { it.id }
+        .toSet()
+    val directSafetensorReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleDirectSafetensorReady)
+        .map { it.id }
+        .toSet()
+    val productionReadinessPendingFamilies = modelFamilyModuleCatalogProductionReadinessPendingFamilies()
+    val directSafetensorPendingFamilies = modelFamilyModuleCatalogDirectSafetensorPendingFamilies()
+    val metadataOnlyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleMetadataOnly)
+        .map { it.id }
+        .toSet()
+    val readinessCounts = modelFamilyModules
+        .groupingBy(::modelFamilyModuleReadiness)
+        .eachCount()
+    val catalogedIncludedCount = catalogPaths.intersect(includedPaths).size
+    val passed = missingProjects.isEmpty() &&
+            uncatalogedProjects.isEmpty() &&
+            serviceIncompleteProjects.isEmpty() &&
+            tokenizerMissingFamilies.isEmpty() &&
+            productionReadinessPendingFamilies.isEmpty() &&
+            directSafetensorPendingFamilies.isEmpty()
+    return buildString {
+        append("{")
+        append("\"passed\": $passed, ")
+        append("\"catalogFamilyCount\": ${modelFamilyModules.size}, ")
+        append("\"catalogProjectCount\": ${catalogPaths.size}, ")
+        append("\"includedModelProjectCount\": ${includedPaths.size}, ")
+        append("\"includedCatalogedProjectCount\": $catalogedIncludedCount, ")
+        append("\"supportOnlyProjectCount\": ${supportOnlyProjects.size}, ")
+        append("\"serviceDescriptorCompleteProjectCount\": ${catalogedIncludedCount - serviceIncompleteProjects.size}, ")
+        append("\"serviceDescriptorIncompleteProjectCount\": ${serviceIncompleteProjects.size}, ")
+        append("\"tokenizerMetadataReadyFamilyCount\": ${tokenizerReadyFamilies.size}, ")
+        append("\"tokenizerMetadataPendingFamilyCount\": ${tokenizerPendingFamilies.size}, ")
+        append("\"tokenizerMetadataMissingFamilyCount\": ${tokenizerMissingFamilies.size}, ")
+        append("\"productionReadyFamilyCount\": ${productionReadyFamilies.size}, ")
+        append("\"directSafetensorReadyFamilyCount\": ${directSafetensorReadyFamilies.size}, ")
+        append("\"productionReadinessPendingFamilyCount\": ${productionReadinessPendingFamilies.size}, ")
+        append("\"directSafetensorPendingFamilyCount\": ${directSafetensorPendingFamilies.size}, ")
+        append("\"metadataOnlyFamilyCount\": ${metadataOnlyFamilies.size}, ")
+        append("\"selectedFamilyCount\": ${bundledModelFamilies.size}, ")
+        append("\"missingProjectCount\": ${missingProjects.size}, ")
+        append("\"uncatalogedProjectCount\": ${uncatalogedProjects.size}, ")
+        append("\"readinessCounts\": ${jsonIntMap(readinessCounts)}, ")
+        append("\"selectedFamilies\": ${jsonStringArray(bundledModelFamilies.sorted())}, ")
+        append("\"productionReadyFamilies\": ${jsonStringArray(productionReadyFamilies.sorted())}, ")
+        append("\"directSafetensorReadyFamilies\": ${jsonStringArray(directSafetensorReadyFamilies.sorted())}, ")
+        append("\"productionReadinessPendingFamilies\": ${jsonStringArray(productionReadinessPendingFamilies.sorted())}, ")
+        append("\"directSafetensorPendingFamilies\": ${jsonStringArray(directSafetensorPendingFamilies.sorted())}, ")
+        append("\"metadataOnlyFamilies\": ${jsonStringArray(metadataOnlyFamilies.sorted())}, ")
+        append("\"missingProjects\": ${jsonStringArray(missingProjects.sorted())}, ")
+        append("\"uncatalogedProjects\": ${jsonStringArray(uncatalogedProjects.sorted())}, ")
+        append("\"supportOnlyProjects\": ${jsonStringArray(supportOnlyProjects.sorted())}, ")
+        append("\"serviceDescriptorIncompleteProjects\": ${jsonStringArray(serviceIncompleteProjects.sorted())}, ")
+        append("\"tokenizerMetadataPendingFamilies\": ${jsonStringArray(tokenizerPendingFamilies.sorted())}, ")
+        append("\"tokenizerMetadataPendingReasons\": ${jsonStringMap(tokenizerPendingReasons)}, ")
+        append("\"tokenizerMetadataMissingFamilies\": ${jsonStringArray(tokenizerMissingFamilies.sorted())}")
+        append("}")
+    }
+}
+
+fun modelFamilyModuleCatalogReportJson(): String {
+    val catalogPaths = catalogModelFamilyProjectPaths()
+    val includedPaths = includedModelFamilyProjectPaths()
+    val missingProjects = modelFamilyModuleCatalogMissingProjects()
+    val uncatalogedProjects = modelFamilyModuleCatalogUncatalogedProjects()
+    val supportOnlyProjects = modelFamilyModuleCatalogSupportOnlyProjects()
+    val serviceIncompleteProjects = modelFamilyModuleCatalogServiceIncompleteProjects()
+    val tokenizerMissingFamilies = modelFamilyModuleCatalogTokenizerMetadataMissingFamilies()
+    val tokenizerPendingFamilies = modelFamilyModuleCatalogTokenizerMetadataPendingFamilies()
+    val tokenizerPendingReasons = modelFamilyModuleCatalogTokenizerMetadataPendingReasons()
+    val tokenizerReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleTokenizerReady)
+        .map { it.id }
+        .toSet()
+    val productionReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleProductionReady)
+        .map { it.id }
+        .toSet()
+    val directSafetensorReadyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleDirectSafetensorReady)
+        .map { it.id }
+        .toSet()
+    val productionReadinessPendingFamilies = modelFamilyModuleCatalogProductionReadinessPendingFamilies()
+    val directSafetensorPendingFamilies = modelFamilyModuleCatalogDirectSafetensorPendingFamilies()
+    val metadataOnlyFamilies = modelFamilyModules
+        .filter(::modelFamilyModuleMetadataOnly)
+        .map { it.id }
+        .toSet()
+    val readinessCounts = modelFamilyModules
+        .groupingBy(::modelFamilyModuleReadiness)
+        .eachCount()
+    val catalogedIncludedCount = catalogPaths.intersect(includedPaths).size
+    val passed = missingProjects.isEmpty() &&
+            uncatalogedProjects.isEmpty() &&
+            serviceIncompleteProjects.isEmpty() &&
+            tokenizerMissingFamilies.isEmpty() &&
+            productionReadinessPendingFamilies.isEmpty() &&
+            directSafetensorPendingFamilies.isEmpty()
+    return buildString {
+        appendLine("{")
+        appendLine("  \"schemaVersion\": 1,")
+        appendLine("  \"passed\": $passed,")
+        appendLine("  \"catalogFamilyCount\": ${modelFamilyModules.size},")
+        appendLine("  \"catalogProjectCount\": ${catalogPaths.size},")
+        appendLine("  \"includedModelProjectCount\": ${includedPaths.size},")
+        appendLine("  \"includedCatalogedProjectCount\": $catalogedIncludedCount,")
+        appendLine("  \"supportOnlyProjectCount\": ${supportOnlyProjects.size},")
+        appendLine("  \"serviceDescriptorCompleteProjectCount\": ${catalogedIncludedCount - serviceIncompleteProjects.size},")
+        appendLine("  \"serviceDescriptorIncompleteProjectCount\": ${serviceIncompleteProjects.size},")
+        appendLine("  \"tokenizerMetadataReadyFamilyCount\": ${tokenizerReadyFamilies.size},")
+        appendLine("  \"tokenizerMetadataPendingFamilyCount\": ${tokenizerPendingFamilies.size},")
+        appendLine("  \"tokenizerMetadataMissingFamilyCount\": ${tokenizerMissingFamilies.size},")
+        appendLine("  \"productionReadyFamilyCount\": ${productionReadyFamilies.size},")
+        appendLine("  \"directSafetensorReadyFamilyCount\": ${directSafetensorReadyFamilies.size},")
+        appendLine("  \"productionReadinessPendingFamilyCount\": ${productionReadinessPendingFamilies.size},")
+        appendLine("  \"directSafetensorPendingFamilyCount\": ${directSafetensorPendingFamilies.size},")
+        appendLine("  \"metadataOnlyFamilyCount\": ${metadataOnlyFamilies.size},")
+        appendLine("  \"selectedFamilyCount\": ${bundledModelFamilies.size},")
+        appendLine("  \"missingProjectCount\": ${missingProjects.size},")
+        appendLine("  \"uncatalogedProjectCount\": ${uncatalogedProjects.size},")
+        appendLine("  \"readinessCounts\": ${jsonIntMap(readinessCounts)},")
+        appendLine("  \"selectedFamilies\": ${jsonStringArray(bundledModelFamilies.sorted())},")
+        appendLine("  \"productionReadyFamilies\": ${jsonStringArray(productionReadyFamilies.sorted())},")
+        appendLine("  \"directSafetensorReadyFamilies\": ${jsonStringArray(directSafetensorReadyFamilies.sorted())},")
+        appendLine("  \"productionReadinessPendingFamilies\": ${jsonStringArray(productionReadinessPendingFamilies.sorted())},")
+        appendLine("  \"directSafetensorPendingFamilies\": ${jsonStringArray(directSafetensorPendingFamilies.sorted())},")
+        appendLine("  \"metadataOnlyFamilies\": ${jsonStringArray(metadataOnlyFamilies.sorted())},")
+        appendLine("  \"missingProjects\": ${jsonStringArray(missingProjects.sorted())},")
+        appendLine("  \"uncatalogedProjects\": ${jsonStringArray(uncatalogedProjects.sorted())},")
+        appendLine("  \"supportOnlyProjects\": ${jsonStringArray(supportOnlyProjects.sorted())},")
+        appendLine("  \"serviceDescriptorIncompleteProjects\": ${jsonStringArray(serviceIncompleteProjects.sorted())},")
+        appendLine("  \"tokenizerMetadataPendingFamilies\": ${jsonStringArray(tokenizerPendingFamilies.sorted())},")
+        appendLine("  \"tokenizerMetadataPendingReasons\": ${jsonStringMap(tokenizerPendingReasons)},")
+        appendLine("  \"tokenizerMetadataMissingFamilies\": ${jsonStringArray(tokenizerMissingFamilies.sorted())},")
+        appendLine("  \"catalog\": ${jsonModelFamilyModuleCatalogEntries()},")
+        appendLine("  \"includedProjects\": ${jsonIncludedModelFamilyProjectEntries()}")
+        appendLine("}")
+    }
+}
+
 fun modelFamilyBundleReportJson(selected: List<ModelFamilyModule>): String {
     val selectedIds = selected.map { it.id }
     val selectedIdSet = selectedIds.toSet()
@@ -2468,6 +3138,7 @@ fun modelFamilyBundleReportJson(selected: List<ModelFamilyModule>): String {
         appendLine("  \"availableFamilies\": ${jsonStringArray(availableFamilies)},")
         appendLine("  \"availableProfiles\": ${jsonStringArray(availableProfiles)},")
         appendLine("  \"availableSelectors\": ${jsonStringArray(availableModelFamilySelectors)},")
+        appendLine("  \"moduleCatalog\": ${jsonModelFamilyModuleCatalogSummary()},")
         appendLine("  \"requiredFamilies\": ${jsonStringArray(requiredModelFamilies.sorted())},")
         appendLine("  \"forbiddenFamilies\": ${jsonStringArray(forbiddenModelFamilies.sorted())},")
         appendLine("  \"requiredAliases\": ${jsonStringArray(requiredModelFamilyAliasTokens.sorted())},")
@@ -2540,6 +3211,8 @@ val modelFamilyBundleManifestFile = generatedModelFamilyBundleDir.map {
     it.file("META-INF/gollek-model-family-bundle.properties")
 }
 val modelFamilyBundleReportFile = layout.buildDirectory.file("reports/gollek/model-family-bundle.json")
+val modelFamilyModuleCatalogReportFile =
+    layout.buildDirectory.file("reports/gollek/model-family-module-catalog.json")
 val modelFamilyFixtureReportFile = layout.buildDirectory.file("reports/gollek/model-family-fixtures.json")
 val modelFamilyFixtureFingerprintReportFile =
     layout.buildDirectory.file("reports/gollek/model-family-fixture-fingerprints.json")
@@ -2549,7 +3222,7 @@ val modelFamilyFixtureFingerprintLockDriftReportFile =
     layout.buildDirectory.file("reports/gollek/model-family-fixture-fingerprint-lock-drift.json")
 
 fun modelFamilyFixtureRootDirs() = modelFamilyModules.map { module ->
-    project(module.path).layout.projectDirectory.dir("src/test/resources/model-family-fixtures")
+    modelFamilyProjectDir(module).resolve("src/test/resources/model-family-fixtures")
 }
 
 val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundleManifest") {
@@ -2579,6 +3252,15 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
     inputs.property("forbiddenModelFamilies", forbiddenModelFamilies.sorted().joinToString(","))
     inputs.property("requiredModelFamilyAliases", requiredModelFamilyAliasTokens.sorted().joinToString(","))
     inputs.property("forbiddenModelFamilyAliases", forbiddenModelFamilyAliasTokens.sorted().joinToString(","))
+    inputs.property(
+        "productionReadinessPendingFamilies",
+        modelFamilyModuleCatalogProductionReadinessPendingFamilies().sorted().joinToString(",")
+    )
+    inputs.property(
+        "directSafetensorPendingFamilies",
+        modelFamilyModuleCatalogDirectSafetensorPendingFamilies().sorted().joinToString(",")
+    )
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
     inputs.property("manifestSchemaVersion", modelFamilyBundleManifestSchemaVersion)
     inputs.files(modelFamilyFixtureRootDirs())
     inputs.property("requiredModelFamilyFixtureTokens", requiredModelFamilyFixtureTokens.sorted().joinToString(","))
@@ -2591,6 +3273,7 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
         "modelFamilyBundleAliases",
         modelFamilyBundleAliases.joinToString(",") { "${it.id}:${it.familyIds.sorted().joinToString("+")}" }
     )
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
 
     doLast {
         val selected = selectedModelFamilyModules()
@@ -2605,6 +3288,8 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
             selectedForbiddenAliases
         )
         val fixtureSnapshot = modelFamilyFixtureLockSnapshot()
+        val productionReadinessPendingFamilies = modelFamilyModuleCatalogProductionReadinessPendingFamilies()
+        val directSafetensorPendingFamilies = modelFamilyModuleCatalogDirectSafetensorPendingFamilies()
         val file = outputFile.get().asFile
         file.parentFile.mkdirs()
         file.writeText(
@@ -2626,6 +3311,13 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
                 appendLine("explicitForbiddenFamilies=${explicitForbiddenModelFamilyTokens.sorted().joinToString(",")}")
                 appendLine("explicitRequiredAliases=${explicitRequiredModelFamilyAliasTokens.sorted().joinToString(",")}")
                 appendLine("explicitForbiddenAliases=${explicitForbiddenModelFamilyAliasTokens.sorted().joinToString(",")}")
+                appendLine("requiresDirectSafetensorRuntime=$requiresDirectSafetensorRuntime")
+                appendLine("productionReadinessPassed=${productionReadinessPendingFamilies.isEmpty()}")
+                appendLine("productionReadinessPendingCount=${productionReadinessPendingFamilies.size}")
+                appendLine("productionReadinessPendingFamilies=${productionReadinessPendingFamilies.sorted().joinToString(",")}")
+                appendLine("directSafetensorReadinessPassed=${directSafetensorPendingFamilies.isEmpty()}")
+                appendLine("directSafetensorPendingCount=${directSafetensorPendingFamilies.size}")
+                appendLine("directSafetensorPendingFamilies=${directSafetensorPendingFamilies.sorted().joinToString(",")}")
                 appendLine("selectors=${requestedModelFamilyTokens.sorted().joinToString(",")}")
                 appendLine("requiredFamilies=${requiredModelFamilies.sorted().joinToString(",")}")
                 appendLine("forbiddenFamilies=${forbiddenModelFamilies.sorted().joinToString(",")}")
@@ -2661,11 +3353,13 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
                     )
                 }
                 appendLine("detached=${selected.isEmpty()}")
+                appendLine("familyCount=${selected.size}")
                 appendLine("families=${selected.joinToString(",") { it.id }}")
                 appendLine("profiles=${selected.map { it.profile }.distinct().sorted().joinToString(",")}")
                 appendLine("availableFamilies=${modelFamilyModules.map { it.id }.sorted().joinToString(",")}")
                 appendLine("availableProfiles=${modelFamilyModules.map { it.profile }.distinct().sorted().joinToString(",")}")
                 appendLine("availableSelectors=${availableModelFamilySelectors.joinToString(",")}")
+                appendLine("tokenizerMetadataPendingFamilies=${pendingModelFamilyTokenizerMetadata.sorted().joinToString(",")}")
                 appendLine("availableBundlePresets=${modelFamilyBundlePresetIds.sorted().joinToString(",")}")
                 appendLine("bundlePresets=${modelFamilyBundlePresets.map { it.id }.sorted().joinToString(",")}")
                 for (preset in modelFamilyBundlePresets.sortedBy { it.id }) {
@@ -2697,6 +3391,33 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
                             validation.selectedFamilyIds.sorted().joinToString(",")
                         }"
                     )
+                    appendLine("bundlePreset.${preset.id}.selectedCount=${validation.selectedFamilyIds.size}")
+                    appendLine(
+                        "bundlePreset.${preset.id}.productionTokenizerMetadataRequired=${
+                            validation.productionTokenizerMetadataRequired
+                        }"
+                    )
+                    appendLine(
+                        "bundlePreset.${preset.id}.productionTokenizerMetadataReady=${
+                            validation.productionTokenizerMetadataReady
+                        }"
+                    )
+                    appendLine(
+                        "bundlePreset.${preset.id}.productionSafetyPassed=${validation.productionSafetyPassed}"
+                    )
+                    appendLine(
+                        "bundlePreset.${preset.id}.productionSafetyViolationCount=${
+                            validation.productionSafetyViolationCount
+                        }"
+                    )
+                    appendLine(
+                        "bundlePreset.${preset.id}.pendingTokenizerFamilies=${
+                            validation.pendingTokenizerFamilyIds.sorted().joinToString(",")
+                        }"
+                    )
+                    for ((familyId, reason) in validation.pendingTokenizerReasons.toSortedMap()) {
+                        appendLine("bundlePreset.${preset.id}.pendingTokenizerFamily.${familyId}.reason=$reason")
+                    }
                     appendLine("bundlePreset.${preset.id}.policyPassed=${validation.passed}")
                     appendLine("bundlePreset.${preset.id}.policyViolationCount=${validation.violationCount}")
                     appendLine(
@@ -2704,21 +3425,25 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
                             validation.missingRequiredFamilyIds.sorted().joinToString(",")
                         }"
                     )
+                    appendLine("bundlePreset.${preset.id}.missingRequiredCount=${validation.missingRequiredFamilyIds.size}")
                     appendLine(
                         "bundlePreset.${preset.id}.selectedForbiddenFamilies=${
                             validation.selectedForbiddenFamilyIds.sorted().joinToString(",")
                         }"
                     )
+                    appendLine("bundlePreset.${preset.id}.selectedForbiddenCount=${validation.selectedForbiddenFamilyIds.size}")
                     appendLine(
                         "bundlePreset.${preset.id}.missingRequiredAliases=${
                             validation.missingRequiredAliases.keys.sorted().joinToString(",")
                         }"
                     )
+                    appendLine("bundlePreset.${preset.id}.missingRequiredAliasCount=${validation.missingRequiredAliases.size}")
                     appendLine(
                         "bundlePreset.${preset.id}.selectedForbiddenAliases=${
                             validation.selectedForbiddenAliases.keys.sorted().joinToString(",")
                         }"
                     )
+                    appendLine("bundlePreset.${preset.id}.selectedForbiddenAliasCount=${validation.selectedForbiddenAliases.size}")
                     for ((aliasId, missing) in validation.missingRequiredAliases.toSortedMap()) {
                         appendLine(
                             "bundlePreset.${preset.id}.missingRequiredAlias.${aliasId}.families=${
@@ -2738,11 +3463,16 @@ val generateModelFamilyBundleManifest = tasks.register("generateModelFamilyBundl
                 for (alias in modelFamilyBundleAliases.sortedBy { it.id }) {
                     appendLine("bundleAlias.${alias.id}.description=${alias.description}")
                     appendLine("bundleAlias.${alias.id}.families=${alias.familyIds.sorted().joinToString(",")}")
+                    appendLine("bundleAlias.${alias.id}.familyCount=${alias.familyIds.size}")
                 }
                 for (module in modelFamilyModules.sortedBy { it.id }) {
                     appendLine("family.${module.id}.selected=${module.id in bundledModelFamilies}")
                     appendLine("family.${module.id}.profile=${module.profile}")
                     appendLine("family.${module.id}.path=${module.path}")
+                    val pendingReason = modelFamilyTokenizerMetadataPendingReason(module.id)
+                    if (pendingReason.isNotBlank()) {
+                        appendLine("family.${module.id}.tokenizerMetadataPendingReason=$pendingReason")
+                    }
                 }
             },
             Charsets.UTF_8
@@ -2754,7 +3484,11 @@ dependencies {
     fun includeModelFamilies() {
         for (module in modelFamilyModules) {
             if (module.id in bundledModelFamilies) {
-                implementation(project(module.path))
+                val moduleProject = modelFamilyProject(module)
+                    ?: throw GradleException(
+                        "Selected model-family project ${module.path} for ${module.id} is not included"
+                    )
+                implementation(moduleProject)
             }
         }
     }
@@ -2780,6 +3514,7 @@ dependencies {
     implementation("com.google.ai.edge.litertlm:litertlm-jvm:0.11.0")
 
     implementation(project(":sdk:gollek-sdk"))
+    implementation(project(":sdk:gollek-sdk-agent"))
     implementation(project(":sdk:gollek-sdk-api"))
     implementation(project(":sdk:gollek-sdk-core"))
     if (findProject(":sdk:gollek-sdk-session") != null) {
@@ -2797,8 +3532,10 @@ dependencies {
     implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":core:plugin:gollek-plugin-kernel-core"))
     implementation(project(":core:plugin:gollek-plugin-runner-core"))
+    implementation(project(":core:plugin:gollek-plugin-core"))
     implementation(project(":core:plugin:gollek-plugin-runner-gguf"))
     implementation(project(":core:gollek-model-repo-hf"))
+    implementation(project(":models:gollek-model-gemma4"))
     includeModelFamilies()
     implementation(project(":core:gollek-model-repo-kaggle"))
     implementation(project(":core:gollek-model-repo-local"))
@@ -2971,14 +3708,33 @@ tasks.register("printModelFamilyBundlePresets") {
         println("Model-family bundle presets (${validations.size}):")
         for (validation in validations) {
             val preset = validation.preset
+            val presetStatus = when {
+                validation.passed && validation.productionSafetyPassed -> "passed"
+                !validation.passed && !validation.productionSafetyPassed ->
+                    "failed (${validation.violationCount} policy violation(s), " +
+                            "${validation.productionSafetyViolationCount} production safety violation(s))"
+                !validation.passed -> "failed (${validation.violationCount} policy violation(s))"
+                else -> "failed (${validation.productionSafetyViolationCount} production safety violation(s))"
+            }
             println(
-                "  - ${preset.id}: ${
-                    if (validation.passed) "passed" else "failed (${validation.violationCount} violation(s))"
-                }"
+                "  - ${preset.id}: $presetStatus"
             )
             println("    description: ${preset.description}")
             println("    selectors: ${preset.selectors.sorted().joinToString(", ").ifBlank { "none" }}")
             println("    selected families (${validation.selectedFamilyIds.size}): ${compactFamilyList(validation.selectedFamilyIds)}")
+            println(
+                "    production tokenizer metadata: ${
+                    if (validation.productionTokenizerMetadataRequired) {
+                        if (validation.productionTokenizerMetadataReady) {
+                            "ready"
+                        } else {
+                            "blocked (${validation.pendingTokenizerFamilyIds.sorted().joinToString(", ")})"
+                        }
+                    } else {
+                        "not required"
+                    }
+                }"
+            )
             println("    required families: ${preset.requiredFamilies.sorted().joinToString(", ").ifBlank { "none" }}")
             println("    forbidden families: ${preset.forbiddenFamilies.sorted().joinToString(", ").ifBlank { "none" }}")
             println("    required aliases: ${preset.requiredAliases.sorted().joinToString(", ").ifBlank { "none" }}")
@@ -3001,6 +3757,11 @@ tasks.register("printModelFamilyBundlePresets") {
                     println("    selected forbidden alias $aliasId: ${selectedFamilies.sorted().joinToString(", ")}")
                 }
             }
+            if (!validation.productionSafetyPassed) {
+                for ((familyId, reason) in validation.pendingTokenizerReasons.toSortedMap()) {
+                    println("    production tokenizer pending $familyId: $reason")
+                }
+            }
         }
     }
 }
@@ -3014,13 +3775,51 @@ tasks.register("printModelFamilyBundleJson") {
     }
 }
 
+tasks.register("printModelFamilyModuleCatalogJson") {
+    group = "help"
+    description = "Print attachable model-family module catalog JSON for CI/release automation."
+    dependsOn("writeModelFamilyModuleCatalogReport")
+    doLast {
+        println(modelFamilyModuleCatalogReportFile.get().asFile.readText(Charsets.UTF_8))
+    }
+}
+
+tasks.register("writeModelFamilyModuleCatalogReport") {
+    group = "help"
+    description = "Write attachable model-family module catalog JSON for CI/release automation."
+
+    val outputFile = modelFamilyModuleCatalogReportFile
+    outputs.file(outputFile)
+    inputs.property("catalogModelFamilyProjectPaths", catalogModelFamilyProjectPaths().sorted().joinToString(","))
+    inputs.property("includedModelFamilyProjectPaths", includedModelFamilyProjectPaths().sorted().joinToString(","))
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
+    inputs.property(
+        "includedCatalogedModelFamilyProjectPaths",
+        includedCatalogedModelFamilyProjectPaths().sorted().joinToString(",")
+    )
+    inputs.property("bundledModelFamilies", bundledModelFamilies.sorted().joinToString(","))
+    inputs.files(includedModelFamilyProjectPaths().flatMap { path ->
+        listOf(
+            modelFamilyProjectResourceFile(path, modelFamilyPluginDescriptorRelativePath),
+            modelFamilyProjectResourceFile(path, modelFamilyServiceDescriptorRelativePath),
+            modelFamilyProjectResourceFile(path, gollekPluginServiceDescriptorRelativePath)
+        )
+    })
+
+    doLast {
+        val file = outputFile.get().asFile
+        file.parentFile.mkdirs()
+        file.writeText(modelFamilyModuleCatalogReportJson(), Charsets.UTF_8)
+    }
+}
+
 tasks.register("writeModelFamilyBundleReport") {
     group = "help"
     description = "Write selected model-family modules as JSON for CI/release automation."
 
     val outputFile = modelFamilyBundleReportFile
     val fixtureRoots = modelFamilyModules.map { module ->
-        project(module.path).layout.projectDirectory.dir("src/test/resources/model-family-fixtures")
+        modelFamilyProjectDir(module).resolve("src/test/resources/model-family-fixtures")
     }
     outputs.file(outputFile)
     inputs.files(fixtureRoots)
@@ -3297,14 +4096,15 @@ val validateModelFamilyBundle = tasks.register("validateModelFamilyBundle") {
     group = "verification"
     description = "Validate model-family Gradle metadata, plugin descriptors, and ServiceLoader entries."
 
-    val pluginJsonFiles = modelFamilyModules.map { module ->
-        project(module.path).layout.projectDirectory.file("src/main/resources/plugin.json")
+    val pluginJsonFiles = existingModelFamilyModules().map { module ->
+        modelFamilyProjectDir(module).resolve("src/main/resources/plugin.json")
     }
-    val pluginSourceDirs = modelFamilyModules.map { module ->
-        project(module.path).layout.projectDirectory.dir("src/main/java")
+    val pluginSourceDirs = existingModelFamilyModules().map { module ->
+        modelFamilyProjectDir(module).resolve("src/main/java")
     }
     inputs.files(pluginJsonFiles)
     inputs.files(pluginSourceDirs)
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
 
     doLast {
         val modelFamilyService = "META-INF/services/tech.kayys.gollek.spi.model.ModelFamilyPlugin"
@@ -3312,8 +4112,15 @@ val validateModelFamilyBundle = tasks.register("validateModelFamilyBundle") {
         val problems = mutableListOf<String>()
 
         for (module in modelFamilyModules) {
-            val moduleProject = project(module.path)
-            val resourcesDir = moduleProject.layout.projectDirectory.dir("src/main/resources").asFile
+            if (modelFamilyProject(module) == null) {
+                if (module.id in bundledModelFamilies) {
+                    problems += "${module.id}: selected model-family project ${module.path} is not included"
+                }
+                continue
+            }
+
+            val moduleProjectDir = modelFamilyProjectDir(module)
+            val resourcesDir = moduleProjectDir.resolve("src/main/resources")
             val pluginJson = resourcesDir.resolve("plugin.json")
 
             if (!pluginJson.isFile) {
@@ -3325,12 +4132,30 @@ val validateModelFamilyBundle = tasks.register("validateModelFamilyBundle") {
             val descriptorId = jsonStringValue(json, "id")
             val mainClass = jsonStringValue(json, "mainClass")
             val bundleProfile = jsonStringValue(json, "bundleProfile")
+            val tokenizerKinds = modelFamilyPluginDescriptorTokenizerKinds(module.path)
+            val tokenizerMetadataPending = modelFamilyPluginDescriptorTokenizerMetadataPending(module.path)
+            val tokenizerMetadataPendingReason = modelFamilyPluginDescriptorTokenizerMetadataPendingReason(module.path)
 
             if (descriptorId != "model-family/${module.id}") {
                 problems += "${module.id}: plugin.json id is '$descriptorId', expected 'model-family/${module.id}'"
             }
             if (bundleProfile != module.profile) {
                 problems += "${module.id}: plugin.json bundleProfile is '$bundleProfile', expected '${module.profile}'"
+            }
+            if (tokenizerMetadataPending && tokenizerMetadataPendingReason.isBlank()) {
+                problems += "${module.id}: plugin.json tokenizerMetadataStatus is pending but " +
+                        "tokenizerMetadataPendingReason is missing"
+            }
+            if (!tokenizerMetadataPending && tokenizerMetadataPendingReason.isNotBlank()) {
+                problems += "${module.id}: plugin.json tokenizerMetadataPendingReason is set but " +
+                        "tokenizerMetadataStatus is not pending"
+            }
+            if (tokenizerKinds.isEmpty() && module.id !in pendingModelFamilyTokenizerMetadata) {
+                problems += "${module.id}: plugin.json is missing properties.tokenizerKind/tokenizerKinds"
+            }
+            if (tokenizerKinds.isNotEmpty() && module.id in pendingModelFamilyTokenizerMetadata) {
+                problems += "${module.id}: tokenizer metadata is now present; clear " +
+                        "plugin.json tokenizerMetadataStatus=pending"
             }
             if (mainClass.isNullOrBlank()) {
                 problems += "${module.id}: plugin.json mainClass is missing"
@@ -3353,7 +4178,7 @@ val validateModelFamilyBundle = tasks.register("validateModelFamilyBundle") {
 
             validateScopedDirectSafetensorMetadata(
                 module,
-                moduleProject.layout.projectDirectory.dir("src/main/java").asFile,
+                moduleProjectDir.resolve("src/main/java"),
                 problems
             )
         }
@@ -3364,6 +4189,355 @@ val validateModelFamilyBundle = tasks.register("validateModelFamilyBundle") {
                         problems.joinToString("\n") { "  - $it" }
             )
         }
+    }
+}
+
+val validateModelFamilyModuleCatalog = tasks.register("validateModelFamilyModuleCatalog") {
+    group = "verification"
+    description = "Validate that attachable model-family Gradle projects and CLI selector catalog stay in sync."
+    dependsOn("writeModelFamilyModuleCatalogReport")
+
+    inputs.property("catalogModelFamilyProjectPaths", catalogModelFamilyProjectPaths().sorted().joinToString(","))
+    inputs.property("includedModelFamilyProjectPaths", includedModelFamilyProjectPaths().sorted().joinToString(","))
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
+    inputs.property(
+        "includedCatalogedModelFamilyProjectPaths",
+        includedCatalogedModelFamilyProjectPaths().sorted().joinToString(",")
+    )
+    inputs.files(includedModelFamilyProjectPaths().flatMap { path ->
+        listOf(
+            modelFamilyProjectResourceFile(path, modelFamilyPluginDescriptorRelativePath),
+            modelFamilyProjectResourceFile(path, modelFamilyServiceDescriptorRelativePath),
+            modelFamilyProjectResourceFile(path, gollekPluginServiceDescriptorRelativePath)
+        )
+    })
+
+    doLast {
+        val missingProjects = modelFamilyModuleCatalogMissingProjects()
+        val uncatalogedProjects = modelFamilyModuleCatalogUncatalogedProjects()
+        val serviceIncompleteProjects = modelFamilyModuleCatalogServiceIncompleteProjects()
+        val tokenizerMissingFamilies = modelFamilyModuleCatalogTokenizerMetadataMissingFamilies()
+        val productionReadinessPendingFamilies = modelFamilyModuleCatalogProductionReadinessPendingFamilies()
+        val directSafetensorPendingFamilies = modelFamilyModuleCatalogDirectSafetensorPendingFamilies()
+        val stalePendingFamilies = modelFamilyModules
+            .filter { module -> modelFamilyProject(module) != null }
+            .filter { module -> module.id in pendingModelFamilyTokenizerMetadata }
+            .filter { module -> modelFamilyPluginDescriptorHasTokenizerMetadata(module.path) }
+            .map { it.id }
+        val moduleById = modelFamilyModules.associateBy { it.id }
+
+        val problems = mutableListOf<String>()
+        if (missingProjects.isNotEmpty()) {
+            problems += "catalog entries are not included as Gradle projects: " +
+                    missingProjects.sorted().joinToString(", ")
+        }
+        if (uncatalogedProjects.isNotEmpty()) {
+            problems += "included model-family plugin projects are missing from the CLI catalog: " +
+                    uncatalogedProjects.sorted().joinToString(", ")
+        }
+        if (serviceIncompleteProjects.isNotEmpty()) {
+            problems += "cataloged model-family plugin projects are missing plugin service descriptors: " +
+                    serviceIncompleteProjects.sorted().joinToString(", ")
+        }
+        if (tokenizerMissingFamilies.isNotEmpty()) {
+            problems += "cataloged model-family plugin projects are missing tokenizer metadata: " +
+                    tokenizerMissingFamilies.sorted().joinToString(", ")
+        }
+        if (stalePendingFamilies.isNotEmpty()) {
+            problems += "model-family tokenizer metadata pending exceptions are stale: " +
+                    stalePendingFamilies.sorted()
+                        .joinToString(", ") { familyId ->
+                            "$familyId (${modelFamilyTokenizerMetadataPendingReason(familyId)})"
+                        }
+        }
+        if (productionReadinessPendingFamilies.isNotEmpty()) {
+            problems += "production candidate model-family plugins are not production-ready: " +
+                    productionReadinessPendingFamilies.sorted()
+                        .joinToString(", ") { familyId ->
+                            val readiness = moduleById[familyId]?.let(::modelFamilyModuleReadiness) ?: "unknown"
+                            "$familyId ($readiness)"
+                        }
+        }
+        if (directSafetensorPendingFamilies.isNotEmpty()) {
+            problems += "direct SafeTensor model-family plugins are not direct-runtime-ready: " +
+                    directSafetensorPendingFamilies.sorted()
+                        .joinToString(", ") { familyId ->
+                            val readiness = moduleById[familyId]?.let(::modelFamilyModuleReadiness) ?: "unknown"
+                            "$familyId ($readiness)"
+                        }
+        }
+
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                "Model-family module catalog validation failed:\n" +
+                        problems.joinToString("\n") { "  - $it" } +
+                        "\nReport: ${modelFamilyModuleCatalogReportFile.get().asFile.relativeTo(projectDir)}" +
+                        "\nUpdate settings.gradle.kts auto-discovery or ui/gollek-cli modelFamilyModules."
+            )
+        }
+    }
+}
+
+val validateExtensionAvailabilityProviders = tasks.register("validateExtensionAvailabilityProviders") {
+    group = "verification"
+    description = "Validate extension availability provider ServiceLoader descriptors."
+
+    val servicePath = "META-INF/services/tech.kayys.gollek.plugin.core.ExtensionAvailabilityProvider"
+    val serviceFile = projectDir.resolve("src/main/resources/$servicePath")
+    val sourceRoot = projectDir.resolve("src/main/java")
+    val expectedProviders = listOf(
+        "tech.kayys.gollek.cli.util.SulingAudioExtensionAvailabilityProvider",
+        "tech.kayys.gollek.cli.util.Gemma4UnifiedRuntimeAvailabilityProvider"
+    )
+
+    inputs.file(serviceFile)
+    inputs.files(fileTree(sourceRoot) {
+        include("**/*ExtensionAvailabilityProvider.java")
+    })
+    inputs.property("expectedExtensionAvailabilityProviders", expectedProviders.joinToString(","))
+
+    doLast {
+        val problems = mutableListOf<String>()
+
+        if (!serviceFile.isFile) {
+            problems += "missing ServiceLoader file $servicePath"
+        } else {
+            val implementations = serviceFile.readLines()
+                .map { it.substringBefore("#").trim() }
+                .filter { it.isNotBlank() }
+            val duplicates = implementations.groupingBy { it }
+                .eachCount()
+                .filterValues { it > 1 }
+                .keys
+                .sorted()
+
+            if (implementations.isEmpty()) {
+                problems += "$servicePath does not list any providers"
+            }
+            for (duplicate in duplicates) {
+                problems += "$servicePath lists duplicate provider $duplicate"
+            }
+            for (provider in expectedProviders) {
+                if (provider !in implementations) {
+                    problems += "$servicePath does not list required provider $provider"
+                }
+            }
+            for (implementation in implementations) {
+                val sourceFile = sourceRoot.resolve(implementation.replace('.', File.separatorChar) + ".java")
+                if (!sourceFile.isFile) {
+                    problems += "$servicePath lists $implementation, but source file is missing"
+                    continue
+                }
+                val source = sourceFile.readText()
+                if (!source.contains("implements ExtensionAvailabilityProvider")) {
+                    problems += "$implementation must implement ExtensionAvailabilityProvider"
+                }
+                if (!source.contains("ExtensionAvailability availability()")) {
+                    problems += "$implementation must expose an ExtensionAvailability availability() method"
+                }
+            }
+        }
+
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                "Extension availability provider validation failed:\n" +
+                        problems.joinToString("\n") { "  - $it" }
+            )
+        }
+    }
+}
+
+val pluginClasspath = providers.gradleProperty("gollek.pluginClasspath").orElse("")
+val extensionPluginClasspath = providers.gradleProperty("gollek.extensionPluginClasspath").orElse("")
+val pluginDirs = providers.gradleProperty("gollek.pluginDirs").orElse("")
+val extensionPluginDirs = providers.gradleProperty("gollek.extensionPluginDirs").orElse("")
+
+val validateExtensionAvailabilityProviderContracts = tasks.register<JavaExec>(
+    "validateExtensionAvailabilityProviderContracts"
+) {
+    group = "verification"
+    description = "Run packaged extension availability providers through the plugin-core contract gate."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.ExtensionAvailabilityContractCheck")
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("extensionPluginClasspath", extensionPluginClasspath)
+    inputs.property("extensionPluginDirs", extensionPluginDirs)
+    pluginPathInputFiles("extensionPluginClasspathFiles", pluginClasspath, extensionPluginClasspath)
+    pluginPathInputFiles("extensionPluginDirectoryFiles", pluginDirs, extensionPluginDirs)
+    doFirst {
+        args(extensionPluginClasspathArgs())
+    }
+}
+
+val extensionAvailabilityGateReportFile =
+    layout.buildDirectory.file("reports/gollek/extension-availability-gate.json")
+
+val writeExtensionAvailabilityGateReport = tasks.register<JavaExec>("writeExtensionAvailabilityGateReport") {
+    group = "verification"
+    description = "Write the packaged extension availability release-gate report for CI archival."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.ExtensionAvailabilityGateReportWriter")
+    args(extensionAvailabilityGateReportFile.get().asFile.absolutePath)
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("extensionPluginClasspath", extensionPluginClasspath)
+    inputs.property("extensionPluginDirs", extensionPluginDirs)
+    pluginPathInputFiles("extensionPluginClasspathFiles", pluginClasspath, extensionPluginClasspath)
+    pluginPathInputFiles("extensionPluginDirectoryFiles", pluginDirs, extensionPluginDirs)
+    outputs.file(extensionAvailabilityGateReportFile)
+    doFirst {
+        args(extensionPluginClasspathArgs())
+    }
+}
+
+val modelFamilyPluginClasspath = providers.gradleProperty("gollek.modelFamilyPluginClasspath").orElse("")
+val modelFamilyPluginDirs = providers.gradleProperty("gollek.modelFamilyPluginDirs").orElse("")
+
+fun pluginPathEntries(vararg values: Provider<String>): List<String> {
+    return values.asSequence()
+        .flatMap { value -> value.get().split(File.pathSeparator).asSequence() }
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .map { rootProject.file(it).absolutePath }
+        .distinct()
+        .toList()
+}
+
+fun optionPathArgs(optionName: String, vararg values: Provider<String>): List<String> {
+    return pluginPathEntries(*values)
+        .flatMap { path -> listOf(optionName, path) }
+}
+
+fun pluginClasspathArgs(vararg values: Provider<String>): List<String> {
+    return pluginPathEntries(*values)
+}
+
+fun pluginDirArgs(vararg values: Provider<String>): List<String> {
+    return optionPathArgs("--plugin-dir", *values)
+}
+
+fun JavaExec.pluginPathInputFiles(propertyName: String, vararg values: Provider<String>) {
+    inputs.files(providers.provider {
+        pluginPathEntries(*values).map { rootProject.file(it) }
+    })
+        .withPropertyName(propertyName)
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .optional()
+}
+
+fun extensionPluginClasspathArgs(): List<String> {
+    return pluginClasspathArgs(pluginClasspath, extensionPluginClasspath) +
+            pluginDirArgs(pluginDirs, extensionPluginDirs)
+}
+
+fun modelFamilyPluginClasspathArgs(): List<String> {
+    return pluginClasspathArgs(pluginClasspath, modelFamilyPluginClasspath) +
+            pluginDirArgs(pluginDirs, modelFamilyPluginDirs)
+}
+
+fun combinedPluginClasspathArgs(): List<String> {
+    return pluginClasspathArgs(pluginClasspath, extensionPluginClasspath, modelFamilyPluginClasspath) +
+            pluginDirArgs(pluginDirs, extensionPluginDirs, modelFamilyPluginDirs)
+}
+
+val validateModelFamilyBundleGate = tasks.register<JavaExec>("validateModelFamilyBundleGate") {
+    group = "verification"
+    description = "Run packaged model-family plugins through the bundle availability and contract release gate."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.ModelFamilyBundleGateCheck")
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("modelFamilyPluginClasspath", modelFamilyPluginClasspath)
+    inputs.property("modelFamilyPluginDirs", modelFamilyPluginDirs)
+    pluginPathInputFiles("modelFamilyPluginClasspathFiles", pluginClasspath, modelFamilyPluginClasspath)
+    pluginPathInputFiles("modelFamilyPluginDirectoryFiles", pluginDirs, modelFamilyPluginDirs)
+    doFirst {
+        args(modelFamilyPluginClasspathArgs())
+    }
+}
+
+val modelFamilyBundleGateReportFile =
+    layout.buildDirectory.file("reports/gollek/model-family-bundle-gate.json")
+
+val writeModelFamilyBundleGateReport = tasks.register<JavaExec>("writeModelFamilyBundleGateReport") {
+    group = "verification"
+    description = "Write the packaged model-family bundle release-gate report for CI archival."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.ModelFamilyBundleGateReportWriter")
+    args(modelFamilyBundleGateReportFile.get().asFile.absolutePath)
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("modelFamilyPluginClasspath", modelFamilyPluginClasspath)
+    inputs.property("modelFamilyPluginDirs", modelFamilyPluginDirs)
+    pluginPathInputFiles("modelFamilyPluginClasspathFiles", pluginClasspath, modelFamilyPluginClasspath)
+    pluginPathInputFiles("modelFamilyPluginDirectoryFiles", pluginDirs, modelFamilyPluginDirs)
+    outputs.file(modelFamilyBundleGateReportFile)
+    doFirst {
+        args(modelFamilyPluginClasspathArgs())
+    }
+}
+
+val pluginGatesReportFile =
+    layout.buildDirectory.file("reports/gollek/plugin-gates.json")
+
+val validatePluginGates = tasks.register<JavaExec>("validatePluginGates") {
+    group = "verification"
+    description = "Run extension and model-family plugin release gates as one combined CI check."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.PluginGatesCheck")
+    inputs.property("pluginClasspath", pluginClasspath)
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("extensionPluginClasspath", extensionPluginClasspath)
+    inputs.property("extensionPluginDirs", extensionPluginDirs)
+    inputs.property("modelFamilyPluginClasspath", modelFamilyPluginClasspath)
+    inputs.property("modelFamilyPluginDirs", modelFamilyPluginDirs)
+    pluginPathInputFiles(
+        "combinedPluginClasspathFiles",
+        pluginClasspath,
+        extensionPluginClasspath,
+        modelFamilyPluginClasspath
+    )
+    pluginPathInputFiles(
+        "combinedPluginDirectoryFiles",
+        pluginDirs,
+        extensionPluginDirs,
+        modelFamilyPluginDirs
+    )
+    doFirst {
+        args(combinedPluginClasspathArgs())
+    }
+}
+
+val writePluginGatesReport = tasks.register<JavaExec>("writePluginGatesReport") {
+    group = "verification"
+    description = "Write a combined extension and model-family plugin release-gate report for CI archival."
+    dependsOn(tasks.named("classes"))
+    classpath = sourceSets.named("main").get().runtimeClasspath
+    mainClass.set("tech.kayys.gollek.cli.util.PluginGatesReportWriter")
+    args(pluginGatesReportFile.get().asFile.absolutePath)
+    inputs.property("pluginClasspath", pluginClasspath)
+    inputs.property("pluginDirs", pluginDirs)
+    inputs.property("extensionPluginClasspath", extensionPluginClasspath)
+    inputs.property("extensionPluginDirs", extensionPluginDirs)
+    inputs.property("modelFamilyPluginClasspath", modelFamilyPluginClasspath)
+    inputs.property("modelFamilyPluginDirs", modelFamilyPluginDirs)
+    pluginPathInputFiles(
+        "combinedPluginClasspathFiles",
+        pluginClasspath,
+        extensionPluginClasspath,
+        modelFamilyPluginClasspath
+    )
+    pluginPathInputFiles(
+        "combinedPluginDirectoryFiles",
+        pluginDirs,
+        extensionPluginDirs,
+        modelFamilyPluginDirs
+    )
+    outputs.file(pluginGatesReportFile)
+    doFirst {
+        args(combinedPluginClasspathArgs())
     }
 }
 
@@ -3395,6 +4569,15 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
     inputs.property("forbiddenModelFamilies", forbiddenModelFamilies.sorted().joinToString(","))
     inputs.property("requiredModelFamilyAliases", requiredModelFamilyAliasTokens.sorted().joinToString(","))
     inputs.property("forbiddenModelFamilyAliases", forbiddenModelFamilyAliasTokens.sorted().joinToString(","))
+    inputs.property(
+        "productionReadinessPendingFamilies",
+        modelFamilyModuleCatalogProductionReadinessPendingFamilies().sorted().joinToString(",")
+    )
+    inputs.property(
+        "directSafetensorPendingFamilies",
+        modelFamilyModuleCatalogDirectSafetensorPendingFamilies().sorted().joinToString(",")
+    )
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
     inputs.property("manifestSchemaVersion", modelFamilyBundleManifestSchemaVersion)
     inputs.files(modelFamilyFixtureRootDirs())
     inputs.property("requiredModelFamilyFixtureTokens", requiredModelFamilyFixtureTokens.sorted().joinToString(","))
@@ -3413,6 +4596,8 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
             selectedForbiddenAliases
         )
         val fixtureSnapshot = modelFamilyFixtureLockSnapshot()
+        val productionReadinessPendingFamilies = modelFamilyModuleCatalogProductionReadinessPendingFamilies()
+        val directSafetensorPendingFamilies = modelFamilyModuleCatalogDirectSafetensorPendingFamilies()
         val manifest = manifestFile.get().asFile
         val problems = mutableListOf<String>()
 
@@ -3455,6 +4640,13 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
         expectCsv("explicitForbiddenFamilies", explicitForbiddenModelFamilyTokens.sorted())
         expectCsv("explicitRequiredAliases", explicitRequiredModelFamilyAliasTokens.sorted())
         expectCsv("explicitForbiddenAliases", explicitForbiddenModelFamilyAliasTokens.sorted())
+        expectProperty("requiresDirectSafetensorRuntime", requiresDirectSafetensorRuntime.toString())
+        expectProperty("productionReadinessPassed", productionReadinessPendingFamilies.isEmpty().toString())
+        expectProperty("productionReadinessPendingCount", productionReadinessPendingFamilies.size.toString())
+        expectCsv("productionReadinessPendingFamilies", productionReadinessPendingFamilies.sorted())
+        expectProperty("directSafetensorReadinessPassed", directSafetensorPendingFamilies.isEmpty().toString())
+        expectProperty("directSafetensorPendingCount", directSafetensorPendingFamilies.size.toString())
+        expectCsv("directSafetensorPendingFamilies", directSafetensorPendingFamilies.sorted())
         expectProperty("selectors", requestedModelFamilyTokens.sorted().joinToString(","))
         expectCsv("requiredFamilies", requiredModelFamilies.sorted())
         expectCsv("forbiddenFamilies", forbiddenModelFamilies.sorted())
@@ -3486,11 +4678,13 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
             expectCsv("selectedForbiddenAlias.${aliasId}.families", selectedFamilies.sorted())
         }
         expectProperty("detached", selected.isEmpty().toString())
+        expectProperty("familyCount", selected.size.toString())
         expectCsv("families", selected.map { it.id })
         expectCsv("profiles", selected.map { it.profile }.distinct().sorted())
         expectCsv("availableFamilies", modelFamilyModules.map { it.id }.sorted())
         expectCsv("availableProfiles", modelFamilyModules.map { it.profile }.distinct().sorted())
         expectCsv("availableSelectors", availableModelFamilySelectors)
+        expectCsv("tokenizerMetadataPendingFamilies", pendingModelFamilyTokenizerMetadata.sorted())
         expectCsv("availableBundlePresets", modelFamilyBundlePresetIds.sorted())
         expectCsv("bundlePresets", modelFamilyBundlePresets.map { it.id }.sorted())
         expectCsv("bundleAliases", modelFamilyBundleAliases.map { it.id }.sorted())
@@ -3504,20 +4698,60 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
             expectCsv("bundlePreset.${preset.id}.requiredAliases", preset.requiredAliases.sorted())
             expectCsv("bundlePreset.${preset.id}.forbiddenAliases", preset.forbiddenAliases.sorted())
             expectCsv("bundlePreset.${preset.id}.selectedFamilies", validation.selectedFamilyIds.sorted())
+            expectProperty("bundlePreset.${preset.id}.selectedCount", validation.selectedFamilyIds.size.toString())
+            expectProperty(
+                "bundlePreset.${preset.id}.productionTokenizerMetadataRequired",
+                validation.productionTokenizerMetadataRequired.toString()
+            )
+            expectProperty(
+                "bundlePreset.${preset.id}.productionTokenizerMetadataReady",
+                validation.productionTokenizerMetadataReady.toString()
+            )
+            expectProperty(
+                "bundlePreset.${preset.id}.productionSafetyPassed",
+                validation.productionSafetyPassed.toString()
+            )
+            expectProperty(
+                "bundlePreset.${preset.id}.productionSafetyViolationCount",
+                validation.productionSafetyViolationCount.toString()
+            )
+            expectCsv(
+                "bundlePreset.${preset.id}.pendingTokenizerFamilies",
+                validation.pendingTokenizerFamilyIds.sorted()
+            )
+            for ((familyId, reason) in validation.pendingTokenizerReasons) {
+                expectProperty("bundlePreset.${preset.id}.pendingTokenizerFamily.${familyId}.reason", reason)
+            }
             expectProperty("bundlePreset.${preset.id}.policyPassed", validation.passed.toString())
             expectProperty("bundlePreset.${preset.id}.policyViolationCount", validation.violationCount.toString())
             expectCsv("bundlePreset.${preset.id}.missingRequiredFamilies", validation.missingRequiredFamilyIds.sorted())
+            expectProperty(
+                "bundlePreset.${preset.id}.missingRequiredCount",
+                validation.missingRequiredFamilyIds.size.toString()
+            )
             expectCsv(
                 "bundlePreset.${preset.id}.selectedForbiddenFamilies",
                 validation.selectedForbiddenFamilyIds.sorted()
+            )
+            expectProperty(
+                "bundlePreset.${preset.id}.selectedForbiddenCount",
+                validation.selectedForbiddenFamilyIds.size.toString()
             )
             expectCsv(
                 "bundlePreset.${preset.id}.missingRequiredAliases",
                 validation.missingRequiredAliases.keys.sorted()
             )
+            expectProperty(
+                "bundlePreset.${preset.id}.missingRequiredAliasCount",
+                validation.missingRequiredAliases.size.toString()
+            )
             expectCsv(
                 "bundlePreset.${preset.id}.selectedForbiddenAliases",
                 validation.selectedForbiddenAliases.keys.sorted()
+            )
+            expectProperty(
+                "bundlePreset.${preset.id}.selectedForbiddenAliasCount",
+                validation.selectedForbiddenAliases.size.toString()
             )
             for ((aliasId, missing) in validation.missingRequiredAliases) {
                 expectCsv("bundlePreset.${preset.id}.missingRequiredAlias.${aliasId}.families", missing.sorted())
@@ -3533,12 +4767,17 @@ val validateModelFamilyBundleManifest = tasks.register("validateModelFamilyBundl
         for (alias in modelFamilyBundleAliases) {
             expectProperty("bundleAlias.${alias.id}.description", alias.description)
             expectCsv("bundleAlias.${alias.id}.families", alias.familyIds.sorted())
+            expectProperty("bundleAlias.${alias.id}.familyCount", alias.familyIds.size.toString())
         }
 
         for (module in modelFamilyModules) {
             expectProperty("family.${module.id}.selected", (module.id in bundledModelFamilies).toString())
             expectProperty("family.${module.id}.profile", module.profile)
             expectProperty("family.${module.id}.path", module.path)
+            val pendingReason = modelFamilyTokenizerMetadataPendingReason(module.id)
+            if (pendingReason.isNotBlank()) {
+                expectProperty("family.${module.id}.tokenizerMetadataPendingReason", pendingReason)
+            }
         }
 
         if (problems.isNotEmpty()) {
@@ -3595,6 +4834,13 @@ val validateModelFamilyBundlePresets = tasks.register("validateModelFamilyBundle
                     selectedFamilies.sorted().joinToString(", ")
                 }"
             }
+            if (!validation.productionSafetyPassed) {
+                problems += "$prefix: production presets cannot select pending tokenizer metadata families: ${
+                    validation.pendingTokenizerReasons.toSortedMap()
+                        .entries
+                        .joinToString(", ") { (familyId, reason) -> "$familyId ($reason)" }
+                }"
+            }
         }
 
         if (problems.isNotEmpty()) {
@@ -3602,7 +4848,8 @@ val validateModelFamilyBundlePresets = tasks.register("validateModelFamilyBundle
                 "Model-family bundle preset validation failed:\n" +
                         problems.joinToString("\n") { "  - $it" } +
                         "\nAdjust ModelFamilyBundlePreset selectors, policy fields, or alias membership " +
-                        "before using these presets in production CI."
+                        "and keep pending-tokenizer families out of prod_* presets before using these presets " +
+                        "in production CI."
             )
         }
     }
@@ -3724,12 +4971,14 @@ val validateModelFamilyBundlePolicy = tasks.register("validateModelFamilyBundleP
         "modelFamilyBundleAliases",
         modelFamilyBundleAliases.joinToString(",") { "${it.id}:${it.familyIds.sorted().joinToString("+")}" }
     )
+    inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
 
     doLast {
         val missingRequired = modelFamilyPolicyMissingRequired()
         val selectedForbidden = modelFamilyPolicySelectedForbidden()
         val missingRequiredAliases = modelFamilyPolicyMissingRequiredAliases()
         val selectedForbiddenAliases = modelFamilyPolicySelectedForbiddenAliases()
+        val selectedPendingTokenizerFamilies = bundledModelFamilies.intersect(pendingModelFamilyTokenizerMetadata)
         val problems = mutableListOf<String>()
 
         if (missingRequired.isNotEmpty()) {
@@ -3746,6 +4995,17 @@ val validateModelFamilyBundlePolicy = tasks.register("validateModelFamilyBundleP
                 selectedFamilies.sorted().joinToString(", ")
             }"
         }
+        if (requestedModelFamilyBundlePreset?.id?.startsWith("prod_") == true &&
+            selectedPendingTokenizerFamilies.isNotEmpty()
+        ) {
+            problems += "production preset '${requestedModelFamilyBundlePreset.id}' selected pending tokenizer " +
+                    "metadata families: ${
+                        selectedPendingTokenizerFamilies.sorted()
+                            .joinToString(", ") { familyId ->
+                                "$familyId (${modelFamilyTokenizerMetadataPendingReason(familyId)})"
+                            }
+                    }"
+        }
 
         if (problems.isNotEmpty()) {
             throw GradleException(
@@ -3756,7 +5016,8 @@ val validateModelFamilyBundlePolicy = tasks.register("validateModelFamilyBundleP
                         "-Pgollek.requiredModelFamilies=<families/profiles> for required plugins, " +
                         "-Pgollek.forbiddenModelFamilies=<families/profiles> for forbidden plugins, " +
                         "-Pgollek.requiredModelFamilyAliases=<aliases> for complete alias coverage, " +
-                        "or -Pgollek.forbiddenModelFamilyAliases=<aliases> to reject alias overlap."
+                        "-Pgollek.forbiddenModelFamilyAliases=<aliases> to reject alias overlap, " +
+                        "or keep pending-tokenizer families out of prod_* presets."
             )
         }
     }
@@ -3841,6 +5102,9 @@ val validateModelFamilyBundleLockDriftReportContract = tasks.register("validateM
         val expected = linkedMapOf(
             "familyCount" to "5",
             "families" to "gemma,llama,mistral,phi,qwen",
+            "productionSafetyPassed" to "true",
+            "pendingTokenizerFamilies" to "kimi",
+            "pendingTokenizerReasons" to "kimi=tokenizer adapter pending descriptor stabilization",
             "fixtureRequiredContentFingerprints" to "gemma=abc,llama=def",
             "presetConformanceStatus" to "clean",
             "fixturePassed" to "true"
@@ -3848,6 +5112,9 @@ val validateModelFamilyBundleLockDriftReportContract = tasks.register("validateM
         val actual = Properties().apply {
             setProperty("familyCount", "4")
             setProperty("families", "gemma,llama,mistral,qwen")
+            setProperty("productionSafetyPassed", "false")
+            setProperty("pendingTokenizerFamilies", "")
+            setProperty("pendingTokenizerReasons", "")
             setProperty("fixtureRequiredContentFingerprints", "gemma=abc,llama=old")
             setProperty("presetConformanceStatus", "clean")
             setProperty("fixturePassed", "true")
@@ -3860,20 +5127,25 @@ val validateModelFamilyBundleLockDriftReportContract = tasks.register("validateM
         )
         val requiredSnippets = linkedMapOf(
             "failed drift status" to "\"passed\": false",
-            "raw drift count" to "\"driftCount\": 3",
-            "scalar drift count" to "\"bundleScalarDriftCount\": 1",
-            "selection drift count" to "\"bundleSelectionDriftCount\": 1",
+            "raw drift count" to "\"driftCount\": 6",
+            "scalar drift count" to "\"bundleScalarDriftCount\": 3",
+            "selection drift count" to "\"bundleSelectionDriftCount\": 2",
+            "production safety drift count" to "\"productionSafetyDriftCount\": 3",
             "fixture fingerprint drift count" to "\"fixtureFingerprintDriftCount\": 1",
-            "scalar drift entry" to "\"bundleScalarDrift\": [{\"key\": \"familyCount\", " +
+            "scalar drift entry" to "{\"key\": \"familyCount\", " +
                     "\"scope\": \"bundle\", \"label\": \"family count\", \"status\": \"changed\", " +
-                    "\"expected\": \"5\", \"actual\": \"4\"}]",
-            "selection drift entry" to "\"bundleSelectionDrift\": [{\"key\": \"families\", " +
-                    "\"scope\": \"family\", \"value\": \"phi\", \"status\": \"added\"}]",
+                    "\"expected\": \"5\", \"actual\": \"4\"}",
+            "selection drift entry" to "{\"key\": \"families\", " +
+                    "\"scope\": \"family\", \"value\": \"phi\", \"status\": \"added\"}",
+            "production safety summary" to "\"productionSafetySummaries\": [",
+            "production safety drift entry" to "\"productionSafetyDrift\": [",
             "fixture fingerprint drift entry" to "\"fixtureFingerprintDrift\": " +
                     "[{\"key\": \"fixtureRequiredContentFingerprints\", \"scope\": \"required\", " +
                     "\"familyId\": \"llama\", \"status\": \"changed\", \"expected\": \"def\", " +
                     "\"actual\": \"old\"}]",
             "current bundle status" to "\"currentBundleStatus\": {",
+            "current production safety status" to "\"productionSafety\": {",
+            "current production pending tokenizer reasons" to "\"pendingTokenizerReasons\": {",
             "raw drift array" to "\"drift\": ["
         )
         val missing = requiredSnippets.entries
@@ -3888,6 +5160,107 @@ val validateModelFamilyBundleLockDriftReportContract = tasks.register("validateM
         }
     }
 }
+
+val validateModelFamilyModuleCatalogReportContract =
+    tasks.register("validateModelFamilyModuleCatalogReportContract") {
+        group = "verification"
+        description = "Validate the JSON contract emitted by model-family module catalog reports."
+
+        inputs.property("modelFamilyModuleCatalogReportContractSchema", 1)
+        inputs.property("catalogModelFamilyProjectPaths", catalogModelFamilyProjectPaths().sorted().joinToString(","))
+        inputs.property("includedModelFamilyProjectPaths", includedModelFamilyProjectPaths().sorted().joinToString(","))
+        inputs.property("pendingModelFamilyTokenizerMetadata", pendingModelFamilyTokenizerMetadataInput())
+
+        doLast {
+            val report = modelFamilyModuleCatalogReportJson()
+            val summary = jsonModelFamilyModuleCatalogSummary()
+            val requiredReportSnippets = linkedMapOf(
+                "schema version" to "\"schemaVersion\": 1",
+                "pass status" to "\"passed\":",
+                "catalog family count" to "\"catalogFamilyCount\":",
+                "catalog project count" to "\"catalogProjectCount\":",
+                "included model project count" to "\"includedModelProjectCount\":",
+                "included cataloged project count" to "\"includedCatalogedProjectCount\":",
+                "support-only project count" to "\"supportOnlyProjectCount\":",
+                "service descriptor complete project count" to "\"serviceDescriptorCompleteProjectCount\":",
+                "service descriptor incomplete project count" to "\"serviceDescriptorIncompleteProjectCount\":",
+                "tokenizer metadata ready family count" to "\"tokenizerMetadataReadyFamilyCount\":",
+                "tokenizer metadata pending family count" to "\"tokenizerMetadataPendingFamilyCount\":",
+                "tokenizer metadata missing family count" to "\"tokenizerMetadataMissingFamilyCount\":",
+                "production ready family count" to "\"productionReadyFamilyCount\":",
+                "direct safetensor ready family count" to "\"directSafetensorReadyFamilyCount\":",
+                "production readiness pending family count" to "\"productionReadinessPendingFamilyCount\":",
+                "direct safetensor pending family count" to "\"directSafetensorPendingFamilyCount\":",
+                "metadata-only family count" to "\"metadataOnlyFamilyCount\":",
+                "selected family count" to "\"selectedFamilyCount\":",
+                "missing project count" to "\"missingProjectCount\":",
+                "uncataloged project count" to "\"uncatalogedProjectCount\":",
+                "readiness counts" to "\"readinessCounts\":",
+                "selected families" to "\"selectedFamilies\":",
+                "production ready families" to "\"productionReadyFamilies\":",
+                "direct safetensor ready families" to "\"directSafetensorReadyFamilies\":",
+                "production readiness pending families" to "\"productionReadinessPendingFamilies\":",
+                "direct safetensor pending families" to "\"directSafetensorPendingFamilies\":",
+                "metadata-only families" to "\"metadataOnlyFamilies\":",
+                "missing projects" to "\"missingProjects\":",
+                "uncataloged projects" to "\"uncatalogedProjects\":",
+                "support-only projects" to "\"supportOnlyProjects\":",
+                "service descriptor incomplete projects" to "\"serviceDescriptorIncompleteProjects\":",
+                "tokenizer metadata pending families" to "\"tokenizerMetadataPendingFamilies\":",
+                "tokenizer metadata pending reasons" to "\"tokenizerMetadataPendingReasons\":",
+                "tokenizer metadata missing families" to "\"tokenizerMetadataMissingFamilies\":",
+                "model family service descriptor presence" to "\"modelFamilyServiceDescriptorPresent\":",
+                "gollek plugin service descriptor presence" to "\"gollekPluginServiceDescriptorPresent\":",
+                "service descriptor completeness" to "\"serviceDescriptorComplete\":",
+                "tokenizer metadata presence" to "\"tokenizerMetadataPresent\":",
+                "tokenizer metadata pending flag" to "\"tokenizerMetadataPending\":",
+                "tokenizer metadata pending reason" to "\"tokenizerMetadataPendingReason\":",
+                "tokenizer kinds" to "\"tokenizerKinds\":",
+                "tokenizer ready flag" to "\"tokenizerReady\":",
+                "metadata-only flag" to "\"metadataOnly\":",
+                "direct safetensor ready flag" to "\"directSafetensorReady\":",
+                "production ready flag" to "\"productionReady\":",
+                "readiness state" to "\"readiness\":",
+                "catalog array" to "\"catalog\": [",
+                "included projects array" to "\"includedProjects\": ["
+            )
+            val requiredSummarySnippets = linkedMapOf(
+                "summary pass status" to "\"passed\":",
+                "summary catalog family count" to "\"catalogFamilyCount\":",
+                "summary production ready family count" to "\"productionReadyFamilyCount\":",
+                "summary direct safetensor ready family count" to "\"directSafetensorReadyFamilyCount\":",
+                "summary production readiness pending family count" to "\"productionReadinessPendingFamilyCount\":",
+                "summary direct safetensor pending family count" to "\"directSafetensorPendingFamilyCount\":",
+                "summary metadata-only family count" to "\"metadataOnlyFamilyCount\":",
+                "summary readiness counts" to "\"readinessCounts\":",
+                "summary production ready families" to "\"productionReadyFamilies\":",
+                "summary direct safetensor ready families" to "\"directSafetensorReadyFamilies\":",
+                "summary production readiness pending families" to "\"productionReadinessPendingFamilies\":",
+                "summary direct safetensor pending families" to "\"directSafetensorPendingFamilies\":",
+                "summary metadata-only families" to "\"metadataOnlyFamilies\":",
+                "summary missing project count" to "\"missingProjectCount\":",
+                "summary uncataloged project count" to "\"uncatalogedProjectCount\":",
+                "summary support-only projects" to "\"supportOnlyProjects\":",
+                "summary service descriptor incomplete projects" to "\"serviceDescriptorIncompleteProjects\":",
+                "summary tokenizer metadata pending families" to "\"tokenizerMetadataPendingFamilies\":",
+                "summary tokenizer metadata pending reasons" to "\"tokenizerMetadataPendingReasons\":",
+                "summary tokenizer metadata missing families" to "\"tokenizerMetadataMissingFamilies\":"
+            )
+            val missing = requiredReportSnippets.entries
+                .filterNot { (_, snippet) -> report.contains(snippet) }
+                .map { it.key } +
+                    requiredSummarySnippets.entries
+                        .filterNot { (_, snippet) -> summary.contains(snippet) }
+                        .map { it.key }
+            if (missing.isNotEmpty()) {
+                throw GradleException(
+                    "Model-family module catalog report contract changed unexpectedly:\n" +
+                            missing.joinToString("\n") { "  - missing $it" } +
+                            "\nUpdate validateModelFamilyModuleCatalogReportContract if this JSON change is intentional."
+                )
+            }
+        }
+    }
 
 val validateModelFamilyBundleLock = tasks.register("validateModelFamilyBundleLock") {
     group = "verification"
@@ -3963,19 +5336,30 @@ val validateModelFamilyBundleLock = tasks.register("validateModelFamilyBundleLoc
 }
 
 tasks.named("compileJava") {
+    dependsOn(validateModelFamilyModuleCatalog)
     dependsOn(validateModelFamilyBundle)
+    dependsOn(validateExtensionAvailabilityProviders)
     dependsOn(validateModelFamilyBundleManifest)
     dependsOn(validateModelFamilyBundlePresets)
     dependsOn(validateModelFamilyBundlePolicy)
 }
 
 tasks.named("check") {
+    dependsOn(validateModelFamilyModuleCatalog)
     dependsOn(validateModelFamilyBundle)
+    dependsOn(validateExtensionAvailabilityProviders)
+    dependsOn(validateExtensionAvailabilityProviderContracts)
+    dependsOn(writeExtensionAvailabilityGateReport)
+    dependsOn(validateModelFamilyBundleGate)
+    dependsOn(writeModelFamilyBundleGateReport)
+    dependsOn(validatePluginGates)
+    dependsOn(writePluginGatesReport)
     dependsOn(validateModelFamilyFixtures)
     dependsOn(validateModelFamilyBundleManifest)
     dependsOn(validateModelFamilyBundlePresets)
     dependsOn(validateModelFamilyBundlePolicy)
     dependsOn(validateModelFamilyBundleLockDriftReportContract)
+    dependsOn(validateModelFamilyModuleCatalogReportContract)
     if (enforceModelFamilyBundleLock) {
         dependsOn(validateModelFamilyBundleLock)
     }

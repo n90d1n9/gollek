@@ -87,6 +87,28 @@ final class DirectForwardTensorOps {
         return input.numel() / hidden == 1L;
     }
 
+    static boolean isPackedF32LinearInput(AccelTensor input) {
+        return input != null
+                && input.rank() > 0
+                && input.size(-1) > 0L
+                && input.quantType() == AccelTensor.QuantType.F32
+                && input.isContiguous();
+    }
+
+    static AccelTensor linearRowView(AccelTensor input, long row) {
+        if (!isPackedF32LinearInput(input)) {
+            throw new IllegalArgumentException("linear row views require packed F32 linear input");
+        }
+        long hidden = input.size(-1);
+        long rows = input.numel() / hidden;
+        if (row < 0L || row >= rows) {
+            throw new IndexOutOfBoundsException("row " + row + " outside linear input rows " + rows);
+        }
+        long rowBytes = Math.multiplyExact(hidden, (long) Float.BYTES);
+        MemorySegment rowSegment = input.dataPtr().asSlice(Math.multiplyExact(row, rowBytes), rowBytes);
+        return AccelTensor.view(rowSegment, new long[] { 1L, hidden }, input);
+    }
+
     static AccelTensor addBiasIfNeeded(AccelTensor tensor, AccelTensor bias) {
         if (bias == null) {
             return tensor;

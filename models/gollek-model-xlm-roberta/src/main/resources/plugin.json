@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["xlm-roberta", "xlm_roberta"]
+    "families": ["xlm-roberta", "xlm_roberta"],
+    "tokenizerKind": "sentencepiece"
   }
 }

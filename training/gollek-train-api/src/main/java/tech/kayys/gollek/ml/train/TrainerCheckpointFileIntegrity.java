@@ -121,7 +121,7 @@ final class TrainerCheckpointFileIntegrity {
             return "invalid " + metadataLabel + ": " + expectedBytes;
         }
         try {
-            long actualSize = Files.size(artifactFile);
+            long actualSize = TrainingReportArtifactFingerprint.of(artifactFile).bytes();
             if (expectedSize == actualSize) {
                 return null;
             }
@@ -137,7 +137,7 @@ final class TrainerCheckpointFileIntegrity {
             return null;
         }
         try {
-            String actualSha256 = TrainerCheckpointIO.sha256Hex(artifactFile);
+            String actualSha256 = TrainingReportArtifactFingerprint.of(artifactFile).sha256();
             if (expectedSha256.equalsIgnoreCase(actualSha256)) {
                 return null;
             }

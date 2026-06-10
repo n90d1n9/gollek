@@ -357,6 +357,11 @@ public final class TrainingReportComparisonArtifacts {
                 TrainingReportComparisonJUnitXml.render(resolvedExport));
         TrainerCheckpointIO.writeStringAtomically(metricsCsvFile, resolvedExport.metricsCsv());
         TrainerCheckpointIO.writeStringAtomically(findingsCsvFile, resolvedExport.findingsCsv());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint = TrainingReportArtifactFingerprint.of(junitXmlFile);
+        TrainingReportArtifactFingerprint metricsCsvFingerprint = TrainingReportArtifactFingerprint.of(metricsCsvFile);
+        TrainingReportArtifactFingerprint findingsCsvFingerprint = TrainingReportArtifactFingerprint.of(findingsCsvFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
@@ -365,11 +370,11 @@ public final class TrainingReportComparisonArtifacts {
                 junitXmlFile,
                 metricsCsvFile,
                 findingsCsvFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(junitXmlFile),
-                TrainerCheckpointIO.sha256Hex(metricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(findingsCsvFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
+                metricsCsvFingerprint.sha256(),
+                findingsCsvFingerprint.sha256(),
                 resolvedExport);
     }
 
@@ -393,6 +398,11 @@ public final class TrainingReportComparisonArtifacts {
         TrainerCheckpointIO.writeStringAtomically(junitXmlFile, TrainingReportComparisonJUnitXml.render(export));
         TrainerCheckpointIO.writeStringAtomically(metricsCsvFile, export.metricsCsv());
         TrainerCheckpointIO.writeStringAtomically(findingsCsvFile, export.findingsCsv());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint = TrainingReportArtifactFingerprint.of(junitXmlFile);
+        TrainingReportArtifactFingerprint metricsCsvFingerprint = TrainingReportArtifactFingerprint.of(metricsCsvFile);
+        TrainingReportArtifactFingerprint findingsCsvFingerprint = TrainingReportArtifactFingerprint.of(findingsCsvFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
@@ -401,11 +411,11 @@ public final class TrainingReportComparisonArtifacts {
                 junitXmlFile,
                 metricsCsvFile,
                 findingsCsvFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(junitXmlFile),
-                TrainerCheckpointIO.sha256Hex(metricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(findingsCsvFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
+                metricsCsvFingerprint.sha256(),
+                findingsCsvFingerprint.sha256(),
                 export);
     }
 
@@ -472,6 +482,16 @@ public final class TrainingReportComparisonArtifacts {
         if (!(parsed instanceof Map<?, ?> map)) {
             throw new IOException("Training report comparison JSON must be an object: " + resolvedJsonFile);
         }
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
+        TrainingReportArtifactFingerprint metricsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMetricsCsvFile);
+        TrainingReportArtifactFingerprint findingsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedFindingsCsvFile);
         return new ArtifactInspection(
                 commonDirectory(
                         resolvedJsonFile,
@@ -489,11 +509,11 @@ public final class TrainingReportComparisonArtifacts {
                 junitXml,
                 metricsCsv,
                 findingsCsv,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMetricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(resolvedFindingsCsvFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
+                metricsCsvFingerprint.sha256(),
+                findingsCsvFingerprint.sha256());
     }
 
     public static ArtifactVerification verify(ArtifactBundle bundle) throws IOException {

@@ -10,6 +10,7 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(25))
     }
+    modularity.inferModulePath.set(false)
 }
 
 repositories {
@@ -37,7 +38,10 @@ dependencies {
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+    testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher")
     testImplementation(project(":core:gollek-model-repo-hf"))
+    testImplementation(project(":core:gollek-model-repository"))
+    testImplementation(project(":core:gollek-runtime-config"))
 }
 
 publishing {

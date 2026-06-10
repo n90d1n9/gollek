@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-text-processor",
     "families": ["kosmos-2", "kosmos2", "kosmos_2_text_model", "kosmos_2_vision_model"]
   }
 }

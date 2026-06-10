@@ -25,6 +25,9 @@ class MetalBindingNativeFallbackTest {
 
         assertFalse(binding.isNativeAvailable());
         assertFalse(binding.isRuntimeActive());
+        assertFalse(binding.supportsSwigluFfnMatvecRowsBf16());
+        assertFalse(binding.supportsGegluFfnMatvecRowsBf16());
+        assertEquals(0, binding.bf16FfnMatvecRowsVariant());
     }
 
     @Test

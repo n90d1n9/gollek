@@ -141,6 +141,30 @@ public record TrainingReport(Map<String, Object> payload) {
         return TrainingReportReader.historyOverview(payload);
     }
 
+    public TrainingReportThroughput throughput() {
+        return TrainingReportReader.throughputView(payload);
+    }
+
+    public Map<String, Object> throughputMap() {
+        return TrainingReportReader.throughput(payload);
+    }
+
+    public String throughputMarkdown() {
+        return TrainingReportThroughputMarkdown.render(throughput());
+    }
+
+    public TrainingReportAcceleration acceleration() {
+        return TrainingReportReader.accelerationView(payload);
+    }
+
+    public Map<String, Object> accelerationMap() {
+        return TrainingReportReader.acceleration(payload);
+    }
+
+    public String accelerationMarkdown() {
+        return TrainingReportAccelerationMarkdown.render(acceleration());
+    }
+
     public Map<String, Object> trainLossSummary() {
         return TrainingReportReader.trainLossSummary(payload);
     }
@@ -205,6 +229,18 @@ public record TrainingReport(Map<String, Object> payload) {
         return TrainingReportReader.optimization(payload);
     }
 
+    public Map<String, Object> parameterUpdateDiagnosticsPolicyMap() {
+        return TrainingReportReader.parameterUpdateDiagnosticsPolicy(payload);
+    }
+
+    public TrainingReportParameterUpdateDiagnosticsPolicy parameterUpdateDiagnosticsPolicy() {
+        return TrainingReportReader.parameterUpdateDiagnosticsPolicyView(payload);
+    }
+
+    public String parameterUpdateDiagnosticsPolicyMarkdown() {
+        return TrainingReportParameterUpdateDiagnosticsPolicyMarkdown.render(parameterUpdateDiagnosticsPolicy());
+    }
+
     public Map<String, Object> runHealthMap() {
         return TrainingReportReader.runHealth(payload);
     }
@@ -219,6 +255,88 @@ public record TrainingReport(Map<String, Object> payload) {
 
     public TrainingReportDataHealth dataHealth() {
         return TrainingReportReader.dataHealthView(payload);
+    }
+
+    public List<Map<String, Object>> dataHealthIssueSummaries() {
+        return TrainingReportReader.dataHealthIssueSummaries(payload);
+    }
+
+    public Map<String, Object> runtimeProfileMap() {
+        return TrainingReportReader.runtimeProfile(payload);
+    }
+
+    public TrainingReportRuntimeProfile runtimeProfile() {
+        return TrainingReportReader.runtimeProfileView(payload);
+    }
+
+    public TrainingReportRuntimeProfile.Balance runtimeProfileBalance() {
+        return runtimeProfile().balance();
+    }
+
+    public Map<String, Object> runtimeProfileBalanceMap() {
+        return runtimeProfileBalance().toMap();
+    }
+
+    public TrainingReportRuntimeProfileBalanceAssessment runtimeProfileBalanceAssessment() {
+        return TrainingReportRuntimeProfileBalanceAssessment.assess(runtimeProfileBalance());
+    }
+
+    public TrainingReportRuntimeProfileBalanceAssessment runtimeProfileBalanceAssessment(
+            TrainingReportRuntimeProfileBalanceAssessment.Thresholds thresholds) {
+        return TrainingReportRuntimeProfileBalanceAssessment.assess(runtimeProfileBalance(), thresholds);
+    }
+
+    public Map<String, Object> runtimeProfileBalanceAssessmentMap() {
+        return runtimeProfileBalanceAssessment().toMap();
+    }
+
+    public String runtimeProfileBalanceMarkdown() {
+        return TrainingReportRuntimeProfileMarkdown.renderBalance(runtimeProfileBalance());
+    }
+
+    public Map<String, Object> runtimeInputProfileMap() {
+        return TrainingReportReader.runtimeInputProfile(payload);
+    }
+
+    public TrainingReportRuntimeInputProfileGate.Result runtimeInputProfileGate() {
+        return TrainingReportRuntimeInputProfileGate.evaluate(this);
+    }
+
+    public TrainingReportRuntimeInputProfileGate.Result runtimeInputProfileGate(
+            TrainingReportRuntimeInputProfileGate.Policy policy) {
+        return TrainingReportRuntimeInputProfileGate.evaluate(this, policy);
+    }
+
+    public String runtimeInputProfileMarkdown() {
+        return TrainingReportRuntimeProfileMarkdown.renderInputPipeline(
+                TrainingReportRuntimeInputProfile.fromMetadata(metadata()));
+    }
+
+    public String runtimeProfileMarkdown() {
+        return TrainingReportRuntimeProfileMarkdown.render(
+                runtimeProfile(),
+                TrainingReportRuntimeInputProfile.fromMetadata(metadata()));
+    }
+
+    public TrainingReportRuntimeProfileActionPlan runtimeProfileActionPlan() {
+        return TrainingReportRuntimeProfileActionPlan.from(this);
+    }
+
+    public Map<String, Object> runtimeProfileActionPlanMap() {
+        return runtimeProfileActionPlan().toMap();
+    }
+
+    public String runtimeProfileActionPlanMarkdown() {
+        return TrainingReportRuntimeProfileActionPlanMarkdown.render(this);
+    }
+
+    public TrainingReportRuntimeProfileBudgetGate.Result runtimeProfileBudgetGate() {
+        return TrainingReportRuntimeProfileBudgetGate.evaluate(this);
+    }
+
+    public TrainingReportRuntimeProfileBudgetGate.Result runtimeProfileBudgetGate(
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) {
+        return TrainingReportRuntimeProfileBudgetGate.evaluate(this, policy);
     }
 
     public List<Map<String, Object>> diagnostics() {
@@ -321,12 +439,7 @@ public record TrainingReport(Map<String, Object> payload) {
         return TrainingReportReader.metadata(payload);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> immutableMap(Map<?, ?> map) {
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
-        if (snapshot instanceof Map<?, ?> snapshotMap) {
-            return (Map<String, Object>) snapshotMap;
-        }
-        return Map.of();
+        return TrainingReportSnapshots.immutableMap(map);
     }
 }

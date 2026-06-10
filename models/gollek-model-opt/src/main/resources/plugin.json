@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["opt"]
+    "families": ["opt"],
+    "tokenizerKind": "hf-bpe"
   }
 }

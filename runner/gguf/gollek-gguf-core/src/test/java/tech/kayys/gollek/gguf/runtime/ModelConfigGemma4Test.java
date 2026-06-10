@@ -55,4 +55,12 @@ class ModelConfigGemma4Test {
         assertEquals(10_000.0d, config.ropeThetaForLayer(0), 0.0001d);
         assertEquals(30.0d, config.finalLogitSoftcapping(), 0.0001d);
     }
+
+    @Test
+    void mapsGemma4UnifiedGgufArchitectureClassName() {
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of("general.architecture", "gemma4_unified"));
+
+        assertEquals("gemma4_unified", config.modelType());
+        assertEquals("Gemma4ForMultimodalLM", config.primaryArchitecture());
+    }
 }

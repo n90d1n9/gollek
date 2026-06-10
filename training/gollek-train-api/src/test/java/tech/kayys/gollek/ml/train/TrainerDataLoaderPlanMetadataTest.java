@@ -34,9 +34,44 @@ class TrainerDataLoaderPlanMetadataTest {
         assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.shuffle"));
         assertEquals(99L, metadata.get("trainLoaderPlan.shuffleSeed"));
         assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.reshuffleEachEpoch"));
+        assertEquals(Boolean.FALSE, metadata.get("trainLoaderPlan.prefetch.enabled"));
+        assertEquals(0, metadata.get("trainLoaderPlan.prefetch.bufferSize"));
         assertEquals(Boolean.FALSE, metadata.get("trainLoaderPlan.derivedFromBatchCollection"));
         assertEquals(Boolean.FALSE, metadata.get("validationLoaderPlan.available"));
         assertEquals("no-loader", metadata.get("validationLoaderPlan.skipReason"));
+        assertEquals(0L, train.initialEpoch());
+    }
+
+    @Test
+    void capturesPrefetchedTensorLoaderPlanWithoutConsumingLoaderEpochs() {
+        DataLoader.TensorDataset dataset = DataLoader.tensorDataset(
+                GradTensor.of(new float[] {1f, 2f, 3f, 4f}, 4, 1),
+                GradTensor.of(new float[] {0f, 1f, 0f, 1f}, 4, 1));
+        DataLoader.TensorDataLoader train = DataLoader.tensorBuilder(dataset)
+                .batchSize(2)
+                .shuffle(99L)
+                .reshuffleEachEpoch()
+                .build();
+
+        try (var prefetched = train.prefetch(3)) {
+            Map<String, Object> metadata = TrainerDataLoaderPlanMetadata.capture(prefetched, null);
+
+            assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.available"));
+            assertEquals("tensor", metadata.get("trainLoaderPlan.kind"));
+            assertEquals(4, metadata.get("trainLoaderPlan.datasetSize"));
+            assertEquals(2, metadata.get("trainLoaderPlan.batchSize"));
+            assertEquals(2, metadata.get("trainLoaderPlan.batchCount"));
+            assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.shuffle"));
+            assertEquals(99L, metadata.get("trainLoaderPlan.shuffleSeed"));
+            assertEquals(Boolean.TRUE, metadata.get("trainLoaderPlan.prefetch.enabled"));
+            assertEquals(3, metadata.get("trainLoaderPlan.prefetch.bufferSize"));
+            assertEquals(1, metadata.get("trainLoaderPlan.prefetch.workerCount"));
+            assertEquals(3, metadata.get("trainLoaderPlan.prefetch.maxBufferedItems"));
+            assertEquals(DataLoader.TensorDataLoader.class.getName(),
+                    metadata.get("trainLoaderPlan.prefetch.sourceLoaderType"));
+            assertEquals(Boolean.FALSE, metadata.get("trainLoaderPlan.derivedFromBatchCollection"));
+        }
+
         assertEquals(0L, train.initialEpoch());
     }
 

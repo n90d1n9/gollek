@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "experimental",
-    "families": ["deepseek_r1"]
+    "families": ["deepseek_r1"],
+    "tokenizerKind": "hf-bpe"
   }
 }

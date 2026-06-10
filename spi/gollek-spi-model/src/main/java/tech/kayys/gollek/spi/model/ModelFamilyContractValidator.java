@@ -23,8 +23,17 @@ public final class ModelFamilyContractValidator {
     private static final Pattern SCOPED_DIRECT_SAFETENSOR_KEY_PATTERN =
             Pattern.compile("[a-z][a-z0-9_]*_direct_safetensor");
     private static final Pattern TOKENIZER_ID_PATTERN = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9_.:-]*");
+    private static final Pattern ORIGIN_WHITESPACE_PATTERN = Pattern.compile("\\s");
     private static final String DIRECT_SAFETENSOR_KEY = "direct_safetensor";
     private static final String DIRECT_SAFETENSOR_SUFFIX = "_direct_safetensor";
+    private static final String TRANSFORMERS_MODELS_ORIGIN_PREFIX =
+            "3rdparty/transformers/src/transformers/models/";
+    private static final String EXTERNAL_ORIGIN_PREFIX = "external/";
+    private static final String LEGACY_ORIGIN_PREFIX = "legacy/";
+    private static final String TOKENIZER_METADATA_STATUS_KEY = "tokenizer_metadata_status";
+    private static final String TOKENIZER_METADATA_PENDING_REASON_KEY = "tokenizer_metadata_pending_reason";
+    private static final String TOKENIZER_METADATA_STATUS_READY = "ready";
+    private static final String TOKENIZER_METADATA_STATUS_PENDING = "pending";
     private static final Set<String> PROFILE_KEYS = Set.of(
             ModelFamilyBundleProfile.CORE.key(),
             ModelFamilyBundleProfile.OPTIONAL.key(),
@@ -58,9 +67,12 @@ public final class ModelFamilyContractValidator {
 
         List<ModelTokenizerDescriptor> tokenizers = safeTokenizers(plugin, descriptor.id(), violations);
         List<ModelArchitecture> adapters = safeAdapters(plugin, descriptor.id(), violations);
+        List<ModelFamilyUnifiedRuntimeRequirement> unifiedRuntimeRequirements =
+                safeUnifiedRuntimeRequirements(plugin, descriptor.id(), violations);
         validateDescriptor(plugin, descriptor, violations);
         validateTokenizerDescriptors(descriptor, tokenizers, violations);
         validateArchitectureAdapters(descriptor, adapters, violations);
+        validateUnifiedRuntimeRequirements(descriptor, unifiedRuntimeRequirements, violations);
         validateSupportReport(plugin, descriptor, adapters, tokenizers, violations);
         return List.copyOf(violations);
     }
@@ -142,10 +154,39 @@ public final class ModelFamilyContractValidator {
         if (origin.isBlank()) {
             violations.add(new ModelFamilyContractViolation(familyId, "missing_origin",
                     "metadata.origin should point to the Transformers source family"));
+        } else {
+            validateOriginMetadata(descriptor, origin, violations);
         }
 
         validateScopedDirectSafetensorMetadata(descriptor, violations);
         validateCapabilityShape(descriptor, violations);
+    }
+
+    private static void validateOriginMetadata(
+            ModelFamilyDescriptor descriptor,
+            String origin,
+            List<ModelFamilyContractViolation> violations) {
+        String familyId = descriptor.id();
+        for (String item : splitMetadata(origin)) {
+            if (item.isBlank()) {
+                violations.add(new ModelFamilyContractViolation(familyId, "origin_empty_segment",
+                        "metadata.origin should not contain empty comma-separated segments"));
+                continue;
+            }
+            if (ORIGIN_WHITESPACE_PATTERN.matcher(item).find()) {
+                violations.add(new ModelFamilyContractViolation(familyId, "origin_contains_whitespace",
+                        "metadata.origin segment '" + item + "' should not contain whitespace"));
+            }
+            if (item.contains("/")
+                    && !item.startsWith(TRANSFORMERS_MODELS_ORIGIN_PREFIX)
+                    && !item.startsWith(EXTERNAL_ORIGIN_PREFIX)
+                    && !item.startsWith(LEGACY_ORIGIN_PREFIX)) {
+                violations.add(new ModelFamilyContractViolation(familyId, "unexpected_origin_path",
+                        "metadata.origin segment '" + item + "' should use "
+                                + TRANSFORMERS_MODELS_ORIGIN_PREFIX + ", " + EXTERNAL_ORIGIN_PREFIX
+                                + ", or " + LEGACY_ORIGIN_PREFIX));
+            }
+        }
     }
 
     private static void validateScopedDirectSafetensorMetadata(
@@ -190,7 +231,9 @@ public final class ModelFamilyContractValidator {
             List<ModelFamilyContractViolation> violations) {
         String familyId = descriptor.id();
         boolean tokenCap = descriptor.capabilities().contains(ModelFamilyCapability.TOKENIZER);
-        if (tokenCap && tokenizers.isEmpty()) {
+        validateTokenizerMetadataChecklist(descriptor, tokenizers, tokenCap, violations);
+
+        if (tokenCap && tokenizers.isEmpty() && !tokenizerMetadataPending(descriptor)) {
             violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_capability_without_descriptor",
                     "TOKENIZER capability requires at least one tokenizer descriptor"));
         }
@@ -215,6 +258,56 @@ public final class ModelFamilyContractValidator {
                         "tokenizer id '" + tokenizer.id() + "' is declared more than once"));
             }
             validateTokenizerFileGroups(familyId, tokenizer, violations);
+        }
+    }
+
+    private static void validateTokenizerMetadataChecklist(
+            ModelFamilyDescriptor descriptor,
+            List<ModelTokenizerDescriptor> tokenizers,
+            boolean tokenCap,
+            List<ModelFamilyContractViolation> violations) {
+        String familyId = descriptor.id();
+        String status = normalize(descriptor.metadata().get(TOKENIZER_METADATA_STATUS_KEY));
+        String pendingReason = Objects.toString(
+                descriptor.metadata().get(TOKENIZER_METADATA_PENDING_REASON_KEY), "").trim();
+        if (status.isBlank()) {
+            if (!pendingReason.isBlank()) {
+                violations.add(new ModelFamilyContractViolation(familyId,
+                        "tokenizer_metadata_pending_reason_without_pending_status",
+                        "metadata." + TOKENIZER_METADATA_PENDING_REASON_KEY
+                                + " should only be declared with tokenizer_metadata_status=pending"));
+            }
+            return;
+        }
+
+        if (!TOKENIZER_METADATA_STATUS_READY.equals(status)
+                && !TOKENIZER_METADATA_STATUS_PENDING.equals(status)) {
+            violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_metadata_status_invalid",
+                    "metadata." + TOKENIZER_METADATA_STATUS_KEY + " must be ready or pending when declared"));
+            return;
+        }
+        if (!tokenCap) {
+            violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_metadata_without_capability",
+                    "metadata." + TOKENIZER_METADATA_STATUS_KEY + " should be paired with TOKENIZER capability"));
+        }
+        if (TOKENIZER_METADATA_STATUS_READY.equals(status) && tokenizers.isEmpty()) {
+            violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_metadata_ready_without_descriptor",
+                    "tokenizer metadata status ready requires at least one tokenizer descriptor"));
+        }
+        if (TOKENIZER_METADATA_STATUS_PENDING.equals(status) && !tokenizers.isEmpty()) {
+            violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_metadata_pending_with_descriptor",
+                    "tokenizer metadata status pending should omit tokenizer descriptors until reusable metadata is ready"));
+        }
+        if (TOKENIZER_METADATA_STATUS_PENDING.equals(status) && pendingReason.isBlank()) {
+            violations.add(new ModelFamilyContractViolation(familyId, "tokenizer_metadata_pending_reason_missing",
+                    "metadata." + TOKENIZER_METADATA_PENDING_REASON_KEY
+                            + " is required when tokenizer_metadata_status=pending"));
+        }
+        if (!TOKENIZER_METADATA_STATUS_PENDING.equals(status) && !pendingReason.isBlank()) {
+            violations.add(new ModelFamilyContractViolation(familyId,
+                    "tokenizer_metadata_pending_reason_without_pending_status",
+                    "metadata." + TOKENIZER_METADATA_PENDING_REASON_KEY
+                            + " should only be declared with tokenizer_metadata_status=pending"));
         }
     }
 
@@ -345,6 +438,76 @@ public final class ModelFamilyContractValidator {
             violations.add(new ModelFamilyContractViolation(familyId, "architecture_adapters_unavailable",
                     "architectureAdapters() threw " + error.getClass().getSimpleName() + ": " + error.getMessage()));
             return List.of();
+        }
+    }
+
+    private static List<ModelFamilyUnifiedRuntimeRequirement> safeUnifiedRuntimeRequirements(
+            ModelFamilyPlugin plugin,
+            String familyId,
+            List<ModelFamilyContractViolation> violations) {
+        try {
+            List<ModelFamilyUnifiedRuntimeRequirement> requirements = plugin.unifiedRuntimeRequirements();
+            return requirements == null ? List.of() : new ArrayList<>(requirements);
+        } catch (RuntimeException error) {
+            violations.add(new ModelFamilyContractViolation(familyId, "unified_runtime_requirements_unavailable",
+                    "unifiedRuntimeRequirements() threw " + error.getClass().getSimpleName() + ": "
+                            + error.getMessage()));
+            return List.of();
+        }
+    }
+
+    private static void validateUnifiedRuntimeRequirements(
+            ModelFamilyDescriptor descriptor,
+            List<ModelFamilyUnifiedRuntimeRequirement> requirements,
+            List<ModelFamilyContractViolation> violations) {
+        if (requirements.isEmpty()) {
+            return;
+        }
+
+        String familyId = descriptor.id();
+        Set<String> claimedModelTypes = normalizedStringSet(descriptor.modelTypes());
+        Set<String> metadataModelTypes = new LinkedHashSet<>();
+        metadataModelTypes.addAll(splitMetadata(descriptor.metadata().get("unified_model_type")));
+        metadataModelTypes.addAll(splitMetadata(descriptor.metadata().get("unified_model_types")));
+
+        if (metadataModelTypes.isEmpty()
+                && normalize(descriptor.metadata().get("unified_runtime")).isBlank()
+                && normalize(descriptor.metadata().get("unified_runtime_reason")).isBlank()) {
+            violations.add(new ModelFamilyContractViolation(familyId, "unified_runtime_requirement_missing_metadata",
+                    "unified runtime requirements should be mirrored in descriptor metadata for discovery"));
+        }
+
+        for (ModelFamilyUnifiedRuntimeRequirement requirement : requirements) {
+            if (requirement == null) {
+                violations.add(new ModelFamilyContractViolation(familyId, "unified_runtime_requirement_null",
+                        "unifiedRuntimeRequirements() must not contain null entries"));
+                continue;
+            }
+
+            String modelType = normalize(requirement.modelType());
+            if ("unknown".equals(modelType)) {
+                violations.add(new ModelFamilyContractViolation(familyId,
+                        "unified_runtime_requirement_unknown_model_type",
+                        "unified runtime requirement modelType must not be blank or unknown"));
+            } else if (!MODEL_TYPE_PATTERN.matcher(modelType).matches()) {
+                violations.add(new ModelFamilyContractViolation(familyId,
+                        "invalid_unified_runtime_requirement_model_type",
+                        "unified runtime requirement modelType '" + modelType + "' must match "
+                                + MODEL_TYPE_PATTERN.pattern()));
+            }
+
+            if (!claimedModelTypes.contains(modelType) && !metadataModelTypes.contains(modelType)) {
+                violations.add(new ModelFamilyContractViolation(familyId,
+                        "unified_runtime_requirement_unclaimed_model_type",
+                        "unified runtime requirement modelType '" + modelType
+                                + "' should be claimed by descriptor.modelTypes or unified_model_type metadata"));
+            }
+
+            if (requirement.requiredInputModalities().isEmpty()) {
+                violations.add(new ModelFamilyContractViolation(familyId,
+                        "unified_runtime_requirement_missing_modalities",
+                        "unified runtime requirement should declare required input modalities"));
+            }
         }
     }
 
@@ -490,6 +653,22 @@ public final class ModelFamilyContractValidator {
 
     private static String normalizedMetadata(ModelFamilyDescriptor descriptor, String key) {
         return normalize(descriptor.metadata().get(key)).replace('-', '_');
+    }
+
+    private static boolean tokenizerMetadataPending(ModelFamilyDescriptor descriptor) {
+        return TOKENIZER_METADATA_STATUS_PENDING.equals(
+                normalize(descriptor.metadata().get(TOKENIZER_METADATA_STATUS_KEY)));
+    }
+
+    private static List<String> splitMetadata(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (String item : value.split(",", -1)) {
+            values.add(Objects.toString(item, "").trim().toLowerCase(Locale.ROOT));
+        }
+        return List.copyOf(values);
     }
 
     private static boolean isScopedDirectSafetensorReason(String value) {

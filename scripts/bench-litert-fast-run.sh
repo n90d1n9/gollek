@@ -93,7 +93,7 @@ fi
 
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-litert-fast-bench.XXXXXX")"
 if [[ -n "$SUMMARY_FILE" ]]; then
-  printf 'case\tdurationMs\tbackend\twarmEngine\tengineInitMs\tfirstChunkMs\ttotalMs\tlog\n' > "$SUMMARY_FILE"
+  printf 'case\tdurationMs\tbackend\twarmEngine\tengineInitMs\tfirstChunkMs\ttotalMs\trouteResolveMs\trouteCacheHit\tselectedArtifact\trouteSource\tlog\n' > "$SUMMARY_FILE"
 fi
 cleanup() {
   if [[ "$KEEP_DAEMON" -ne 1 ]]; then
@@ -151,6 +151,15 @@ extract_warm_engine() {
     | sed 's/^warmEngine=//'
 }
 
+extract_profile_value() {
+  local file="$1"
+  local key="$2"
+  strip_ansi < "$file" \
+    | { grep -oE "${key}=[^[:space:],)]+" || true; } \
+    | tail -n 1 \
+    | sed -E "s/^${key}=//"
+}
+
 metric_exceeds() {
   local actual="$1"
   local limit="$2"
@@ -189,7 +198,7 @@ write_summary_row() {
   if [[ -z "$SUMMARY_FILE" ]]; then
     return 0
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(summary_field "$1")" \
     "$(summary_field "$2")" \
     "$(summary_field "$3")" \
@@ -197,20 +206,28 @@ write_summary_row() {
     "$(summary_field "$5")" \
     "$(summary_field "$6")" \
     "$(summary_field "$7")" \
-    "$(summary_field "$8")" >> "$SUMMARY_FILE"
+    "$(summary_field "$8")" \
+    "$(summary_field "$9")" \
+    "$(summary_field "${10}")" \
+    "$(summary_field "${11}")" \
+    "$(summary_field "${12}")" >> "$SUMMARY_FILE"
 }
 
 run_case() {
   local name="$1"
   local output="$RUN_DIR/${name}.log"
-  GOLLEK_JAVA_OPTS="${GOLLEK_JAVA_OPTS:-} -Dgollek.litert.fast_run.profile=true" \
-    "$GOLLEK_BIN" run \
-      --model "$MODEL_ID" \
-      --prompt "$PROMPT" \
-      --max-tokens "$MAX_TOKENS" \
-      --temperature 0 \
-      --top-k 1 \
-      --top-p 1 >"$output" 2>&1
+  if GOLLEK_JAVA_OPTS="${GOLLEK_JAVA_OPTS:-} -Dgollek.litert.fast_run.profile=true" \
+      "$GOLLEK_BIN" run \
+        --model "$MODEL_ID" \
+        --prompt "$PROMPT" \
+        --max-tokens "$MAX_TOKENS" \
+        --temperature 0 \
+        --top-k 1 \
+        --top-p 1 >"$output" 2>&1; then
+    RUN_CASE_EXIT=0
+  else
+    RUN_CASE_EXIT=$?
+  fi
   RUN_CASE_OUTPUT="$output"
 }
 
@@ -219,7 +236,15 @@ assert_case() {
   local output="$2"
   local threshold_ms="$3"
   local require_warm_engine="${4:-0}"
-  local duration_ms backend engine_ms first_chunk_ms total_ms warm_engine
+  local run_exit="${5:-0}"
+  local duration_ms backend engine_ms first_chunk_ms total_ms warm_engine route_ms route_cache_hit selected_artifact route_source
+
+  if [[ "$run_exit" -ne 0 ]]; then
+    write_summary_row "$name" "n/a" "unknown" "n/a" "n/a" "n/a" "n/a" "n/a" "n/a" "n/a" "n/a" "$output"
+    echo "FAIL: $name command exited with status ${run_exit}" >&2
+    tail -n 80 "$output" >&2
+    exit "$run_exit"
+  fi
 
   if grep -E 'DISPATCH_OP|GGML_ASSERT|FATAL:|Exception|ERROR:' "$output" >/dev/null; then
     echo "FAIL: $name produced runtime errors" >&2
@@ -261,6 +286,10 @@ assert_case() {
   engine_ms="$(extract_profile_metric_ms "$output" engineInit || true)"
   first_chunk_ms="$(extract_profile_metric_ms "$output" firstChunk || true)"
   total_ms="$(extract_profile_metric_ms "$output" total || true)"
+  route_ms="$(extract_profile_metric_ms "$output" routeResolve || true)"
+  route_cache_hit="$(extract_profile_value "$output" routeCacheHit || true)"
+  selected_artifact="$(extract_profile_value "$output" selectedArtifact || true)"
+  route_source="$(extract_profile_value "$output" routeSource || true)"
   if [[ "$name" == "warm" ]]; then
     assert_profile_metric_under "$name" "engineInit" "$engine_ms" "$WARM_ENGINE_INIT_THRESHOLD_MS" "$output"
     assert_profile_metric_under "$name" "firstChunk" "$first_chunk_ms" "$WARM_FIRST_CHUNK_THRESHOLD_MS" "$output"
@@ -274,9 +303,13 @@ assert_case() {
     "${engine_ms:-n/a}" \
     "${first_chunk_ms:-n/a}" \
     "${total_ms:-n/a}" \
+    "${route_ms:-n/a}" \
+    "${route_cache_hit:-n/a}" \
+    "${selected_artifact:-n/a}" \
+    "${route_source:-n/a}" \
     "$output"
-  printf '%-7s duration=%sms backend=%s warmEngine=%s engineInit=%sms firstChunk=%sms total=%sms log=%s\n' \
-    "$name" "$duration_ms" "${backend:-unknown}" "${warm_engine:-n/a}" "${engine_ms:-n/a}" "${first_chunk_ms:-n/a}" "${total_ms:-n/a}" "$output"
+  printf '%-7s duration=%sms backend=%s warmEngine=%s engineInit=%sms firstChunk=%sms total=%sms routeResolve=%sms routeCacheHit=%s selectedArtifact=%s routeSource=%s log=%s\n' \
+    "$name" "$duration_ms" "${backend:-unknown}" "${warm_engine:-n/a}" "${engine_ms:-n/a}" "${first_chunk_ms:-n/a}" "${total_ms:-n/a}" "${route_ms:-n/a}" "${route_cache_hit:-n/a}" "${selected_artifact:-n/a}" "${route_source:-n/a}" "$output"
 }
 
 if [[ "$WARM_ONLY" -ne 1 ]]; then
@@ -284,13 +317,15 @@ if [[ "$WARM_ONLY" -ne 1 ]]; then
 
   cold_log=""
   RUN_CASE_OUTPUT=""
+  RUN_CASE_EXIT=0
   run_case cold
   cold_log="$RUN_CASE_OUTPUT"
-  assert_case cold "$cold_log" "$COLD_THRESHOLD_MS" 0
+  assert_case cold "$cold_log" "$COLD_THRESHOLD_MS" 0 "$RUN_CASE_EXIT"
 fi
 
 for ((i = 1; i <= WARMUP_RUNS; i++)); do
   RUN_CASE_OUTPUT=""
+  RUN_CASE_EXIT=0
   run_case "warmup-${i}"
   warmup_log="$RUN_CASE_OUTPUT"
   # Warmup runs are stabilizers: after install or daemon replacement they may
@@ -300,12 +335,13 @@ for ((i = 1; i <= WARMUP_RUNS; i++)); do
   if [[ "$WARM_ONLY" -eq 1 ]]; then
     warmup_require_warm_engine=1
   fi
-  assert_case "warmup${i}" "$warmup_log" "$COLD_THRESHOLD_MS" "$warmup_require_warm_engine"
+  assert_case "warmup${i}" "$warmup_log" "$COLD_THRESHOLD_MS" "$warmup_require_warm_engine" "$RUN_CASE_EXIT"
 done
 
 RUN_CASE_OUTPUT=""
+RUN_CASE_EXIT=0
 run_case warm
 warm_log="$RUN_CASE_OUTPUT"
-assert_case warm "$warm_log" "$WARM_THRESHOLD_MS" 1
+assert_case warm "$warm_log" "$WARM_THRESHOLD_MS" 1 "$RUN_CASE_EXIT"
 
 echo "PASS: LiteRT-LM fast path benchmark passed"

@@ -1012,7 +1012,9 @@ public final class GgufFastRun {
     }
 
     static void printRunHeader(Path modelPath, FastArgs args, PrintStream out) {
-        printBanner(out);
+        if (args == null || args.banner) {
+            printBanner(out);
+        }
         if (shouldPrintResolvedModelPath(modelPath, args)) {
             out.printf("Resolved local model index entry: %s%n", modelPath);
         }
@@ -2642,6 +2644,7 @@ public final class GgufFastRun {
                 configValue("gollek.gguf.fast_run.engine"),
                 System.getenv("GOLLEK_GGUF_ENGINE"),
                 "auto");
+        private boolean banner = true;
         private boolean supported = true;
 
         private boolean supported() {
@@ -2724,6 +2727,7 @@ public final class GgufFastRun {
                     case "--java-native" -> parsed.engine = "java";
                     case "--llamacpp", "--llama-cpp" -> parsed.engine = "llamacpp";
                     case "--benchmark", "--bench" -> parsed.engine = "benchmark";
+                    case "--no-banner", "--suppress-banner" -> parsed.banner = false;
                     case "--use-cpu" -> parsed.backend = "cpu";
                     case "--max-tokens" -> {
                         Value next = valueOrNext(value, args, i);

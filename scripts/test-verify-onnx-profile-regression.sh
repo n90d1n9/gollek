@@ -136,8 +136,11 @@ if ! grep -qx $'stage\tstatus\texitCode\tartifact\tstdout\tstderr\treason' "$PAS
     || ! grep -q "^baseline-metadata	pass	0	$PASS_DIR/baseline-metadata.tsv			$GOOD_MANIFEST$" "$PASS_DIR/results.tsv" \
     || ! grep -q "^benchmark	pass	0	$PASS_DIR/bench/current/summary.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^current-aggregate	pass	0	$PASS_DIR/current-aggregate.tsv	" "$PASS_DIR/results.tsv" \
+    || ! grep -q "^current-diagnosis	pass	0	$PASS_DIR/current-diagnosis/diagnosis.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^current-noise	pass	0	$PASS_DIR/current-noise.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^baseline-aggregate	pass	0	$PASS_DIR/baseline-aggregate.tsv	" "$PASS_DIR/results.tsv" \
+    || ! grep -q "^baseline-diagnosis	pass	0	$PASS_DIR/baseline-diagnosis/diagnosis.tsv	" "$PASS_DIR/results.tsv" \
+    || ! grep -q "^diagnosis-diff	pass	0	$PASS_DIR/diagnosis-diff/comparison.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^backend-metadata	pass	0	$PASS_DIR/backend-metadata.tsv			CoreML$" "$PASS_DIR/results.tsv" \
     || ! grep -q "^compare	pass	0	$PASS_DIR/compare/comparison.tsv	" "$PASS_DIR/results.tsv"; then
   echo "Expected pass results for raw-baseline regression gate" >&2
@@ -148,6 +151,10 @@ if ! grep -qx $'expectBackend\tCoreML' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'bundle\t'"$PASS_DIR"'/bundle.tsv' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'bundleJson\t'"$PASS_DIR"'/bundle.json' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'decision\t'"$PASS_DIR"'/decision.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'currentDiagnosis\t'"$PASS_DIR"'/current-diagnosis/diagnosis.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'baselineDiagnosis\t'"$PASS_DIR"'/baseline-diagnosis/diagnosis.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'diagnosisDiff\t'"$PASS_DIR"'/diagnosis-diff/comparison.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'diagnosisDiffSummary\t'"$PASS_DIR"'/diagnosis-diff/summary.tsv' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'maxNoisePercent\t10' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'noiseMetrics\tdurationMs,generationTps' "$PASS_DIR/config.tsv" \
     || ! grep -q 'expect_backend=CoreML' "$PASS_DIR/bench.stdout.log"; then
@@ -160,11 +167,20 @@ if ! grep -qx $'kind\tpath\trequired\tstatus\tdescription' "$PASS_DIR/bundle.tsv
     || ! grep -qx $'config\t'"$PASS_DIR"'/config.tsv\trequired\tpresent\tRegression configuration' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'decision\t'"$PASS_DIR"'/decision.tsv\trequired\tpresent\tRegression decision summary' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'currentAggregate\t'"$PASS_DIR"'/current-aggregate.tsv\trequired\tpresent\tCurrent aggregate summary' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'currentDiagnosis\t'"$PASS_DIR"'/current-diagnosis/diagnosis.tsv\toptional\tpresent\tCurrent performance diagnosis' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'currentDiagnosisStages\t'"$PASS_DIR"'/current-diagnosis/stages.tsv\toptional\tpresent\tCurrent diagnosed stage ranking' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'currentNoise\t'"$PASS_DIR"'/current-noise.tsv\toptional\tpresent\tCurrent noise stability summary' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'baselineDiagnosis\t'"$PASS_DIR"'/baseline-diagnosis/diagnosis.tsv\toptional\tpresent\tBaseline performance diagnosis' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'baselineDiagnosisStages\t'"$PASS_DIR"'/baseline-diagnosis/stages.tsv\toptional\tpresent\tBaseline diagnosed stage ranking' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'diagnosisDiff\t'"$PASS_DIR"'/diagnosis-diff/comparison.tsv\toptional\tpresent\tCurrent versus baseline diagnosis comparison' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'diagnosisDiffSummary\t'"$PASS_DIR"'/diagnosis-diff/summary.tsv\toptional\tpresent\tDiagnosis comparison summary' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'comparison\t'"$PASS_DIR"'/compare/comparison.tsv\trequired\tpresent\tRow-level regression comparison' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'metricSummary\t'"$PASS_DIR"'/compare/metric-summary.tsv\toptional\tpresent\tPer-metric regression summary' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx "artifacts.bundle=$PASS_DIR/bundle.tsv" "${TMP_DIR}/pass.out" \
     || ! grep -qx "artifacts.bundleJson=$PASS_DIR/bundle.json" "${TMP_DIR}/pass.out" \
+    || ! grep -qx "artifacts.currentDiagnosis=$PASS_DIR/current-diagnosis/diagnosis.tsv" "${TMP_DIR}/pass.out" \
+    || ! grep -qx "artifacts.baselineDiagnosis=$PASS_DIR/baseline-diagnosis/diagnosis.tsv" "${TMP_DIR}/pass.out" \
+    || ! grep -qx "artifacts.diagnosisDiff=$PASS_DIR/diagnosis-diff/comparison.tsv" "${TMP_DIR}/pass.out" \
     || ! grep -qx "artifacts.decision=$PASS_DIR/decision.tsv" "${TMP_DIR}/pass.out"; then
   echo "Expected regression artifact bundle rows" >&2
   cat "$PASS_DIR/bundle.tsv" >&2
@@ -172,6 +188,9 @@ if ! grep -qx $'kind\tpath\trequired\tstatus\tdescription' "$PASS_DIR/bundle.tsv
   exit 1
 fi
 if ! grep -Fq '"kind": "comparison"' "$PASS_DIR/bundle.json" \
+    || ! grep -Fq '"kind": "currentDiagnosis"' "$PASS_DIR/bundle.json" \
+    || ! grep -Fq '"kind": "baselineDiagnosis"' "$PASS_DIR/bundle.json" \
+    || ! grep -Fq '"kind": "diagnosisDiff"' "$PASS_DIR/bundle.json" \
     || ! grep -Fq '"kind": "currentNoise"' "$PASS_DIR/bundle.json" \
     || ! grep -Fq '"requiredMissing": "0"' "$PASS_DIR/bundle.json"; then
   echo "Expected regression bundle JSON summary" >&2
@@ -182,13 +201,42 @@ if ! grep -qx $'key\tvalue' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'status\tpass' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'failedStages\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'lastStage\tcompare' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'currentPrimaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'baselinePrimaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisStageChanged\tfalse' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffComparedStages\t8' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffFasterStages\t1' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffSlowerStages\t6' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffSameStages\t1' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffPrimaryStageChanged\tfalse' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSpeedupStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSpeedupMs\t-1.000' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'regressionFailures\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'noiseFailures\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundleRequiredMissing\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundle\t'"$PASS_DIR"'/bundle.tsv' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffSummary\t'"$PASS_DIR"'/diagnosis-diff/summary.tsv' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'comparison\t'"$PASS_DIR"'/compare/comparison.tsv' "$PASS_DIR/decision.tsv"; then
   echo "Expected passing regression decision summary" >&2
   cat "$PASS_DIR/decision.tsv" >&2
+  exit 1
+fi
+if ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/current-diagnosis/diagnosis.tsv" \
+    || ! grep -qx $'primaryValueMs\t36.500' "$PASS_DIR/current-diagnosis/diagnosis.tsv" \
+    || ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/baseline-diagnosis/diagnosis.tsv" \
+    || ! grep -qx $'primaryValueMs\t37.500' "$PASS_DIR/baseline-diagnosis/diagnosis.tsv"; then
+  echo "Expected regression diagnosis rows" >&2
+  cat "$PASS_DIR/current-diagnosis/diagnosis.tsv" >&2
+  cat "$PASS_DIR/baseline-diagnosis/diagnosis.tsv" >&2
+  exit 1
+fi
+if ! grep -qx $'decodeRun\tonnxDecodeRunMs\t37.500\t36.500\t-1.000\t-2.667\tprimary\tprimary\tfaster\t' "$PASS_DIR/diagnosis-diff/comparison.tsv" \
+    || ! grep -qx $'primaryStageChanged\tfalse' "$PASS_DIR/diagnosis-diff/summary.tsv" \
+    || ! grep -qx $'largestSpeedupStage\tdecodeRun' "$PASS_DIR/diagnosis-diff/summary.tsv"; then
+  echo "Expected regression diagnosis diff rows" >&2
+  cat "$PASS_DIR/diagnosis-diff/comparison.tsv" >&2
+  cat "$PASS_DIR/diagnosis-diff/summary.tsv" >&2
   exit 1
 fi
 if ! grep -qx $'key\tvalue' "$PASS_DIR/environment.tsv" \

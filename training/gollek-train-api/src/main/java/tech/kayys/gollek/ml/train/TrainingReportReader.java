@@ -17,7 +17,7 @@ import java.util.OptionalDouble;
  * Reads and exposes persisted canonical trainer reports.
  */
 public final class TrainingReportReader {
-    public static final String CANONICAL_SCHEMA = TrainerTrainingReport.SCHEMA;
+    public static final String CANONICAL_SCHEMA = TrainingReportSchema.CANONICAL_REPORT_V1;
 
     private TrainingReportReader() {
     }
@@ -168,6 +168,22 @@ public final class TrainingReportReader {
         return TrainingReportHistoryOverview.fromMap(historySummary(report));
     }
 
+    public static TrainingReportThroughput throughputView(Map<String, ?> report) {
+        return TrainingReportThroughput.fromMetadata(metadata(report));
+    }
+
+    public static Map<String, Object> throughput(Map<String, ?> report) {
+        return throughputView(report).toMap();
+    }
+
+    public static TrainingReportAcceleration accelerationView(Map<String, ?> report) {
+        return TrainingReportAcceleration.fromMetadata(metadata(report));
+    }
+
+    public static Map<String, Object> acceleration(Map<String, ?> report) {
+        return accelerationView(report).toMap();
+    }
+
     public static Map<String, Object> trainLossSummary(Map<String, ?> report) {
         return historySummarySection(report, "trainLoss");
     }
@@ -240,6 +256,15 @@ public final class TrainingReportReader {
         return TrainingReportOptimizationSummary.fromMap(optimizationSummary(report));
     }
 
+    public static Map<String, Object> parameterUpdateDiagnosticsPolicy(Map<String, ?> report) {
+        return parameterUpdateDiagnosticsPolicyView(report).toMap();
+    }
+
+    public static TrainingReportParameterUpdateDiagnosticsPolicy parameterUpdateDiagnosticsPolicyView(
+            Map<String, ?> report) {
+        return TrainingReportParameterUpdateDiagnosticsPolicy.fromMetadata(metadata(report));
+    }
+
     public static Map<String, Object> metadata(Map<String, ?> report) {
         return mapSection(report, "metadata");
     }
@@ -266,6 +291,22 @@ public final class TrainingReportReader {
 
     public static TrainingReportDataHealth dataHealthView(Map<String, ?> report) {
         return TrainingReportDataHealth.fromMap(dataHealth(report));
+    }
+
+    public static List<Map<String, Object>> dataHealthIssueSummaries(Map<String, ?> report) {
+        return dataHealthView(report).issueSummaries();
+    }
+
+    public static Map<String, Object> runtimeProfile(Map<String, ?> report) {
+        return runtimeProfileView(report).toMap();
+    }
+
+    public static TrainingReportRuntimeProfile runtimeProfileView(Map<String, ?> report) {
+        return TrainingReportRuntimeProfile.fromMetadata(metadata(report));
+    }
+
+    public static Map<String, Object> runtimeInputProfile(Map<String, ?> report) {
+        return TrainingReportRuntimeInputProfile.fromMetadata(metadata(report)).toMap();
     }
 
     public static List<Map<String, Object>> diagnostics(Map<String, ?> report) {
@@ -469,13 +510,8 @@ public final class TrainingReportReader {
         return List.copyOf(rows);
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> immutableMap(Map<?, ?> map) {
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
-        if (snapshot instanceof Map<?, ?> snapshotMap) {
-            return (Map<String, Object>) snapshotMap;
-        }
-        return Map.of();
+        return TrainingReportSnapshots.immutableMap(map);
     }
 
     private static OptionalDouble nestedOptionalDouble(

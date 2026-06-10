@@ -17,9 +17,9 @@ final class GenerationTokenValidationPolicy {
     private GenerationTokenValidationPolicy() {
     }
 
-    static GreedySamplingMasks buildGreedySamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize,
+    static TokenSamplingMasks buildTokenSamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize,
             ModelRuntimeTraits traits) {
-        return new GreedySamplingMasks(
+        return new TokenSamplingMasks(
                 buildDisallowedTokenMask(tokenizer, true, stops, vocabSize, traits),
                 buildDisallowedTokenMask(tokenizer, false, stops, vocabSize, traits));
     }
@@ -30,7 +30,15 @@ final class GenerationTokenValidationPolicy {
             return;
         }
         BitSet mask = buildDisallowedTokenMask(tokenizer, firstStep, stops, logits.length, traits);
-        for (int tokenId = mask.nextSetBit(0); tokenId >= 0; tokenId = mask.nextSetBit(tokenId + 1)) {
+        maskDisallowedContinuationTokens(logits, mask);
+    }
+
+    static void maskDisallowedContinuationTokens(float[] logits, BitSet mask) {
+        if (logits == null || mask == null || mask.isEmpty()) {
+            return;
+        }
+        for (int tokenId = mask.nextSetBit(0); tokenId >= 0 && tokenId < logits.length;
+                tokenId = mask.nextSetBit(tokenId + 1)) {
             logits[tokenId] = Float.NEGATIVE_INFINITY;
         }
     }
@@ -74,6 +82,11 @@ final class GenerationTokenValidationPolicy {
 
     static boolean isDisallowedContinuationToken(int tokenId, Tokenizer tokenizer, boolean firstStep,
             Set<Integer> stops, ModelRuntimeTraits traits) {
+        return isDisallowedContinuationToken(tokenId, tokenizer, firstStep, stops, traits, null);
+    }
+
+    static boolean isDisallowedContinuationToken(int tokenId, Tokenizer tokenizer, boolean firstStep,
+            Set<Integer> stops, ModelRuntimeTraits traits, Map<Integer, String> specialTokenTexts) {
         ModelRuntimeTraits effectiveTraits = traits == null ? ModelRuntimeTraits.EMPTY : traits;
         if (tokenizer == null || tokenId < 0) {
             return false;
@@ -81,7 +94,7 @@ final class GenerationTokenValidationPolicy {
         if (tokenId == tokenizer.bosTokenId() || tokenId == tokenizer.padTokenId()) {
             return true;
         }
-        String specialText = specialTokenText(tokenizer, tokenId);
+        String specialText = specialTokenText(tokenizer, tokenId, specialTokenTexts);
         if (specialText != null) {
             if (isAllowedControlText(specialText.trim(), effectiveTraits)) {
                 return false;
@@ -93,11 +106,16 @@ final class GenerationTokenValidationPolicy {
 
     static boolean shouldRejectSampledToken(int tokenId, Tokenizer tokenizer, ModelRuntimeTraits traits,
             boolean firstStep, Set<Integer> stops) {
+        return shouldRejectSampledToken(tokenId, tokenizer, traits, firstStep, stops, null);
+    }
+
+    static boolean shouldRejectSampledToken(int tokenId, Tokenizer tokenizer, ModelRuntimeTraits traits,
+            boolean firstStep, Set<Integer> stops, Map<Integer, String> specialTokenTexts) {
         ModelRuntimeTraits effectiveTraits = traits == null ? ModelRuntimeTraits.EMPTY : traits;
         if (tokenId < 0) {
             return false;
         }
-        if (isDisallowedContinuationToken(tokenId, tokenizer, firstStep, stops, effectiveTraits)) {
+        if (isDisallowedContinuationToken(tokenId, tokenizer, firstStep, stops, effectiveTraits, specialTokenTexts)) {
             return true;
         }
         if (!firstStep && !effectiveTraits.validateContinuationTokensByDecode()) {
@@ -148,8 +166,15 @@ final class GenerationTokenValidationPolicy {
     }
 
     private static String specialTokenText(Tokenizer tokenizer, int tokenId) {
+        return specialTokenText(tokenizer, tokenId, null);
+    }
+
+    private static String specialTokenText(Tokenizer tokenizer, int tokenId, Map<Integer, String> specialTokenTexts) {
         if (tokenizer == null || tokenId < 0) {
             return null;
+        }
+        if (specialTokenTexts != null) {
+            return specialTokenTexts.get(tokenId);
         }
         Map<String, Integer> specialTokens = tokenizer.specialTokens();
         if (specialTokens == null || specialTokens.isEmpty()) {

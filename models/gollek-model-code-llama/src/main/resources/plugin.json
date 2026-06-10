@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "optional",
-    "families": ["code_llama"]
+    "families": ["code_llama"],
+    "tokenizerKind": "sentencepiece"
   }
 }

@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["deberta_v2", "deberta-v2"]
+    "families": ["deberta_v2", "deberta-v2"],
+    "tokenizerKind": "sentencepiece"
   }
 }

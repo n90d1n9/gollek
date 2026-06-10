@@ -22,6 +22,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+/**
+ * Runs the token-by-token decode loop after prefill has selected the first
+ * generated token.
+ */
 final class DirectGenerationLoop {
     private final Supplier<DirectGenerationStepSampler> stepSampler;
 
@@ -30,9 +34,27 @@ final class DirectGenerationLoop {
     }
 
     Result run(Request request) {
+        DirectLoadedModel model = request.model();
+        KVCacheManager.KVCacheSession session = request.session();
+        DirectGenerationStepSampler.SamplingState sampling = request.sampling();
+        Set<Integer> stops = request.stops();
+        boolean checkStopTokens = stops != null && !stops.isEmpty();
+        long requestStartNanos = request.requestStartNanos();
+        InferenceProfile profile = request.profile();
+        boolean collectTokenIds = request.collectTokenIds();
+        boolean countCompletionTokens = request.countCompletionTokens();
+        boolean normalizeNullDelta = request.normalizeNullDelta();
+        BooleanSupplier cancelled = request.cancelled();
+        Consumer<String> deltaConsumer = request.deltaConsumer();
+        BiConsumer<Integer, Integer> nextTokenObserver = request.nextTokenObserver();
         StringBuilder out = new StringBuilder();
-        List<Long> generatedIds = request.collectTokenIds() ? new ArrayList<>() : Collections.emptyList();
-        StreamingDecoder decoder = new StreamingDecoder(request.model().tokenizer(), DecodeOptions.defaultOptions());
+        List<Long> generatedIds = collectTokenIds ? new ArrayList<>() : Collections.emptyList();
+        StreamingDecoder decoder = new StreamingDecoder(model.tokenizer(), DecodeOptions.defaultOptions());
+        GenerationConfig cfg = request.cfg();
+        List<String> stopStrings = cfg.stopStrings();
+        boolean checkStopStrings = stopStrings != null && !stopStrings.isEmpty();
+        int maxNewTokens = cfg.maxNewTokens();
+        DirectGenerationStepSampler sampler = null;
         int next = request.firstToken();
         int completionTokens = 0;
         long firstTokenNanos = 0L;
@@ -40,53 +62,55 @@ final class DirectGenerationLoop {
         long samplingNanos = 0L;
         int decodeSteps = 0;
 
-        for (int step = 0; step < request.cfg().maxNewTokens(); step++) {
-            if (request.stops().contains(next) || request.isCancelled()) {
+        for (int step = 0; step < maxNewTokens; step++) {
+            if ((checkStopTokens && stops.contains(next)) || isCancelled(cancelled)) {
                 break;
             }
 
             if (firstTokenNanos == 0L) {
-                firstTokenNanos = System.nanoTime() - request.requestStartNanos();
+                firstTokenNanos = System.nanoTime() - requestStartNanos;
+                markFirstToken(profile, requestStartNanos);
             }
-            markFirstToken(request.profile(), request.requestStartNanos());
-            if (request.collectTokenIds()) {
+            if (collectTokenIds) {
                 generatedIds.add((long) next);
             }
-            if (request.countCompletionTokens()) {
+            if (countCompletionTokens) {
                 completionTokens++;
             }
 
             String delta = decoder.decodeNext((long) next);
-            if (delta == null && request.normalizeNullDelta()) {
+            if (delta == null && normalizeNullDelta) {
                 delta = "";
             }
             out.append(delta);
-            if (delta != null && !delta.isEmpty() && request.deltaConsumer() != null) {
-                request.deltaConsumer().accept(delta);
+            if (delta != null && !delta.isEmpty() && deltaConsumer != null) {
+                deltaConsumer.accept(delta);
             }
 
-            if (endsWithStopString(decoder.currentText(), request.cfg().stopStrings())) {
+            if (checkStopStrings && endsWithStopString(decoder.currentText(), stopStrings)) {
                 break;
             }
 
-            recordSampleFrequency(request.sampling().frequencies(), next);
-            if (step + 1 >= request.cfg().maxNewTokens()) {
+            recordSampleFrequency(sampling.frequencies(), next);
+            if (step + 1 >= maxNewTokens) {
                 break;
             }
-            DirectGenerationStepSampler.StepResult decode = stepSampler.get().decode(next,
-                    request.decodeStartBase() + step, request.model(), request.session(), request.cfg(),
-                    request.sampling());
+            if (sampler == null) {
+                sampler = stepSampler.get();
+            }
+            DirectGenerationStepSampler.StepResult decode = sampler.decode(next,
+                    request.decodeStartBase() + step, model, session, cfg, sampling);
             next = decode.token();
             decodeNanos += decode.forwardNanos();
             decodeSteps++;
             samplingNanos += decode.samplingNanos();
-            if (request.profile() != null) {
-                request.profile().decodeNanos += decode.forwardNanos();
-                request.profile().decodeSteps++;
-                request.profile().samplingNanos += decode.samplingNanos();
+            if (profile != null) {
+                profile.decodeNanos += decode.forwardNanos();
+                profile.decodeSteps++;
+                profile.samplingNanos += decode.samplingNanos();
             }
-            if (request.nextTokenObserver() != null) {
-                request.nextTokenObserver().accept(next, step + 1);
+            if (nextTokenObserver != null) {
+                nextTokenObserver.accept(next, step + 1);
             }
         }
 
@@ -106,6 +130,10 @@ final class DirectGenerationLoop {
         return false;
     }
 
+    private static boolean isCancelled(BooleanSupplier cancelled) {
+        return cancelled != null && cancelled.getAsBoolean();
+    }
+
     record Request(
             DirectLoadedModel model,
             GenerationConfig cfg,
@@ -122,9 +150,6 @@ final class DirectGenerationLoop {
             BooleanSupplier cancelled,
             Consumer<String> deltaConsumer,
             BiConsumer<Integer, Integer> nextTokenObserver) {
-        boolean isCancelled() {
-            return cancelled != null && cancelled.getAsBoolean();
-        }
     }
 
     record Result(String text, List<Long> generatedTokenIds, int completionTokens, long firstTokenNanos,

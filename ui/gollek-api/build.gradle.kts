@@ -20,14 +20,15 @@ dependencies {
     implementation("io.quarkus:quarkus-smallrye-openapi")
     implementation("io.quarkus:quarkus-micrometer-registry-prometheus")
     implementation("io.quarkus:quarkus-mutiny")
-    
+
     implementation(project(":sdk:gollek-sdk"))
+    implementation(project(":sdk:gollek-sdk-agent"))
     implementation(project(":sdk:gollek-sdk-core"))
     implementation(project(":spi:gollek-spi"))
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":spi:gollek-spi-model"))
     implementation(project(":spi:gollek-spi-provider"))
-    
+
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.quarkus:quarkus-junit5")

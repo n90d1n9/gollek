@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import picocli.CommandLine.Command;
+import tech.kayys.gollek.cli.commands.AgentCommand;
 import tech.kayys.gollek.cli.commands.ChatCommand;
 import tech.kayys.gollek.cli.commands.PrepareCommand;
 import tech.kayys.gollek.cli.commands.DeleteCommand;
@@ -29,6 +30,7 @@ import tech.kayys.gollek.cli.commands.StatsCommand;
 import tech.kayys.gollek.cli.commands.LogsCommand;
 import tech.kayys.gollek.cli.commands.TrainCommand;
 import tech.kayys.gollek.cli.commands.RegisterCommand;
+import tech.kayys.gollek.cli.commands.RouteBenchmarksCommand;
 import tech.kayys.gollek.cli.commands.MultimodalCommand;
 import tech.kayys.gollek.cli.commands.LiteRTCommand;
 import tech.kayys.gollek.cli.commands.OnnxCommand;
@@ -48,6 +50,7 @@ import picocli.CommandLine.Option;
         PrepareCommand.class,
         PrewarmCommand.class,
         ListCommand.class,
+        AgentCommand.class,
         McpCommand.class,
         ShowCommand.class,
         DeleteCommand.class,
@@ -61,6 +64,7 @@ import picocli.CommandLine.Option;
         JobsCommand.class,
         StatsCommand.class,
         LogsCommand.class,
+        RouteBenchmarksCommand.class,
         TrainCommand.class,
         RegisterCommand.class,
         MultimodalCommand.class,

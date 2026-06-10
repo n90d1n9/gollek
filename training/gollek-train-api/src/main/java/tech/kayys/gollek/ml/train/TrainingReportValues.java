@@ -99,7 +99,7 @@ final class TrainingReportValues {
         if (!(value instanceof Map<?, ?> map)) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
         if (snapshot instanceof Map<?, ?> snapshotMap) {
             return (Map<String, Object>) snapshotMap;
         }

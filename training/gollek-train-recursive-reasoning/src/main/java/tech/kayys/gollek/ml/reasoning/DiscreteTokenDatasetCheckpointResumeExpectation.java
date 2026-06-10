@@ -22,12 +22,13 @@ public record DiscreteTokenDatasetCheckpointResumeExpectation(
             new DiscreteTokenDatasetCheckpointResumeExpectation(null, null, null, null, null, null);
 
     public DiscreteTokenDatasetCheckpointResumeExpectation {
-        experimentName = optionalText(experimentName, "experimentName");
-        runId = optionalText(runId, "runId");
-        modelFamily = optionalText(modelFamily, "modelFamily");
-        seed = optionalNonNegative(seed, "seed");
-        checkpointStep = optionalNonNegative(checkpointStep, "checkpointStep");
-        minimumCheckpointStep = optionalNonNegative(minimumCheckpointStep, "minimumCheckpointStep");
+        experimentName = DiscreteTokenDatasetMetadataSupport.optionalText(experimentName, "experimentName");
+        runId = DiscreteTokenDatasetMetadataSupport.optionalText(runId, "runId");
+        modelFamily = DiscreteTokenDatasetMetadataSupport.optionalText(modelFamily, "modelFamily");
+        seed = DiscreteTokenDatasetMetadataSupport.optionalNonNegative(seed, "seed");
+        checkpointStep = DiscreteTokenDatasetMetadataSupport.optionalNonNegative(checkpointStep, "checkpointStep");
+        minimumCheckpointStep =
+                DiscreteTokenDatasetMetadataSupport.optionalNonNegative(minimumCheckpointStep, "minimumCheckpointStep");
         if (checkpointStep != null && minimumCheckpointStep != null && checkpointStep < minimumCheckpointStep) {
             throw new IllegalArgumentException(
                     "checkpointStep must be >= minimumCheckpointStep when both expectations are set");
@@ -45,12 +46,12 @@ public record DiscreteTokenDatasetCheckpointResumeExpectation(
     public static DiscreteTokenDatasetCheckpointResumeExpectation fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetCheckpointResumeExpectation(
-                optionalString(metadata, "experimentName"),
-                optionalString(metadata, "runId"),
-                optionalString(metadata, "modelFamily"),
-                optionalLong(metadata, "seed"),
-                optionalLong(metadata, "checkpointStep"),
-                optionalLong(metadata, "minimumCheckpointStep"));
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "experimentName"),
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "runId"),
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "modelFamily"),
+                DiscreteTokenDatasetMetadataSupport.optionalLong(metadata, "seed"),
+                DiscreteTokenDatasetMetadataSupport.optionalLong(metadata, "checkpointStep"),
+                DiscreteTokenDatasetMetadataSupport.optionalLong(metadata, "minimumCheckpointStep"));
     }
 
     public static DiscreteTokenDatasetCheckpointResumeExpectation exactFromManifest(
@@ -147,66 +148,6 @@ public record DiscreteTokenDatasetCheckpointResumeExpectation(
         if (value != null) {
             metadata.put(key, value);
         }
-    }
-
-    private static String optionalString(Map<?, ?> metadata, String key) {
-        Object value = optional(metadata, key);
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof CharSequence text) {
-            return text.toString();
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static Long optionalLong(Map<?, ?> metadata, String key) {
-        Object value = optional(metadata, key);
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < Long.MIN_VALUE
-                    || numericValue > Long.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-            }
-            return number.longValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Long.parseLong(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-    }
-
-    private static Object optional(Map<?, ?> metadata, String key) {
-        return metadata.containsKey(key) ? metadata.get(key) : null;
-    }
-
-    private static String optionalText(String value, String name) {
-        if (value == null) {
-            return null;
-        }
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
-    }
-
-    private static Long optionalNonNegative(Long value, String name) {
-        if (value == null) {
-            return null;
-        }
-        if (value < 0L) {
-            throw new IllegalArgumentException(name + " must be >= 0 but was " + value);
-        }
-        return value;
     }
 
     public static final class Builder {

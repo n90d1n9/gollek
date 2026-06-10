@@ -36,6 +36,17 @@ public record TrainingReportActionPlan(
         return status() == Status.READY;
     }
 
+    public static TrainingReportActionPlan fromMap(Map<String, ?> map) {
+        if (map == null || map.isEmpty()) {
+            return new TrainingReportActionPlan(
+                    TrainingReportDiagnostics.Summary.fromMap(Map.of()),
+                    List.of());
+        }
+        return new TrainingReportActionPlan(
+                TrainingReportDiagnostics.Summary.fromMap(TrainingReportValues.mapValue(map, "diagnostics")),
+                recommendationsFromObject(map.get("recommendations")));
+    }
+
     public boolean requiresAttention() {
         return status() != Status.READY;
     }
@@ -76,5 +87,23 @@ public record TrainingReportActionPlan(
                 .toList());
         map.put("actionItems", actionItems());
         return Map.copyOf(map);
+    }
+
+    private static List<TrainingReportRecommendation> recommendationsFromObject(Object value) {
+        if (!(value instanceof Iterable<?> iterable)) {
+            return List.of();
+        }
+        List<TrainingReportRecommendation> recommendations = new java.util.ArrayList<>();
+        for (Object item : iterable) {
+            if (item instanceof Map<?, ?> map) {
+                Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
+                if (snapshot instanceof Map<?, ?> snapshotMap) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> typedMap = (Map<String, Object>) snapshotMap;
+                    recommendations.add(TrainingReportRecommendation.fromMap(typedMap));
+                }
+            }
+        }
+        return List.copyOf(recommendations);
     }
 }

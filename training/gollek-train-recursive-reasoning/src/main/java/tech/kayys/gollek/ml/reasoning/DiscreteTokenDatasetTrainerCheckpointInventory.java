@@ -227,8 +227,8 @@ public record DiscreteTokenDatasetTrainerCheckpointInventory(
     public record ReadFailure(Path checkpointDir, String errorType, String message) {
         public ReadFailure {
             checkpointDir = Objects.requireNonNull(checkpointDir, "checkpointDir must not be null");
-            errorType = requireText(errorType, "errorType");
-            message = requireText(message, "message");
+            errorType = DiscreteTokenDatasetMetadataSupport.requireText(errorType, "errorType");
+            message = DiscreteTokenDatasetMetadataSupport.requireText(message, "message");
         }
 
         public static ReadFailure from(Path checkpointDir, Exception error) {
@@ -253,11 +253,4 @@ public record DiscreteTokenDatasetTrainerCheckpointInventory(
         }
     }
 
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
-    }
 }

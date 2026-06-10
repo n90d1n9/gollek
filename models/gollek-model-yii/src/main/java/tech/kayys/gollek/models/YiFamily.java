@@ -29,7 +29,7 @@ public class YiFamily implements ModelArchitecture {
 
         @Override
         public List<String> supportedModelTypes() {
-            return List.of("yi");
+            return List.of("yi", "yi_1_5");
         }
 
         // Yi uses LlamaForCausalLM weights — identical naming

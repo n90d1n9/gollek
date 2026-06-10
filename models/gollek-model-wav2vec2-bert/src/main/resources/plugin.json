@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["wav2vec2_bert", "wav2vec2-bert"]
   }
 }

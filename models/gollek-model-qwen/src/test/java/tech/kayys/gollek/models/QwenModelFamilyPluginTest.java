@@ -1,17 +1,22 @@
 package tech.kayys.gollek.models;
 
 import org.junit.jupiter.api.Test;
+import tech.kayys.gollek.spi.model.ModelAttentionTraitsPolicy;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
 import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QwenModelFamilyPluginTest {
@@ -89,6 +94,41 @@ class QwenModelFamilyPluginTest {
         assertEquals("model.layers.4.mlp.down_proj.weight", architecture.layerFfnDownWeight(4));
         assertEquals("model.layers.4.self_attn.q_norm.weight", architecture.layerQueryNormWeight(4));
         assertEquals("model.layers.4.self_attn.k_norm.weight", architecture.layerKeyNormWeight(4));
+    }
+
+    @Test
+    void qwenRuntimeProfileOwnsPromptDefaults() {
+        ModelRuntimeTraits traits = QwenRuntimeProfile.text(new ModelConfig());
+
+        assertTrue(traits.qwenText());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.DEFAULT, traits.promptBosPolicy());
+        assertEquals(ModelRuntimeTraits.QWEN_DEFAULT_SYSTEM_PROMPT, traits.defaultSystemPrompt());
+        assertFalse(traits.skipDefaultSystemPromptInjection());
+        assertFalse(traits.validateContinuationTokensByDecode());
+        assertFalse(traits.rejectEmptyDecodedTokens());
+        assertEquals(List.of(), traits.allowedControlTokenTexts().stream().toList());
+        assertEquals(ModelRuntimeTraits.QWEN_DEFAULT_SYSTEM_PROMPT,
+                QwenRuntimeProfile.prompt().defaultSystemPrompt());
+    }
+
+    @Test
+    void qwenAdaptersUseSharedRuntimeProfileForCompactAttention() {
+        ModelConfig compactConfig = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "qwen2",
+                "qwen2.block_count", 24,
+                "qwen2.embedding_length", 1536,
+                "qwen2.feed_forward_length", 8960));
+
+        for (ModelArchitecture adapter : List.of(new Qwen2Family(), new Qwen25Family(), new Qwen3Family())) {
+            ModelRuntimeTraits traits = adapter.runtimeTraits(compactConfig);
+
+            assertTrue(traits.qwenText(), adapter.id());
+            assertTrue(traits.attention().compactAttentionMatvecCandidate(), adapter.id());
+            assertEquals(
+                    ModelAttentionTraitsPolicy.DEFAULT_QWEN_PAGED_METAL_PREFILL_MAX_TOKENS,
+                    traits.attention().defaultPagedMetalPrefillMaxTokens(),
+                    adapter.id());
+        }
     }
 
     private static Path fixture(String familyId) throws Exception {

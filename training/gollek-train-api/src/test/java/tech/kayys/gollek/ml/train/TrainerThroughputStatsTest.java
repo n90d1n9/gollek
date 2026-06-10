@@ -26,6 +26,8 @@ class TrainerThroughputStatsTest {
         assertEquals(3_000_000_000L, train.computeNanos());
         assertEquals(3_000.0, train.computeMillis(), 1e-6);
         assertEquals(1.0, train.samplesPerSecond(), 1e-6);
+        assertEquals(2.0 / 3.0, train.batchesPerSecond(), 1e-6);
+        assertEquals(1_500.0, train.averageBatchMillis(), 1e-6);
 
         ThroughputSnapshot validation = stats.validationTotal();
         assertEquals(1L, validation.batchCount());
@@ -73,6 +75,8 @@ class TrainerThroughputStatsTest {
         assertEquals(4L, metadata.get("trainLabelElementCount"));
         assertEquals(2_000.0, (Double) metadata.get("trainComputeMillis"), 1e-6);
         assertEquals(2.0, (Double) metadata.get("trainSamplesPerSecond"), 1e-6);
+        assertEquals(1.0, (Double) metadata.get("trainBatchesPerSecond"), 1e-6);
+        assertEquals(1_000.0, (Double) metadata.get("trainAverageBatchMillis"), 1e-6);
     }
 
     private static Batch batch(int samples, int width) {

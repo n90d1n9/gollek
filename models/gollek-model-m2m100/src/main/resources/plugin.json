@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["m2m_100", "m2m100"]
+    "families": ["m2m_100", "m2m100"],
+    "tokenizerKind": "sentencepiece"
   }
 }

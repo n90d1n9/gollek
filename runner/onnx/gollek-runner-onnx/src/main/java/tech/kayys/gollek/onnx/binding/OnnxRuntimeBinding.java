@@ -8,6 +8,7 @@ import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -741,11 +742,155 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             throw unsupported("createTensorWithData");
         try (Arena a = Arena.ofConfined()) {
-            MemorySegment shapeSeg = a.allocate((long) shape.length * 8L, 8);
-            for (int i = 0; i < shape.length; i++)
-                shapeSeg.setAtIndex(ValueLayout.JAVA_LONG, i, shape[i]);
+            MemorySegment shapeSeg = allocateShapeBuffer(a, shape.length);
+            writeShape(shapeSeg, shape);
+            return createTensorWithPreparedShape(memInfo, data, shapeSeg, shape.length, dataType);
+        } catch (Throwable t) {
+            throw new RuntimeException("ORT CreateTensorWithData failed", t);
+        }
+    }
 
-            MemorySegment valPtr = a.allocate(ValueLayout.ADDRESS);
+    /**
+     * Allocate a reusable int64 shape buffer.
+     */
+    public MemorySegment allocateShapeBuffer(Arena arena, int rank) {
+        Objects.requireNonNull(arena, "arena");
+        if (rank <= 0) {
+            throw new IllegalArgumentException("Tensor rank must be positive: " + rank);
+        }
+        return arena.allocate((long) rank * Long.BYTES, Long.BYTES);
+    }
+
+    /**
+     * Write a complete tensor shape into a reusable int64 shape buffer.
+     */
+    public void writeShape(MemorySegment shapeBuffer, long[] shape) {
+        Objects.requireNonNull(shapeBuffer, "shapeBuffer");
+        Objects.requireNonNull(shape, "shape");
+        if (shape.length == 0) {
+            throw new IllegalArgumentException("Tensor shape must not be empty");
+        }
+        requireShapeCapacity(shapeBuffer, shape.length);
+        for (int i = 0; i < shape.length; i++) {
+            shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, i, shape[i]);
+        }
+    }
+
+    /**
+     * Hot-path helper for rank-2 tensor shapes such as [batch, sequence].
+     */
+    public void writeShape2d(MemorySegment shapeBuffer, long firstDim, long secondDim) {
+        Objects.requireNonNull(shapeBuffer, "shapeBuffer");
+        requireShapeCapacity(shapeBuffer, 2);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 0, firstDim);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 1, secondDim);
+    }
+
+    /**
+     * Hot-path helper for rank-4 tensor shapes such as KV-cache tensors.
+     */
+    public void writeShape4d(MemorySegment shapeBuffer,
+            long firstDim,
+            long secondDim,
+            long thirdDim,
+            long fourthDim) {
+        Objects.requireNonNull(shapeBuffer, "shapeBuffer");
+        requireShapeCapacity(shapeBuffer, 4);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 0, firstDim);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 1, secondDim);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 2, thirdDim);
+        shapeBuffer.setAtIndex(ValueLayout.JAVA_LONG, 3, fourthDim);
+    }
+
+    /**
+     * Wrap an existing data segment using a caller-owned shape buffer.
+     *
+     * <p>This avoids allocating and filling shape arrays inside tight decode loops.
+     * The shape buffer only needs to remain valid for this call; ORT copies tensor
+     * metadata while the backing data segment must remain valid for the OrtValue
+     * lifetime.
+     */
+    public MemorySegment createTensorWithPreparedShape(MemorySegment memInfo,
+            MemorySegment data,
+            MemorySegment shapeBuffer,
+            int shapeLength,
+            int dataType) {
+        return createTensorWithPreparedShape(memInfo, data, data.byteSize(), shapeBuffer, shapeLength, dataType);
+    }
+
+    /**
+     * Wrap an existing data segment using a caller-owned shape buffer and logical
+     * data length.
+     */
+    public MemorySegment createTensorWithPreparedShape(MemorySegment memInfo,
+            MemorySegment data,
+            long dataByteLength,
+            MemorySegment shapeBuffer,
+            int shapeLength,
+            int dataType) {
+        try (Arena a = Arena.ofConfined()) {
+            return createTensorWithPreparedShape(
+                    memInfo,
+                    data,
+                    dataByteLength,
+                    shapeBuffer,
+                    shapeLength,
+                    dataType,
+                    a.allocate(ValueLayout.ADDRESS));
+        }
+    }
+
+    /**
+     * Wrap an existing data segment using caller-owned shape and out-pointer
+     * buffers.
+     *
+     * <p>This is the lowest-allocation tensor wrapping path for tight loops. The
+     * {@code valueOutPointer} segment may be reused across calls after the returned
+     * OrtValue pointer has been read.
+     */
+    public MemorySegment createTensorWithPreparedShape(MemorySegment memInfo,
+            MemorySegment data,
+            MemorySegment shapeBuffer,
+            int shapeLength,
+            int dataType,
+            MemorySegment valueOutPointer) {
+        return createTensorWithPreparedShape(memInfo, data, data.byteSize(), shapeBuffer, shapeLength, dataType,
+                valueOutPointer);
+    }
+
+    /**
+     * Wrap an existing data segment using caller-owned shape/out-pointer buffers
+     * and a logical data length.
+     *
+     * <p>The data segment may be larger than the logical tensor payload, which lets
+     * decode loops reuse one native scratch buffer without creating per-token slice
+     * views just to adjust the byte length passed to ORT.
+     */
+    public MemorySegment createTensorWithPreparedShape(MemorySegment memInfo,
+            MemorySegment data,
+            long dataByteLength,
+            MemorySegment shapeBuffer,
+            int shapeLength,
+            int dataType,
+            MemorySegment valueOutPointer) {
+        if (!nativeAvailable)
+            throw unsupported("createTensorWithPreparedShape");
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(shapeBuffer, "shapeBuffer");
+        Objects.requireNonNull(valueOutPointer, "valueOutPointer");
+        if (dataByteLength < 0L || dataByteLength > data.byteSize()) {
+            throw new IllegalArgumentException("Tensor data byte length " + dataByteLength
+                    + " is outside segment byte size " + data.byteSize());
+        }
+        if (shapeLength <= 0) {
+            throw new IllegalArgumentException("Tensor shape length must be positive: " + shapeLength);
+        }
+        requireShapeCapacity(shapeBuffer, shapeLength);
+        if (valueOutPointer.byteSize() < ValueLayout.ADDRESS.byteSize()) {
+            throw new IllegalArgumentException("OrtValue out pointer is too small: required "
+                    + ValueLayout.ADDRESS.byteSize() + " bytes, found " + valueOutPointer.byteSize());
+        }
+        try {
             MemorySegment status = MemorySegment.NULL;
             try {
                 status = (MemorySegment) vtable(SLOT_CREATE_TENSOR_WITH_DATA,
@@ -758,23 +903,23 @@ public class OnnxRuntimeBinding {
                                 ValueLayout.JAVA_INT, // element type
                                 ValueLayout.ADDRESS // OrtValue** out
                         )).invokeExact(
-                                memInfo, data, data.byteSize(),
-                                shapeSeg, (long) shape.length,
-                                dataType, valPtr);
+                                memInfo, data, dataByteLength,
+                                shapeBuffer, (long) shapeLength,
+                                dataType, valueOutPointer);
             } catch (Throwable t) {
                 System.err.printf("[ORT-FATAL] CreateTensor vtable call failed: %s (data_bytes=%d, shape=%s, type=%d)\n",
-                        t.getMessage(), data.byteSize(), java.util.Arrays.toString(shape), dataType);
+                        t.getMessage(), dataByteLength, describeShape(shapeBuffer, shapeLength), dataType);
                 throw new RuntimeException("ORT CreateTensorWithData vtable call failed", t);
             }
 
             if (!isNull(status)) {
                 System.err.printf("[ORT-DEBUG] CreateTensor FAILED: data_bytes=%d, shape=%s, type=%d\n",
-                        data.byteSize(), java.util.Arrays.toString(shape), dataType);
+                        dataByteLength, describeShape(shapeBuffer, shapeLength), dataType);
                 checkStatusPtr(status, "CreateTensorWithDataAsOrtValue");
             }
-            return valPtr.get(ValueLayout.ADDRESS, 0);
+            return valueOutPointer.get(ValueLayout.ADDRESS, 0);
         } catch (Throwable t) {
-            throw new RuntimeException("ORT CreateTensorWithData failed", t);
+            throw new RuntimeException("ORT CreateTensorWithPreparedShape failed", t);
         }
     }
 
@@ -820,12 +965,149 @@ public class OnnxRuntimeBinding {
         if (!nativeAvailable)
             throw unsupported("run");
         try (Arena a = Arena.ofConfined()) {
-            // Pack input name pointers
             MemorySegment inNames = packStrings(a, inputNames);
-            MemorySegment inVals = packPtrs(a, inputValues);
             MemorySegment outNames = packStrings(a, outputNames);
-            MemorySegment outVals = a.allocate((long) outputNames.length * 8L, 8);
+            return runWithPackedNames(session, runOpts, inNames, inputValues, outNames, outputNames.length);
+        }
+    }
 
+    /**
+     * Pack a stable set of tensor names for repeated {@link #runWithPackedNames}
+     * calls.
+     *
+     * <p>Use this when the input/output name sets are constant across many ORT
+     * runs, such as autoregressive decode loops. The returned pointer array is
+     * owned by the supplied arena and must not outlive it.
+     */
+    public MemorySegment packStringPointers(Arena arena, String[] names) {
+        if (!nativeAvailable) {
+            throw unsupported("packStringPointers");
+        }
+        return packStrings(arena, names);
+    }
+
+    /**
+     * Allocate a reusable native pointer array.
+     *
+     * <p>The returned segment is owned by {@code arena}. Call
+     * {@link #writePointerArray(MemorySegment, MemorySegment[], int)} before each
+     * run when the pointed-to OrtValue set changes.
+     */
+    public MemorySegment allocatePointerArray(Arena arena, int count) {
+        Objects.requireNonNull(arena, "arena");
+        if (count < 0) {
+            throw new IllegalArgumentException("Pointer array count must be non-negative: " + count);
+        }
+        return arena.allocate((long) count * ValueLayout.ADDRESS.byteSize(),
+                ValueLayout.ADDRESS.byteAlignment());
+    }
+
+    /**
+     * Allocate a reusable single-pointer slot, useful for ORT APIs that return
+     * values through {@code OrtValue**} out parameters.
+     */
+    public MemorySegment allocateValuePointer(Arena arena) {
+        Objects.requireNonNull(arena, "arena");
+        return arena.allocate(ValueLayout.ADDRESS);
+    }
+
+    /**
+     * Write the first {@code count} pointers from {@code values} into an existing
+     * native pointer array.
+     */
+    public void writePointerArray(MemorySegment pointerArray, MemorySegment[] values, int count) {
+        Objects.requireNonNull(pointerArray, "pointerArray");
+        Objects.requireNonNull(values, "values");
+        if (count < 0 || count > values.length) {
+            throw new IllegalArgumentException("Pointer write count " + count
+                    + " is outside values length " + values.length);
+        }
+        long requiredBytes = (long) count * ValueLayout.ADDRESS.byteSize();
+        if (pointerArray.byteSize() < requiredBytes) {
+            throw new IllegalArgumentException("Pointer array is too small: required "
+                    + requiredBytes + " bytes, found " + pointerArray.byteSize());
+        }
+        for (int i = 0; i < count; i++) {
+            MemorySegment value = values[i];
+            if (value == null) {
+                throw new NullPointerException("values[" + i + "]");
+            }
+            pointerArray.setAtIndex(ValueLayout.ADDRESS, i, value);
+        }
+    }
+
+    /**
+     * Write pointers into an existing native pointer array after the caller has
+     * already validated capacity, count, and non-null values.
+     *
+     * <p>This is intended for decode loops that assemble inputs through a trusted
+     * helper such as {@code OnnxRunInputValues}; external/general callers should
+     * prefer {@link #writePointerArray(MemorySegment, MemorySegment[], int)}.
+     */
+    public void writePointerArrayUnchecked(MemorySegment pointerArray, MemorySegment[] values, int count) {
+        for (int i = 0; i < count; i++) {
+            pointerArray.setAtIndex(ValueLayout.ADDRESS, i, values[i]);
+        }
+    }
+
+    /**
+     * Run inference with pre-packed input/output name pointer arrays.
+     *
+     * <p>This avoids allocating C strings for tensor names on every token step
+     * while still packing the changing OrtValue pointer array per run.
+     */
+    public MemorySegment[] runWithPackedNames(MemorySegment session,
+            MemorySegment runOpts,
+            MemorySegment inputNamePtrs,
+            MemorySegment[] inputValues,
+            MemorySegment outputNamePtrs,
+            int outputCount) {
+        if (!nativeAvailable)
+            throw unsupported("runWithPackedNames");
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment inVals = allocatePointerArray(a, inputValues.length);
+            writePointerArray(inVals, inputValues, inputValues.length);
+            MemorySegment outVals = allocatePointerArray(a, outputCount);
+            MemorySegment[] result = new MemorySegment[outputCount];
+            runWithPreparedPointers(
+                    session,
+                    runOpts,
+                    inputNamePtrs,
+                    inVals,
+                    inputValues.length,
+                    outputNamePtrs,
+                    outVals,
+                    result);
+            return result;
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new RuntimeException("ORT Run failed: " + t.getMessage(), t);
+        }
+    }
+
+    /**
+     * Run inference using pre-packed names and reusable OrtValue pointer arrays.
+     *
+     * <p>This is the lowest-allocation path for decode loops: callers allocate the
+     * input/output pointer arrays once, rewrite input pointers each step, and reuse
+     * {@code outputValues} as the Java view of ORT's output pointers.
+     */
+    public void runWithPreparedPointers(MemorySegment session,
+            MemorySegment runOpts,
+            MemorySegment inputNamePtrs,
+            MemorySegment inputValuePtrs,
+            int inputCount,
+            MemorySegment outputNamePtrs,
+            MemorySegment outputValuePtrs,
+            MemorySegment[] outputValues) {
+        if (!nativeAvailable)
+            throw unsupported("runWithPreparedPointers");
+        Objects.requireNonNull(outputValues, "outputValues");
+        if (inputCount < 0) {
+            throw new IllegalArgumentException("Input count must be non-negative: " + inputCount);
+        }
+        try {
             MemorySegment status = (MemorySegment) vtable(SLOT_RUN,
                     FunctionDescriptor.of(ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS, // session
@@ -838,15 +1120,14 @@ public class OnnxRuntimeBinding {
                             ValueLayout.ADDRESS // output values** (out)
                     )).invokeExact(
                             session, runOpts,
-                            inNames, inVals, (long) inputValues.length,
-                            outNames, (long) outputNames.length,
-                            outVals);
+                            inputNamePtrs, inputValuePtrs, (long) inputCount,
+                            outputNamePtrs, (long) outputValues.length,
+                            outputValuePtrs);
             checkStatusPtr(status, "Run");
 
-            MemorySegment[] result = new MemorySegment[outputNames.length];
-            for (int i = 0; i < result.length; i++)
-                result[i] = outVals.getAtIndex(ValueLayout.ADDRESS, i);
-            return result;
+            for (int i = 0; i < outputValues.length; i++) {
+                outputValues[i] = outputValuePtrs.getAtIndex(ValueLayout.ADDRESS, i);
+            }
         } catch (Throwable t) {
             throw new RuntimeException("ORT Run failed: " + t.getMessage(), t);
         }
@@ -894,6 +1175,70 @@ public class OnnxRuntimeBinding {
             return new float[fallbackWidth];
         }
         int elementType = getTensorElementType(value);
+        TensorTailSpan tail = tensorTailSpan(value, fallbackWidth);
+        return getTensorDataAsFloat(value, elementType, tail.elementOffset(), tail.width());
+    }
+
+    /**
+     * Return the argmax index over the last logical row of a float-like tensor
+     * without materializing the logits as a Java array.
+     */
+    public int argmaxTensorDataFloatLast(MemorySegment value, int fallbackWidth) {
+        if (!nativeAvailable) {
+            return 0;
+        }
+        int elementType = getTensorElementType(value);
+        TensorTailSpan tail = tensorTailSpan(value, fallbackWidth);
+        MemorySegment dataPtr = getTensorMutableData(value);
+        int elementSize = elementSizeBytes(elementType);
+        MemorySegment data = dataPtr.reinterpret((tail.elementOffset() + tail.width()) * (long) elementSize);
+        return argmaxFloatData(data, elementType, tail.elementOffset(), tail.width());
+    }
+
+    /**
+     * Inspect a logits tensor once and cache the stable facts needed for repeated
+     * last-token argmax calls.
+     */
+    public LogitsTailPlan createLogitsTailPlan(MemorySegment value, int fallbackWidth, long sequenceLength) {
+        if (!nativeAvailable) {
+            return LogitsTailPlan.fallback(fallbackWidth);
+        }
+        return logitsTailPlanFromDimensions(
+                getTensorElementType(value),
+                getTensorDimensions(value),
+                fallbackWidth,
+                sequenceLength);
+    }
+
+    /**
+     * Return the argmax index over the last logical row using a cached logits
+     * tail plan. This avoids repeated ORT shape/type metadata calls in decode
+     * loops.
+     */
+    public int argmaxTensorDataFloatLast(MemorySegment value, LogitsTailPlan plan, long sequenceLength) {
+        if (!nativeAvailable) {
+            return 0;
+        }
+        Objects.requireNonNull(plan, "plan");
+        long elementOffset = plan.elementOffset(sequenceLength);
+        MemorySegment dataPtr = getTensorMutableData(value);
+        int elementSize = elementSizeBytes(plan.elementType());
+        MemorySegment data = dataPtr.reinterpret((elementOffset + plan.width()) * (long) elementSize);
+        return argmaxFloatData(data, plan.elementType(), elementOffset, plan.width());
+    }
+
+    private float[] getTensorDataAsFloat(MemorySegment value, int elementType, long elementOffset, int count) {
+        MemorySegment dataPtr = getTensorMutableData(value);
+        int elementSize = elementSizeBytes(elementType);
+        MemorySegment data = dataPtr.reinterpret((elementOffset + count) * (long) elementSize);
+        float[] result = new float[count];
+        for (int i = 0; i < count; i++) {
+            result[i] = readFloatElement(data, elementType, elementOffset + i);
+        }
+        return result;
+    }
+
+    private TensorTailSpan tensorTailSpan(MemorySegment value, int fallbackWidth) {
         long[] dims = getTensorDimensions(value);
         int width = fallbackWidth;
         long elementCount = 0L;
@@ -916,27 +1261,86 @@ public class OnnxRuntimeBinding {
             }
         }
         if (elementCount <= 0L || width <= 0 || elementCount < width) {
-            return getTensorDataAsFloat(value, elementType, 0L, fallbackWidth);
+            return new TensorTailSpan(0L, Math.max(0, fallbackWidth));
         }
-        long offset = elementCount - width;
-        return getTensorDataAsFloat(value, elementType, offset, width);
+        return new TensorTailSpan(elementCount - width, width);
     }
 
-    private float[] getTensorDataAsFloat(MemorySegment value, int elementType, long elementOffset, int count) {
-        MemorySegment dataPtr = getTensorMutableData(value);
-        int elementSize = elementSizeBytes(elementType);
-        MemorySegment data = dataPtr.reinterpret((elementOffset + count) * (long) elementSize);
-        float[] result = new float[count];
-        for (int i = 0; i < count; i++) {
-            long idx = elementOffset + i;
-            result[i] = switch (elementType) {
-                case ONNX_TENSOR_FLOAT -> data.getAtIndex(ValueLayout.JAVA_FLOAT, idx);
-                case ONNX_TENSOR_FLOAT16 -> float16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, idx));
-                case ONNX_TENSOR_BFLOAT16 -> bfloat16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, idx));
-                default -> data.getAtIndex(ValueLayout.JAVA_FLOAT, idx);
-            };
+    static LogitsTailPlan logitsTailPlanFromDimensions(
+            int elementType,
+            long[] dims,
+            int fallbackWidth,
+            long sequenceLength) {
+        int width = Math.max(0, fallbackWidth);
+        long rowCount = 0L;
+        if (dims != null && dims.length > 0) {
+            long product = 1L;
+            boolean usable = true;
+            for (long dim : dims) {
+                if (dim <= 0) {
+                    usable = false;
+                    break;
+                }
+                product = Math.multiplyExact(product, dim);
+            }
+            long lastDim = dims[dims.length - 1];
+            if (lastDim > 0 && lastDim <= Integer.MAX_VALUE) {
+                width = Math.toIntExact(lastDim);
+            }
+            if (usable && width > 0 && product >= width) {
+                rowCount = product / width;
+            }
         }
-        return result;
+        boolean fullSequenceOutput = rowCount > 1L && rowCount == sequenceLength;
+        return new LogitsTailPlan(elementType, width, fullSequenceOutput);
+    }
+
+    static int argmaxFloatData(MemorySegment data, int elementType, long elementOffset, int count) {
+        Objects.requireNonNull(data, "data");
+        if (count <= 0) {
+            throw new IllegalArgumentException("Argmax count must be positive: " + count);
+        }
+        int bestIndex = 0;
+        float best = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < count; i++) {
+            float value = readFloatElement(data, elementType, elementOffset + i);
+            if (value > best) {
+                best = value;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private static float readFloatElement(MemorySegment data, int elementType, long index) {
+        return switch (elementType) {
+            case ONNX_TENSOR_FLOAT -> data.getAtIndex(ValueLayout.JAVA_FLOAT, index);
+            case ONNX_TENSOR_FLOAT16 -> float16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, index));
+            case ONNX_TENSOR_BFLOAT16 -> bfloat16ToFloat(data.getAtIndex(ValueLayout.JAVA_SHORT, index));
+            default -> data.getAtIndex(ValueLayout.JAVA_FLOAT, index);
+        };
+    }
+
+    private record TensorTailSpan(long elementOffset, int width) {
+    }
+
+    public record LogitsTailPlan(int elementType, int width, boolean fullSequenceOutput) {
+        public LogitsTailPlan {
+            if (width <= 0) {
+                throw new IllegalArgumentException("Logits width must be positive: " + width);
+            }
+        }
+
+        static LogitsTailPlan fallback(int fallbackWidth) {
+            return new LogitsTailPlan(ONNX_TENSOR_FLOAT, Math.max(1, fallbackWidth), false);
+        }
+
+        long elementOffset(long sequenceLength) {
+            if (!fullSequenceOutput) {
+                return 0L;
+            }
+            return Math.max(0L, sequenceLength - 1L) * (long) width;
+        }
     }
 
     private static int elementSizeBytes(int elementType) {
@@ -1082,18 +1486,33 @@ public class OnnxRuntimeBinding {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private void requireShapeCapacity(MemorySegment shapeBuffer, int shapeLength) {
+        long requiredBytes = (long) shapeLength * Long.BYTES;
+        if (shapeBuffer.byteSize() < requiredBytes) {
+            throw new IllegalArgumentException("Shape buffer is too small: required "
+                    + requiredBytes + " bytes, found " + shapeBuffer.byteSize());
+        }
+    }
+
+    private String describeShape(MemorySegment shapeBuffer, int shapeLength) {
+        if (shapeBuffer == null || shapeLength <= 0 || shapeBuffer.byteSize() < (long) shapeLength * Long.BYTES) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < shapeLength; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(shapeBuffer.getAtIndex(ValueLayout.JAVA_LONG, i));
+        }
+        return sb.append(']').toString();
+    }
+
     private MemorySegment packStrings(Arena arena, String[] names) {
         MemorySegment ptrs = arena.allocate((long) names.length * 8L, 8);
         for (int i = 0; i < names.length; i++)
             ptrs.setAtIndex(ValueLayout.ADDRESS, i,
                     arena.allocateFrom(names[i]));
-        return ptrs;
-    }
-
-    private MemorySegment packPtrs(Arena arena, MemorySegment[] segs) {
-        MemorySegment ptrs = arena.allocate((long) segs.length * 8L, 8);
-        for (int i = 0; i < segs.length; i++)
-            ptrs.setAtIndex(ValueLayout.ADDRESS, i, segs[i]);
         return ptrs;
     }
 

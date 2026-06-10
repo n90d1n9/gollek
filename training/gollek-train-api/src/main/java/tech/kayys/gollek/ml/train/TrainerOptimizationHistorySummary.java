@@ -216,7 +216,7 @@ final class TrainerOptimizationHistorySummary {
 
     private static void putIfPresent(Map<String, Object> target, String key, Object value) {
         if (value != null) {
-            target.put(key, TrainerMetadataSupport.immutableSnapshot(value));
+            target.put(key, TrainingReportSnapshots.immutableSnapshot(value));
         }
     }
 

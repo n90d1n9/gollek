@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["sentencepiece", "vision-text-processor"],
     "families": ["siglip"]
   }
 }

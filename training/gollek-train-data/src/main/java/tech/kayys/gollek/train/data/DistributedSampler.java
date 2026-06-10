@@ -47,7 +47,7 @@ public final class DistributedSampler implements IndexSampler {
 
     @Override
     public List<Integer> sample(int datasetSize) {
-        requireDatasetSize(datasetSize);
+        DataLoaderCounts.requireDatasetSize(datasetSize);
         int perReplica = sampleCount(datasetSize);
         int totalSize = perReplica * numReplicas;
         if (totalSize == 0) {
@@ -80,7 +80,7 @@ public final class DistributedSampler implements IndexSampler {
 
     @Override
     public int sampleCount(int datasetSize) {
-        requireDatasetSize(datasetSize);
+        DataLoaderCounts.requireDatasetSize(datasetSize);
         if (dropLast) {
             return datasetSize / numReplicas;
         }
@@ -122,9 +122,4 @@ public final class DistributedSampler implements IndexSampler {
         return z ^ (z >>> 31);
     }
 
-    private static void requireDatasetSize(int datasetSize) {
-        if (datasetSize < 0) {
-            throw new IllegalArgumentException("datasetSize must be non-negative, got: " + datasetSize);
-        }
-    }
 }

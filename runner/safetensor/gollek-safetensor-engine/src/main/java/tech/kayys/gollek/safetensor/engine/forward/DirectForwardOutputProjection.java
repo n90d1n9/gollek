@@ -104,16 +104,14 @@ final class DirectForwardOutputProjection {
                                       AccelTensor bias,
                                       String profileKey,
                                       AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.linear(
-                context.runtime(),
-                context.traits(),
-                context.config(),
+        return DirectForwardLinearProjection.linear(DirectForwardLinearRequest.logitsProjection(
+                new DirectForwardLinearContext(context.runtime(), context.traits(), context.config()),
                 decodeLogitsPhase,
                 input,
                 weight,
                 bias,
                 profileKey,
-                outputBuffer);
+                outputBuffer));
     }
 
     private static AccelTensor lmHeadOrThrow(ResolvedModelWeights resolvedWeights) {

@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["layoutlm", "layoutlmv2", "layoutlmv3"]
+    "families": ["layoutlm", "layoutlmv2", "layoutlmv3"],
+    "tokenizerKind": "wordpiece"
   }
 }

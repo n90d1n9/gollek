@@ -76,6 +76,61 @@ class TrainerOptimizerStepRunnerTest {
     }
 
     @Test
+    void recordsOptimizerRuntimeProfilePhases() {
+        Parameter parameter = parameter(10f);
+        parameter.data().backward(GradTensor.of(new float[] {4f}, 1));
+        Optimizer optimizer = SGD.builder(List.of(parameter), 1.0f).build();
+        TrainerRuntimeProfiler profiler = new TrainerRuntimeProfiler();
+
+        TrainerOptimizerStepRunner.StepResult result = new TrainerOptimizerStepRunner(
+                optimizer,
+                null,
+                TrainerGradientClipConfig.value(0.5),
+                new RecordingFailures(),
+                () -> { },
+                true,
+                profiler).step(1);
+
+        assertTrue(result.optimizerStepApplied());
+        assertEquals(1L, profiler.snapshot(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_ACCUMULATION_SCALE).count());
+        assertEquals(1L, profiler.snapshot(TrainerRuntimeProfiler.Phase.OPTIMIZER_STEP).count());
+        assertEquals(1L, profiler.snapshot(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_UPDATE_DIAGNOSTICS).count());
+        assertEquals(1L, profiler.snapshot(TrainerRuntimeProfiler.Phase.OPTIMIZER_ZERO_GRAD).count());
+        assertTrue(profiler.toMetadata("runtimeProfile")
+                .containsKey("runtimeProfile.optimizer.step.totalMillis"));
+    }
+
+    @Test
+    void capturesParameterUpdateDiagnosticsOnConfiguredIntervalOnly() {
+        Parameter parameter = parameter(10f);
+        Optimizer optimizer = SGD.builder(List.of(parameter), 1.0f).build();
+        TrainerRuntimeProfiler profiler = new TrainerRuntimeProfiler();
+        TrainerOptimizerStepRunner runner = new TrainerOptimizerStepRunner(
+                optimizer,
+                null,
+                TrainerGradientClipConfig.DISABLED,
+                new RecordingFailures(),
+                () -> { },
+                TrainerParameterUpdateDiagnosticsPolicy.of(true, 2),
+                profiler);
+
+        parameter.data().backward(GradTensor.of(new float[] {1f}, 1));
+        TrainerOptimizerStepRunner.StepResult first = runner.step(1);
+        parameter.data().backward(GradTensor.of(new float[] {1f}, 1));
+        TrainerOptimizerStepRunner.StepResult second = runner.step(1);
+
+        assertTrue(first.optimizerStepApplied());
+        assertFalse(first.parameterUpdateDiagnosticsEnabled());
+        assertTrue(second.optimizerStepApplied());
+        assertTrue(second.parameterUpdateDiagnosticsEnabled());
+        assertEquals(1L, profiler.snapshot(TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_SNAPSHOT).count());
+        assertEquals(1L, profiler.snapshot(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_UPDATE_DIAGNOSTICS).count());
+    }
+
+    @Test
     void skipsOptimizerAndSchedulerWhenMixedPrecisionOverflowIsDetected() {
         Parameter parameter = parameter(2f);
         parameter.data().backward(GradTensor.of(new float[] {Float.POSITIVE_INFINITY}, 1));

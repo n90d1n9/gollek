@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["phimoe", "phi_moe", "phi-moe"]
   }
 }

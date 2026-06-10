@@ -1,5 +1,17 @@
 rootProject.name = "gollek-engine"
 
+fun includeOptionalProject(projectPath: String, vararg candidatePaths: String) {
+    val projectDir = candidatePaths
+        .map { file(it) }
+        .firstOrNull { candidate ->
+            candidate.resolve("build.gradle.kts").isFile || candidate.resolve("build.gradle").isFile
+        }
+        ?: return
+
+    include(projectPath)
+    project(":$projectPath").projectDir = projectDir
+}
+
 include("gollek-utils")
 include("compiler:gollek-compiler")
 include("compiler:gollek-neural-compiler")
@@ -24,6 +36,7 @@ include("core:gollek-tokenizer-core")
 include("core:gollek-tool-core")
 include("examples:jupyter-deps")
 include("integration:gollek-jupyter-kernel")
+project(":integration:gollek-jupyter-kernel").projectDir = file("integration/jupyter/gollek-jupyter-kernel")
 include("models:gollek-model-cohere")
 include("models:gollek-model-common")
 include("models:gollek-model-deepseek")
@@ -34,6 +47,30 @@ include("models:gollek-model-mistral")
 include("models:gollek-model-phi")
 include("models:gollek-model-qwen")
 include("models:gollek-model-yii")
+val staticallyIncludedModelProjects = setOf(
+    "gollek-model-cohere",
+    "gollek-model-common",
+    "gollek-model-deepseek",
+    "gollek-model-gemma",
+    "gollek-model-kimi",
+    "gollek-model-llama",
+    "gollek-model-mistral",
+    "gollek-model-phi",
+    "gollek-model-qwen",
+    "gollek-model-yii",
+)
+file("models")
+    .listFiles { candidate ->
+        candidate.isDirectory &&
+                candidate.name.startsWith("gollek-model-") &&
+                candidate.name !in staticallyIncludedModelProjects &&
+                (candidate.resolve("build.gradle.kts").isFile || candidate.resolve("build.gradle").isFile)
+    }
+    ?.sortedBy { it.name }
+    ?.forEach { modelProject ->
+        includeOptionalProject("models:${modelProject.name}", "models/${modelProject.name}")
+    }
+includeOptionalProject("suling", "../extensions/audio/suling", "stubs/suling")
 include("optimization:gollek-plugin-elastic-ep")
 include("optimization:gollek-plugin-evicpress")
 include("optimization:gollek-plugin-fa3")
@@ -75,6 +112,7 @@ include("runner:gollek-diffusion")
 include("runtime:gollek-runtime")
 include("runtime:gollek-runtime-distributed")
 include("sdk:gollek-sdk")
+include("sdk:gollek-sdk-agent")
 include("sdk:gollek-sdk-api")
 include("sdk:gollek-sdk-core")
 include("sdk:gollek-sdk-local")
@@ -129,6 +167,8 @@ include("ml:gollek-ml-diffusion-opd")
 project(":ml:gollek-ml-diffusion-opd").projectDir = file("training/gollek-train-diffusion-opd")
 include("ml:gollek-ml-estimator")
 project(":ml:gollek-ml-estimator").projectDir = file("training/gollek-train-estimator")
+include("ml:gollek-ml-recursive-reasoning")
+project(":ml:gollek-ml-recursive-reasoning").projectDir = file("training/gollek-train-recursive-reasoning")
 include("examples:gollek-ml-examples")
 project(":examples:gollek-ml-examples").projectDir = file("training/gollek-train-examples")
 include("ml:gollek-ml-preprocessing")

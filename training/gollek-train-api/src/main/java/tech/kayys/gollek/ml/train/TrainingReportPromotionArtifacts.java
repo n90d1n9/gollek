@@ -290,13 +290,15 @@ public final class TrainingReportPromotionArtifacts {
 
         TrainerCheckpointIO.writeStringAtomically(jsonFile, TrainerJson.toJson(resolvedReview.toMap()) + "\n");
         TrainerCheckpointIO.writeStringAtomically(markdownFile, TrainingReportPromotionMarkdown.render(resolvedReview));
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
                 jsonFile,
                 markdownFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
                 resolvedReview.decision());
     }
 
@@ -327,14 +329,18 @@ public final class TrainingReportPromotionArtifacts {
         if (!(parsed instanceof Map<?, ?> map)) {
             throw new IOException("Promotion review JSON must be an object: " + resolvedJsonFile);
         }
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
         return new ArtifactInspection(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile),
                 resolvedJsonFile,
                 resolvedMarkdownFile,
                 stringKeyMap(map),
                 markdown,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256());
     }
 
     public static ArtifactVerification verify(ArtifactBundle bundle) throws IOException {
@@ -493,18 +499,17 @@ public final class TrainingReportPromotionArtifacts {
             failures.add(report.role() + " source report fingerprint is missing for " + report.name());
             return;
         }
+        TrainingReportArtifactFingerprint actual = TrainingReportArtifactFingerprint.of(report.source());
         if (report.bytes() != null) {
-            long actualBytes = Files.size(report.source());
-            if (actualBytes != report.bytes().longValue()) {
+            if (actual.bytes() != report.bytes().longValue()) {
                 failures.add(report.role() + " source report byte size mismatch for " + report.name()
-                        + " (expected " + report.bytes() + " bytes, got " + actualBytes + " bytes)");
+                        + " (expected " + report.bytes() + " bytes, got " + actual.bytes() + " bytes)");
             }
         }
         if (report.sha256() != null && !report.sha256().isBlank()) {
-            String actualSha256 = TrainerCheckpointIO.sha256Hex(report.source());
-            if (!report.sha256().equalsIgnoreCase(actualSha256)) {
+            if (!report.sha256().equalsIgnoreCase(actual.sha256())) {
                 failures.add(report.role() + " source report SHA-256 mismatch for " + report.name()
-                        + " (expected " + report.sha256() + ", got " + actualSha256 + ")");
+                        + " (expected " + report.sha256() + ", got " + actual.sha256() + ")");
             }
         }
     }

@@ -15,6 +15,7 @@ final class TrainerOptimizationMetadata {
             int pendingGradientAccumulationBatches,
             int optimizerStepCount,
             double gradientClip,
+            int parameterUpdateDiagnosticsIntervalSteps,
             GradientDiagnostics gradients,
             ParameterDiagnostics parameters,
             UpdateDiagnostics updates) {
@@ -24,6 +25,7 @@ final class TrainerOptimizationMetadata {
                 pendingGradientAccumulationBatches,
                 optimizerStepCount,
                 TrainerGradientClipConfig.norm(gradientClip),
+                parameterUpdateDiagnosticsIntervalSteps,
                 gradients,
                 parameters,
                 updates);
@@ -35,12 +37,15 @@ final class TrainerOptimizationMetadata {
             int pendingGradientAccumulationBatches,
             int optimizerStepCount,
             TrainerGradientClipConfig gradientClip,
+            int parameterUpdateDiagnosticsIntervalSteps,
             GradientDiagnostics gradients,
             ParameterDiagnostics parameters,
             UpdateDiagnostics updates) {
         metadata.put("gradientAccumulationSteps", gradientAccumulationSteps);
         metadata.put("pendingGradientAccumulationBatches", pendingGradientAccumulationBatches);
         metadata.put("optimizerStepCount", optimizerStepCount);
+        metadata.put("parameterUpdateDiagnosticsIntervalSteps", Math.max(1, parameterUpdateDiagnosticsIntervalSteps));
+        metadata.put("parameterUpdateDiagnosticsSampled", Math.max(1, parameterUpdateDiagnosticsIntervalSteps) > 1);
         metadata.put("gradientClipEnabled", gradientClip.enabled());
         metadata.put("gradientClipThreshold", gradientClip.normThreshold());
         metadata.put("gradientClipNormEnabled", gradientClip.normEnabled());

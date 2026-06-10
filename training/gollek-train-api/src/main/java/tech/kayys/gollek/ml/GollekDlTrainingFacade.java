@@ -9,9 +9,14 @@ import java.util.Optional;
 import tech.kayys.gollek.ml.train.TrainerRuntimeSmoke;
 import tech.kayys.gollek.ml.train.TrainerRuntimeSmokeArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReport;
+import tech.kayys.gollek.ml.train.TrainingReportAcceleration;
 import tech.kayys.gollek.ml.train.TrainingReportActionPlan;
 import tech.kayys.gollek.ml.train.TrainingReportActionPlanMarkdown;
+import tech.kayys.gollek.ml.train.TrainingReportAdvisor;
 import tech.kayys.gollek.ml.train.TrainingReportComparison;
+import tech.kayys.gollek.ml.train.TrainingReportComparisonActionPlanArtifactVerificationMarkdown;
+import tech.kayys.gollek.ml.train.TrainingReportComparisonActionPlanArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportComparisonActionPlanExport;
 import tech.kayys.gollek.ml.train.TrainingReportComparisonArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportComparisonExport;
 import tech.kayys.gollek.ml.train.TrainingReportComparisonJUnitXml;
@@ -36,9 +41,17 @@ import tech.kayys.gollek.ml.train.TrainingReportPromotionGateMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionMarkdown;
 import tech.kayys.gollek.ml.train.TrainingReportRecommendation;
 import tech.kayys.gollek.ml.train.TrainingReportReader;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGate;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileActionPlan;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBalanceAssessment;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBudgetGate;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBudgetGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfile;
 import tech.kayys.gollek.ml.train.TrainingReportSeries;
 import tech.kayys.gollek.ml.train.TrainingReportSeriesBundle;
 import tech.kayys.gollek.ml.train.TrainingReportSeriesExport;
+import tech.kayys.gollek.ml.train.TrainingReportThroughput;
 import tech.kayys.gollek.ml.train.TrainingReportValidationArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportValidationJUnitXml;
 import tech.kayys.gollek.ml.train.TrainingReportValidationMarkdown;
@@ -106,6 +119,54 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
         return TrainingReportReader.readReport(reportFile);
     }
 
+    public static TrainingReportThroughput trainingReportThroughput(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).throughput();
+    }
+
+    public static TrainingReportThroughput trainingReportThroughput(TrainingReport report) {
+        return report.throughput();
+    }
+
+    public static Map<String, Object> trainingReportThroughputMap(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).throughputMap();
+    }
+
+    public static Map<String, Object> trainingReportThroughputMap(TrainingReport report) {
+        return report.throughputMap();
+    }
+
+    public static String trainingReportThroughputMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).throughputMarkdown();
+    }
+
+    public static String trainingReportThroughputMarkdown(TrainingReport report) {
+        return report.throughputMarkdown();
+    }
+
+    public static TrainingReportAcceleration trainingReportAcceleration(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).acceleration();
+    }
+
+    public static TrainingReportAcceleration trainingReportAcceleration(TrainingReport report) {
+        return report.acceleration();
+    }
+
+    public static Map<String, Object> trainingReportAccelerationMap(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).accelerationMap();
+    }
+
+    public static Map<String, Object> trainingReportAccelerationMap(TrainingReport report) {
+        return report.accelerationMap();
+    }
+
+    public static String trainingReportAccelerationMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).accelerationMarkdown();
+    }
+
+    public static String trainingReportAccelerationMarkdown(TrainingReport report) {
+        return report.accelerationMarkdown();
+    }
+
     public static TrainingReportActionPlan trainingReportActionPlan(Path reportFile) throws IOException {
         return TrainingReportReader.readReport(reportFile).actionPlan();
     }
@@ -124,6 +185,291 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
 
     public static String trainingReportActionPlanMarkdown(TrainingReportActionPlan actionPlan) {
         return TrainingReportActionPlanMarkdown.render(actionPlan);
+    }
+
+    public static Map<String, Object> trainingReportRuntimeInputProfile(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeInputProfileMap();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeInputProfile(TrainingReport report) {
+        return report.runtimeInputProfileMap();
+    }
+
+    public static String trainingReportRuntimeInputProfileMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeInputProfileMarkdown();
+    }
+
+    public static String trainingReportRuntimeInputProfileMarkdown(TrainingReport report) {
+        return report.runtimeInputProfileMarkdown();
+    }
+
+    public static TrainingReportRuntimeProfile.Balance trainingReportRuntimeProfileBalance(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalance();
+    }
+
+    public static TrainingReportRuntimeProfile.Balance trainingReportRuntimeProfileBalance(TrainingReport report) {
+        return report.runtimeProfileBalance();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileBalanceMap(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalanceMap();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileBalanceMap(TrainingReport report) {
+        return report.runtimeProfileBalanceMap();
+    }
+
+    public static TrainingReportRuntimeProfileBalanceAssessment trainingReportRuntimeProfileBalanceAssessment(
+            Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalanceAssessment();
+    }
+
+    public static TrainingReportRuntimeProfileBalanceAssessment trainingReportRuntimeProfileBalanceAssessment(
+            Path reportFile,
+            TrainingReportRuntimeProfileBalanceAssessment.Thresholds thresholds) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalanceAssessment(thresholds);
+    }
+
+    public static TrainingReportRuntimeProfileBalanceAssessment trainingReportRuntimeProfileBalanceAssessment(
+            TrainingReport report) {
+        return report.runtimeProfileBalanceAssessment();
+    }
+
+    public static TrainingReportRuntimeProfileBalanceAssessment trainingReportRuntimeProfileBalanceAssessment(
+            TrainingReport report,
+            TrainingReportRuntimeProfileBalanceAssessment.Thresholds thresholds) {
+        return report.runtimeProfileBalanceAssessment(thresholds);
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileBalanceAssessmentMap(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalanceAssessmentMap();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileBalanceAssessmentMap(TrainingReport report) {
+        return report.runtimeProfileBalanceAssessmentMap();
+    }
+
+    public static String trainingReportRuntimeProfileBalanceMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBalanceMarkdown();
+    }
+
+    public static String trainingReportRuntimeProfileBalanceMarkdown(TrainingReport report) {
+        return report.runtimeProfileBalanceMarkdown();
+    }
+
+    public static TrainingReportRuntimeProfileActionPlan trainingReportRuntimeProfileActionPlan(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileActionPlan();
+    }
+
+    public static TrainingReportRuntimeProfileActionPlan trainingReportRuntimeProfileActionPlan(TrainingReport report) {
+        return report.runtimeProfileActionPlan();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileActionPlanMap(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileActionPlanMap();
+    }
+
+    public static Map<String, Object> trainingReportRuntimeProfileActionPlanMap(TrainingReport report) {
+        return report.runtimeProfileActionPlanMap();
+    }
+
+    public static String trainingReportRuntimeProfileActionPlanMarkdown(Path reportFile) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileActionPlanMarkdown();
+    }
+
+    public static String trainingReportRuntimeProfileActionPlanMarkdown(TrainingReport report) {
+        return report.runtimeProfileActionPlanMarkdown();
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGate.Result trainingReportRuntimeProfileBudgetGate(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBudgetGate();
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGate.Result trainingReportRuntimeProfileBudgetGate(
+            Path reportFile,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeProfileBudgetGate(policy);
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGate.Result trainingReportRuntimeProfileBudgetGate(
+            TrainingReport report) {
+        return report.runtimeProfileBudgetGate();
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGate.Result trainingReportRuntimeProfileBudgetGate(
+            TrainingReport report,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) {
+        return report.runtimeProfileBudgetGate(policy);
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateMarkdown(Path reportFile) throws IOException {
+        return trainingReportRuntimeProfileBudgetGate(reportFile).markdown();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateMarkdown(
+            Path reportFile,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) throws IOException {
+        return trainingReportRuntimeProfileBudgetGate(reportFile, policy).markdown();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateMarkdown(TrainingReport report) {
+        return report.runtimeProfileBudgetGate().markdown();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateMarkdown(
+            TrainingReport report,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) {
+        return report.runtimeProfileBudgetGate(policy).markdown();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateJUnitXml(Path reportFile) throws IOException {
+        return trainingReportRuntimeProfileBudgetGate(reportFile).junitXml();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateJUnitXml(
+            Path reportFile,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) throws IOException {
+        return trainingReportRuntimeProfileBudgetGate(reportFile, policy).junitXml();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateJUnitXml(TrainingReport report) {
+        return report.runtimeProfileBudgetGate().junitXml();
+    }
+
+    public static String trainingReportRuntimeProfileBudgetGateJUnitXml(
+            TrainingReport report,
+            TrainingReportRuntimeProfileBudgetGate.Policy policy) {
+        return report.runtimeProfileBudgetGate(policy).junitXml();
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactBundle writeTrainingReportRuntimeProfileBudgetGateArtifacts(
+            Path directory,
+            TrainingReportRuntimeProfileBudgetGate.Result result) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.write(directory, result);
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactBundle writeTrainingReportRuntimeProfileBudgetGateArtifacts(
+            Path directory,
+            TrainingReport report) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.write(directory, report.runtimeProfileBudgetGate());
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactInspection readTrainingReportRuntimeProfileBudgetGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.read(directory);
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactBundle refreshTrainingReportRuntimeProfileBudgetGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.refreshDerived(directory);
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeProfileBudgetGateArtifacts(
+            TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeProfileBudgetGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeProfileBudgetGateArtifacts.verify(directory);
+    }
+
+    public static TrainingReportRuntimeInputProfileGate.Result trainingReportRuntimeInputProfileGate(Path reportFile)
+            throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeInputProfileGate();
+    }
+
+    public static TrainingReportRuntimeInputProfileGate.Result trainingReportRuntimeInputProfileGate(
+            Path reportFile,
+            TrainingReportRuntimeInputProfileGate.Policy policy) throws IOException {
+        return TrainingReportReader.readReport(reportFile).runtimeInputProfileGate(policy);
+    }
+
+    public static TrainingReportRuntimeInputProfileGate.Result trainingReportRuntimeInputProfileGate(
+            TrainingReport report) {
+        return report.runtimeInputProfileGate();
+    }
+
+    public static TrainingReportRuntimeInputProfileGate.Result trainingReportRuntimeInputProfileGate(
+            TrainingReport report,
+            TrainingReportRuntimeInputProfileGate.Policy policy) {
+        return report.runtimeInputProfileGate(policy);
+    }
+
+    public static String trainingReportRuntimeInputProfileGateMarkdown(Path reportFile) throws IOException {
+        return trainingReportRuntimeInputProfileGate(reportFile).markdown();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateMarkdown(
+            Path reportFile,
+            TrainingReportRuntimeInputProfileGate.Policy policy) throws IOException {
+        return trainingReportRuntimeInputProfileGate(reportFile, policy).markdown();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateMarkdown(TrainingReport report) {
+        return report.runtimeInputProfileGate().markdown();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateMarkdown(
+            TrainingReport report,
+            TrainingReportRuntimeInputProfileGate.Policy policy) {
+        return report.runtimeInputProfileGate(policy).markdown();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateJUnitXml(Path reportFile) throws IOException {
+        return trainingReportRuntimeInputProfileGate(reportFile).junitXml();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateJUnitXml(
+            Path reportFile,
+            TrainingReportRuntimeInputProfileGate.Policy policy) throws IOException {
+        return trainingReportRuntimeInputProfileGate(reportFile, policy).junitXml();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateJUnitXml(TrainingReport report) {
+        return report.runtimeInputProfileGate().junitXml();
+    }
+
+    public static String trainingReportRuntimeInputProfileGateJUnitXml(
+            TrainingReport report,
+            TrainingReportRuntimeInputProfileGate.Policy policy) {
+        return report.runtimeInputProfileGate(policy).junitXml();
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle writeTrainingReportRuntimeInputProfileGateArtifacts(
+            Path directory,
+            TrainingReportRuntimeInputProfileGate.Result result) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.write(directory, result);
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle writeTrainingReportRuntimeInputProfileGateArtifacts(
+            Path directory,
+            TrainingReport report) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.write(directory, report.runtimeInputProfileGate());
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactInspection readTrainingReportRuntimeInputProfileGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.read(directory);
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle refreshTrainingReportRuntimeInputProfileGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.refreshDerived(directory);
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeInputProfileGateArtifacts(
+            TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verifyTrainingReportRuntimeInputProfileGateArtifacts(
+            Path directory) throws IOException {
+        return TrainingReportRuntimeInputProfileGateArtifacts.verify(directory);
     }
 
     public static List<TrainingReportRecommendation> trainingReportRecommendations(Path reportFile)
@@ -301,6 +647,100 @@ public class GollekDlTrainingFacade extends GollekDlFitFacade {
                 expectedJunitXmlSha256,
                 expectedMetricsCsvSha256,
                 expectedFindingsCsvSha256);
+    }
+
+    public static String trainingReportComparisonActionPlanSchema() {
+        return TrainingReportAdvisor.comparisonActionPlanSchema();
+    }
+
+    public static Map<String, Object> trainingReportComparisonActionPlan(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.comparisonActionPlan(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static Map<String, Object> trainingReportComparisonActionPlan(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.comparisonActionPlan(baseline.payload(), candidate.payload());
+    }
+
+    public static TrainingReportComparisonActionPlanExport trainingReportComparisonActionPlanExport(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.comparisonActionPlanExport(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static TrainingReportComparisonActionPlanExport trainingReportComparisonActionPlanExport(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.comparisonActionPlanExport(baseline.payload(), candidate.payload());
+    }
+
+    public static TrainingReportComparisonActionPlanExport readTrainingReportComparisonActionPlanExport(
+            Path jsonFile) throws IOException {
+        return TrainingReportComparisonActionPlanExport.readJson(jsonFile);
+    }
+
+    public static String trainingReportComparisonActionPlanMarkdown(
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportAdvisor.comparisonActionPlanMarkdown(
+                TrainingReportReader.readCanonical(baselineReportFile),
+                TrainingReportReader.readCanonical(candidateReportFile));
+    }
+
+    public static String trainingReportComparisonActionPlanMarkdown(
+            TrainingReport baseline,
+            TrainingReport candidate) {
+        return TrainingReportAdvisor.comparisonActionPlanMarkdown(baseline.payload(), candidate.payload());
+    }
+
+    public static String readTrainingReportComparisonActionPlanMarkdown(Path markdownFile) throws IOException {
+        return TrainingReportComparisonActionPlanExport.readMarkdown(markdownFile);
+    }
+
+    public static TrainingReportComparisonActionPlanArtifacts.ArtifactBundle writeTrainingReportComparisonActionPlanArtifacts(
+            Path directory,
+            Path baselineReportFile,
+            Path candidateReportFile) throws IOException {
+        return TrainingReportComparisonActionPlanArtifacts.write(
+                directory,
+                trainingReportComparisonActionPlanExport(baselineReportFile, candidateReportFile));
+    }
+
+    public static TrainingReportComparisonActionPlanArtifacts.ArtifactBundle writeTrainingReportComparisonActionPlanArtifacts(
+            Path directory,
+            TrainingReport baseline,
+            TrainingReport candidate) throws IOException {
+        return TrainingReportComparisonActionPlanArtifacts.write(
+                directory,
+                trainingReportComparisonActionPlanExport(baseline, candidate));
+    }
+
+    public static TrainingReportComparisonActionPlanArtifacts.ArtifactBundle writeTrainingReportComparisonActionPlanArtifacts(
+            Path directory,
+            TrainingReportComparisonActionPlanExport export) throws IOException {
+        return TrainingReportComparisonActionPlanArtifacts.write(directory, export);
+    }
+
+    public static TrainingReportComparisonActionPlanArtifacts.Verification verifyTrainingReportComparisonActionPlanArtifacts(
+            TrainingReportComparisonActionPlanArtifacts.ArtifactBundle bundle) throws IOException {
+        return TrainingReportComparisonActionPlanArtifacts.verify(bundle);
+    }
+
+    public static TrainingReportComparisonActionPlanArtifacts.Verification verifyTrainingReportComparisonActionPlanArtifacts(
+            Path manifestFile) throws IOException {
+        return TrainingReportComparisonActionPlanArtifacts.verify(manifestFile);
+    }
+
+    public static String trainingReportComparisonActionPlanArtifactVerificationMarkdown(
+            TrainingReportComparisonActionPlanArtifacts.Verification verification) {
+        return TrainingReportComparisonActionPlanArtifactVerificationMarkdown.render(verification);
     }
 
     public static TrainingReportPortfolio trainingReportPortfolio(Map<String, Path> reportFiles)

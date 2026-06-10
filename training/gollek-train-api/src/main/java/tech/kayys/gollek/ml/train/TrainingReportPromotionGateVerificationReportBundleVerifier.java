@@ -30,9 +30,9 @@ final class TrainingReportPromotionGateVerificationReportBundleVerifier {
                         TrainingReportPromotionGateArtifactPackage.defaultVerificationReportFile(
                                 resolvedReportDirectory)),
                 markdownFile,
-                TrainerCheckpointIO.sha256Hex(markdownFile),
+                TrainingReportArtifactFingerprint.of(markdownFile).sha256(),
                 junitXmlFile,
-                TrainerCheckpointIO.sha256Hex(junitXmlFile));
+                TrainingReportArtifactFingerprint.of(junitXmlFile).sha256());
     }
 
     static TrainingReportPromotionGateArtifactPackage.VerificationReportBundleVerification verify(

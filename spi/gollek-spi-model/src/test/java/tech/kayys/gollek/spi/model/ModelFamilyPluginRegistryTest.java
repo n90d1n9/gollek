@@ -2,7 +2,10 @@ package tech.kayys.gollek.spi.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -10,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelFamilyPluginRegistryTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void selectsTokenizerProfilesByModelType() {
@@ -45,6 +51,34 @@ class ModelFamilyPluginRegistryTest {
     }
 
     @Test
+    void runtimeManifestCarriesUnifiedRuntimeRequirementsFromMetadata() {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "unified-runtime-family",
+                        "Unified Runtime Family",
+                        List.of("unified_runtime_model"),
+                        List.of("UnifiedRuntimeForConditionalGeneration"),
+                        List.of(ModelFamilyCapability.MULTIMODAL),
+                        Map.of(
+                                "unified_model_type", "unified_runtime_model",
+                                "unified_runtime_required_modalities", "text,image",
+                                "unified_runtime_reason", "needs external unified runtime"));
+            }
+        };
+
+        ModelFamilyRuntimeManifest manifest = plugin.runtimeManifest();
+        ModelFamilyUnifiedRuntimeRequirement requirement = manifest.unifiedRuntimeRequirements().getFirst();
+
+        assertTrue(manifest.requiresUnifiedRuntime());
+        assertEquals("unified_runtime_model", requirement.modelType());
+        assertEquals(List.of("text", "image"), requirement.requiredInputModalities());
+        assertTrue(requirement.productionReadyRequired());
+        assertEquals("needs external unified runtime", requirement.reason());
+    }
+
+    @Test
     void resolvesModelFamilyByModelTypeWithTokenizerDescriptors() {
         ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
             @Override
@@ -77,6 +111,9 @@ class ModelFamilyPluginRegistryTest {
                     .map(ModelFamilySupportReport::id)
                     .toList());
             assertEquals("resolution-family", resolution.primarySupportReport().orElseThrow().id());
+            assertEquals("resolution-family", resolution.primaryRuntimeManifest().orElseThrow().familyId());
+            assertEquals(List.of("resolution-spm"), resolution.runtimeManifests().getFirst()
+                    .tokenizerProfileIds());
             assertEquals(List.of("resolution-spm"), resolution.tokenizerDescriptors().stream()
                     .map(ModelTokenizerDescriptor::id)
                     .toList());
@@ -108,6 +145,307 @@ class ModelFamilyPluginRegistryTest {
     }
 
     @Test
+    void exposesRuntimeManifestForResolvedFamilies() throws Exception {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "runtime-manifest-family",
+                        "Runtime Manifest Family",
+                        List.of("runtime_manifest"),
+                        List.of("RuntimeManifestForCausalLM"),
+                        List.of(ModelFamilyCapability.CAUSAL_LM,
+                                ModelFamilyCapability.TOKENIZER,
+                                ModelFamilyCapability.CHAT_TEMPLATE,
+                                ModelFamilyCapability.DIRECT_SAFETENSOR_INFERENCE),
+                        Map.of(
+                                "bundle_profile", "core",
+                                "origin", "3rdparty/transformers/src/transformers/models/runtime_manifest",
+                                "chat_template_ids", "runtime-chat,runtime-json"));
+            }
+
+            @Override
+            public List<ModelArchitecture> architectureAdapters() {
+                return List.of(new StubArchitecture(
+                        "runtime-manifest-adapter",
+                        "runtime_manifest",
+                        "RuntimeManifestForCausalLM"));
+            }
+
+            @Override
+            public List<ModelTokenizerDescriptor> tokenizerDescriptors() {
+                return List.of(ModelTokenizerDescriptor.huggingFaceBpe("runtime-hf-bpe"));
+            }
+        };
+        ModelConfig config = new ObjectMapper().readValue("""
+                {
+                  "model_type": "gemma4_text",
+                  "architectures": ["RuntimeManifestForCausalLM"]
+                }
+                """, ModelConfig.class);
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.global();
+        registry.register(plugin);
+        try {
+            List<ModelFamilyRuntimeManifest> manifests =
+                    registry.runtimeManifestsFor("runtime_manifest", null);
+            ModelFamilyRuntimeManifest manifest = manifests.getFirst();
+
+            assertEquals(1, manifests.size());
+            assertEquals("runtime-manifest-family", manifest.familyId());
+            assertEquals(List.of("runtime_manifest"), manifest.modelTypes());
+            assertEquals(List.of("runtime-manifest-adapter"), manifest.architectureAdapterIds());
+            assertEquals(List.of("runtime-hf-bpe"), manifest.tokenizerProfileIds());
+            assertEquals(List.of("runtime-chat", "runtime-json"), manifest.chatTemplateIds());
+            assertEquals(ModelFamilyBundleProfile.CORE, manifest.bundleProfile());
+            assertEquals(ModelFamilyDirectSupport.READY, manifest.directSafetensorStatus());
+            assertTrue(manifest.tokenizerReady());
+            assertTrue(manifest.chatTemplateReady());
+            assertTrue(manifest.directSafetensorReady());
+            assertEquals("runtime-manifest-family",
+                    registry.runtimeManifest("runtime-manifest-family").orElseThrow().familyId());
+            assertEquals("runtime-manifest-family",
+                    registry.resolve("runtime_manifest", null).primaryRuntimeManifest().orElseThrow().familyId());
+            ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(
+                    registry.resolve("runtime_manifest", null));
+            assertTrue(compatibility.compatible());
+            assertTrue(compatibility.problemCodes().isEmpty());
+            assertEquals("runtime-manifest-adapter", compatibility.selectedArchitectureAdapterId());
+            assertEquals("model_type", compatibility.selectedArchitectureAdapterBy());
+            assertEquals("runtime-manifest-family", registry
+                    .directSafetensorCompatibilityForPlugin("runtime-manifest-family")
+                    .orElseThrow()
+                    .modelFamily()
+                    .primaryFamilyId()
+                    .orElseThrow());
+            assertTrue(registry.directSafetensorCompatibilities().stream()
+                    .anyMatch(candidate -> candidate.modelFamily().familyIds()
+                            .contains("runtime-manifest-family")
+                            && candidate.compatible()));
+            ModelFamilyRuntimeCompatibilitySummary summary =
+                    registry.directSafetensorCompatibilitySummary();
+            assertTrue(summary.familyCount() >= 1);
+            assertTrue(summary.compatibleFamilyIds().contains("runtime-manifest-family"));
+            assertEquals(0, summary.problemCounts().getOrDefault(
+                    "model_family_architecture_adapters_missing", 0));
+            assertEquals(List.of("runtime-manifest-family"), registry
+                    .directSafetensorCompatibilitySummaryForFamilies(List.of("runtime-manifest-family"))
+                    .compatibleFamilyIds());
+            assertTrue(registry
+                    .directSafetensorCompatibilitySummaryForFamilies(List.of("missing-runtime-family"))
+                    .empty());
+            assertTrue(plugin.runtimeTraits(config).gemma4Text());
+        } finally {
+            registry.unregister(plugin.id());
+        }
+    }
+
+    @Test
+    void directSafetensorCompatibilityReportsPendingQuantizedLoaderFromModelConfig() throws Exception {
+        Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
+        Files.writeString(tempDir.resolve("config.json"), """
+                {
+                  "model_type": "quantized_runtime",
+                  "architectures": ["QuantizedRuntimeForCausalLM"],
+                  "quantization_config": {
+                    "format": "mobile",
+                    "container": "compressed_tensors",
+                    "loader_scope": "metadata_only_pending_mobile_quant_loader"
+                  }
+                }
+                """);
+        ModelFamilyPlugin plugin = directReadyPlugin(
+                "quantized-runtime-family",
+                "quantized_runtime",
+                "QuantizedRuntimeForCausalLM");
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.global();
+        registry.register(plugin);
+        try {
+            ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(
+                    registry.resolve("quantized_runtime", "QuantizedRuntimeForCausalLM"),
+                    tempDir);
+
+            assertTrue(!compatibility.compatible());
+            assertEquals("quantized-runtime-family-adapter", compatibility.selectedArchitectureAdapterId());
+            assertTrue(compatibility.problemCodes().contains(
+                    ModelFamilyProblemCodes.QUANTIZED_WEIGHT_LOADER_PENDING));
+            assertTrue(compatibility.problemCodes().contains(ModelFamilyProblemCodes.QAT_MOBILE_LOADER_PENDING));
+            assertTrue(compatibility.problemCodes().stream()
+                    .noneMatch("model_family_architecture_adapter_unmatched"::equals));
+            assertTrue(compatibility.remediationHints().stream()
+                    .anyMatch(hint -> hint.contains("mobile quantized weights in compressed_tensors")));
+        } finally {
+            registry.unregister(plugin.id());
+        }
+    }
+
+    @Test
+    void quantizedLoaderProfileInfersGemma4MobileQatFromUpstreamConfigShape() throws Exception {
+        Files.writeString(tempDir.resolve("config.json"), """
+                {
+                  "model_type": "gemma4",
+                  "quantization_config": {
+                    "quant_method": "gemma",
+                    "num_bits": 4
+                  },
+                  "text_config": {
+                    "model_type": "gemma4_text"
+                  },
+                  "vision_config": {
+                    "model_type": "gemma4_vision"
+                  },
+                  "audio_config": {
+                    "model_type": "gemma4_audio"
+                  }
+                }
+                """);
+
+        ModelFamilyQuantizedLoaderProfile profile =
+                ModelFamilyQuantizedLoaderProfile.fromModelDir(tempDir);
+
+        assertTrue(profile.gemma4MobileQat());
+        assertTrue(profile.inferredFromConfig());
+        assertEquals("mobile", profile.format());
+        assertEquals("transformers", profile.container());
+        assertEquals("metadata_only_pending_mobile_quant_loader", profile.loaderScope());
+        assertTrue(profile.problemCodes().contains(ModelFamilyProblemCodes.QAT_MOBILE_LOADER_PENDING));
+    }
+
+    @Test
+    void quantizedLoaderProfileDoesNotInferGemma4MobileQatWithoutMultimodalTowers() throws Exception {
+        Files.writeString(tempDir.resolve("config.json"), """
+                {
+                  "model_type": "gemma4",
+                  "quantization_config": {
+                    "quant_method": "gemma",
+                    "num_bits": 4
+                  },
+                  "text_config": {
+                    "model_type": "gemma4_text"
+                  }
+                }
+                """);
+
+        ModelFamilyQuantizedLoaderProfile profile =
+                ModelFamilyQuantizedLoaderProfile.fromModelDir(tempDir);
+
+        assertEquals(null, profile);
+    }
+
+    @Test
+    void directSafetensorCompatibilityReportsGenericPendingQuantizedLoaderForUnknownFormat() throws Exception {
+        Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
+        Files.writeString(tempDir.resolve("config.json"), """
+                {
+                  "model_type": "quantized_runtime",
+                  "architectures": ["QuantizedRuntimeForCausalLM"],
+                  "quantization_config": {
+                    "format": "future_format",
+                    "container": "future_container",
+                    "loader_scope": "metadata_only_pending_future_quant_loader"
+                  }
+                }
+                """);
+        ModelFamilyPlugin plugin = directReadyPlugin(
+                "quantized-runtime-family",
+                "quantized_runtime",
+                "QuantizedRuntimeForCausalLM");
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.global();
+        registry.register(plugin);
+        try {
+            ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(
+                    registry.resolve("quantized_runtime", "QuantizedRuntimeForCausalLM"),
+                    tempDir);
+
+            assertTrue(!compatibility.compatible());
+            assertEquals(List.of(ModelFamilyProblemCodes.QUANTIZED_WEIGHT_LOADER_PENDING),
+                    compatibility.problemCodes());
+            assertTrue(compatibility.remediationHints().stream()
+                    .anyMatch(hint -> hint.contains("future_format quantized weights in future_container")));
+        } finally {
+            registry.unregister(plugin.id());
+        }
+    }
+
+    @Test
+    void directSafetensorCompatibilityDoesNotBlockSupportedQuantizedLoaderScope() throws Exception {
+        Files.writeString(tempDir.resolve("tokenizer.json"), "{}");
+        Files.writeString(tempDir.resolve("config.json"), """
+                {
+                  "model_type": "quantized_runtime",
+                  "architectures": ["QuantizedRuntimeForCausalLM"],
+                  "quantization_config": {
+                    "format": "q4_0",
+                    "container": "gguf",
+                    "loader_scope": "ready_q4_0_weight_loader"
+                  }
+                }
+                """);
+        ModelFamilyPlugin plugin = directReadyPlugin(
+                "quantized-runtime-family",
+                "quantized_runtime",
+                "QuantizedRuntimeForCausalLM");
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.global();
+        registry.register(plugin);
+        try {
+            ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(
+                    registry.resolve("quantized_runtime", "QuantizedRuntimeForCausalLM"),
+                    tempDir);
+
+            assertTrue(compatibility.compatible());
+            assertEquals(List.of(), compatibility.problemCodes());
+        } finally {
+            registry.unregister(plugin.id());
+        }
+    }
+
+    @Test
+    void pluginRuntimeTraitsDelegateToMatchingArchitectureAdapter() throws Exception {
+        ModelRuntimeTraits adapterTraits = new ModelRuntimeTraits(false, false, true, false);
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "runtime-traits-family",
+                        "Runtime Traits Family",
+                        List.of("runtime_traits"),
+                        List.of("RuntimeTraitsForCausalLM"),
+                        List.of(ModelFamilyCapability.DIRECT_SAFETENSOR_INFERENCE),
+                        Map.of("bundle_profile", "core"));
+            }
+
+            @Override
+            public List<ModelArchitecture> architectureAdapters() {
+                return List.of(new StubArchitecture(
+                        "runtime-traits-adapter",
+                        "runtime_traits",
+                        "RuntimeTraitsForCausalLM",
+                        adapterTraits));
+            }
+        };
+        ModelConfig config = new ObjectMapper().readValue("""
+                {
+                  "model_type": "runtime_traits",
+                  "architectures": ["RuntimeTraitsForCausalLM"]
+                }
+                """, ModelConfig.class);
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.global();
+        registry.register(plugin);
+        try {
+            ModelRuntimeTraits traits = plugin.runtimeTraits(config);
+
+            assertTrue(traits.qwenText());
+            assertEquals(ModelRuntimeTraits.QWEN_DEFAULT_SYSTEM_PROMPT, traits.defaultSystemPrompt());
+        } finally {
+            registry.unregister(plugin.id());
+        }
+    }
+
+    @Test
     void resolvesModelFamilyFromParsedConfig() throws Exception {
         ModelFamilyPlugin plugin = metadataOnlyPlugin("config-resolution-family", "config_resolution",
                 "ConfigResolutionForCausalLM");
@@ -130,6 +468,21 @@ class ModelFamilyPluginRegistryTest {
         } finally {
             registry.unregister(plugin.id());
         }
+    }
+
+    @Test
+    void isolatedRegistryDoesNotMutateGlobalRegistry() {
+        ModelFamilyPlugin plugin = metadataOnlyPlugin("isolated-family", "isolated_model",
+                "IsolatedForCausalLM");
+        ModelFamilyPluginRegistry isolated = ModelFamilyPluginRegistry.create();
+
+        isolated.register(plugin);
+
+        assertEquals(ModelFamilyResolution.Status.RESOLVED,
+                isolated.resolve("isolated_model", null).status());
+        assertEquals(ModelFamilyResolution.Status.NOT_FOUND,
+                ModelFamilyPluginRegistry.global().resolve("isolated_model", null).status());
+        assertTrue(ModelFamilyPluginRegistry.global().plugin("isolated-family").isEmpty());
     }
 
     @Test
@@ -502,19 +855,56 @@ class ModelFamilyPluginRegistryTest {
         };
     }
 
+    private static ModelFamilyPlugin directReadyPlugin(String id, String modelType, String architectureClassName) {
+        return new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        id,
+                        id,
+                        List.of(modelType),
+                        List.of(architectureClassName),
+                        List.of(ModelFamilyCapability.CAUSAL_LM,
+                                ModelFamilyCapability.TOKENIZER,
+                                ModelFamilyCapability.DIRECT_SAFETENSOR_INFERENCE),
+                        Map.of("bundle_profile", "core"));
+            }
+
+            @Override
+            public List<ModelArchitecture> architectureAdapters() {
+                return List.of(new StubArchitecture(
+                        id + "-adapter",
+                        modelType,
+                        architectureClassName));
+            }
+
+            @Override
+            public List<ModelTokenizerDescriptor> tokenizerDescriptors() {
+                return List.of(ModelTokenizerDescriptor.huggingFaceBpe(id + "-tokenizer"));
+            }
+        };
+    }
+
     private static final class StubArchitecture implements ModelArchitecture {
         private final String id;
         private final String modelType;
         private final String architectureClassName;
+        private final ModelRuntimeTraits runtimeTraits;
 
         private StubArchitecture() {
             this("stub", "ready", "ReadyForCausalLM");
         }
 
         private StubArchitecture(String id, String modelType, String architectureClassName) {
+            this(id, modelType, architectureClassName, null);
+        }
+
+        private StubArchitecture(String id, String modelType, String architectureClassName,
+                ModelRuntimeTraits runtimeTraits) {
             this.id = id;
             this.modelType = modelType;
             this.architectureClassName = architectureClassName;
+            this.runtimeTraits = runtimeTraits;
         }
 
         @Override
@@ -585,6 +975,11 @@ class ModelFamilyPluginRegistryTest {
         @Override
         public String layerFfnNormWeight(int i) {
             return "ffn_norm.weight";
+        }
+
+        @Override
+        public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
+            return runtimeTraits == null ? ModelArchitecture.super.runtimeTraits(config) : runtimeTraits;
         }
     }
 }

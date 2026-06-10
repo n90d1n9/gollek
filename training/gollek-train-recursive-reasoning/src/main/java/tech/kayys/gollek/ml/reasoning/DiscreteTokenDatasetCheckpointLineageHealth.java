@@ -11,8 +11,8 @@ import java.util.Optional;
 
 final class DiscreteTokenDatasetCheckpointLineageHealth {
 
-    private static final String PAYLOAD_KIND = "checkpoint-lineage-health";
-    private static final String SCHEMA_VERSION = "gollek.checkpoint-lineage-health.v1";
+    private static final String PAYLOAD_KIND = DiscreteTokenDatasetCheckpointLineageHealthSnapshot.KIND;
+    private static final String SCHEMA_VERSION = DiscreteTokenDatasetCheckpointLineageHealthSnapshot.SCHEMA_VERSION;
     private static final String HEALTHY_CODE = "GOLLEK_LINEAGE_HEALTHY";
     private static final String NO_LINEAGE_ACTION = "No lineage action required.";
     private static final String NO_CHECK_ACTION = "No action required.";

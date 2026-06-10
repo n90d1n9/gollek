@@ -13,6 +13,7 @@ public record ModelFamilyResolution(
         Status status,
         List<String> familyIds,
         List<ModelFamilySupportReport> supportReports,
+        List<ModelFamilyRuntimeManifest> runtimeManifests,
         List<ModelTokenizerDescriptor> tokenizerDescriptors) {
 
     public enum Status {
@@ -27,6 +28,7 @@ public record ModelFamilyResolution(
         status = status == null ? Status.NOT_FOUND : status;
         familyIds = List.copyOf(familyIds == null ? List.of() : familyIds);
         supportReports = List.copyOf(supportReports == null ? List.of() : supportReports);
+        runtimeManifests = List.copyOf(runtimeManifests == null ? List.of() : runtimeManifests);
         tokenizerDescriptors = List.copyOf(tokenizerDescriptors == null ? List.of() : tokenizerDescriptors);
     }
 
@@ -50,6 +52,10 @@ public record ModelFamilyResolution(
         return supportReports.stream().findFirst();
     }
 
+    public Optional<ModelFamilyRuntimeManifest> primaryRuntimeManifest() {
+        return runtimeManifests.stream().findFirst();
+    }
+
     public boolean requiresAttention() {
         return !problemCodes().isEmpty();
     }
@@ -63,6 +69,9 @@ public record ModelFamilyResolution(
         }
         if (resolved() && supportReports.isEmpty()) {
             return List.of("model_family_support_report_unavailable");
+        }
+        if (resolved() && runtimeManifests.isEmpty()) {
+            return List.of("model_family_runtime_manifest_unavailable");
         }
         return List.of();
     }
@@ -81,6 +90,10 @@ public record ModelFamilyResolution(
         if (resolved() && supportReports.isEmpty()) {
             return List.of(
                     "The matched model-family plugin did not publish a support report; check its plugin implementation.");
+        }
+        if (resolved() && runtimeManifests.isEmpty()) {
+            return List.of(
+                    "The matched model-family plugin did not publish a runtime manifest; check its plugin implementation.");
         }
         return List.of();
     }

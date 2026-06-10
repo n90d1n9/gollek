@@ -76,6 +76,17 @@ class ModelCapabilityMapperTest {
         assertEquals(true, tooling.get("model_tool_calling"));
         assertEquals(false, tooling.get("tool_execution"));
 
+        Map<String, Object> embeddings = (Map<String, Object>) matrix.get("embeddings");
+        assertEquals(true, embeddings.get("generation"));
+        assertEquals("/v1/embeddings", embeddings.get("endpoint"));
+        assertEquals(true, embeddings.get("openai_compatible"));
+        assertEquals(768, embeddings.get("dimensions"));
+        assertEquals(List.of("float", "base64"), embeddings.get("encoding_formats"));
+        assertEquals(List.of("input", "inputs"), embeddings.get("input_aliases"));
+        assertEquals(true, embeddings.get("batch_inputs"));
+        assertEquals(false, embeddings.get("retrieval_policy"));
+        assertEquals(false, embeddings.get("vector_store_ownership"));
+
         List<Map<String, Object>> candidates = (List<Map<String, Object>>) matrix.get("provider_candidates");
         assertEquals(1, candidates.size());
         assertEquals("local", candidates.get(0).get("id"));

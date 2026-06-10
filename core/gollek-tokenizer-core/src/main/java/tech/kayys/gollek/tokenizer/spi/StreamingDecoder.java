@@ -34,8 +34,7 @@ public class StreamingDecoder {
 
         // We re-decode the full sequence to handle BPE merges and multi-byte UTF-8
         // correctly across token boundaries.
-        long[] currentIds = Arrays.copyOf(tokens, tokenCount);
-        String currentFullText = tokenizer.decode(currentIds, options);
+        String currentFullText = tokenizer.decode(tokens, 0, tokenCount, options);
 
 
 

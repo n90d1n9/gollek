@@ -3,8 +3,12 @@ package tech.kayys.gollek.cli.util;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyCapability;
 import tech.kayys.gollek.spi.model.ModelFamilyDescriptor;
 import tech.kayys.gollek.spi.model.ModelFamilyPlugin;
+import tech.kayys.gollek.spi.model.ModelFamilyPluginRegistry;
+import tech.kayys.gollek.spi.model.ModelFamilyResolution;
+import tech.kayys.gollek.spi.model.ModelFamilyRuntimeCompatibility;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,10 +32,14 @@ class ModelFamilyBundleManifestTest {
         properties.setProperty("bundleFingerprint", "sha256:abc123");
         properties.setProperty("selectors", "core,direct,gemma,all,custom_selector");
         properties.setProperty("families", "gemma,llama,phi");
+        properties.setProperty("familyCount", "3");
         properties.setProperty("profiles", "core,optional");
         properties.setProperty("availableFamilies", "bert,flava,gemma,llama,phi");
         properties.setProperty("availableProfiles", "core,metadata_only,optional");
         properties.setProperty("availableSelectors", "core,direct,gemma,llama,optional");
+        properties.setProperty("tokenizerMetadataPendingFamilies", "kimi");
+        properties.setProperty("family.kimi.tokenizerMetadataPendingReason",
+                "tokenizer adapter pending descriptor stabilization");
         properties.setProperty("selectorSource", "explicit");
         properties.setProperty("explicitSelectors", "direct,gemma");
         properties.setProperty("presetSelectors", "direct");
@@ -61,6 +69,12 @@ class ModelFamilyBundleManifestTest {
         properties.setProperty("fixtureMissingRequiredFamilies", "phi");
         properties.setProperty("fixtureProblemFamilies", "bert,phi");
         properties.setProperty("bundlePreset", "prod_llm");
+        properties.setProperty("productionReadinessPassed", "true");
+        properties.setProperty("productionReadinessPendingCount", "0");
+        properties.setProperty("productionReadinessPendingFamilies", "");
+        properties.setProperty("directSafetensorReadinessPassed", "true");
+        properties.setProperty("directSafetensorPendingCount", "0");
+        properties.setProperty("directSafetensorPendingFamilies", "");
         properties.setProperty("availableBundlePresets", "prod_llm,research_all");
         properties.setProperty("bundlePresets", "prod_llm,research_all");
         properties.setProperty("bundlePreset.prod_llm.description", "Lean production LLM");
@@ -68,20 +82,41 @@ class ModelFamilyBundleManifestTest {
         properties.setProperty("bundlePreset.prod_llm.requiredAliases", "direct");
         properties.setProperty("bundlePreset.prod_llm.forbiddenAliases", "embedding");
         properties.setProperty("bundlePreset.prod_llm.selectedFamilies", "gemma,llama,phi");
+        properties.setProperty("bundlePreset.prod_llm.selectedCount", "3");
+        properties.setProperty("bundlePreset.prod_llm.productionTokenizerMetadataRequired", "true");
+        properties.setProperty("bundlePreset.prod_llm.productionTokenizerMetadataReady", "true");
+        properties.setProperty("bundlePreset.prod_llm.productionSafetyPassed", "true");
+        properties.setProperty("bundlePreset.prod_llm.productionSafetyViolationCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.pendingTokenizerFamilies", "");
         properties.setProperty("bundlePreset.prod_llm.policyPassed", "true");
         properties.setProperty("bundlePreset.prod_llm.policyViolationCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.missingRequiredCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.selectedForbiddenCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.missingRequiredAliasCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.selectedForbiddenAliasCount", "0");
         properties.setProperty("bundlePreset.research_all.description", "Everything");
         properties.setProperty("bundlePreset.research_all.selectors", "all");
         properties.setProperty("bundlePreset.research_all.selectedFamilies", "bert,flava,gemma,llama,phi");
+        properties.setProperty("bundlePreset.research_all.selectedCount", "5");
+        properties.setProperty("bundlePreset.research_all.productionTokenizerMetadataRequired", "false");
+        properties.setProperty("bundlePreset.research_all.productionTokenizerMetadataReady", "false");
+        properties.setProperty("bundlePreset.research_all.productionSafetyPassed", "true");
+        properties.setProperty("bundlePreset.research_all.productionSafetyViolationCount", "0");
         properties.setProperty("bundlePreset.research_all.policyPassed", "false");
         properties.setProperty("bundlePreset.research_all.policyViolationCount", "1");
         properties.setProperty("bundlePreset.research_all.missingRequiredAliases", "direct");
+        properties.setProperty("bundlePreset.research_all.missingRequiredCount", "0");
+        properties.setProperty("bundlePreset.research_all.selectedForbiddenCount", "0");
+        properties.setProperty("bundlePreset.research_all.missingRequiredAliasCount", "1");
+        properties.setProperty("bundlePreset.research_all.selectedForbiddenAliasCount", "0");
         properties.setProperty("bundlePreset.research_all.missingRequiredAlias.direct.families", "qwen");
         properties.setProperty("bundleAliases", "direct,vlm");
         properties.setProperty("bundleAlias.direct.description", "Lean direct runtime");
         properties.setProperty("bundleAlias.direct.families", "gemma,llama,phi");
+        properties.setProperty("bundleAlias.direct.familyCount", "3");
         properties.setProperty("bundleAlias.vlm.description", "Vision-language metadata");
         properties.setProperty("bundleAlias.vlm.families", "flava,gemma");
+        properties.setProperty("bundleAlias.vlm.familyCount", "2");
         properties.setProperty("family.bert.selected", "false");
         properties.setProperty("family.bert.profile", "metadata_only");
         properties.setProperty("family.flava.selected", "false");
@@ -106,6 +141,9 @@ class ModelFamilyBundleManifestTest {
         assertEquals(List.of("custom_selector"), manifest.unknownSelectors());
         assertEquals(List.of("core", "direct", "gemma", "llama", "optional"), manifest.availableSelectors());
         assertEquals("core, direct, gemma, llama, optional", manifest.joinedAvailableSelectors());
+        assertEquals(List.of("kimi"), manifest.tokenizerMetadataPendingFamilies());
+        assertEquals(Map.of("kimi", "tokenizer adapter pending descriptor stabilization"),
+                manifest.tokenizerMetadataPendingReasons());
         assertEquals("explicit", manifest.selectorSource());
         assertEquals("explicit -Pgollek.modelFamilies", manifest.displaySelectorSource());
         assertEquals(List.of("direct", "gemma"), manifest.explicitSelectors());
@@ -141,6 +179,27 @@ class ModelFamilyBundleManifestTest {
         assertEquals(List.of("phi"), manifest.fixtureStatus().missingRequiredFamilies());
         assertEquals(List.of("bert", "phi"), manifest.fixtureStatus().problemFamilies());
         assertEquals("prod_llm", manifest.bundlePreset());
+        assertTrue(manifest.requiresDirectSafetensorRuntime());
+        assertEquals(Boolean.TRUE, manifest.productionReadinessPassed());
+        assertTrue(manifest.productionReadinessStatusKnown());
+        assertEquals("passed", manifest.productionReadinessStatusLabel());
+        assertEquals(0, manifest.productionReadinessPendingCount());
+        assertEquals(List.of(), manifest.productionReadinessPendingFamilies());
+        assertEquals(Boolean.TRUE, manifest.directSafetensorReadinessPassed());
+        assertTrue(manifest.directSafetensorReadinessStatusKnown());
+        assertEquals("passed", manifest.directSafetensorReadinessStatusLabel());
+        assertEquals(0, manifest.directSafetensorPendingCount());
+        assertEquals(List.of(), manifest.directSafetensorPendingFamilies());
+        assertTrue(manifest.catalogReadinessPassed());
+        assertEquals("passed", manifest.catalogReadinessStatusLabel());
+        assertEquals("passed (0 production pending, 0 direct SafeTensor pending)",
+                manifest.displayCatalogReadinessStatus());
+        assertTrue(manifest.productionTokenizerMetadataRequired());
+        assertTrue(manifest.productionTokenizerMetadataReady());
+        assertTrue(manifest.productionSafetyPassed());
+        assertEquals("passed", manifest.productionSafetyStatusLabel());
+        assertEquals("passed (tokenizer metadata ready)", manifest.displayProductionSafetyStatus());
+        assertEquals(List.of(), manifest.selectedTokenizerMetadataPendingFamilies());
         assertTrue(manifest.hasBundlePreset());
         assertEquals("prod_llm - Lean production LLM", manifest.displayBundlePreset());
         assertTrue(manifest.activeBundlePreset().isPresent());
@@ -170,7 +229,15 @@ class ModelFamilyBundleManifestTest {
         assertTrue(manifest.bundlePresets().get(0).policyStatusKnown());
         assertEquals("passed", manifest.bundlePresets().get(0).policyStatusLabel());
         assertEquals(0, manifest.bundlePresets().get(0).policyViolationCount());
+        assertEquals(Boolean.TRUE, manifest.bundlePresets().get(0).productionTokenizerMetadataRequired());
+        assertEquals(Boolean.TRUE, manifest.bundlePresets().get(0).productionTokenizerMetadataReady());
+        assertEquals(Boolean.TRUE, manifest.bundlePresets().get(0).productionSafetyPassed());
+        assertEquals("passed", manifest.bundlePresets().get(0).productionSafetyStatusLabel());
+        assertEquals(0, manifest.bundlePresets().get(0).productionSafetyViolationCount());
+        assertEquals(List.of(), manifest.bundlePresets().get(0).pendingTokenizerFamilies());
         assertEquals(Boolean.FALSE, manifest.bundlePresets().get(1).policyPassed());
+        assertEquals(Boolean.FALSE, manifest.bundlePresets().get(1).productionTokenizerMetadataRequired());
+        assertEquals(Boolean.TRUE, manifest.bundlePresets().get(1).productionSafetyPassed());
         assertEquals(List.of("qwen"),
                 manifest.bundlePresets().get(1).policyViolations().missingRequiredAliases().get("direct"));
         assertTrue(manifest.joinedBundlePresets().contains("prod_llm(selectors=direct, selected=3, policy=passed"));
@@ -188,6 +255,79 @@ class ModelFamilyBundleManifestTest {
         assertEquals("bert[metadata_only], flava[metadata_only]", manifest.joinedOmittedFamiliesWithProfiles());
         assertEquals("core", manifest.familyProfiles().get("gemma"));
         assertEquals(":models:gollek-model-gemma", manifest.familyPaths().get("gemma"));
+        assertEquals(List.of(), manifest.countConsistencyProblems());
+    }
+
+    @Test
+    void nonProductionPresetCanExposePendingTokenizersWithoutProductionSafetyViolations() {
+        Properties properties = new Properties();
+        properties.setProperty("schemaVersion", "1");
+        properties.setProperty("bundleFingerprint", "sha256:test");
+        properties.setProperty("bundlePresets", "research_all");
+        properties.setProperty("bundlePreset.research_all.description", "Research model farm");
+        properties.setProperty("bundlePreset.research_all.selectors", "all");
+        properties.setProperty("bundlePreset.research_all.selectedFamilies", "gemma,kimi");
+        properties.setProperty("bundlePreset.research_all.selectedCount", "2");
+        properties.setProperty("bundlePreset.research_all.productionTokenizerMetadataRequired", "false");
+        properties.setProperty("bundlePreset.research_all.productionTokenizerMetadataReady", "false");
+        properties.setProperty("bundlePreset.research_all.productionSafetyPassed", "true");
+        properties.setProperty("bundlePreset.research_all.productionSafetyViolationCount", "0");
+        properties.setProperty("bundlePreset.research_all.pendingTokenizerFamilies", "kimi");
+        properties.setProperty("bundlePreset.research_all.policyPassed", "true");
+        properties.setProperty("bundlePreset.research_all.policyViolationCount", "0");
+
+        ModelFamilyBundleManifest.BundlePreset preset =
+                ModelFamilyBundleManifest.fromProperties(properties).bundlePresets().getFirst();
+
+        assertEquals(0, preset.productionSafetyViolationCount());
+        assertEquals(List.of("kimi"), preset.pendingTokenizerFamilies());
+        assertEquals(List.of(), preset.countConsistencyProblems());
+        assertTrue(preset.productionSafetyCompactStatus().contains("0 production safety violation(s)"));
+        assertTrue(preset.productionSafetyCompactStatus().contains("1 pending tokenizer family(s)"));
+    }
+
+    @Test
+    void reportsGeneratedCountMetadataDrift() {
+        Properties properties = new Properties();
+        properties.setProperty("families", "gemma,llama");
+        properties.setProperty("familyCount", "3");
+        properties.setProperty("productionReadinessPendingFamilies", "phi,qwen");
+        properties.setProperty("productionReadinessPendingCount", "1");
+        properties.setProperty("directSafetensorPendingFamilies", "phi");
+        properties.setProperty("directSafetensorPendingCount", "0");
+        properties.setProperty("policyViolationCount", "0");
+        properties.setProperty("missingRequiredFamilies", "qwen");
+        properties.setProperty("fixtureRequiredFamilies", "gemma,llama");
+        properties.setProperty("fixtureRequiredFamilyCount", "1");
+        properties.setProperty("fixtureMissingRequiredFamilies", "qwen");
+        properties.setProperty("fixtureMissingRequiredCount", "0");
+        properties.setProperty("fixtureProblemFamilies", "gemma,llama");
+        properties.setProperty("fixtureProblemFamilyCount", "1");
+        properties.setProperty("bundlePresets", "prod_llm");
+        properties.setProperty("bundlePreset.prod_llm.selectedFamilies", "gemma,llama");
+        properties.setProperty("bundlePreset.prod_llm.selectedCount", "1");
+        properties.setProperty("bundlePreset.prod_llm.missingRequiredFamilies", "qwen");
+        properties.setProperty("bundlePreset.prod_llm.missingRequiredCount", "0");
+        properties.setProperty("bundlePreset.prod_llm.policyViolationCount", "0");
+        properties.setProperty("bundleAliases", "direct");
+        properties.setProperty("bundleAlias.direct.families", "gemma,llama");
+        properties.setProperty("bundleAlias.direct.familyCount", "4");
+
+        ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.fromProperties(properties);
+
+        assertEquals(List.of(
+                "bundle.familyCount=3, expected 2",
+                "bundle.productionReadinessPendingCount=1, expected 2",
+                "bundle.directSafetensorPendingCount=0, expected 1",
+                "policy.violationCount=0, expected 1",
+                "fixture.requiredFamilyCount=1, expected 2",
+                "fixture.missingRequiredCount=0, expected 1",
+                "fixture.problemFamilyCount=1, expected 2",
+                "bundlePreset.prod_llm.selectedCount=1, expected 2",
+                "bundlePreset.prod_llm.policyViolationCount=0, expected 1",
+                "bundlePreset.prod_llm.missingRequiredCount=0, expected 1",
+                "bundleAlias.direct.familyCount=4, expected 2"
+        ), manifest.countConsistencyProblems());
     }
 
     @Test
@@ -287,6 +427,35 @@ class ModelFamilyBundleManifestTest {
     }
 
     @Test
+    void packagedCliClasspathCarriesGemma4DirectAdapterOutsideDefaultBundleSelection() {
+        ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.load();
+        DiscoveredModelFamilyPlugins discovered = serviceLoaderPluginsByFamilyId();
+        ModelFamilyPlugin gemma4 = discovered.uniquePluginsByFamilyId().get("gemma4");
+
+        assertTrue(manifest.present(), "packaged model-family bundle manifest should be generated");
+        assertTrue(!manifest.families().contains("gemma4"),
+                "default bundle selection should not require Gemma4 unified runtime gates");
+        assertEquals(List.of(), discovered.discoveryErrors(),
+                "packaged model-family plugin discovery should not throw");
+        assertTrue(gemma4 != null, "Gemma4 plugin should stay on the CLI classpath for direct runtime resolution");
+        assertTrue(gemma4.descriptor().supportsDirectSafetensorInference());
+        assertTrue(gemma4.descriptor().capabilities().contains(ModelFamilyCapability.GGUF));
+        assertEquals(List.of("gemma4"), gemma4.architectureAdapters().stream()
+                .map(adapter -> adapter.id())
+                .toList());
+
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.registerAll(discovered.uniquePluginsByFamilyId().values());
+        ModelFamilyResolution resolution = registry.resolve(
+                "gemma4_unified",
+                "Gemma4UnifiedForConditionalGeneration");
+        ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(resolution);
+        assertEquals(ModelFamilyResolution.Status.RESOLVED, resolution.status());
+        assertEquals(List.of("gemma4"), resolution.familyIds());
+        assertEquals("gemma4", compatibility.selectedArchitectureAdapterId());
+    }
+
+    @Test
     void packagedDefaultBundleStaysCleanCoreSelection() {
         ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.load();
 
@@ -341,6 +510,18 @@ class ModelFamilyBundleManifestTest {
         assertEquals(List.of(), missingMapKeys(manifest.availableFamilies(), manifest.familyPaths()),
                 () -> "available families missing Gradle path metadata: "
                         + missingMapKeys(manifest.availableFamilies(), manifest.familyPaths()));
+        assertEquals(List.of(), missingFamilyIds(
+                        manifest.tokenizerMetadataPendingFamilies(),
+                        manifest.availableFamilies()),
+                () -> "tokenizer metadata pending families should be known catalog families: "
+                        + missingFamilyIds(manifest.tokenizerMetadataPendingFamilies(), manifest.availableFamilies()));
+        assertEquals(List.of(), missingMapKeys(
+                        manifest.tokenizerMetadataPendingFamilies(),
+                        manifest.tokenizerMetadataPendingReasons()),
+                () -> "tokenizer metadata pending families should carry reasons: "
+                        + missingMapKeys(
+                                manifest.tokenizerMetadataPendingFamilies(),
+                                manifest.tokenizerMetadataPendingReasons()));
     }
 
     @Test
@@ -351,6 +532,18 @@ class ModelFamilyBundleManifestTest {
         assertEquals(List.of(), unknownAvailableSelectors(manifest),
                 () -> "available selectors should resolve to known families, profiles, aliases, or reserved selectors: "
                         + unknownAvailableSelectors(manifest));
+    }
+
+    @Test
+    void packagedAvailableProfilesMatchFamilyProfileCatalog() {
+        ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.load();
+
+        assertTrue(manifest.present(), "packaged model-family bundle manifest should be generated");
+        assertEquals(distinctSortedValues(manifest.familyProfiles()), manifest.availableProfiles(),
+                "availableProfiles should match the distinct profiles advertised by family metadata");
+        assertEquals(List.of(), missingFamilyIds(manifest.profiles(), manifest.availableProfiles()),
+                () -> "selected profiles missing from availableProfiles: "
+                        + missingFamilyIds(manifest.profiles(), manifest.availableProfiles()));
     }
 
     @Test
@@ -370,6 +563,46 @@ class ModelFamilyBundleManifestTest {
         assertEquals(guardedPresetIds, manifest.bundlePresets().stream()
                 .map(ModelFamilyBundleManifest.BundlePreset::id)
                 .toList());
+    }
+
+    @Test
+    void packagedBundlePresetSelectionsStayCountedAndAvailable() {
+        ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.load();
+
+        assertTrue(manifest.present(), "packaged model-family bundle manifest should be generated");
+        assertEquals(List.of(), manifest.bundlePresets().stream()
+                        .filter(preset -> preset.selectedCount() != preset.selectedFamilies().size())
+                        .map(ModelFamilyBundleManifest.BundlePreset::id)
+                        .toList(),
+                "packaged bundle preset selectedCount should match selectedFamilies size");
+        assertEquals(List.of(), manifest.bundlePresets().stream()
+                        .flatMap(preset -> missingFamilyIds(preset.selectedFamilies(), manifest.availableFamilies())
+                                .stream()
+                                .map(familyId -> preset.id() + ":" + familyId))
+                        .toList(),
+                "packaged bundle presets should only select available families");
+    }
+
+    @Test
+    void packagedBundlePresetInputsResolveToKnownCatalogEntries() {
+        ModelFamilyBundleManifest manifest = ModelFamilyBundleManifest.load();
+
+        assertTrue(manifest.present(), "packaged model-family bundle manifest should be generated");
+        assertEquals(List.of(), manifest.bundlePresets().stream()
+                        .flatMap(preset -> unknownPresetSelectors(preset, manifest).stream()
+                                .map(selector -> preset.id() + ":" + selector))
+                        .toList(),
+                "packaged bundle preset selectors should resolve to known catalog entries");
+        assertEquals(List.of(), manifest.bundlePresets().stream()
+                        .flatMap(preset -> unknownPresetFamilyPolicyInputs(preset, manifest).stream()
+                                .map(familyId -> preset.id() + ":" + familyId))
+                        .toList(),
+                "packaged bundle preset family policies should reference available families");
+        assertEquals(List.of(), manifest.bundlePresets().stream()
+                        .flatMap(preset -> unknownPresetAliasPolicyInputs(preset, manifest).stream()
+                                .map(aliasId -> preset.id() + ":" + aliasId))
+                        .toList(),
+                "packaged bundle preset alias policies should reference available aliases");
     }
 
     @Test
@@ -691,6 +924,13 @@ class ModelFamilyBundleManifestTest {
                 .toList();
     }
 
+    private static List<String> distinctSortedValues(Map<String, String> valuesByKey) {
+        return valuesByKey.values().stream()
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
     private static List<String> unknownAvailableSelectors(ModelFamilyBundleManifest manifest) {
         Set<String> knownSelectors = new java.util.LinkedHashSet<>();
         knownSelectors.addAll(manifest.availableFamilies());
@@ -702,6 +942,43 @@ class ModelFamilyBundleManifestTest {
         knownSelectors.add("none");
         return manifest.availableSelectors().stream()
                 .filter(selector -> !knownSelectors.contains(selector))
+                .toList();
+    }
+
+    private static List<String> unknownPresetSelectors(
+            ModelFamilyBundleManifest.BundlePreset preset,
+            ModelFamilyBundleManifest manifest) {
+        Set<String> knownSelectors = new java.util.LinkedHashSet<>(manifest.availableSelectors());
+        knownSelectors.add("all");
+        knownSelectors.add("none");
+        return preset.selectors().stream()
+                .filter(selector -> !knownSelectors.contains(selector))
+                .toList();
+    }
+
+    private static List<String> unknownPresetFamilyPolicyInputs(
+            ModelFamilyBundleManifest.BundlePreset preset,
+            ModelFamilyBundleManifest manifest) {
+        Set<String> availableFamilies = Set.copyOf(manifest.availableFamilies());
+        return java.util.stream.Stream.concat(
+                        preset.requiredFamilies().stream(),
+                        preset.forbiddenFamilies().stream())
+                .filter(familyId -> !availableFamilies.contains(familyId))
+                .distinct()
+                .toList();
+    }
+
+    private static List<String> unknownPresetAliasPolicyInputs(
+            ModelFamilyBundleManifest.BundlePreset preset,
+            ModelFamilyBundleManifest manifest) {
+        Set<String> availableAliases = manifest.bundleAliases().stream()
+                .map(ModelFamilyBundleManifest.BundleAlias::id)
+                .collect(java.util.stream.Collectors.toSet());
+        return java.util.stream.Stream.concat(
+                        preset.requiredAliases().stream(),
+                        preset.forbiddenAliases().stream())
+                .filter(aliasId -> !availableAliases.contains(aliasId))
+                .distinct()
                 .toList();
     }
 

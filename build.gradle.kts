@@ -49,6 +49,7 @@ subprojects {
     val jbossLoggingVersion = "3.6.1.Final"
     val jacksonVersion = "2.16.1"
     val junitJupiterVersion = "5.10.2"
+    val junitPlatformVersion = "1.10.2"
     val mockitoJupiterVersion = "5.14.2"
 
     java {
@@ -59,6 +60,10 @@ subprojects {
 
     dependencies {
         // Common logging and util dependencies can go here
+        if (path.startsWith(":models:gollek-model-")) {
+            add("testImplementation", "org.junit.jupiter:junit-jupiter")
+            add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:$junitPlatformVersion")
+        }
     }
 
     tasks.withType<JavaCompile> {
@@ -74,6 +79,9 @@ subprojects {
             "--add-modules=jdk.incubator.vector",
             "--enable-native-access=ALL-UNNAMED",
         )
+        if (project.path.startsWith(":models:gollek-model-")) {
+            useJUnitPlatform()
+        }
     }
 
     tasks.withType<JavaExec>().configureEach {
@@ -232,58 +240,6 @@ subprojects {
     }
 }
 
-val jbangTrainerPublicationModules = listOf(
-    ":core:gollek-tensor",
-    ":core:gollek-error-code",
-    ":core:gollek-runtime-config",
-    ":core:gollek-ir",
-    ":core:gollek-tokenizer-core",
-    ":core:gollek-provider-core",
-    ":core:gollek-model-repository",
-    ":core:gollek-model-repo-local",
-    ":core:gollek-model-repo-hf",
-    ":spi:gollek-spi",
-    ":spi:gollek-spi-model",
-    ":spi:gollek-spi-inference",
-    ":spi:gollek-spi-multimodal",
-    ":spi:gollek-spi-plugin",
-    ":spi:gollek-spi-provider",
-    ":spi:gollek-spi-runtime",
-    ":trainer:gollek-trainer-api",
-    ":trainer:gollek-trainer",
-    ":ml:gollek-ml-runner-api",
-    ":ml:gollek-ml-autograd",
-    ":ml:gollek-ml-core",
-    ":ml:gollek-ml-data",
-    ":ml:gollek-ml-nn",
-    ":ml:gollek-ml-estimator",
-    ":ml:gollek-ml-preprocessing",
-    ":ml:gollek-ml-selection",
-    ":ml:gollek-ml-optimize",
-    ":ml:gollek-ml-hub",
-    ":ml:gollek-ml-export",
-    ":ml:gollek-ml-multimodal",
-    ":ml:gollek-ml-cnn",
-    ":runner:onnx:gollek-ml-export-onnx",
-    ":runner:gguf:gollek-gguf-core",
-    ":runner:litert:gollek-litert-core",
-    ":runner:litert:gollek-runner-litert",
-    ":runner:safetensor:gollek-safetensor-spi",
-    ":runner:safetensor:gollek-safetensor-api",
-    ":runner:safetensor:gollek-safetensor-loader",
-    ":runner:safetensor:gollek-safetensor-core",
-    ":runner:safetensor:gollek-safetensor-quantization",
-    ":quantizer:gollek-quantizer-gptq",
-    ":quantizer:gollek-quantizer-awq",
-    ":quantizer:gollek-quantizer-autoround",
-    ":quantizer:gollek-quantizer-turboquant",
-    ":sdk:gollek-sdk-api",
-    ":backend:metal:gollek-backend-metal",
-    ":ml:gollek-ml-api",
-)
-
-tasks.register("publishJbangTrainerExamplesToMavenLocal") {
-    group = "publishing"
-    description = "Publishes the Gradle-built runtime graph needed by trainer JBang examples."
-    dependsOn(jbangTrainerPublicationModules.map { "$it:publishToMavenLocal" })
-}
+apply(from = "gradle/training-module-checks.gradle.kts")
+apply(from = "gradle/model-family-direct-fixtures.gradle.kts")
+apply(from = "gradle/jbang-trainer-examples.gradle.kts")

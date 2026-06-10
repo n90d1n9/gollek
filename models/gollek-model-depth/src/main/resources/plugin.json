@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-processor",
     "families": ["dpt", "depth_anything", "depth-anything", "depth_pro", "depth-pro", "zoedepth", "zoe_depth"]
   }
 }

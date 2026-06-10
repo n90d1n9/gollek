@@ -18,10 +18,10 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
         List<String> nextSteps) {
 
     public DiscreteTokenDatasetCheckpointResumeExplanation {
-        status = requireText(status, "status");
-        summary = requireText(summary, "summary");
+        status = DiscreteTokenDatasetMetadataSupport.requireText(status, "status");
+        summary = DiscreteTokenDatasetMetadataSupport.requireText(summary, "summary");
         findings = immutableFindings(findings);
-        nextSteps = immutableTextList(nextSteps, "nextSteps");
+        nextSteps = DiscreteTokenDatasetMetadataSupport.optionalTextList(nextSteps, "nextSteps");
         String expectedStatus = ready ? "ready" : "blocked";
         if (!expectedStatus.equals(status)) {
             throw new IllegalArgumentException("status must be " + expectedStatus + " when ready=" + ready);
@@ -61,6 +61,17 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
                 nextSteps(findings));
     }
 
+    public static DiscreteTokenDatasetCheckpointResumeExplanation fromMetadata(Map<?, ?> metadata) {
+        Objects.requireNonNull(metadata, "metadata must not be null");
+        return new DiscreteTokenDatasetCheckpointResumeExplanation(
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "status"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "ready"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "summary"),
+                findingsFromMetadata(metadata, "findings"),
+                DiscreteTokenDatasetMetadataSupport.requiredStringList(metadata, "nextSteps"))
+                .requireMetadataMatch(metadata);
+    }
+
     public String primaryCode() {
         return findings.isEmpty() ? "none" : findings.get(0).code();
     }
@@ -82,6 +93,19 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
                 .toList());
         metadata.put("nextSteps", nextSteps);
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeExplanation requireMetadataMatch(Map<?, ?> metadata) {
+        Objects.requireNonNull(metadata, "metadata must not be null");
+        Map<String, Object> expected = toMetadata();
+        for (Map.Entry<String, Object> entry : expected.entrySet()) {
+            Object actual = DiscreteTokenDatasetMetadataSupport.required(metadata, entry.getKey());
+            if (!DiscreteTokenDatasetMetadataSupport.metadataValueMatches(entry.getValue(), actual)) {
+                throw new IllegalArgumentException(
+                        "resume explanation field '" + entry.getKey() + "' does not match findings");
+            }
+        }
+        return this;
     }
 
     private static void addSchemaFinding(
@@ -264,26 +288,19 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
                 .toList();
     }
 
-    private static List<String> immutableTextList(List<?> values, String name) {
-        if (values == null || values.isEmpty()) {
-            return List.of();
+    private static List<Finding> findingsFromMetadata(Map<?, ?> metadata, String key) {
+        Object value = DiscreteTokenDatasetMetadataSupport.required(metadata, key);
+        if (!(value instanceof List<?> values)) {
+            throw new IllegalArgumentException("metadata field '" + key + "' must be a list");
         }
         return values.stream()
-                .map(value -> {
-                    if (value instanceof CharSequence text) {
-                        return requireText(text.toString(), name + " entry");
+                .map(entry -> {
+                    if (entry instanceof Map<?, ?> map) {
+                        return Finding.fromMetadata(map);
                     }
-                    throw new IllegalArgumentException(name + " entries must be strings");
+                    throw new IllegalArgumentException("metadata field '" + key + "' entries must be maps");
                 })
                 .toList();
-    }
-
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 
     public record Finding(
@@ -295,12 +312,23 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
             Map<String, Object> details) {
 
         public Finding {
-            code = requireText(code, "code");
-            category = requireText(category, "category");
-            severity = requireText(severity, "severity");
-            message = requireText(message, "message");
-            suggestion = requireText(suggestion, "suggestion");
-            details = immutableMetadataMap(details, "details");
+            code = DiscreteTokenDatasetMetadataSupport.requireText(code, "code");
+            category = DiscreteTokenDatasetMetadataSupport.requireText(category, "category");
+            severity = DiscreteTokenDatasetMetadataSupport.requireText(severity, "severity");
+            message = DiscreteTokenDatasetMetadataSupport.requireText(message, "message");
+            suggestion = DiscreteTokenDatasetMetadataSupport.requireText(suggestion, "suggestion");
+            details = DiscreteTokenDatasetMetadataSupport.immutableJsonMetadataMap(details, "details");
+        }
+
+        public static Finding fromMetadata(Map<?, ?> metadata) {
+            Objects.requireNonNull(metadata, "metadata must not be null");
+            return new Finding(
+                    DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "code"),
+                    DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "category"),
+                    DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "severity"),
+                    DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "message"),
+                    DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "suggestion"),
+                    DiscreteTokenDatasetMetadataSupport.optionalJsonMetadataMap(metadata, "details"));
         }
 
         public Map<String, Object> toMetadata() {
@@ -317,16 +345,4 @@ public record DiscreteTokenDatasetCheckpointResumeExplanation(
         }
     }
 
-    private static Map<String, Object> immutableMetadataMap(Map<String, Object> metadata, String name) {
-        if (metadata == null || metadata.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Object> copy = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
-            String key = requireText(entry.getKey(), name + " key");
-            Object value = Objects.requireNonNull(entry.getValue(), name + " field '" + key + "' must not be null");
-            copy.put(key, value);
-        }
-        return Collections.unmodifiableMap(copy);
-    }
 }

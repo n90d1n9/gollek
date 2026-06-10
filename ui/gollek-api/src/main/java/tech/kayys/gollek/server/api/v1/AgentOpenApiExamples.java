@@ -308,11 +308,444 @@ final class AgentOpenApiExamples {
             }
             """;
 
+    static final String PREFLIGHT_REQUEST = """
+            {
+              "model": "demo-model",
+              "surface": "chat",
+              "feature_profile": "chat_agent",
+              "required_features": ["rag_context", "mcp_tool_discovery"],
+              "request": {
+                "request_id": "req_preflight_123",
+                "trace_id": "trace_preflight_123",
+                "messages": [
+                  {"role": "system", "content": "Use supplied context."},
+                  {"role": "user", "content": "Can this route support an agent?"}
+                ],
+                "tools": [
+                  {
+                    "type": "function",
+                    "function": {
+                      "name": "lookup_context",
+                      "parameters": {"type": "object"}
+                    }
+                  }
+                ],
+                "rag_context": [
+                  {"source": "docs/agentic", "text": "Gollek injects RAG context but does not retrieve it."}
+                ]
+              }
+            }
+            """;
+
+    static final String PREFLIGHT_RESPONSE = """
+            {
+              "object": "gollek.agent_preflight",
+              "contract_version": "v1",
+              "supported_contract_versions": ["v1"],
+              "feature_negotiation": {
+                "mode": "feature_flags",
+                "feature_namespace": "gollek.agent.compatibility",
+                "contract_version": "v1",
+                "default_feature_profile": "agent_serving",
+                "supported_feature_profiles": ["agent_serving", "chat_agent", "responses_agent", "embedding_rag", "mcp_tools"],
+                "required_features": [
+                  "openai_chat_completions",
+                  "openai_responses",
+                  "openai_embeddings",
+                  "agent_contract",
+                  "agent_preflight",
+                  "mcp_tool_discovery",
+                  "rag_context"
+                ]
+              },
+              "status": "ready",
+              "ready": true,
+              "surface": "chat",
+              "model": "demo-model",
+              "feature_profile": "chat_agent",
+              "trace": {
+                "request_id": "req_preflight_123",
+                "trace_id": "trace_preflight_123",
+                "metadata": {}
+              },
+              "boundary": {
+                "validation_only": true,
+                "model_invoked": false,
+                "tool_execution": false,
+                "retrieval_execution": false,
+                "tool_authorization": false
+              },
+              "checks": {
+                "discover_mcp_tools": true,
+                "mcp_discovery_required": true,
+                "validate_tools": true,
+                "tool_validation_required": true,
+                "validate_request": true,
+                "request_validation_required": true,
+                "openai_tool_compatibility": true,
+                "enabled_only": true,
+                "feature_profile": "chat_agent",
+                "required_contract_version": "v1",
+                "required_features": ["rag_context", "mcp_tool_discovery"],
+                "optional_features": []
+              },
+              "check_results": {
+                "capabilities": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                },
+                "contract": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                },
+                "feature_negotiation": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {},
+                  "details": {
+                    "feature_profile": "chat_agent",
+                    "supported_feature_profiles": ["agent_serving", "chat_agent", "responses_agent", "embedding_rag", "mcp_tools"],
+                    "feature_profile_supported": true,
+                    "required_contract_version": "v1",
+                    "supported_contract_versions": ["v1"],
+                    "required_features": ["rag_context", "mcp_tool_discovery"],
+                    "optional_features": [],
+                    "unsupported_required_features": [],
+                    "unsupported_optional_features": []
+                  }
+                },
+                "model_route": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                },
+                "mcp_discovery": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                },
+                "tool_validation": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                },
+                "request_validation": {
+                  "status": "ready",
+                  "ready": true,
+                  "requested": true,
+                  "blocking_messages": [],
+                  "warning_messages": [],
+                  "blocking_codes": [],
+                  "warning_codes": [],
+                  "issue_hints": [],
+                  "remediation_plan": [],
+                  "blocking_remediation_plan": [],
+                  "warning_remediation_plan": [],
+                  "remediation_plan_by_code": {}
+                }
+              },
+              "ready_check_count": 7,
+              "blocked_check_count": 0,
+              "skipped_check_count": 0,
+              "checked_areas": [
+                "capabilities",
+                "contract",
+                "feature_negotiation",
+                "model_route",
+                "mcp_discovery",
+                "tool_validation",
+                "request_validation"
+              ],
+              "readiness_report": {
+                "object": "gollek.agent_readiness_report",
+                "contract_version": "v1",
+                "supported_contract_versions": ["v1"],
+                "feature_negotiation": {
+                  "mode": "feature_flags",
+                  "feature_namespace": "gollek.agent.compatibility",
+                  "contract_version": "v1",
+                  "default_feature_profile": "agent_serving",
+                  "supported_feature_profiles": ["agent_serving", "chat_agent", "responses_agent", "embedding_rag", "mcp_tools"],
+                  "required_features": [
+                    "openai_chat_completions",
+                    "openai_responses",
+                    "openai_embeddings",
+                    "agent_contract",
+                    "agent_preflight",
+                    "mcp_tool_discovery",
+                    "rag_context"
+                  ]
+                },
+                "status": "ready",
+                "ready": true,
+                "surface": "chat",
+                "model": "demo-model",
+                "feature_profile": "chat_agent",
+                "trace": {
+                  "request_id": "req_preflight_123",
+                  "trace_id": "trace_preflight_123",
+                  "metadata": {}
+                },
+                "boundary": {
+                  "validation_only": true,
+                  "model_invoked": false,
+                  "tool_execution": false,
+                  "retrieval_execution": false,
+                  "tool_authorization": false
+                },
+                "checks": {
+                  "capabilities": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  },
+                  "contract": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  },
+                  "feature_negotiation": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {},
+                    "details": {
+                      "feature_profile": "chat_agent",
+                      "supported_feature_profiles": ["agent_serving", "chat_agent", "responses_agent", "embedding_rag", "mcp_tools"],
+                      "feature_profile_supported": true,
+                      "required_contract_version": "v1",
+                      "supported_contract_versions": ["v1"],
+                      "required_features": ["rag_context", "mcp_tool_discovery"],
+                      "optional_features": [],
+                      "unsupported_required_features": [],
+                      "unsupported_optional_features": []
+                    }
+                  },
+                  "model_route": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  },
+                  "mcp_discovery": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  },
+                  "tool_validation": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  },
+                  "request_validation": {
+                    "status": "ready",
+                    "ready": true,
+                    "requested": true,
+                    "blocking_messages": [],
+                    "warning_messages": [],
+                    "blocking_codes": [],
+                    "warning_codes": [],
+                    "issue_hints": [],
+                    "remediation_plan": [],
+                    "blocking_remediation_plan": [],
+                    "warning_remediation_plan": [],
+                    "remediation_plan_by_code": {}
+                  }
+                },
+                "checked_areas": [
+                  "capabilities",
+                  "contract",
+                  "feature_negotiation",
+                  "model_route",
+                  "mcp_discovery",
+                  "tool_validation",
+                  "request_validation"
+                ],
+                "blocking_issue_count": 0,
+                "warning_count": 0,
+                "ready_check_count": 7,
+                "blocked_check_count": 0,
+                "skipped_check_count": 0,
+                "issues": [],
+                "issue_hints": [],
+                "issue_hints_by_area": {},
+                "issue_hints_by_code": {},
+                "remediation_plan": [],
+                "blocking_remediation_plan": [],
+                "warning_remediation_plan": [],
+                "remediation_plan_by_area": {},
+                "remediation_plan_by_code": {},
+                "issues_by_area": {},
+                "issue_codes_by_area": {},
+                "blocking_messages": [],
+                "warning_messages": [],
+                "blocking_codes": [],
+                "warning_codes": []
+              },
+              "blocking_issue_count": 0,
+              "warning_count": 0,
+              "issues": [],
+              "issue_hints": [],
+              "issue_hints_by_area": {},
+              "issue_hints_by_code": {},
+              "remediation_plan": [],
+              "blocking_remediation_plan": [],
+              "warning_remediation_plan": [],
+              "remediation_plan_by_area": {},
+              "remediation_plan_by_code": {},
+              "issues_by_area": {},
+              "issue_codes_by_area": {},
+              "blocking_messages": [],
+              "warning_messages": [],
+              "blocking_codes": [],
+              "warning_codes": []
+            }
+            """;
+
     static final String AGENT_CONTRACT_RESPONSE = """
             {
               "object": "gollek.agent_contract",
               "version": "v1",
+              "contract_version": "v1",
+              "supported_contract_versions": ["v1"],
               "service_role": "inference_serving_engine",
+              "compatibility": [
+                "openai_chat_completions",
+                "openai_responses",
+                "openai_embeddings",
+                "agent_contract",
+                "agent_feature_negotiation",
+                "agent_preflight",
+                "mcp_tool_discovery",
+                "rag_context"
+              ],
+              "feature_negotiation": {
+                "mode": "feature_flags",
+                "feature_namespace": "gollek.agent.compatibility",
+                "contract_version": "v1",
+                "supported_contract_versions": ["v1"],
+                "default_feature_profile": "agent_serving",
+                "supported_feature_profiles": ["agent_serving", "chat_agent", "responses_agent", "embedding_rag", "mcp_tools"],
+                "required_features": [
+                  "openai_chat_completions",
+                  "openai_responses",
+                  "openai_embeddings",
+                  "agent_contract",
+                  "agent_feature_negotiation",
+                  "agent_preflight",
+                  "mcp_tool_discovery",
+                  "rag_context"
+                ],
+                "unknown_feature_policy": "ignore_for_forward_compatibility"
+              },
               "boundary": {
                 "tool_execution": false,
                 "retrieval_execution": false
@@ -320,6 +753,69 @@ final class AgentOpenApiExamples {
               "endpoints": {
                 "chat_completions": {"method": "POST", "path": "/v1/chat/completions"},
                 "responses": {"method": "POST", "path": "/v1/responses"}
+              },
+              "readiness_issue_catalog": [
+                {
+                  "code": "TOOL_DEFINITIONS_INVALID",
+                  "area": "tool_validation",
+                  "default_severity": "blocking",
+                  "summary": "Tool definitions are invalid.",
+                  "remediation": "Fix the OpenAI-compatible tool schema before serving the route."
+                }
+              ],
+              "readiness_issue_catalog_by_code": {
+                "TOOL_DEFINITIONS_INVALID": {
+                  "code": "TOOL_DEFINITIONS_INVALID",
+                  "area": "tool_validation",
+                  "default_severity": "blocking",
+                  "summary": "Tool definitions are invalid.",
+                  "remediation": "Fix the OpenAI-compatible tool schema before serving the route."
+                }
+              }
+            }
+            """;
+
+    static final String READINESS_ISSUE_CATALOG_RESPONSE = """
+            {
+              "object": "gollek.agent_readiness_issue_catalog",
+              "version": "v1",
+              "service_role": "inference_serving_engine",
+              "boundary": {
+                "validation_only": true,
+                "model_invoked": false,
+                "tool_execution": false,
+                "retrieval_execution": false,
+                "tool_authorization": false
+              },
+              "count": 1,
+              "items": [
+                {
+                  "code": "TOOL_DEFINITIONS_INVALID",
+                  "area": "tool_validation",
+                  "default_severity": "blocking",
+                  "summary": "Tool definitions are invalid.",
+                  "remediation": "Fix the OpenAI-compatible tool schema before serving the route."
+                }
+              ],
+              "by_code": {
+                "TOOL_DEFINITIONS_INVALID": {
+                  "code": "TOOL_DEFINITIONS_INVALID",
+                  "area": "tool_validation",
+                  "default_severity": "blocking",
+                  "summary": "Tool definitions are invalid.",
+                  "remediation": "Fix the OpenAI-compatible tool schema before serving the route."
+                }
+              },
+              "by_area": {
+                "tool_validation": [
+                  {
+                    "code": "TOOL_DEFINITIONS_INVALID",
+                    "area": "tool_validation",
+                    "default_severity": "blocking",
+                    "summary": "Tool definitions are invalid.",
+                    "remediation": "Fix the OpenAI-compatible tool schema before serving the route."
+                  }
+                ]
               }
             }
             """;

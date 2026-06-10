@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["bloom"]
+    "families": ["bloom"],
+    "tokenizerKind": "hf-bpe"
   }
 }

@@ -148,7 +148,7 @@ public record TrainingReportEpochSnapshot(
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> immutableMap(Map<?, ?> map) {
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
         if (snapshot instanceof Map<?, ?> snapshotMap) {
             return (Map<String, Object>) snapshotMap;
         }

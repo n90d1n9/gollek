@@ -62,15 +62,17 @@ final class FlashAttentionProjectionStage {
                                 in.x, in.kW, in.kB, "attn_k_proj", config,
                                 modelPolicy,
                                 qkvBuffers == null ? null : qkvBuffers.k()))));
-        AccelTensor v = useDenseSharedKvState
-                ? sharedKvState.value()
-                : (sharedKv
-                        ? null
-                        : (alternativeAttention ? AccelTensor.copyOf(k.dataPtr(), k.shape())
-                                : (qkvTriple != null ? qkvTriple.third()
-                                        : projector.project(
-                                                in.x, in.vW, in.vB, "attn_v_proj", config, modelPolicy,
-                                                qkvBuffers == null ? null : qkvBuffers.v()))));
+        AccelTensor v = projectValue(
+                in,
+                config,
+                modelPolicy,
+                sharedKvState,
+                sharedKv,
+                useDenseSharedKvState,
+                alternativeAttention,
+                qkvTriple,
+                qkvBuffers,
+                k);
 
         q = reshapeQuery(q, in, headLayout, config);
         if (!sharedKv) {
@@ -97,6 +99,36 @@ final class FlashAttentionProjectionStage {
             v = vNormed;
         }
         return new PreparedTensors(q, k, v);
+    }
+
+    private AccelTensor projectValue(AttentionInput in, ModelConfig config, FlashAttentionModelPolicy modelPolicy,
+            SharedKvState sharedKvState, boolean sharedKv, boolean useDenseSharedKvState,
+            boolean alternativeAttention, FlashAttentionProjector.LinearTriple qkvTriple,
+            FlashAttentionProjector.ProjectionBuffers qkvBuffers, AccelTensor keyProjection) {
+        if (useDenseSharedKvState) {
+            return sharedKvState.value();
+        }
+        if (sharedKv) {
+            return null;
+        }
+        if (alternativeAttention) {
+            return copyKeyAsValueProjection(keyProjection, in.layerIdx);
+        }
+        if (qkvTriple != null) {
+            return qkvTriple.third();
+        }
+        return projector.project(
+                in.x, in.vW, in.vB, "attn_v_proj", config, modelPolicy,
+                qkvBuffers == null ? null : qkvBuffers.v());
+    }
+
+    private AccelTensor copyKeyAsValueProjection(AccelTensor keyProjection, int layerIdx) {
+        if (keyProjection == null) {
+            throw new IllegalArgumentException(
+                    "Missing attention key projection at layer " + layerIdx
+                            + " while deriving Gemma 4 alternative value projection.");
+        }
+        return AccelTensor.copyOf(keyProjection.dataPtr(), keyProjection.shape());
     }
 
     private AccelTensor reshapeQuery(AccelTensor q, AttentionInput in, FlashAttentionHeadLayout headLayout,

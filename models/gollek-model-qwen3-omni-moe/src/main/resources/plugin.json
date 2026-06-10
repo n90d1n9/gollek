@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["hf-bpe", "vision-text-processor", "audio-processor"],
     "families": ["qwen3_omni_moe", "qwen3_omni_moe_text", "qwen3_omni_moe_thinker", "qwen3_omni_moe_talker"]
   }
 }

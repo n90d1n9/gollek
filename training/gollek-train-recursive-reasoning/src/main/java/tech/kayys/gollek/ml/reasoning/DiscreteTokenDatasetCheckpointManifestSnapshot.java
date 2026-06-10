@@ -29,24 +29,24 @@ public record DiscreteTokenDatasetCheckpointManifestSnapshot(
             DiscreteTokenDatasetCheckpointManifest.DATASET_PLAN_REPORT_METADATA_KEY;
 
     public DiscreteTokenDatasetCheckpointManifestSnapshot {
-        schemaVersion = requireText(schemaVersion, "schemaVersion");
-        experimentName = requireText(experimentName, "experimentName");
-        runId = requireText(runId, "runId");
-        modelFamily = requireText(modelFamily, "modelFamily");
+        schemaVersion = DiscreteTokenDatasetMetadataSupport.requireText(schemaVersion, "schemaVersion");
+        experimentName = DiscreteTokenDatasetMetadataSupport.requireText(experimentName, "experimentName");
+        runId = DiscreteTokenDatasetMetadataSupport.requireText(runId, "runId");
+        modelFamily = DiscreteTokenDatasetMetadataSupport.requireText(modelFamily, "modelFamily");
         if (checkpointStep < 0L) {
             throw new IllegalArgumentException("checkpointStep must be >= 0 but was " + checkpointStep);
         }
         if (createdAtEpochMillis < 0L) {
             throw new IllegalArgumentException("createdAtEpochMillis must be >= 0 but was " + createdAtEpochMillis);
         }
-        createdBy = requireText(createdBy, "createdBy");
+        createdBy = DiscreteTokenDatasetMetadataSupport.requireText(createdBy, "createdBy");
         fingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
-        datasetGateStatus = requireText(datasetGateStatus, "datasetGateStatus");
-        datasetPlanReportMetadata = immutableMetadataMap(
+        datasetGateStatus = DiscreteTokenDatasetMetadataSupport.requireText(datasetGateStatus, "datasetGateStatus");
+        datasetPlanReportMetadata = DiscreteTokenDatasetMetadataSupport.immutableMetadataMap(
                 datasetPlanReportMetadata,
                 "datasetPlanReportMetadata");
         lineage = lineage == null ? DiscreteTokenDatasetCheckpointLineage.root(runId) : lineage;
-        attributes = immutableMetadataMap(attributes, "attributes");
+        attributes = DiscreteTokenDatasetMetadataSupport.immutableMetadataMap(attributes, "attributes");
         verifyDatasetReportConsistency(fingerprint, datasetAccepted, datasetGateStatus, datasetPlanReportMetadata);
     }
 
@@ -59,21 +59,22 @@ public record DiscreteTokenDatasetCheckpointManifestSnapshot(
     public static DiscreteTokenDatasetCheckpointManifestSnapshot fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetCheckpointManifestSnapshot(
-                requiredString(metadata, "schemaVersion"),
-                requiredString(metadata, "experimentName"),
-                requiredString(metadata, "runId"),
-                requiredString(metadata, "modelFamily"),
-                requiredLong(metadata, "seed"),
-                requiredLong(metadata, "checkpointStep"),
-                requiredLong(metadata, "createdAtEpochMillis"),
-                requiredString(metadata, "createdBy"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "schemaVersion"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "experimentName"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "runId"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "modelFamily"),
+                DiscreteTokenDatasetMetadataSupport.requiredLong(metadata, "seed"),
+                DiscreteTokenDatasetMetadataSupport.requiredLong(metadata, "checkpointStep"),
+                DiscreteTokenDatasetMetadataSupport.requiredLong(metadata, "createdAtEpochMillis"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "createdBy"),
                 DiscreteTokenDatasetFingerprint.fromMetadataSection(metadata),
-                requiredBoolean(metadata, "datasetAccepted"),
-                requiredString(metadata, "datasetGateStatus"),
-                requiredMap(metadata, DATASET_PLAN_REPORT_METADATA_KEY),
-                DiscreteTokenDatasetCheckpointLineage.fromMetadata(optionalMap(metadata, "lineage"),
-                        requiredString(metadata, "runId")),
-                optionalMap(metadata, "attributes"));
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "datasetAccepted"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "datasetGateStatus"),
+                DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, DATASET_PLAN_REPORT_METADATA_KEY),
+                DiscreteTokenDatasetCheckpointLineage.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "lineage"),
+                        DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "runId")),
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "attributes"));
     }
 
     public boolean isCurrentSchema() {
@@ -174,117 +175,21 @@ public record DiscreteTokenDatasetCheckpointManifestSnapshot(
                     "top-level fingerprint must match datasetPlanReport fingerprint");
         }
 
-        boolean reportAccepted = requiredBoolean(datasetPlanReportMetadata, "accepted");
+        boolean reportAccepted = DiscreteTokenDatasetMetadataSupport.requiredBoolean(
+                datasetPlanReportMetadata,
+                "accepted");
         if (datasetAccepted != reportAccepted) {
             throw new IllegalArgumentException(
                     "top-level datasetAccepted must match datasetPlanReport accepted");
         }
 
-        String reportGateStatus = requiredString(datasetPlanReportMetadata, "gateStatus");
+        String reportGateStatus = DiscreteTokenDatasetMetadataSupport.requiredString(
+                datasetPlanReportMetadata,
+                "gateStatus");
         if (!datasetGateStatus.equals(reportGateStatus)) {
             throw new IllegalArgumentException(
                     "top-level datasetGateStatus must match datasetPlanReport gateStatus");
         }
     }
 
-    private static Map<String, Object> requiredMap(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Map<?, ?> map) {
-            return immutableMetadataMap(map, key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
-    private static Map<String, Object> optionalMap(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            return Map.of();
-        }
-        Object value = metadata.get(key);
-        if (value instanceof Map<?, ?> map) {
-            return immutableMetadataMap(map, key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
-    private static Map<String, Object> immutableMetadataMap(Map<?, ?> values, String name) {
-        if (values == null || values.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Object> copy = new LinkedHashMap<>();
-        for (Map.Entry<?, ?> entry : values.entrySet()) {
-            String key = mapKey(entry.getKey(), name);
-            Object value = Objects.requireNonNull(entry.getValue(), name + " field '" + key + "' must not be null");
-            copy.put(key, value);
-        }
-        return Collections.unmodifiableMap(copy);
-    }
-
-    private static String mapKey(Object key, String mapName) {
-        if (key instanceof CharSequence text) {
-            return requireText(text.toString(), mapName + " key");
-        }
-        throw new IllegalArgumentException(mapName + " keys must be strings");
-    }
-
-    private static String requiredString(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof CharSequence text) {
-            return requireText(text.toString(), key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static long requiredLong(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < Long.MIN_VALUE
-                    || numericValue > Long.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-            }
-            return number.longValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Long.parseLong(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-    }
-
-    private static boolean requiredBoolean(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Boolean flag) {
-            return flag;
-        }
-        if (value instanceof CharSequence text) {
-            String normalized = text.toString().trim().toLowerCase();
-            if ("true".equals(normalized)) {
-                return true;
-            }
-            if ("false".equals(normalized)) {
-                return false;
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a boolean");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
-    }
-
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
-    }
 }

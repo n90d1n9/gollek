@@ -75,6 +75,9 @@ bash "$ROOT_DIR/scripts/capture-onnx-profile-baseline.sh" \
   --no-require-profile >"${TMP_DIR}/capture.out"
 
 if [[ ! -f "$PASS_DIR/aggregate.tsv" \
+    || ! -f "$PASS_DIR/diagnosis/diagnosis.tsv" \
+    || ! -f "$PASS_DIR/diagnosis/stages.tsv" \
+    || ! -f "$PASS_DIR/diagnosis/report.txt" \
     || ! -f "$PASS_DIR/bench/profile/summary.tsv" \
     || ! -f "$PASS_DIR/environment.tsv" \
     || ! -f "$PASS_DIR/bundle.tsv" \
@@ -100,6 +103,9 @@ if ! grep -qx $'baselineName\twebworld' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'runLabel\tfixed' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'bundle\t'"$PASS_DIR"'/bundle.tsv' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'bundleJson\t'"$PASS_DIR"'/bundle.json' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'diagnosis\t'"$PASS_DIR"'/diagnosis/diagnosis.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'diagnosisStages\t'"$PASS_DIR"'/diagnosis/stages.tsv' "$PASS_DIR/config.tsv" \
+    || ! grep -qx $'diagnosisReport\t'"$PASS_DIR"'/diagnosis/report.txt' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'decision\t'"$PASS_DIR"'/decision.tsv' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'runs\t2' "$PASS_DIR/config.tsv" \
     || ! grep -qx $'warmupRuns\t1' "$PASS_DIR/config.tsv" \
@@ -127,6 +133,9 @@ if ! grep -qx $'model\tonnx-community/WebWorld-8B-Onnx' "$PASS_DIR/manifest.tsv"
     || ! grep -qx $'noiseMetrics\tdurationMs,generationTps' "$PASS_DIR/manifest.tsv" \
     || ! grep -qx $'noise\t'"$PASS_DIR"'/noise.tsv' "$PASS_DIR/manifest.tsv" \
     || ! grep -qx $'environment\t'"$PASS_DIR"'/environment.tsv' "$PASS_DIR/manifest.tsv" \
+    || ! grep -qx $'diagnosis\t'"$PASS_DIR"'/diagnosis/diagnosis.tsv' "$PASS_DIR/manifest.tsv" \
+    || ! grep -qx $'diagnosisStages\t'"$PASS_DIR"'/diagnosis/stages.tsv' "$PASS_DIR/manifest.tsv" \
+    || ! grep -qx $'diagnosisReport\t'"$PASS_DIR"'/diagnosis/report.txt' "$PASS_DIR/manifest.tsv" \
     || ! grep -qx $'bundle\t'"$PASS_DIR"'/bundle.tsv' "$PASS_DIR/manifest.tsv" \
     || ! grep -qx $'bundleJson\t'"$PASS_DIR"'/bundle.json' "$PASS_DIR/manifest.tsv" \
     || ! grep -qx $'decision\t'"$PASS_DIR"'/decision.tsv' "$PASS_DIR/manifest.tsv" \
@@ -153,6 +162,8 @@ if ! grep -qx $'kind\tpath\trequired\tstatus\tdescription' "$PASS_DIR/bundle.tsv
     || ! grep -qx $'config\t'"$PASS_DIR"'/config.tsv\trequired\tpresent\tCapture configuration' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'decision\t'"$PASS_DIR"'/decision.tsv\trequired\tpresent\tCapture decision summary' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'aggregate\t'"$PASS_DIR"'/aggregate.tsv\trequired\tpresent\tAggregated baseline summary' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'diagnosis\t'"$PASS_DIR"'/diagnosis/diagnosis.tsv\toptional\tpresent\tAggregate performance diagnosis' "$PASS_DIR/bundle.tsv" \
+    || ! grep -qx $'diagnosisStages\t'"$PASS_DIR"'/diagnosis/stages.tsv\toptional\tpresent\tDiagnosed stage ranking' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'noise\t'"$PASS_DIR"'/noise.tsv\toptional\tpresent\tNoise stability summary' "$PASS_DIR/bundle.tsv" \
     || ! grep -qx $'latest\t'"$BASELINE_ROOT"'/webworld/latest.tsv\toptional\tpresent\tLatest baseline pointer' "$PASS_DIR/bundle.tsv"; then
   echo "Expected capture artifact bundle rows" >&2
@@ -160,6 +171,7 @@ if ! grep -qx $'kind\tpath\trequired\tstatus\tdescription' "$PASS_DIR/bundle.tsv
   exit 1
 fi
 if ! grep -Fq '"kind": "aggregate"' "$PASS_DIR/bundle.json" \
+    || ! grep -Fq '"kind": "diagnosis"' "$PASS_DIR/bundle.json" \
     || ! grep -Fq '"kind": "latest"' "$PASS_DIR/bundle.json" \
     || ! grep -Fq '"requiredMissing": "0"' "$PASS_DIR/bundle.json"; then
   echo "Expected capture bundle JSON summary" >&2
@@ -170,6 +182,9 @@ if ! grep -qx $'key\tvalue' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'status\tpass' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'failedStages\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'lastStage\tlatest-environment' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryValueMs\t37.500' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosis\t'"$PASS_DIR"'/diagnosis/diagnosis.tsv' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'noiseFailures\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'worstNoiseMetric\tgenerationTps' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundleRequiredMissing\t0' "$PASS_DIR/decision.tsv" \
@@ -194,6 +209,7 @@ if ! grep -qx $'key\tvalue' "$PASS_DIR/environment.tsv" \
 fi
 if ! grep -q "^benchmark	pass	0	$PASS_DIR/bench/profile/summary.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^aggregate	pass	0	$PASS_DIR/aggregate.tsv	" "$PASS_DIR/results.tsv" \
+    || ! grep -q "^diagnosis	pass	0	$PASS_DIR/diagnosis/diagnosis.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^baseline-backend	pass	0	$PASS_DIR/aggregate.tsv	.*CoreML$" "$PASS_DIR/results.tsv" \
     || ! grep -q "^noise	pass	0	$PASS_DIR/noise.tsv	" "$PASS_DIR/results.tsv" \
     || ! grep -q "^environment	pass	0	$PASS_DIR/environment.tsv" "$PASS_DIR/results.tsv" \
@@ -208,6 +224,12 @@ if ! grep -qx $'measured-mean\tpass\t\t1100.000\t19.000\t9.000\t7.500\t220.000\t
   cat "$PASS_DIR/aggregate.tsv" >&2
   exit 1
 fi
+if ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/diagnosis/diagnosis.tsv" \
+    || ! grep -qx $'primaryValueMs\t37.500' "$PASS_DIR/diagnosis/diagnosis.tsv"; then
+  echo "Expected capture diagnosis rows" >&2
+  cat "$PASS_DIR/diagnosis/diagnosis.tsv" >&2
+  exit 1
+fi
 if ! grep -qx $'metric\tmean\tbest\tworst\tnoisePercent\tmaxNoisePercent\tstatus\treason' "$PASS_DIR/noise.tsv" \
     || ! grep -qx $'durationMs\t1100.000\t1000.000\t1200.000\t18.182\t25\tpass\t' "$PASS_DIR/noise.tsv" \
     || ! grep -qx $'generationTps\t9.000\t10.000\t8.000\t22.222\t25\tpass\t' "$PASS_DIR/noise.tsv"; then
@@ -218,6 +240,7 @@ fi
 if ! grep -q "verify-onnx-profile-regression.sh --model onnx-community/WebWorld-8B-Onnx --baseline $BASELINE_ROOT/webworld/latest.tsv" "${TMP_DIR}/capture.out" \
     || ! grep -qx "artifacts.bundle=$PASS_DIR/bundle.tsv" "${TMP_DIR}/capture.out" \
     || ! grep -qx "artifacts.bundleJson=$PASS_DIR/bundle.json" "${TMP_DIR}/capture.out" \
+    || ! grep -qx "artifacts.diagnosis=$PASS_DIR/diagnosis/diagnosis.tsv" "${TMP_DIR}/capture.out" \
     || ! grep -qx "artifacts.decision=$PASS_DIR/decision.tsv" "${TMP_DIR}/capture.out"; then
   echo "Expected report to point at latest baseline" >&2
   cat "${TMP_DIR}/capture.out" >&2

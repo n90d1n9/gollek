@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-processor",
     "families": ["detr", "conditional_detr", "deformable_detr", "rt_detr"]
   }
 }

@@ -29,11 +29,8 @@ final class TensorDataLoaderRuntime implements Iterable<DataLoader.Batch> {
         this.batchSampler = builder.batchSampler;
         this.collateFn = builder.collateFn != null ? builder.collateFn : DataLoader.defaultTensorCollate();
         this.reshuffleEachEpoch = builder.reshuffleEachEpoch;
-        if (builder.initialEpoch < 0L) {
-            throw new IllegalArgumentException("initialEpoch must be non-negative, got: " + builder.initialEpoch);
-        }
         this.initialEpoch = builder.initialEpoch;
-        this.epochCounter = new AtomicLong(initialEpoch);
+        this.epochCounter = DataLoaderEpochs.counter(initialEpoch);
     }
 
     @Override
@@ -42,7 +39,7 @@ final class TensorDataLoaderRuntime implements Iterable<DataLoader.Batch> {
     }
 
     Iterator<DataLoader.Batch> iterator(long epoch) {
-        requireEpoch(epoch);
+        DataLoaderEpochs.requireEpoch(epoch);
         List<List<Integer>> batches = epochBatches(epoch);
 
         return new Iterator<>() {
@@ -62,13 +59,13 @@ final class TensorDataLoaderRuntime implements Iterable<DataLoader.Batch> {
                 List<Integer> batchIndices = batches.get(current);
 
                 current++;
-                return collateFn.collate(batchIndices, dataset);
+                return TensorBatchCollator.collate(collateFn, batchIndices, dataset);
             }
         };
     }
 
     Iterable<DataLoader.Batch> epoch(long epoch) {
-        requireEpoch(epoch);
+        DataLoaderEpochs.requireEpoch(epoch);
         return () -> iterator(epoch);
     }
 
@@ -140,12 +137,6 @@ final class TensorDataLoaderRuntime implements Iterable<DataLoader.Batch> {
     }
 
     private long nextEpoch() {
-        return reshuffleEachEpoch ? epochCounter.getAndIncrement() : initialEpoch;
-    }
-
-    private static void requireEpoch(long epoch) {
-        if (epoch < 0L) {
-            throw new IllegalArgumentException("epoch must be non-negative, got: " + epoch);
-        }
+        return DataLoaderEpochs.next(epochCounter, reshuffleEachEpoch, initialEpoch);
     }
 }

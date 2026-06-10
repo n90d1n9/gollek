@@ -7,7 +7,7 @@ public final class ApiKeyConstants {
 
     public static final String HEADER_API_KEY = "X-API-Key";
     public static final String HEADER_AUTHORIZATION = "Authorization";
-    public static final String AUTHORIZATION_SCHEME = "ApiKey";
+    public static final String AUTHORIZATION_SCHEME = "Bearer";
     public static final String COMMUNITY_API_KEY = "community";
 
     private ApiKeyConstants() {

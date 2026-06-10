@@ -230,15 +230,18 @@ public final class TrainingReportValidationArtifacts {
         TrainerCheckpointIO.writeStringAtomically(jsonFile, TrainerJson.toJson(resolvedResult.toMap()) + "\n");
         TrainerCheckpointIO.writeStringAtomically(markdownFile, resolvedResult.markdown());
         TrainerCheckpointIO.writeStringAtomically(junitXmlFile, resolvedResult.junitXml());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint = TrainingReportArtifactFingerprint.of(junitXmlFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
                 jsonFile,
                 markdownFile,
                 junitXmlFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(junitXmlFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
                 resolvedResult);
     }
 
@@ -258,15 +261,18 @@ public final class TrainingReportValidationArtifacts {
 
         TrainerCheckpointIO.writeStringAtomically(markdownFile, result.markdown());
         TrainerCheckpointIO.writeStringAtomically(junitXmlFile, result.junitXml());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint = TrainingReportArtifactFingerprint.of(junitXmlFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
                 jsonFile,
                 markdownFile,
                 junitXmlFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(junitXmlFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
                 result);
     }
 
@@ -305,6 +311,12 @@ public final class TrainingReportValidationArtifacts {
         if (!(parsed instanceof Map<?, ?> map)) {
             throw new IOException("Training report validation JSON must be an object: " + resolvedJsonFile);
         }
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
         return new ArtifactInspection(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile, resolvedJunitXmlFile),
                 resolvedJsonFile,
@@ -313,9 +325,9 @@ public final class TrainingReportValidationArtifacts {
                 immutableStringKeyMap(map),
                 markdown,
                 junitXml,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256());
     }
 
     public static ArtifactVerification verify(ArtifactBundle bundle) throws IOException {

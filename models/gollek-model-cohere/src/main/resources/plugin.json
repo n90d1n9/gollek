@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "optional",
-    "families": ["cohere", "cohere2"]
+    "families": ["cohere", "cohere2"],
+    "tokenizerKind": "hf-bpe"
   }
 }

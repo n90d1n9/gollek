@@ -63,6 +63,62 @@ class LiteRtLmFastRunDaemonTest {
     }
 
     @Test
+    void runCommandRoutesResolvedLiteRtLmArtifactToStandaloneFastPath(@TempDir Path tempDir) throws Exception {
+        Path litert = Files.writeString(tempDir.resolve("gemma-4-E2B-it.litertlm"), "");
+        RunCommand command = new RunCommand();
+        command.prompt = "what is jakarta";
+        command.providerId = "litert";
+        command.maxTokens = 16;
+        command.temperature = 0.0;
+        command.topK = 1;
+        command.topP = 1.0;
+
+        assertTrue(command.shouldTryStandaloneLiteRtFastPath(litert.toString()));
+        assertArrayEquals(new String[] {
+                "run",
+                "--modelFile", litert.toString(),
+                "--prompt", "what is jakarta",
+                "--max-tokens", "16",
+                "--temperature", "0.0",
+                "--top-k", "1",
+                "--top-p", "1.0",
+                "--provider", "litert"
+        }, command.buildStandaloneLiteRtFastRunArgs(litert.toString()));
+    }
+
+    @Test
+    void runCommandDoesNotStealLiteRtLmArtifactWhenRequestNeedsFullProvider(@TempDir Path tempDir) throws Exception {
+        Path litert = Files.writeString(tempDir.resolve("gemma-4-E2B-it.litertlm"), "");
+        RunCommand command = new RunCommand();
+        command.prompt = "what is jakarta";
+        command.providerId = "litert";
+        command.ragContexts = java.util.List.of("context");
+
+        assertFalse(command.shouldTryStandaloneLiteRtFastPath(litert.toString()));
+    }
+
+    @Test
+    void runCommandAllowsCachedGemma4LiteRtFastPathForSimpleTextRun() {
+        RunCommand command = new RunCommand();
+        command.modelId = "0576e9";
+        command.prompt = "what is jakarta";
+
+        assertTrue(command.shouldTryCachedGemma4MobileQatLiteRtFastPath(false, null));
+        assertTrue(command.shouldTryCachedGemma4MobileQatLiteRtFastPath(true, "litert"));
+        assertFalse(command.shouldTryCachedGemma4MobileQatLiteRtFastPath(true, "safetensor"));
+    }
+
+    @Test
+    void runCommandDoesNotUseCachedGemma4LiteRtFastPathWhenRequestNeedsFullProvider() {
+        RunCommand command = new RunCommand();
+        command.modelId = "0576e9";
+        command.prompt = "what is jakarta";
+        command.ragContexts = java.util.List.of("context");
+
+        assertFalse(command.shouldTryCachedGemma4MobileQatLiteRtFastPath(false));
+    }
+
+    @Test
     void executionRouteNamesDaemonAndDirectFastPath() {
         assertEquals(
                 "Execution route: litert (backend=GPU/Metal) [official_litert_lm_jvm_daemon]",
@@ -89,8 +145,50 @@ class LiteRtLmFastRunDaemonTest {
         try {
             LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
                     new String[]{"run", "--model", "97cbf2", "--prompt", "hello"});
+            LiteRtLmFastRun.RouteResolution route = LiteRtLmFastRun.resolveLiteRtLmRoute(args).orElseThrow();
 
             assertEquals(litertFile.toAbsolutePath().normalize(), LiteRtLmFastRun.resolveLiteRtLmModel(args).orElseThrow());
+            assertEquals(litertFile.toAbsolutePath().normalize(), route.path());
+            assertEquals("fast-index-equivalent-litert", route.source());
+            assertTrue(route.cacheHit());
+            assertEquals("litertlm", route.selectedArtifact());
+            assertTrue(route.durationNanos() >= 0L);
+        } finally {
+            restoreProperty("user.home", previousHome);
+            restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
+        }
+    }
+
+    @Test
+    void gemma4MobileQatShortIdResolvesIndexedLiteRtEquivalentBeforeCachedFallback(@TempDir Path tempHome)
+            throws Exception {
+        Path litertDir = tempHome.resolve("models/litert/gemma");
+        Path litertFile = litertDir.resolve("gemma-4-E2B-it.litertlm");
+        Path safetensorDir = tempHome.resolve("models/safetensors/gemma4-mobile-qat");
+        Files.createDirectories(litertDir);
+        Files.createDirectories(safetensorDir);
+        Files.writeString(litertFile, "stub");
+        writeModelIndex(
+                tempHome,
+                "0576e9",
+                "google/gemma-4-E2B-it-qat-mobile-transformers",
+                "gemma-4-E2B-it-qat-mobile-transformers",
+                safetensorDir,
+                litertDir);
+
+        String previousHome = System.getProperty("user.home");
+        String previousAutoEquivalent = System.getProperty("gollek.litert.fast_run.auto_equivalent");
+        System.setProperty("user.home", tempHome.toString());
+        System.clearProperty("gollek.litert.fast_run.auto_equivalent");
+        try {
+            LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                    new String[]{"run", "--model", "0576e9", "--prompt", "hello"});
+            LiteRtLmFastRun.RouteResolution route = LiteRtLmFastRun.resolveLiteRtLmRoute(args).orElseThrow();
+
+            assertEquals(litertFile.toAbsolutePath().normalize(), route.path());
+            assertEquals("fast-index-equivalent-litert", route.source());
+            assertTrue(route.cacheHit());
+            assertEquals("litertlm", route.selectedArtifact());
         } finally {
             restoreProperty("user.home", previousHome);
             restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
@@ -119,6 +217,62 @@ class LiteRtLmFastRunDaemonTest {
         } finally {
             restoreProperty("user.home", previousHome);
             restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
+        }
+    }
+
+    @Test
+    void daemonRouteResolutionCacheInvalidatesWhenModelIndexChanges(@TempDir Path tempHome) throws Exception {
+        Path litertDir = tempHome.resolve("models/litert/gemma");
+        Path litertFile = litertDir.resolve("gemma-4-E2B-it.litertlm");
+        Path secondLiteRtDir = tempHome.resolve("models/litert/gemma-second-version");
+        Path secondLiteRtFile = secondLiteRtDir.resolve("gemma-4-E2B-it.litertlm");
+        Path safetensorDir = tempHome.resolve("models/safetensors/gemma");
+        Files.createDirectories(litertDir);
+        Files.createDirectories(secondLiteRtDir);
+        Files.createDirectories(safetensorDir);
+        Files.writeString(litertFile, "stub");
+        Files.writeString(secondLiteRtFile, "stub");
+        writeModelIndex(tempHome, safetensorDir, litertDir);
+
+        String previousHome = System.getProperty("user.home");
+        String previousAutoEquivalent = System.getProperty("gollek.litert.fast_run.auto_equivalent");
+        String previousRouteCache = System.getProperty("gollek.litert.fast_run.daemon_route_cache");
+        System.setProperty("user.home", tempHome.toString());
+        System.clearProperty("gollek.litert.fast_run.auto_equivalent");
+        System.clearProperty("gollek.litert.fast_run.daemon_route_cache");
+        try {
+            LiteRtLmFastRun.FastArgs args = LiteRtLmFastRun.FastArgs.parse(
+                    new String[]{"run", "--model", "97cbf2", "--prompt", "hello"});
+            LiteRtLmFastRun.RouteResolutionCache cache = new LiteRtLmFastRun.RouteResolutionCache();
+
+            LiteRtLmFastRun.RouteResolution first = cache.resolve(args).orElseThrow();
+            LiteRtLmFastRun.RouteResolution hot = cache.resolve(args).orElseThrow();
+            assertEquals(litertFile.toAbsolutePath().normalize(), first.path());
+            assertEquals(first.path(), hot.path());
+            assertEquals("fast-index-equivalent-litert", hot.source());
+            assertEquals(1, cache.size());
+
+            writeModelIndex(tempHome, safetensorDir, secondLiteRtDir);
+
+            LiteRtLmFastRun.RouteResolution invalidated = cache.resolve(args).orElseThrow();
+            assertEquals(secondLiteRtFile.toAbsolutePath().normalize(), invalidated.path());
+            assertEquals("fast-index-equivalent-litert", invalidated.source());
+            assertEquals(1, cache.size());
+        } finally {
+            restoreProperty("user.home", previousHome);
+            restoreProperty("gollek.litert.fast_run.auto_equivalent", previousAutoEquivalent);
+            restoreProperty("gollek.litert.fast_run.daemon_route_cache", previousRouteCache);
+        }
+    }
+
+    @Test
+    void daemonRouteResolutionCacheCanBeDisabledForDiagnostics() {
+        String previous = System.getProperty("gollek.litert.fast_run.daemon_route_cache");
+        System.setProperty("gollek.litert.fast_run.daemon_route_cache", "false");
+        try {
+            assertFalse(LiteRtLmFastRun.daemonRouteCacheEnabled());
+        } finally {
+            restoreProperty("gollek.litert.fast_run.daemon_route_cache", previous);
         }
     }
 
@@ -215,6 +369,28 @@ class LiteRtLmFastRunDaemonTest {
     }
 
     @Test
+    void daemonPidVerificationIsEnabledByDefaultForFastStaleCleanup() {
+        String previous = System.getProperty("gollek.litert.fast_run.verify_daemon_pid");
+        System.clearProperty("gollek.litert.fast_run.verify_daemon_pid");
+        try {
+            assertTrue(LiteRtLmFastRun.verifyDaemonPid());
+        } finally {
+            restoreProperty("gollek.litert.fast_run.verify_daemon_pid", previous);
+        }
+    }
+
+    @Test
+    void daemonPidVerificationCanBeDisabledForDiagnostics() {
+        String previous = System.getProperty("gollek.litert.fast_run.verify_daemon_pid");
+        System.setProperty("gollek.litert.fast_run.verify_daemon_pid", "false");
+        try {
+            assertFalse(LiteRtLmFastRun.verifyDaemonPid());
+        } finally {
+            restoreProperty("gollek.litert.fast_run.verify_daemon_pid", previous);
+        }
+    }
+
+    @Test
     void keepAliveConversationIsDisabledByDefaultBecauseLiteRtLmAllowsOneSession() {
         String previous = System.getProperty("gollek.litert.fast_run.keepalive_conversation");
         System.clearProperty("gollek.litert.fast_run.keepalive_conversation");
@@ -237,14 +413,11 @@ class LiteRtLmFastRunDaemonTest {
     }
 
     @Test
-    void daemonLauncherDefaultsToLaunchctlOnMacForLiteRtPersistence() {
+    void daemonLauncherDefaultsToAutoForMacOsPersistence() {
         String previous = System.getProperty("gollek.litert.fast_run.daemon_launcher");
         System.clearProperty("gollek.litert.fast_run.daemon_launcher");
         try {
-            String expected = System.getProperty("os.name", "").toLowerCase().contains("mac")
-                    ? "launchctl"
-                    : "nohup";
-            assertEquals(expected, LiteRtLmFastRun.daemonLauncherMode());
+            assertEquals("auto", LiteRtLmFastRun.daemonLauncherMode());
         } finally {
             restoreProperty("gollek.litert.fast_run.daemon_launcher", previous);
         }
@@ -479,7 +652,11 @@ class LiteRtLmFastRunDaemonTest {
 
     @Test
     void bareQuestionPromptsAreNormalizedForGemmaChatQuality() {
-        assertEquals("Where is jakarta?", LiteRtLmFastRun.promptForModel("where is jakarta"));
+        assertEquals(
+                "Answer directly and concisely in one or two sentences. Do not ask a clarification question. "
+                        + "If a term is ambiguous, answer the most common meaning first and mention common alternatives briefly.\n"
+                        + "Question: Where is jakarta?",
+                LiteRtLmFastRun.promptForModel("where is jakarta"));
     }
 
     @Test
@@ -530,14 +707,30 @@ class LiteRtLmFastRunDaemonTest {
     }
 
     private static void writeModelIndex(Path home, Path safetensorDir, Path litertDir) throws Exception {
+        writeModelIndex(
+                home,
+                "97cbf2",
+                "google/gemma-4-E2B-it",
+                "gemma-4-E2B-it",
+                safetensorDir,
+                litertDir);
+    }
+
+    private static void writeModelIndex(
+            Path home,
+            String safetensorShortId,
+            String safetensorId,
+            String safetensorName,
+            Path safetensorDir,
+            Path litertDir) throws Exception {
         Path index = home.resolve(".gollek/models/index.json");
         Files.createDirectories(index.getParent());
         Files.writeString(index, """
                 [
                   {
-                    "id": "google/gemma-4-E2B-it",
-                    "shortId": "97cbf2",
-                    "name": "gemma-4-E2B-it",
+                    "id": "%s",
+                    "shortId": "%s",
+                    "name": "%s",
                     "format": "safetensors",
                     "path": "%s",
                     "architecture": "gemma"
@@ -551,7 +744,12 @@ class LiteRtLmFastRunDaemonTest {
                     "architecture": "gemma"
                   }
                 ]
-                """.formatted(escapeJson(safetensorDir.toString()), escapeJson(litertDir.toString())));
+                """.formatted(
+                escapeJson(safetensorId),
+                escapeJson(safetensorShortId),
+                escapeJson(safetensorName),
+                escapeJson(safetensorDir.toString()),
+                escapeJson(litertDir.toString())));
     }
 
     private static String escapeJson(String value) {

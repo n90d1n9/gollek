@@ -27,6 +27,10 @@ typedef struct {
     __strong id<MTLComputePipelineState> matvec_bf16_gated_pair;
     __strong id<MTLComputePipelineState> matvec_bf16_gated_pair_x4;
     __strong id<MTLComputePipelineState> matvec_bf16_gated_pair_simd;
+    __strong id<MTLComputePipelineState> matvec_bf16_rows_gated_pair;
+    __strong id<MTLComputePipelineState> matvec_bf16_rows;
+    __strong id<MTLComputePipelineState> matvec_bf16_rows_gated_pair_x4;
+    __strong id<MTLComputePipelineState> matvec_bf16_rows_x4;
     __strong id<MTLComputePipelineState> matvec_half_128;
     __strong id<MTLComputePipelineState> matvec_t_half_128;
     __strong id<MTLComputePipelineState> matvec_half_pair_128;

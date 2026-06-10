@@ -10,6 +10,8 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "experimental",
-    "families": ["kimi", "kimi_k2"]
+    "families": ["kimi", "kimi_k2"],
+    "tokenizerMetadataStatus": "pending",
+    "tokenizerMetadataPendingReason": "tokenizer adapter pending descriptor stabilization"
   }
 }

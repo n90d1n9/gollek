@@ -1,0 +1,525 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gollek.ai/schemas/training/checkpoint-lineage-health.v1.schema.json",
+  "title": "Gollek checkpoint lineage health",
+  "description": "Stable checkpoint lineage health payload emitted by recursive-reasoning checkpoint inspectors.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "kind",
+    "schemaVersion",
+    "rootDir",
+    "status",
+    "healthScore",
+    "alertLevel",
+    "healthy",
+    "issueCount",
+    "issueTypes",
+    "issueDetailCount",
+    "issueCodes",
+    "blockingIssueCount",
+    "issueDetails",
+    "duplicateRunIds",
+    "missingParentRunIds",
+    "ambiguousParentRunIds",
+    "parentMismatchRunIds",
+    "cycleRunIds",
+    "unresolvedRunIds",
+    "summaryMessage",
+    "recommendedAction",
+    "healthBadge",
+    "checks",
+    "failingChecks",
+    "passingCheckCount",
+    "failingCheckCount",
+    "checkSummary",
+    "summary"
+  ],
+  "properties": {
+    "kind": {
+      "const": "checkpoint-lineage-health"
+    },
+    "schemaVersion": {
+      "const": "gollek.checkpoint-lineage-health.v1"
+    },
+    "rootDir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "$ref": "#/$defs/status"
+    },
+    "healthScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "alertLevel": {
+      "$ref": "#/$defs/alertLevel"
+    },
+    "healthy": {
+      "type": "boolean"
+    },
+    "issueCount": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "issueTypes": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "issueDetailCount": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "issueCodes": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "blockingIssueCount": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "primaryIssueCode": {
+      "type": "string"
+    },
+    "primaryIssueType": {
+      "type": "string"
+    },
+    "primaryIssueAction": {
+      "type": "string"
+    },
+    "primaryIssue": {
+      "$ref": "#/$defs/issue"
+    },
+    "issueDetails": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "duplicateRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "missingParentRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "ambiguousParentRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "parentMismatchRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "cycleRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "unresolvedRunIds": {
+      "$ref": "#/$defs/stringArray"
+    },
+    "summaryMessage": {
+      "type": "string"
+    },
+    "recommendedAction": {
+      "type": "string"
+    },
+    "healthBadge": {
+      "$ref": "#/$defs/healthBadge"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "failingChecks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "primaryFailingCheck": {
+      "$ref": "#/$defs/check"
+    },
+    "primaryFailingCheckName": {
+      "type": "string"
+    },
+    "primaryFailingCheckType": {
+      "type": "string"
+    },
+    "primaryFailingCheckCode": {
+      "type": "string"
+    },
+    "primaryFailingCheckSeverity": {
+      "$ref": "#/$defs/alertLevel"
+    },
+    "primaryFailingCheckAction": {
+      "type": "string"
+    },
+    "primaryFailingCheckMessage": {
+      "type": "string"
+    },
+    "passingCheckCount": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "failingCheckCount": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "checkSummary": {
+      "$ref": "#/$defs/checkSummary"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "alertLevel": {
+      "enum": [
+        "critical",
+        "warning",
+        "info"
+      ]
+    },
+    "status": {
+      "enum": [
+        "healthy",
+        "unhealthy"
+      ]
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "code",
+        "severity",
+        "blocking",
+        "runId",
+        "detail",
+        "action"
+      ],
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^GOLLEK_LINEAGE_[A-Z0-9_]+$"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ]
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "checkpointDir": {
+          "type": "string"
+        },
+        "checkpointDirs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "parentRunId": {
+          "type": "string"
+        },
+        "parentCheckpointDirs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "reasons": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "type",
+        "code",
+        "label",
+        "passed",
+        "status",
+        "severity",
+        "blocking",
+        "count",
+        "runIds",
+        "affectedRunIds",
+        "detail",
+        "action"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^GOLLEK_LINEAGE_[A-Z0-9_]+$"
+        },
+        "label": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "count": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "runIds": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "affectedRunIds": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        }
+      }
+    },
+    "healthBadge": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "status",
+        "alertLevel",
+        "primaryIssueCode",
+        "primaryCheckCode",
+        "primaryCheckType",
+        "primaryCheckSeverity",
+        "primaryCheckAction",
+        "score",
+        "variant",
+        "label",
+        "token",
+        "tooltip",
+        "checkStatus",
+        "recommendedAction"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "alertLevel": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "primaryIssueCode": {
+          "type": "string"
+        },
+        "primaryCheckCode": {
+          "type": "string"
+        },
+        "primaryCheckType": {
+          "type": "string"
+        },
+        "primaryCheckSeverity": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "primaryCheckAction": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "variant": {
+          "enum": [
+            "success",
+            "danger"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "tooltip": {
+          "type": "string"
+        },
+        "checkStatus": {
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "recommendedAction": {
+          "type": "string"
+        }
+      }
+    },
+    "severityCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "critical",
+        "warning",
+        "info"
+      ],
+      "properties": {
+        "critical": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "warning": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "info": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "checkSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "total",
+        "passed",
+        "failed",
+        "passRate",
+        "failureRate",
+        "status",
+        "alertLevel",
+        "summaryMessage",
+        "recommendedAction",
+        "issueCodes",
+        "primaryIssueCode",
+        "allPassed",
+        "hasCriticalFailures",
+        "hasWarningFailures",
+        "hasInfoFailures",
+        "dominantSeverity",
+        "failingSeverityCounts",
+        "severityCounts",
+        "primaryFailingName",
+        "primaryFailingType",
+        "primaryFailingCode",
+        "primaryFailingSeverity",
+        "primaryFailingAction",
+        "primaryFailingMessage",
+        "failingNames",
+        "failingCodes"
+      ],
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "passed": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "failed": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "passRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "failureRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "alertLevel": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "summaryMessage": {
+          "type": "string"
+        },
+        "recommendedAction": {
+          "type": "string"
+        },
+        "issueCodes": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "primaryIssueCode": {
+          "type": "string"
+        },
+        "allPassed": {
+          "type": "boolean"
+        },
+        "hasCriticalFailures": {
+          "type": "boolean"
+        },
+        "hasWarningFailures": {
+          "type": "boolean"
+        },
+        "hasInfoFailures": {
+          "type": "boolean"
+        },
+        "dominantSeverity": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "failingSeverityCounts": {
+          "$ref": "#/$defs/severityCounts"
+        },
+        "severityCounts": {
+          "$ref": "#/$defs/severityCounts"
+        },
+        "primaryFailingName": {
+          "type": "string"
+        },
+        "primaryFailingType": {
+          "type": "string"
+        },
+        "primaryFailingCode": {
+          "type": "string"
+        },
+        "primaryFailingSeverity": {
+          "$ref": "#/$defs/alertLevel"
+        },
+        "primaryFailingAction": {
+          "type": "string"
+        },
+        "primaryFailingMessage": {
+          "type": "string"
+        },
+        "primaryFailingCheck": {
+          "$ref": "#/$defs/check"
+        },
+        "failingNames": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "failingCodes": {
+          "$ref": "#/$defs/stringArray"
+        }
+      }
+    }
+  }
+}

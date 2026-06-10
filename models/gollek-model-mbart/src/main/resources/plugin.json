@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["mbart", "mbart50"]
+    "families": ["mbart", "mbart50"],
+    "tokenizerKind": "sentencepiece"
   }
 }

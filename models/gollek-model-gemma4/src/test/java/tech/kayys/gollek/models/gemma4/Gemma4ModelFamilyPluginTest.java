@@ -3,17 +3,27 @@ package tech.kayys.gollek.models.gemma4;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelFamilyCapability;
+import tech.kayys.gollek.spi.model.ModelFamilyDirectSupport;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
 import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
+import tech.kayys.gollek.spi.model.ModelFamilyPluginRegistry;
+import tech.kayys.gollek.spi.model.ModelFamilyProblemCodes;
+import tech.kayys.gollek.spi.model.ModelFamilyResolution;
+import tech.kayys.gollek.spi.model.ModelFamilyRuntimeCompatibility;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Gemma4ModelFamilyPluginTest {
@@ -43,6 +53,61 @@ class Gemma4ModelFamilyPluginTest {
     }
 
     @Test
+    void gemma4Unified12bFixtureMatchesDescriptorTokenizerAndTextAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new Gemma4ModelFamilyPlugin(),
+                fixture("gemma4-12b-it"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "gemma4 unified fixture should match descriptor, tokenizer, and nested text adapter claims");
+    }
+
+    @Test
+    void gemma4QatQ40FixtureMatchesDescriptorAndPinsQuantizationShape() throws Exception {
+        Path fixture = fixture("gemma4-12b-it-qat-q4_0");
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new Gemma4ModelFamilyPlugin(),
+                fixture);
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "gemma4 QAT Q4_0 fixture should preserve descriptor, tokenizer, and text adapter claims");
+
+        String config = fixtureConfig(fixture);
+        assertTrue(config.contains("\"_name_or_path\": \"google/gemma-4-12B-it-qat-q4_0-gguf\""));
+        assertTrue(config.contains("\"family\": \"gemma4_qat\""));
+        assertTrue(config.contains("\"format\": \"q4_0\""));
+        assertTrue(config.contains("\"container\": \"gguf\""));
+        assertTrue(config.contains("\"loader_scope\": \"metadata_only_pending_q4_0_weight_loader\""));
+    }
+
+    @Test
+    void gemma4QatMobileFixtureMatchesDescriptorAndPinsMobileQuantizationShape() throws Exception {
+        Path fixture = fixture("gemma4-e2b-it-qat-mobile");
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new Gemma4ModelFamilyPlugin(),
+                fixture);
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "gemma4 mobile QAT fixture should preserve descriptor, tokenizer, and text adapter claims");
+
+        String config = fixtureConfig(fixture);
+        assertTrue(config.contains("\"_name_or_path\": \"google/gemma-4-E2B-it-qat-mobile-transformers\""));
+        assertTrue(config.contains("\"family\": \"gemma4_qat\""));
+        assertTrue(config.contains("\"format\": \"mobile\""));
+        assertTrue(config.contains("\"container\": \"transformers\""));
+        assertTrue(config.contains("\"activation_scaling\": \"static\""));
+        assertTrue(config.contains("\"channel_wise\": true"));
+        assertTrue(config.contains("\"token_generation_bits\": 2"));
+        assertTrue(config.contains("\"loader_scope\": \"metadata_only_pending_mobile_quant_loader\""));
+    }
+
+    @Test
     void publishesGemma4TextDirectArchitectureAdapterAndTokenizer() {
         Gemma4ModelFamilyPlugin plugin = new Gemma4ModelFamilyPlugin();
 
@@ -50,13 +115,61 @@ class Gemma4ModelFamilyPluginTest {
                 .map(ModelArchitecture::id)
                 .toList());
         assertTrue(plugin.architectureAdapters().get(0) instanceof Gemma4Family);
-        assertEquals(List.of("gemma4", "gemma4_text", "gemma4_vision", "gemma4_audio"),
+        assertEquals(List.of("gemma4", "gemma4_text", "gemma4_vision", "gemma4_audio",
+                        "gemma4_unified", "gemma4_unified_text"),
                 plugin.descriptor().modelTypes());
-        assertEquals("experimental_text_path_guarded_by_runtime",
+        assertTrue(plugin.descriptor().architectureClassNames().contains("Gemma4ForMultimodalLM"));
+        assertTrue(plugin.descriptor().architectureClassNames().contains("Gemma4UnifiedForConditionalGeneration"));
+        assertTrue(plugin.descriptor().architectureClassNames().contains("Gemma4ForImageTextToText"));
+        assertTrue(plugin.descriptor().capabilities().contains(ModelFamilyCapability.MULTIMODAL));
+        assertTrue(plugin.descriptor().capabilities().contains(ModelFamilyCapability.VISION));
+        assertTrue(plugin.descriptor().capabilities().contains(ModelFamilyCapability.AUDIO));
+        assertTrue(plugin.descriptor().capabilities().contains(ModelFamilyCapability.MOE));
+        assertEquals("ready_text_path_guarded_by_runtime",
                 plugin.descriptor().metadata().get("direct_safetensor"));
-        assertEquals("text_only_gemma4_text", plugin.descriptor().metadata().get("direct_safetensor_scope"));
+        assertEquals("text_only_gemma4_text_and_unified_text",
+                plugin.descriptor().metadata().get("direct_safetensor_scope"));
         assertEquals("pending_audio_vision_video_embedder_runtime",
                 plugin.descriptor().metadata().get("multimodal_direct_safetensor"));
+        assertEquals("pending_packed_expert_router_runtime",
+                plugin.descriptor().metadata().get("moe_direct_safetensor"));
+        assertEquals("gemma4_unified", plugin.descriptor().metadata().get("unified_model_type"));
+        assertEquals(1, plugin.unifiedRuntimeRequirements().size());
+        assertEquals("gemma4_unified", plugin.unifiedRuntimeRequirements().getFirst().modelType());
+        assertEquals(List.of("text", "image", "audio", "video"),
+                plugin.unifiedRuntimeRequirements().getFirst().requiredInputModalities());
+        assertTrue(plugin.unifiedRuntimeRequirements().getFirst().productionReadyRequired());
+        assertEquals("google/gemma-4-12B-it", plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it"));
+        assertEquals("dense_unified_encoder_free_multimodal",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it_architecture"));
+        assertEquals("dedicated_gpu_laptop_or_unified_memory_16gb",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it_local_target"));
+        assertEquals("companion_multi_token_prediction_model_available",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it_mtp"));
+        assertEquals("litert-community/gemma-4-12B-it-litert-lm",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it_litert_lm"));
+        assertEquals("metadata_only_pending_litert_lm_runner",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_12b_it_litert_lm_scope"));
+        assertEquals("google/gemma-4-qat-q4-0",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_q4_0_collection"));
+        assertEquals("unquantized,gguf,compressed_tensors_w4a16",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_q4_0_formats"));
+        assertEquals("metadata_only_pending_q4_0_weight_loader",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_q4_0_scope"));
+        assertEquals("google/gemma-4-qat-mobile",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_mobile_collection"));
+        assertEquals("transformers,compressed_tensors_mobile",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_mobile_formats"));
+        assertEquals("metadata_only_pending_mobile_quant_loader",
+                plugin.descriptor().metadata().get("checkpoint_gemma_4_qat_mobile_scope"));
+        assertEquals("google/gemma-4-qat-q4-0",
+                plugin.unifiedRuntimeRequirements().getFirst().metadata().get("qat_q4_0_collection"));
+        assertEquals("google/gemma-4-qat-mobile",
+                plugin.unifiedRuntimeRequirements().getFirst().metadata().get("qat_mobile_collection"));
+        assertEquals("dense_unified_encoder_free_multimodal",
+                plugin.unifiedRuntimeRequirements().getFirst().metadata().get("architecture"));
+        assertEquals("litert-community/gemma-4-12B-it-litert-lm",
+                plugin.unifiedRuntimeRequirements().getFirst().metadata().get("litert_lm_repo"));
         assertEquals(List.of("gemma4-spm-bpe"), plugin.tokenizerDescriptors().stream()
                 .map(ModelTokenizerDescriptor::id)
                 .toList());
@@ -66,9 +179,11 @@ class Gemma4ModelFamilyPluginTest {
     void gemma4DirectWeightsExposePerLayerInputsAndQkNormLayout() {
         Gemma4Family architecture = new Gemma4Family();
 
-        assertEquals(List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration"),
+        assertEquals(List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration",
+                        "Gemma4ForMultimodalLM", "Gemma4UnifiedForConditionalGeneration"),
                 architecture.supportedArchClassNames());
-        assertEquals(List.of("gemma4", "gemma4_text"), architecture.supportedModelTypes());
+        assertEquals(List.of("gemma4", "gemma4_text", "gemma4_unified", "gemma4_unified_text"),
+                architecture.supportedModelTypes());
         assertEquals("model.embed_tokens.weight", architecture.embedTokensWeight());
         assertEquals("model.embed_tokens_per_layer.weight", architecture.embedTokensPerLayerWeight());
         assertEquals("model.per_layer_model_projection.weight", architecture.perLayerModelProjectionWeight());
@@ -106,10 +221,131 @@ class Gemma4ModelFamilyPluginTest {
         assertTrue(!traits.gemma4Text());
         assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE, traits.promptBosPolicy());
         assertTrue(traits.allowedControlTokenTexts().isEmpty());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE,
+                Gemma4RuntimeProfile.prompt(null).promptBosPolicy());
+    }
+
+    @Test
+    void gemma4RuntimeTraitsExposeTextConfigPolicies() {
+        Gemma4Family architecture = new Gemma4Family();
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "gemma4_text",
+                "gemma4_text.embedding_length_per_layer_input", 4096));
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertTrue(traits.gemma4Text());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.NEVER, traits.promptBosPolicy());
+        assertTrue(traits.skipDefaultSystemPromptInjection());
+        assertTrue(traits.validateContinuationTokensByDecode());
+        assertTrue(traits.rejectEmptyDecodedTokens());
+        assertTrue(traits.allowedControlTokenTexts().contains("<|channel>"));
+        assertTrue(traits.perLayerInputPath());
+        assertTrue(traits.attention().splitHalfRope());
+        assertTrue(traits.attention().preferNativeMetalBf16Linear());
+        assertTrue(traits.attention().restrictLegacyMetalAttentionBridge());
+        assertTrue(traits.attention().supportsForcedDenseAttention());
+    }
+
+    @Test
+    void gemma4UnifiedRuntimeTraitsUseGemma4TextPolicies() {
+        Gemma4Family architecture = new Gemma4Family();
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "gemma4_unified",
+                "gemma4_unified.embedding_length_per_layer_input", 5120));
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertEquals("gemma4_unified", config.modelType());
+        assertEquals("Gemma4ForMultimodalLM", config.primaryArchitecture());
+        assertTrue(traits.gemma4Text());
+        assertTrue(traits.skipDefaultSystemPromptInjection());
+        assertTrue(traits.attention().splitHalfRope());
+    }
+
+    @Test
+    void gemma4UnifiedVocabOnlyPerLayerMetadataDoesNotEnablePerLayerInputPath() {
+        Gemma4Family architecture = new Gemma4Family();
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "gemma4_unified",
+                "gemma4_unified.vocab_size_per_layer_input", 262144));
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertTrue(traits.gemma4Text());
+        assertFalse(traits.perLayerInputPath());
+    }
+
+    @Test
+    void gemma4UnifiedResolvesTextOnlyDirectSafetensorCompatibility() {
+        Gemma4ModelFamilyPlugin plugin = new Gemma4ModelFamilyPlugin();
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(plugin);
+
+        ModelFamilyResolution resolution = registry.resolve("gemma4_unified", "Gemma4ForMultimodalLM");
+        ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(resolution);
+
+        assertEquals(ModelFamilyResolution.Status.RESOLVED, resolution.status());
+        assertEquals(List.of("gemma4"), resolution.familyIds());
+        assertEquals(List.of("gemma4-spm-bpe"), resolution.tokenizerDescriptors().stream()
+                .map(ModelTokenizerDescriptor::id)
+                .toList());
+        assertEquals(ModelFamilyDirectSupport.READY,
+                resolution.primarySupportReport().orElseThrow().directSafetensorStatus());
+        assertTrue(resolution.primaryRuntimeManifest().orElseThrow().modelTypes().contains("gemma4_unified"));
+        assertEquals("gemma4_unified",
+                resolution.primaryRuntimeManifest().orElseThrow().unifiedRuntimeRequirements().getFirst().modelType());
+        assertTrue(resolution.primaryRuntimeManifest().orElseThrow().requiresUnifiedRuntime());
+        assertTrue(compatibility.compatible());
+        assertEquals(List.of("gemma4"), compatibility.architectureAdapterIds());
+        assertEquals("gemma4", compatibility.selectedArchitectureAdapterId());
+        assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_direct_safetensor_not_ready"::equals));
+        assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_architecture_adapter_unmatched"::equals));
+        assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_not_found"::equals));
+    }
+
+    @Test
+    void gemma4QatQ40DirectCompatibilityReportsPendingQuantizedLoader() throws Exception {
+        ModelFamilyRuntimeCompatibility compatibility = directCompatibilityForFixture("gemma4-12b-it-qat-q4_0");
+
+        assertTrue(!compatibility.compatible());
+        assertTrue(compatibility.problemCodes().contains(
+                ModelFamilyProblemCodes.QUANTIZED_WEIGHT_LOADER_PENDING));
+        assertTrue(compatibility.problemCodes().contains(ModelFamilyProblemCodes.QAT_Q4_0_LOADER_PENDING));
+        assertTrue(compatibility.problemCodes().stream()
+                .noneMatch(ModelFamilyProblemCodes.QAT_MOBILE_LOADER_PENDING::equals));
+        assertTrue(compatibility.remediationHints().stream()
+                .anyMatch(hint -> hint.contains("q4_0 quantized weights in gguf")));
+    }
+
+    @Test
+    void gemma4QatMobileDirectCompatibilityReportsPendingMobileLoader() throws Exception {
+        ModelFamilyRuntimeCompatibility compatibility = directCompatibilityForFixture("gemma4-e2b-it-qat-mobile");
+
+        assertTrue(!compatibility.compatible());
+        assertTrue(compatibility.problemCodes().contains(
+                ModelFamilyProblemCodes.QUANTIZED_WEIGHT_LOADER_PENDING));
+        assertTrue(compatibility.problemCodes().contains(ModelFamilyProblemCodes.QAT_MOBILE_LOADER_PENDING));
+        assertTrue(compatibility.problemCodes().stream()
+                .noneMatch(ModelFamilyProblemCodes.QAT_Q4_0_LOADER_PENDING::equals));
+        assertTrue(compatibility.remediationHints().stream()
+                .anyMatch(hint -> hint.contains("mobile quantized weights in transformers")));
     }
 
     private static Path fixture(String familyId) throws Exception {
         return Path.of(Objects.requireNonNull(
                 Gemma4ModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
+    }
+
+    private static String fixtureConfig(Path fixture) throws Exception {
+        return Files.readString(fixture.resolve("config.json"));
+    }
+
+    private static ModelFamilyRuntimeCompatibility directCompatibilityForFixture(String familyId) throws Exception {
+        Gemma4ModelFamilyPlugin plugin = new Gemma4ModelFamilyPlugin();
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(plugin);
+        ModelFamilyResolution resolution = registry.resolve("gemma4_unified", "Gemma4ForMultimodalLM");
+        return registry.directSafetensorCompatibility(resolution, fixture(familyId));
     }
 }

@@ -5,11 +5,21 @@ import org.junit.jupiter.api.Disabled;
 import tech.kayys.gollek.ml.autograd.GradTensor;
 import tech.kayys.gollek.ml.nn.NNModule;
 import tech.kayys.gollek.ml.nn.layer.Linear;
+import tech.kayys.gollek.ml.train.TrainingReport;
+import tech.kayys.gollek.ml.train.TrainingReportAdvisor;
+import tech.kayys.gollek.ml.train.TrainingReportComparisonActionPlanArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportComparisonActionPlanExport;
 // TODO: nlp package - import tech.kayys.gollek.ml.nlp.Pipeline;
 import tech.kayys.gollek.core.tensor.DeviceType;
 import tech.kayys.gollek.train.data.DataLoader;
 
 import static org.junit.jupiter.api.Assertions.*;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 public class GollekTest {
 
@@ -41,6 +51,44 @@ public class GollekTest {
         assertNotNull(device);
         // On most CI/Local it will be CPU
         System.out.println("Default device: " + device);
+    }
+
+    @Test
+    public void testComparisonActionPlanFacadeWritesAndVerifiesArtifacts() throws IOException {
+        TrainingReport baseline = TrainingReport.of(runtimeProfileReport(2_000_000L, 5_000_000L));
+        TrainingReport candidate = TrainingReport.of(runtimeProfileReport(4_000_000L, 10_000_000L));
+
+        assertEquals(TrainingReportAdvisor.COMPARISON_ACTION_PLAN_SCHEMA,
+                Gollek.DL.trainingReportComparisonActionPlanSchema());
+        Map<String, Object> actionPlan = Gollek.DL.trainingReportComparisonActionPlan(baseline, candidate);
+        assertEquals(TrainingReportComparisonActionPlanExport.SCHEMA, actionPlan.get("schema"));
+
+        TrainingReportComparisonActionPlanExport export =
+                Gollek.DL.trainingReportComparisonActionPlanExport(baseline, candidate);
+        assertTrue(export.regressed());
+        assertTrue(export.requiresAttention());
+        assertTrue(Gollek.DL.trainingReportComparisonActionPlanMarkdown(baseline, candidate)
+                .contains("Runtime Regression Summary"));
+
+        Path directory = Files.createTempDirectory("gollek-action-plan-facade");
+        TrainingReportComparisonActionPlanArtifacts.ArtifactBundle bundle =
+                Gollek.DL.writeTrainingReportComparisonActionPlanArtifacts(directory, export);
+        TrainingReportComparisonActionPlanArtifacts.Verification verification =
+                Gollek.DL.verifyTrainingReportComparisonActionPlanArtifacts(bundle);
+        assertTrue(verification.passed());
+        assertTrue(Gollek.DL.trainingReportComparisonActionPlanArtifactVerificationMarkdown(verification)
+                .contains("**Status:** `PASS`"));
+        assertEquals(export.markdown(),
+                Gollek.DL.readTrainingReportComparisonActionPlanMarkdown(bundle.markdownFile()));
+        assertEquals(export.runtimeRegression().toMap(),
+                Gollek.DL.readTrainingReportComparisonActionPlanExport(bundle.jsonFile())
+                        .runtimeRegression()
+                        .toMap());
+
+        Files.deleteIfExists(bundle.jsonFile());
+        Files.deleteIfExists(bundle.markdownFile());
+        Files.deleteIfExists(bundle.manifestFile());
+        Files.deleteIfExists(bundle.directory());
     }
 
     @Test
@@ -953,6 +1001,65 @@ public class GollekTest {
             result.add(groups[(int) dataset.get(i)[0].data()[0] - 1]);
         }
         return result;
+    }
+
+    private static Map<String, Object> runtimeProfileReport(long forwardNanos, long lossNanos) {
+        double forwardMillis = forwardNanos / 1_000_000.0;
+        double lossMillis = lossNanos / 1_000_000.0;
+        double totalMillis = forwardMillis + lossMillis;
+        Map<String, Object> trainGroup = Map.of(
+                "name", "train",
+                "count", 2L,
+                "totalMillis", totalMillis,
+                "percentTotal", 100.0,
+                "averageMillis", totalMillis / 2.0,
+                "minMillis", Math.min(forwardMillis, lossMillis),
+                "maxMillis", Math.max(forwardMillis, lossMillis),
+                "lastMillis", lossMillis,
+                "stddevMillis", Math.abs(lossMillis - forwardMillis) / 2.0);
+        Map<String, Object> lossHotspot = Map.of(
+                "phase", "train.loss",
+                "count", 1L,
+                "totalMillis", lossMillis,
+                "percentTotal", totalMillis == 0.0 ? 0.0 : lossMillis * 100.0 / totalMillis,
+                "averageMillis", lossMillis,
+                "minMillis", lossMillis,
+                "maxMillis", lossMillis,
+                "lastMillis", lossMillis,
+                "stddevMillis", 0.0);
+        Map<String, Object> metadata = Map.ofEntries(
+                Map.entry("runtimeProfile.groupCount", 1),
+                Map.entry("runtimeProfile.groups", List.of(trainGroup)),
+                Map.entry("runtimeProfile.primaryGroup.name", "train"),
+                Map.entry("runtimeProfile.primaryGroup.totalMillis", totalMillis),
+                Map.entry("runtimeProfile.primaryGroup.percentTotal", 100.0),
+                Map.entry("runtimeProfile.primaryGroup.averageMillis", totalMillis / 2.0),
+                Map.entry("runtimeProfile.primaryGroup.minMillis", Math.min(forwardMillis, lossMillis)),
+                Map.entry("runtimeProfile.primaryGroup.lastMillis", lossMillis),
+                Map.entry("runtimeProfile.primaryGroup.stddevMillis", Math.abs(lossMillis - forwardMillis) / 2.0),
+                Map.entry("runtimeProfile.hotspotCount", 2),
+                Map.entry("runtimeProfile.hotspots", List.of(
+                        Map.of(
+                                "phase", "train.forward",
+                                "count", 1L,
+                                "totalMillis", forwardMillis,
+                                "percentTotal", totalMillis == 0.0 ? 0.0 : forwardMillis * 100.0 / totalMillis,
+                                "averageMillis", forwardMillis,
+                                "minMillis", forwardMillis,
+                                "maxMillis", forwardMillis,
+                                "lastMillis", forwardMillis,
+                                "stddevMillis", 0.0),
+                        lossHotspot)),
+                Map.entry("runtimeProfile.primaryHotspot.phase", "train.loss"),
+                Map.entry("runtimeProfile.primaryHotspot.totalMillis", lossMillis),
+                Map.entry("runtimeProfile.primaryHotspot.percentTotal", totalMillis == 0.0 ? 0.0 : lossMillis * 100.0 / totalMillis),
+                Map.entry("runtimeProfile.primaryHotspot.averageMillis", lossMillis),
+                Map.entry("runtimeProfile.primaryHotspot.minMillis", lossMillis),
+                Map.entry("runtimeProfile.primaryHotspot.lastMillis", lossMillis),
+                Map.entry("runtimeProfile.primaryHotspot.stddevMillis", 0.0));
+        return Map.of(
+                "diagnostics", List.of(),
+                "metadata", metadata);
     }
 
     private static int[][] balancedGroupedMultiLabelRows() {

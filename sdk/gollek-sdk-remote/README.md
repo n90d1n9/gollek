@@ -112,16 +112,64 @@ contract, validate request/tool schemas, and fetch MCP tool definitions. These
 helpers are read-only: Gollek exposes schemas and validation, while the caller's
 agent framework owns planning, authorization, and tool execution.
 
+The same classes are also published as the lightweight `gollek-sdk-agent`
+artifact for external orchestrators that do not need the full remote SDK graph.
+Call `servingReadiness(...)` when you want the SDK to perform the discovery and
+dry-run validation calls as one serving-only preflight report.
+Use `AgentServingPreflightRequest` when a route should skip optional stages such
+as MCP discovery or tool validation.
+Use `servingPreflightReadiness(...)` when the server exposes
+`POST /v1/agent/preflight` and you want Gollek to compose those same checks in a
+single request.
+
 ```java
 import java.util.List;
 import java.util.Map;
+import tech.kayys.gollek.client.agent.AgentCapabilitiesView;
 import tech.kayys.gollek.client.agent.AgentEmbeddingView;
+import tech.kayys.gollek.client.agent.AgentMcpDiscoveryView;
+import tech.kayys.gollek.client.agent.AgentModelCapabilitiesView;
+import tech.kayys.gollek.client.agent.AgentReadinessIssueCatalogView;
 import tech.kayys.gollek.client.agent.AgentResponseView;
+import tech.kayys.gollek.client.agent.AgentServingContract;
+import tech.kayys.gollek.client.agent.AgentServingPreflightRequest;
+import tech.kayys.gollek.client.agent.AgentServingReadinessReport;
+import tech.kayys.gollek.client.agent.AgentStreamAccumulator;
+import tech.kayys.gollek.client.agent.AgentToolValidationView;
+import tech.kayys.gollek.client.agent.AgentValidationView;
 
-Map<String, Object> capabilities = client.agent().capabilities();
-Map<String, Object> contract = client.agent().contract();
+AgentCapabilitiesView capabilities = client.agent().capabilitiesView();
+if (!capabilities.hasRequiredAgentServingCapabilities()) {
+    throw new IllegalStateException("Gollek capabilities mismatch: "
+        + capabilities.agentServingCapabilityIssues());
+}
 
-Map<String, Object> toolDefinitions = client.agent().mcpTools(true, true);
+AgentServingContract contract = client.agent().contractView();
+if (!contract.hasRequiredServingBoundary()) {
+    throw new IllegalStateException("Gollek serving boundary mismatch: " + contract.servingBoundaryIssues());
+}
+
+AgentReadinessIssueCatalogView issueCatalog = client.agent().readinessIssueCatalogView();
+issueCatalog.find("TOOL_DEFINITIONS_INVALID").ifPresent(issue ->
+    System.out.println(issue.code() + ": " + issue.remediation()));
+
+AgentModelCapabilitiesView model = client.agent().modelCapabilitiesView("demo-model");
+if (!model.hasRequiredAgentServingRoute()) {
+    throw new IllegalStateException("Model cannot serve this agent route: "
+        + model.agentServingRouteIssues());
+}
+
+AgentMcpDiscoveryView toolDefinitions = client.agent().mcpToolsView(true, true);
+if (!toolDefinitions.discoveryOnly()) {
+    throw new IllegalStateException("MCP discovery endpoint crossed the serving boundary");
+}
+
+AgentToolValidationView toolCheck = client.agent().validateToolsView(
+    Map.of("tools", toolDefinitions.openAiToolDefinitions()));
+if (toolCheck.hasWarnings()) {
+    System.out.println("tool schema warnings: " + toolCheck.warnings());
+}
+
 AgentEmbeddingView queryEmbedding = client.agent().createEmbeddingView(Map.of(
     "model", "demo-embed",
     "input", List.of("Question or search query for caller-owned retrieval")
@@ -129,14 +177,34 @@ AgentEmbeddingView queryEmbedding = client.agent().createEmbeddingView(Map.of(
 List<Double> queryVector = queryEmbedding.firstVector();
 // Use queryVector with your vector store, then pass selected chunks as rag_context.
 
-AgentResponseView chatView = client.agent().createChatCompletionView(Map.of(
+Map<String, Object> chatRequest = Map.of(
     "model", "demo-model",
     "messages", List.of(Map.of("role", "user", "content", "Answer with the discovered tools")),
     "rag_context", List.of(Map.of(
         "title", "Retrieved chunk",
         "text", "Relevant retrieved document text.")),
-    "tools", toolDefinitions.get("tools")
-), trace);
+    "tools", toolDefinitions.openAiToolDefinitions()
+);
+
+AgentValidationView dryRun = client.agent().validateRequestView("chat", chatRequest, trace);
+if (!dryRun.validationOnly() || dryRun.modelInvoked()) {
+    throw new IllegalStateException("Validation endpoint crossed the serving boundary");
+}
+
+AgentServingReadinessReport readiness = AgentServingReadinessReport.builder()
+    .capabilities(capabilities)
+    .contract(contract)
+    .modelRoute(model)
+    .mcpDiscovery(toolDefinitions, true)
+    .toolValidation(toolCheck, true)
+    .requestValidation(dryRun, true)
+    .build();
+readiness.requireReady("Gollek serving preflight failed");
+Map<String, Object> readinessReport = readiness.toReport();
+System.out.println("readiness: " + readinessReport.get("status")
+    + " checks=" + readinessReport.get("checks"));
+
+AgentResponseView chatView = client.agent().createChatCompletionView(chatRequest, trace);
 chatView.toolCalls().forEach(call -> {
     try {
         Map<String, Object> args = call.argumentsMap();
@@ -146,12 +214,47 @@ chatView.toolCalls().forEach(call -> {
     }
 });
 
-Map<String, Object> validation = client.agent().validateRequest("chat.completions", Map.of(
+AgentValidationView validation = client.agent().validateRequestView("chat", Map.of(
     "model", "demo-model",
     "messages", List.of(Map.of("role", "user", "content", "Validate this request")),
-    "tools", toolDefinitions.get("tools")
+    "tools", toolDefinitions.openAiToolDefinitions()
 ), trace);
+System.out.println("validated surface: " + validation.surface() + " model: " + validation.model());
+
+AgentStreamAccumulator.Snapshot stream = client.agent().streamChatCompletion(Map.of(
+    "model", "demo-model",
+    "messages", List.of(Map.of("role", "user", "content", "Stream this request")),
+    "tools", toolDefinitions.openAiToolDefinitions()
+), trace, event -> {
+    if (event.hasDelta()) {
+        System.out.print(event.delta());
+    }
+});
 ```
+
+For the server-side preflight endpoint:
+
+```java
+AgentServingReadinessReport readiness = client.agent().servingPreflightReadiness(
+    AgentServingPreflightRequest.builder()
+        .modelId("demo-model")
+        .surface("chat")
+        .request(chatRequest)
+        .build());
+readiness.requireReady("Gollek serving preflight failed");
+Map<String, Object> ciReport = readiness.toReport();
+```
+
+`toReport()` emits `object: "gollek.agent_readiness_report"`, status, issue
+counts, check counts, per-check messages, `issue_hints`, and the
+validation-only boundary. Use `toMetadata()` when a caller only needs compact
+status fields and remediation metadata for request logs or dashboards.
+The SDK also maps server-side `check_results` from `/v1/agent/preflight`, so
+Java callers receive the same per-area readiness status that CLI and REST
+clients see. Use `readiness.checkResults()` or `readiness.check("preflight")`
+for typed `Check` objects with `status`, `ready`, `requested`, `skipped()`,
+`blockingMessages()`, and `warningMessages()`; use `readiness.checks()` when
+you need the raw report-compatible map.
 
 ### Async Job Submission
 

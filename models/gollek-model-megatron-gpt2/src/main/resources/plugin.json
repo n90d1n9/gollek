@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["megatron_gpt2", "megatron-gpt2"]
   }
 }

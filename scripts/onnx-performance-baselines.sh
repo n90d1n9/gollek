@@ -26,6 +26,48 @@ gollek_onnx_performance_baseline_manifest_value() {
   ' "$manifest"
 }
 
+gollek_onnx_performance_baseline_key_value() {
+  local file="$1"
+  local key="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    return 1
+  fi
+  awk -v key="$key" '
+    BEGIN { FS = "\t" }
+    NR > 1 && $1 == key {
+      value = $0
+      sub(/^[^\t]*\t/, "", value)
+      print value
+      found = 1
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+gollek_onnx_performance_baseline_resolve_manifest_path() {
+  local manifest="$1"
+  local candidate="$2"
+  if [[ -z "$candidate" ]]; then
+    printf ''
+    return 0
+  fi
+  if [[ -f "$candidate" ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  local manifest_dir
+  manifest_dir="${manifest%/*}"
+  if [[ "$manifest_dir" == "$manifest" ]]; then
+    manifest_dir="."
+  fi
+  if [[ -f "${manifest_dir}/${candidate}" ]]; then
+    printf '%s' "${manifest_dir}/${candidate}"
+    return 0
+  fi
+  printf '%s' "$candidate"
+}
+
 gollek_onnx_performance_baseline_mtime_utc() {
   local file="$1"
   if [[ -z "$file" || ! -f "$file" ]]; then
@@ -74,7 +116,7 @@ gollek_onnx_performance_baseline_summary_value() {
 }
 
 gollek_onnx_performance_baseline_header() {
-  printf 'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tupdatedUtc\n'
+  printf 'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tprimaryStage\tprimaryMetric\tprimaryValueMs\tprimaryShareOfOrtPercent\tupdatedUtc\n'
 }
 
 gollek_onnx_performance_baseline_rows() {
@@ -82,6 +124,7 @@ gollek_onnx_performance_baseline_rows() {
   local name_filter="${2:-}"
   local dir name latest manifest status updated model onnx_backend expect_backend max_tokens runs warmup_runs prompt
   local aggregate_label case_name duration_ms generation_tps decode_tps ttft_ms token_latency_ms onnx_ort_run_ms onnx_decode_run_ms
+  local decision diagnosis primary_stage primary_metric primary_value_ms primary_share_of_ort_percent
 
   if [[ ! -d "$root" ]]; then
     return 0
@@ -117,7 +160,15 @@ gollek_onnx_performance_baseline_rows() {
     token_latency_ms="$(gollek_onnx_performance_baseline_summary_value "$latest" "$case_name" tokenLatencyMs 2>/dev/null || true)"
     onnx_ort_run_ms="$(gollek_onnx_performance_baseline_summary_value "$latest" "$case_name" onnxOrtRunMs 2>/dev/null || true)"
     onnx_decode_run_ms="$(gollek_onnx_performance_baseline_summary_value "$latest" "$case_name" onnxDecodeRunMs 2>/dev/null || true)"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    decision="$(gollek_onnx_performance_baseline_manifest_value "$manifest" decision 2>/dev/null || true)"
+    diagnosis="$(gollek_onnx_performance_baseline_manifest_value "$manifest" diagnosis 2>/dev/null || true)"
+    decision="$(gollek_onnx_performance_baseline_resolve_manifest_path "$manifest" "$decision")"
+    diagnosis="$(gollek_onnx_performance_baseline_resolve_manifest_path "$manifest" "$diagnosis")"
+    primary_stage="$(gollek_onnx_performance_baseline_key_value "$decision" primaryStage 2>/dev/null || gollek_onnx_performance_baseline_key_value "$diagnosis" primaryStage 2>/dev/null || true)"
+    primary_metric="$(gollek_onnx_performance_baseline_key_value "$decision" primaryMetric 2>/dev/null || gollek_onnx_performance_baseline_key_value "$diagnosis" primaryMetric 2>/dev/null || true)"
+    primary_value_ms="$(gollek_onnx_performance_baseline_key_value "$decision" primaryValueMs 2>/dev/null || gollek_onnx_performance_baseline_key_value "$diagnosis" primaryValueMs 2>/dev/null || true)"
+    primary_share_of_ort_percent="$(gollek_onnx_performance_baseline_key_value "$decision" primaryShareOfOrtPercent 2>/dev/null || gollek_onnx_performance_baseline_key_value "$diagnosis" primaryShareOfOrtPercent 2>/dev/null || true)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$(gollek_onnx_performance_baseline_safe_tsv "$name")" \
       "$(gollek_onnx_performance_baseline_safe_tsv "$status")" \
       "$(gollek_onnx_performance_baseline_safe_tsv "$latest")" \
@@ -137,6 +188,10 @@ gollek_onnx_performance_baseline_rows() {
       "$(gollek_onnx_performance_baseline_safe_tsv "$token_latency_ms")" \
       "$(gollek_onnx_performance_baseline_safe_tsv "$onnx_ort_run_ms")" \
       "$(gollek_onnx_performance_baseline_safe_tsv "$onnx_decode_run_ms")" \
+      "$(gollek_onnx_performance_baseline_safe_tsv "$primary_stage")" \
+      "$(gollek_onnx_performance_baseline_safe_tsv "$primary_metric")" \
+      "$(gollek_onnx_performance_baseline_safe_tsv "$primary_value_ms")" \
+      "$(gollek_onnx_performance_baseline_safe_tsv "$primary_share_of_ort_percent")" \
       "$(gollek_onnx_performance_baseline_safe_tsv "$updated")"
   done
   shopt -u nullglob
@@ -163,7 +218,11 @@ gollek_onnx_performance_baseline_sort_key() {
     tokenLatencyMs) printf '17:number:asc' ;;
     onnxOrtRunMs) printf '18:number:asc' ;;
     onnxDecodeRunMs) printf '19:number:asc' ;;
-    updatedUtc) printf '20:text:desc' ;;
+    primaryStage) printf '20:text:asc' ;;
+    primaryMetric) printf '21:text:asc' ;;
+    primaryValueMs) printf '22:number:asc' ;;
+    primaryShareOfOrtPercent) printf '23:number:desc' ;;
+    updatedUtc) printf '24:text:desc' ;;
     *)
       return 1
       ;;
@@ -185,7 +244,7 @@ gollek_onnx_performance_baseline_sort_rows() {
   field="$sort_spec"
   if ! key_info="$(gollek_onnx_performance_baseline_sort_key "$field")"; then
     echo "Unknown baseline sort field: $field" >&2
-    echo "Available sort fields: name, status, model, onnxBackend, expectBackend, updatedUtc, durationMs, generationTps, decodeTps, ttftMs, tokenLatencyMs, onnxOrtRunMs, onnxDecodeRunMs" >&2
+    echo "Available sort fields: name, status, model, onnxBackend, expectBackend, updatedUtc, durationMs, generationTps, decodeTps, ttftMs, tokenLatencyMs, onnxOrtRunMs, onnxDecodeRunMs, primaryStage, primaryMetric, primaryValueMs, primaryShareOfOrtPercent" >&2
     return 2
   fi
   IFS=':' read -r index kind direction <<< "$key_info"
@@ -229,12 +288,13 @@ gollek_onnx_performance_baseline_table() {
       selected[1] = "name"
       selected[2] = "status"
       selected[3] = "onnxBackend"
-      selected[4] = "durationMs"
-      selected[5] = "generationTps"
-      selected[6] = "onnxOrtRunMs"
-      selected[7] = "updatedUtc"
-      selected[8] = "model"
-      selectedCount = 8
+      selected[4] = "primaryStage"
+      selected[5] = "durationMs"
+      selected[6] = "generationTps"
+      selected[7] = "onnxOrtRunMs"
+      selected[8] = "updatedUtc"
+      selected[9] = "model"
+      selectedCount = 9
       for (i = 1; i <= selectedCount; i++) {
         width[i] = length(selected[i])
       }

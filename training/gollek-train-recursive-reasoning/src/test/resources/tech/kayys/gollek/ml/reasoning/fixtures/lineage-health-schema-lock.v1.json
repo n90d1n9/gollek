@@ -1,0 +1,29 @@
+{
+  "catalogSchemaId": "https://gollek.ai/schemas/training/checkpoint-lineage-health-schema-catalog.v1.schema.json",
+  "catalogSchemaSha256": "5e240a111c472f1d5310ad2f5f9c244c9262ea72fd5366fcaed3c6997d82f85b",
+  "contracts": [
+    {
+      "jsonSchemaByteCount": 11372,
+      "jsonSchemaId": "https://gollek.ai/schemas/training/checkpoint-lineage-health.v1.schema.json",
+      "jsonSchemaSha256": "d023eb3342258f8d1a3470bff8977f1cd7cddd937b459290d056c80a165ad964",
+      "name": "checkpointLineageHealth",
+      "payloadKind": "checkpoint-lineage-health",
+      "payloadSchemaVersion": "gollek.checkpoint-lineage-health.v1"
+    },
+    {
+      "jsonSchemaByteCount": 3997,
+      "jsonSchemaId": "https://gollek.ai/schemas/training/checkpoint-lineage-health-validation.v1.schema.json",
+      "jsonSchemaSha256": "bf619973109101e55b916e4bf46e48696499bea2e88c19456ab78777b271e4fb",
+      "name": "checkpointLineageHealthValidation",
+      "payloadKind": "checkpoint-lineage-health-validation",
+      "payloadSchemaVersion": "gollek.checkpoint-lineage-health-validation.v1"
+    }
+  ],
+  "kind": "checkpoint-lineage-health-schema-lock",
+  "lockSchemaId": "https://gollek.ai/schemas/training/checkpoint-lineage-health-schema-lock.v1.schema.json",
+  "schemaCount": 2,
+  "schemaSetByteCount": 19022,
+  "schemaSetSha256": "0ee19c061c152241861d69323dee15fb539274b41c3121118c0295b7e49ae60d",
+  "schemaVersion": "gollek.checkpoint-lineage-health-schema-lock.v1",
+  "summary": "checkpoint lineage health schema lock for 2 contract(s)"
+}

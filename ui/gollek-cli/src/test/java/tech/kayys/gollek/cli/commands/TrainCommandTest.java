@@ -22,6 +22,8 @@ import tech.kayys.gollek.ml.train.TrainingReportPortfolioArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifactManifest;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifactPackage;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBudgetGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportValidationArtifacts;
 
 class TrainCommandTest {
@@ -125,6 +127,163 @@ class TrainCommandTest {
         assertTrue(autoRefreshCaptured.out().contains("Type: smoke-runtime"));
         assertTrue(autoRefreshCaptured.out().contains("Smoke passed: PASS"));
         assertTrue(autoRefreshCaptured.out().contains("Markdown matches JSON: PASS"));
+    }
+
+    @Test
+    void runtimeInputGateWritesVerifiesAndRefreshesArtifacts() throws Exception {
+        Path report = writeRuntimeInputProfileReport("runtime-input-profile-report.json");
+        Path artifacts = tempDir.resolve("runtime-input-profile-artifacts");
+        Path gateJson = artifacts.resolve(TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JSON_FILE_NAME);
+        Path gateMarkdown = artifacts.resolve(TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_MARKDOWN_FILE_NAME);
+        Path gateJunit = artifacts.resolve(TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JUNIT_XML_FILE_NAME);
+
+        Captured<Integer> gateCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute(
+                        "runtime-input-gate",
+                        report.toString(),
+                        "--policy",
+                        "strict",
+                        "--output-dir",
+                        artifacts.toString()));
+
+        assertEquals(2, gateCaptured.value());
+        assertTrue(gateCaptured.out().contains("Runtime input-profile gate: FAIL"));
+        assertTrue(gateCaptured.out().contains("runtime-input-dominant-stage"));
+        assertTrue(gateCaptured.out().contains("runtime-input-train-validation-skew"));
+        assertTrue(gateCaptured.out().contains("runtime-input-train-prefetch-disabled"));
+        assertTrue(gateCaptured.out().contains("DataLoader.prefetch(2)"));
+        assertTrue(gateCaptured.out().contains("recommendedPrefetchBufferSize=2"));
+        assertTrue(gateCaptured.out().contains("trainLoaderPlan.prefetch.enabled=false"));
+        assertTrue(Files.exists(gateJson));
+        assertTrue(Files.exists(gateMarkdown));
+        assertTrue(Files.exists(gateJunit));
+        String gateJsonContent = Files.readString(gateJson, StandardCharsets.UTF_8);
+        assertTrue(gateJsonContent.contains("\"runtime-input-train-prefetch-disabled\""));
+        assertTrue(gateJsonContent.contains("\"recommendedPrefetchBufferSize\":2"));
+        assertTrue(gateJsonContent.contains("\"trainLoaderPlan.prefetch.enabled\":false"));
+        assertTrue(Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("# Runtime Input Profile Gate"));
+        assertTrue(Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("DataLoader.prefetch(2)"));
+        assertTrue(Files.readString(gateJunit, StandardCharsets.UTF_8)
+                .contains("gollek.training.runtime.input"));
+        assertTrue(Files.readString(gateJunit, StandardCharsets.UTF_8)
+                .contains("runtime-input-train-prefetch-disabled"));
+
+        Captured<Integer> verifyCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("verify-runtime-input-gate-artifacts", artifacts.toString()));
+
+        assertEquals(0, verifyCaptured.value());
+        assertTrue(verifyCaptured.out().contains("Runtime input-profile gate artifact verification: PASS"));
+        assertTrue(verifyCaptured.out().contains("Gate passed: FAIL"));
+        assertTrue(verifyCaptured.out().contains("Markdown matches JSON: PASS"));
+
+        Captured<Integer> autoVerifyCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("verify-artifacts", artifacts.toString()));
+
+        assertEquals(0, autoVerifyCaptured.value());
+        assertTrue(autoVerifyCaptured.out().contains("Training artifact verification: PASS"));
+        assertTrue(autoVerifyCaptured.out().contains("Type: runtime-input-gate"));
+        assertTrue(autoVerifyCaptured.out().contains("Gate passed: FAIL"));
+
+        Files.writeString(gateMarkdown, "# stale runtime input gate\n");
+        Files.writeString(gateJunit, "<stale></stale>\n");
+
+        Captured<Integer> refreshCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("refresh-runtime-input-gate-artifacts", artifacts.toString()));
+
+        assertEquals(0, refreshCaptured.value());
+        assertTrue(refreshCaptured.out().contains("Runtime input-profile gate artifacts refreshed: PASS"));
+        assertTrue(refreshCaptured.out().contains("Markdown matches JSON: PASS"));
+        assertTrue(Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("# Runtime Input Profile Gate"));
+
+        Files.writeString(gateMarkdown, "# stale runtime input gate again\n");
+
+        Captured<Integer> autoRefreshCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("refresh-artifacts", artifacts.toString()));
+
+        assertEquals(0, autoRefreshCaptured.value());
+        assertTrue(autoRefreshCaptured.out().contains("Training artifacts refreshed: PASS"));
+        assertTrue(autoRefreshCaptured.out().contains("Type: runtime-input-gate"));
+        assertTrue(autoRefreshCaptured.out().contains("Markdown matches JSON: PASS"));
+        assertTrue(!Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("stale runtime input gate again"));
+    }
+
+    @Test
+    void runtimeProfileBudgetGateWritesVerifiesAndRefreshesArtifacts() throws Exception {
+        Path report = writeRuntimeProfileBudgetReport("runtime-profile-budget-report.json");
+        Path artifacts = tempDir.resolve("runtime-profile-budget-artifacts");
+        Path gateJson = artifacts.resolve(TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JSON_FILE_NAME);
+        Path gateMarkdown = artifacts.resolve(TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_MARKDOWN_FILE_NAME);
+        Path gateJunit = artifacts.resolve(TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JUNIT_XML_FILE_NAME);
+
+        Captured<Integer> gateCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute(
+                        "runtime-profile-budget-gate",
+                        report.toString(),
+                        "--max-primary-group-percent",
+                        "80",
+                        "--max-primary-hotspot-percent",
+                        "60",
+                        "--max-primary-hotspot-ms",
+                        "250",
+                        "--output-dir",
+                        artifacts.toString()));
+
+        assertEquals(2, gateCaptured.value());
+        assertTrue(gateCaptured.out().contains("Runtime profile budget gate: FAIL"));
+        assertTrue(gateCaptured.out().contains("runtime-profile-primary-group-budget"));
+        assertTrue(gateCaptured.out().contains("runtime-profile-primary-hotspot-millis-budget"));
+        assertTrue(Files.exists(gateJson));
+        assertTrue(Files.exists(gateMarkdown));
+        assertTrue(Files.exists(gateJunit));
+        assertTrue(Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("# Runtime Profile Budget Gate"));
+        assertTrue(Files.readString(gateJunit, StandardCharsets.UTF_8)
+                .contains("gollek.training.runtime.profile"));
+
+        Captured<Integer> verifyCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("verify-runtime-profile-budget-gate-artifacts", artifacts.toString()));
+
+        assertEquals(0, verifyCaptured.value());
+        assertTrue(verifyCaptured.out().contains("Runtime profile budget gate artifact verification: PASS"));
+        assertTrue(verifyCaptured.out().contains("Gate passed: FAIL"));
+        assertTrue(verifyCaptured.out().contains("Markdown matches JSON: PASS"));
+
+        Captured<Integer> autoVerifyCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("verify-artifacts", artifacts.toString()));
+
+        assertEquals(0, autoVerifyCaptured.value());
+        assertTrue(autoVerifyCaptured.out().contains("Training artifact verification: PASS"));
+        assertTrue(autoVerifyCaptured.out().contains("Type: runtime-profile-budget-gate"));
+        assertTrue(autoVerifyCaptured.out().contains("Gate passed: FAIL"));
+
+        Files.writeString(gateMarkdown, "# stale runtime profile budget gate\n");
+        Files.writeString(gateJunit, "<stale></stale>\n");
+
+        Captured<Integer> refreshCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("refresh-runtime-profile-budget-gate-artifacts", artifacts.toString()));
+
+        assertEquals(0, refreshCaptured.value());
+        assertTrue(refreshCaptured.out().contains("Training artifacts refreshed: PASS"));
+        assertTrue(refreshCaptured.out().contains("Type: runtime-profile-budget-gate"));
+        assertTrue(refreshCaptured.out().contains("Markdown matches JSON: PASS"));
+        assertTrue(Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("# Runtime Profile Budget Gate"));
+
+        Files.writeString(gateMarkdown, "# stale runtime profile budget gate again\n");
+
+        Captured<Integer> autoRefreshCaptured = captureOut(() -> new CommandLine(new TrainCommand())
+                .execute("refresh-artifacts", artifacts.toString()));
+
+        assertEquals(0, autoRefreshCaptured.value());
+        assertTrue(autoRefreshCaptured.out().contains("Training artifacts refreshed: PASS"));
+        assertTrue(autoRefreshCaptured.out().contains("Type: runtime-profile-budget-gate"));
+        assertTrue(autoRefreshCaptured.out().contains("Markdown matches JSON: PASS"));
+        assertTrue(!Files.readString(gateMarkdown, StandardCharsets.UTF_8)
+                .contains("stale runtime profile budget gate again"));
     }
 
     @Test
@@ -928,6 +1087,18 @@ class TrainCommandTest {
         return report;
     }
 
+    private Path writeRuntimeInputProfileReport(String fileName) throws Exception {
+        Path report = tempDir.resolve(fileName);
+        Files.writeString(report, runtimeInputProfileReport(), StandardCharsets.UTF_8);
+        return report;
+    }
+
+    private Path writeRuntimeProfileBudgetReport(String fileName) throws Exception {
+        Path report = tempDir.resolve(fileName);
+        Files.writeString(report, runtimeProfileBudgetReport(), StandardCharsets.UTF_8);
+        return report;
+    }
+
     private Path writeValidationArtifacts() throws Exception {
         Path report = writeReport("artifact-source.json", true);
         Path artifacts = tempDir.resolve("validation-artifacts-" + System.nanoTime());
@@ -1059,6 +1230,71 @@ class TrainCommandTest {
                 validationFields,
                 trainLoss,
                 historyValidationLoss);
+    }
+
+    private static String runtimeInputProfileReport() {
+        String report = canonicalReport(0.5, 0.55);
+        String metadata = """
+                  "metadata": {
+                    "runtimeProfile.input.train.iterator.count": 1,
+                    "runtimeProfile.input.train.iterator.totalMillis": 1.0,
+                    "runtimeProfile.input.train.hasNext.count": 10,
+                    "runtimeProfile.input.train.hasNext.totalMillis": 1.0,
+                    "runtimeProfile.input.train.next.count": 10,
+                    "runtimeProfile.input.train.next.totalMillis": 98.0,
+                    "runtimeProfile.input.validation.iterator.count": 1,
+                    "runtimeProfile.input.validation.iterator.totalMillis": 1.0,
+                    "runtimeProfile.input.validation.hasNext.count": 2,
+                    "runtimeProfile.input.validation.hasNext.totalMillis": 1.0,
+                    "runtimeProfile.input.validation.next.count": 2,
+                    "runtimeProfile.input.validation.next.totalMillis": 8.0,
+                    "trainLoaderPlan.batchCount": 4,
+                    "trainLoaderPlan.prefetch.enabled": false,
+                    "trainLoaderPlan.prefetch.maxBufferedItems": 0,
+                    "trainLoaderPlan.prefetch.summary": "prefetch[enabled=false]"
+                  }
+                """;
+        return report.replace("  \"metadata\": {}", metadata);
+    }
+
+    private static String runtimeProfileBudgetReport() {
+        String report = canonicalReport(0.5, 0.55);
+        String metadata = """
+                  "metadata": {
+                    "runtimeProfile.groupCount": 1,
+                    "runtimeProfile.primaryGroup.name": "input",
+                    "runtimeProfile.primaryGroup.totalMillis": 500.0,
+                    "runtimeProfile.primaryGroup.percentTotal": 86.0,
+                    "runtimeProfile.groups": [
+                      {
+                        "name": "input",
+                        "count": 12,
+                        "totalMillis": 500.0,
+                        "percentTotal": 86.0,
+                        "averageMillis": 41.667
+                      }
+                    ],
+                    "runtimeProfile.hotspotCount": 1,
+                    "runtimeProfile.primaryHotspot.phase": "input.train.next",
+                    "runtimeProfile.primaryHotspot.totalMillis": 320.0,
+                    "runtimeProfile.primaryHotspot.percentTotal": 72.0,
+                    "runtimeProfile.hotspots": [
+                      {
+                        "phase": "input.train.next",
+                        "count": 4,
+                        "totalMillis": 320.0,
+                        "percentTotal": 72.0,
+                        "averageMillis": 80.0
+                      }
+                    ],
+                    "runtimeProfile.input.train.iterator.totalMillis": 10.0,
+                    "runtimeProfile.input.train.hasNext.totalMillis": 20.0,
+                    "runtimeProfile.input.train.next.count": 4,
+                    "runtimeProfile.input.train.next.totalMillis": 320.0,
+                    "runtimeProfile.input.validation.next.totalMillis": 15.0
+                  }
+                """;
+        return report.replace("  \"metadata\": {}", metadata);
     }
 
     private static <T> Captured<T> captureOut(ThrowingSupplier<T> supplier) throws Exception {

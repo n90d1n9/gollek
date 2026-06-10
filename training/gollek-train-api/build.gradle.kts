@@ -68,6 +68,13 @@ tasks.jar {
     }
 }
 
+tasks.named<JavaCompile>("compileJava") {
+    // The estimator project is mounted under an aliased physical directory.
+    // Make the clean-build jar edge explicit so Gradle never races this compile
+    // against the jar materialization required by the compile classpath.
+    dependsOn(":ml:gollek-ml-estimator:jar")
+}
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }

@@ -54,6 +54,8 @@ final class TrainerThroughputStats {
         metadata.put(phase + "LabelElementCount", snapshot.labelElementCount());
         metadata.put(phase + "ComputeMillis", snapshot.computeMillis());
         metadata.put(phase + "SamplesPerSecond", snapshot.samplesPerSecond());
+        metadata.put(phase + "BatchesPerSecond", snapshot.batchesPerSecond());
+        metadata.put(phase + "AverageBatchMillis", snapshot.averageBatchMillis());
     }
 
     private static final class PhaseCounters {
@@ -98,6 +100,20 @@ record ThroughputSnapshot(
             return 0.0;
         }
         return sampleCount * 1_000_000_000.0 / computeNanos;
+    }
+
+    double batchesPerSecond() {
+        if (batchCount <= 0L || computeNanos <= 0L) {
+            return 0.0;
+        }
+        return batchCount * 1_000_000_000.0 / computeNanos;
+    }
+
+    double averageBatchMillis() {
+        if (batchCount <= 0L || computeNanos <= 0L) {
+            return 0.0;
+        }
+        return computeMillis() / batchCount;
     }
 
     boolean hasBatchesAndSamples() {

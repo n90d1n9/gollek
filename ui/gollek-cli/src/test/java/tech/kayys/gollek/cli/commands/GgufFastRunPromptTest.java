@@ -59,6 +59,24 @@ class GgufFastRunPromptTest {
     }
 
     @Test
+    void runHeaderCanSuppressBannerForFullCliHandoffs() {
+        GgufFastRun.FastArgs args = GgufFastRun.FastArgs.parse(
+                new String[] {"run", "--no-banner", "--model", "b71c9d", "--prompt", "hello"});
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+        GgufFastRun.printRunHeader(
+                Path.of("/tmp/google__gemma-4-E2B-it-Q4_K_M.gguf"),
+                args,
+                new PrintStream(bytes, true, StandardCharsets.UTF_8));
+
+        String output = bytes.toString(StandardCharsets.UTF_8);
+        assertFalse(output.contains("_____"));
+        assertTrue(output.contains("Resolved local model index entry: /tmp/google__gemma-4-E2B-it-Q4_K_M.gguf"));
+        assertTrue(output.contains("Model: /tmp/google__gemma-4-E2B-it-Q4_K_M.gguf"));
+        assertTrue(output.contains("Provider: gguf, format=gguf"));
+    }
+
+    @Test
     void executionRouteNamesGgufDaemonAndDirectFastPath() {
         assertEquals(
                 "Execution route: gguf (backend=MTL0 (Apple M4)) [llama_cpp_gguf_daemon]",
@@ -161,7 +179,9 @@ class GgufFastRunPromptTest {
         assertTrue(output.contains("(10 sampled, 9 decoded)"));
         assertTrue(output.contains("  native sampler = reused"));
         assertTrue(output.contains("  native session = warm (exact)"));
-        assertTrue(output.contains("  native cache   = below-threshold, 0.00 ms (eager-short, repeat)"));
+        assertTrue(output.contains("  native cache   = below-threshold, 0.00 ms (eager-short, repeat)")
+                || output.contains("  native cache   = below-threshold, 0,00 ms (eager-short, repeat)"),
+                output);
         assertTrue(output.contains("  native output  = 42 bytes, java buffer = 65536 bytes, retries = 1"));
     }
 
@@ -837,6 +857,30 @@ class GgufFastRunPromptTest {
     }
 
     @Test
+    void runCommandCanSuppressDelegatedGgufBannerAfterFullCliHeader() {
+        RunCommand command = new RunCommand();
+        command.modelId = "b71c9d";
+        command.prompt = "where is jakarta";
+        command.providerId = "gguf";
+        command.maxTokens = 1;
+        command.temperature = 0.0;
+        command.topK = 1;
+        command.topP = 1.0;
+
+        assertArrayEquals(new String[] {
+                "run",
+                "--no-banner",
+                "--model", "b71c9d",
+                "--prompt", "where is jakarta",
+                "--max-tokens", "1",
+                "--temperature", "0.0",
+                "--top-k", "1",
+                "--top-p", "1.0",
+                "--provider", "gguf"
+        }, command.buildStandaloneGgufFastRunArgs(true));
+    }
+
+    @Test
     void runCommandDoesNotStealGgufFileFromExplicitNonGgufProvider() {
         RunCommand command = new RunCommand();
         command.modelFile = "/tmp/model.gguf";
@@ -867,6 +911,32 @@ class GgufFastRunPromptTest {
                 "--top-p", "1.0",
                 "--provider", "gguf"
         }, command.buildStandaloneGgufFastRunArgs());
+    }
+
+    @Test
+    void runCommandRouteReportModeDoesNotEnterStandaloneGgufFastPath() {
+        RunCommand command = new RunCommand();
+        command.modelFile = "/tmp/model.gguf";
+        command.prompt = "where is jakarta";
+        command.routeReportJson = true;
+
+        assertFalse(command.shouldTryStandaloneGgufFastPath());
+    }
+
+    @Test
+    void routeReportModeUsesLocalOnlyRepositoryResolutionByDefault() {
+        RunCommand command = new RunCommand();
+        command.routeReportJson = true;
+
+        assertFalse(command.shouldAllowRepositoryResolutionDuringRouteReport());
+
+        command.routeReportAllowPull = true;
+
+        assertTrue(command.shouldAllowRepositoryResolutionDuringRouteReport());
+        assertEquals(0, RoutePreflightReport.exitCode("/tmp/model.gguf", "gguf", "gguf", true));
+        assertEquals(2, RoutePreflightReport.exitCode("/tmp/model.gguf", null, "gguf", true));
+        assertEquals(2, RoutePreflightReport.exitCode(null, "gguf", "gguf", true));
+        assertEquals(0, RoutePreflightReport.exitCode(null, null, null, false));
     }
 
     @Test

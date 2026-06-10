@@ -7,7 +7,6 @@ package tech.kayys.gollek.safetensor.engine.forward;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelOps;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
-import tech.kayys.gollek.safetensor.engine.generation.kv.ForwardWorkspace;
 import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
@@ -99,45 +98,59 @@ final class DirectForwardPerLayerInputs {
                 && resolvedWeights.pleProjectionNorm() != null;
     }
 
-    static void applyResidual(MemorySegment hiddenSeg, long[] hiddenShape, int seqLen,
-            ModelConfig config, ModelArchitecture arch, ResolvedLayerWeights layerWeights,
-            AccelTensor perLayerInput, ForwardWorkspace ws,
-            boolean useMetalElementwise, boolean useNativeElementwiseAdd, boolean addOneRmsNorm,
-            DirectForwardRuntimeContext runtime, DirectForwardOperators operators) {
+    static void applyResidual(DirectForwardPerLayerResidualRequest request) {
+        if (request == null) {
+            return;
+        }
+        AccelTensor perLayerInput = request.perLayerInput();
         if (perLayerInput == null) {
             return;
         }
 
-        AccelTensor gateWeight = layerWeights.perLayerInputGateWeight();
-        AccelTensor projectionWeight = layerWeights.perLayerProjectionWeight();
-        AccelTensor normWeight = layerWeights.postPerLayerInputNormWeight();
-        if (gateWeight == null || projectionWeight == null || normWeight == null) {
+        DirectForwardPerLayerResidualWeights weights = request.weights();
+        if (weights == null || !weights.complete()) {
             return;
         }
 
-        AccelTensor hidden = AccelTensor.view(hiddenSeg, hiddenShape);
-        AccelTensor gate = operators.linear(hidden, gateWeight, null, "per_layer_gate", config);
+        AccelTensor hidden = AccelTensor.view(request.hiddenSeg(), request.hiddenShape());
+        AccelTensor gate = request.operators().linear(
+                hidden, weights.gateWeight(), null, "per_layer_gate", request.config());
         hidden.close();
 
-        AccelTensor mixed = activationMultiply(gate, perLayerInput, arch, ws, useMetalElementwise,
-                runtime);
+        AccelTensor mixed = activationMultiply(gate, perLayerInput, request);
         gate.close();
 
-        AccelTensor projected = operators.linear(mixed, projectionWeight, null, "per_layer_projection", config);
+        AccelTensor projected = request.operators().linear(
+                mixed, weights.projectionWeight(), null, "per_layer_projection", request.config());
         mixed.close();
 
         AccelTensor normed;
-        if (useMetalElementwise && ws != null) {
-            normed = AccelTensor.view(ws.getNormedFfnSeg(), hiddenShape);
-            DirectForwardElementwiseOps.rmsNormRowsMetal(runtime.metalBinding(), normed.dataPtr(), projected.dataPtr(),
-                    normWeight.dataPtr(), seqLen, config.hiddenSize(), (float) config.rmsNormEps(), addOneRmsNorm);
+        if (request.useMetalElementwise() && request.workspace() != null) {
+            normed = AccelTensor.view(request.workspace().getNormedFfnSeg(), request.hiddenShape());
+            DirectForwardElementwiseOps.rmsNormRowsMetal(
+                    request.runtime().metalBinding(),
+                    normed.dataPtr(),
+                    projected.dataPtr(),
+                    weights.normWeight().dataPtr(),
+                    request.seqLen(),
+                    request.config().hiddenSize(),
+                    (float) request.config().rmsNormEps(),
+                    request.addOneRmsNorm());
         } else {
-            normed = AccelOps.rmsNorm(projected, normWeight, config.rmsNormEps(), addOneRmsNorm);
+            normed = AccelOps.rmsNorm(projected, weights.normWeight(), request.config().rmsNormEps(),
+                    request.addOneRmsNorm());
         }
         projected.close();
 
-        DirectForwardElementwiseOps.residualAdd(runtime.log(), runtime.metalBinding(), hiddenSeg, normed, hiddenSeg,
-                seqLen, config.hiddenSize(), useNativeElementwiseAdd);
+        DirectForwardElementwiseOps.residualAdd(
+                request.runtime().log(),
+                request.runtime().metalBinding(),
+                request.hiddenSeg(),
+                normed,
+                request.hiddenSeg(),
+                request.seqLen(),
+                request.config().hiddenSize(),
+                request.useNativeElementwiseAdd());
         normed.close();
     }
 
@@ -153,12 +166,13 @@ final class DirectForwardPerLayerInputs {
     }
 
     private static AccelTensor activationMultiply(AccelTensor gate, AccelTensor perLayerInput,
-            ModelArchitecture arch, ForwardWorkspace ws, boolean useMetalElementwise,
-            DirectForwardRuntimeContext runtime) {
+            DirectForwardPerLayerResidualRequest request) {
+        ModelArchitecture arch = request.arch();
+        DirectForwardRuntimeContext runtime = request.runtime();
         long[] shape = gate.shape();
         int elements = Math.toIntExact(gate.numel());
-        if (useMetalElementwise && ws != null && runtime.metalBinding() != null) {
-            AccelTensor mixed = DirectForwardTensorOps.reusableWorkspaceView(ws.getCombinedSeg(), shape);
+        if (request.useMetalElementwise() && request.workspace() != null && runtime.metalBinding() != null) {
+            AccelTensor mixed = DirectForwardTensorOps.reusableWorkspaceView(request.workspace().getCombinedSeg(), shape);
             if (mixed == null) {
                 mixed = AccelTensor.zeros(shape);
             }

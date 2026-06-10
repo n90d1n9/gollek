@@ -15,6 +15,8 @@ record DirectForwardFfnFastPathOptions(
         boolean enableMetalGegluFusedFfn,
         Boolean enableMetalFusedFfnPrefill,
         int gemma4FusedFfnPrefillMinRows,
+        Boolean enableMetalMatvecFfnPrefillRows,
+        int metalMatvecFfnPrefillMaxRows,
         Boolean enableMetalGegluMatvecFfn,
         Boolean enableMetalSwigluMatvecFfn,
         Boolean enableMetalGateUpMatvecFfn,
@@ -36,6 +38,11 @@ record DirectForwardFfnFastPathOptions(
     static final String GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY =
             "gollek.safetensor.gemma4_fused_ffn_prefill_min_rows";
     private static final int DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS = 2;
+    static final String ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY =
+            "gollek.safetensor.enable_metal_matvec_ffn_prefill_rows";
+    static final String METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY =
+            "gollek.safetensor.metal_matvec_ffn_prefill_max_rows";
+    private static final int DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS = 16;
     static final String ENABLE_METAL_GEGLU_MATVEC_FFN_PROPERTY =
             "gollek.safetensor.enable_metal_geglu_matvec_ffn";
     static final String ENABLE_METAL_SWIGLU_MATVEC_FFN_PROPERTY =
@@ -57,6 +64,9 @@ record DirectForwardFfnFastPathOptions(
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY)),
                 Integer.getInteger(GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY,
                         DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS),
+                parseOptionalBoolean(System.getProperty(ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY)),
+                Integer.getInteger(METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY,
+                        DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_GEGLU_MATVEC_FFN_PROPERTY)),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_SWIGLU_MATVEC_FFN_PROPERTY)),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_GATE_UP_MATVEC_FFN_PROPERTY)),
@@ -67,7 +77,8 @@ record DirectForwardFfnFastPathOptions(
     static DirectForwardFfnFastPathOptions defaults() {
         return new DirectForwardFfnFastPathOptions(
                 null, false, false, false, false, null,
-                DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS, null, null, null, false, false);
+                DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS, null,
+                DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS, null, null, null, false, false);
     }
 
     DirectForwardFfnFastPathOptions withGemma4FusedHalfFfn(Boolean allow, boolean disable) {
@@ -79,6 +90,8 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
+                enableMetalMatvecFfnPrefillRows,
+                metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
                 enableMetalGateUpMatvecFfn,
@@ -96,6 +109,8 @@ record DirectForwardFfnFastPathOptions(
                 gegluEnabled,
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
+                enableMetalMatvecFfnPrefillRows,
+                metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
                 enableMetalGateUpMatvecFfn,
@@ -112,6 +127,26 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalGegluFusedFfn,
                 enabled,
                 minRows,
+                enableMetalMatvecFfnPrefillRows,
+                metalMatvecFfnPrefillMaxRows,
+                enableMetalGegluMatvecFfn,
+                enableMetalSwigluMatvecFfn,
+                enableMetalGateUpMatvecFfn,
+                disableMetalMatvecFfn,
+                validateMetalMatvecFfn);
+    }
+
+    DirectForwardFfnFastPathOptions withMetalMatvecFfnPrefillRows(Boolean enabled, int maxRows) {
+        return new DirectForwardFfnFastPathOptions(
+                gemma4FusedHalfFfnExplicit,
+                disableGemma4FusedHalfFfn,
+                disableMetalFusedFfn,
+                enableQwenMetalFusedFfn,
+                enableMetalGegluFusedFfn,
+                enableMetalFusedFfnPrefill,
+                gemma4FusedFfnPrefillMinRows,
+                enabled,
+                maxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
                 enableMetalGateUpMatvecFfn,
@@ -129,6 +164,8 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
+                enableMetalMatvecFfnPrefillRows,
+                metalMatvecFfnPrefillMaxRows,
                 gegluEnabled,
                 swigluEnabled,
                 gateUpEnabled,
@@ -145,6 +182,8 @@ record DirectForwardFfnFastPathOptions(
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
                 gemma4FusedFfnPrefillMinRows,
+                enableMetalMatvecFfnPrefillRows,
+                metalMatvecFfnPrefillMaxRows,
                 enableMetalGegluMatvecFfn,
                 enableMetalSwigluMatvecFfn,
                 enableMetalGateUpMatvecFfn,

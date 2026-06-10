@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["gpt_neo", "gpt-neo"]
+    "families": ["gpt_neo", "gpt-neo"],
+    "tokenizerKind": "hf-bpe"
   }
 }

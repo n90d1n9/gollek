@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["funnel"]
+    "families": ["funnel"],
+    "tokenizerKind": "wordpiece"
   }
 }

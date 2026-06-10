@@ -99,6 +99,23 @@ class DirectForwardFfnFastPathRoutingPolicyTest {
     }
 
     @Test
+    void rowPrefillMatvecFfnIsGemma4OnlyOptInAndBounded() {
+        DirectForwardFfnFastPathRoutingPolicy defaults = policy(DirectForwardFfnFastPathOptions.defaults());
+        DirectForwardFfnFastPathRoutingPolicy enabled = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalMatvecFfnPrefillRows(true, 4));
+        DirectForwardFfnFastPathRoutingPolicy disabled = policy(
+                DirectForwardFfnFastPathOptions.defaults().withMetalMatvecFfnPrefillRows(true, 4)
+                        .withMetalMatvecFfn(true, true, true, true));
+
+        assertFalse(defaults.shouldUseMetalMatvecFfnPrefillRows(gemma4(), 2));
+        assertFalse(enabled.shouldUseMetalMatvecFfnPrefillRows(gemma4(), 1));
+        assertTrue(enabled.shouldUseMetalMatvecFfnPrefillRows(gemma4(), 4));
+        assertFalse(enabled.shouldUseMetalMatvecFfnPrefillRows(gemma4(), 5));
+        assertFalse(enabled.shouldUseMetalMatvecFfnPrefillRows(generic(), 2));
+        assertFalse(disabled.shouldUseMetalMatvecFfnPrefillRows(gemma4(), 2));
+    }
+
+    @Test
     void validationCanBeForcedOrEnabledByTrace() {
         assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()).shouldValidateMetalMatvecFfn(false));
         assertTrue(policy(DirectForwardFfnFastPathOptions.defaults()).shouldValidateMetalMatvecFfn(true));

@@ -46,7 +46,7 @@ public final class Gollek {
     // ══════════════════════════════════════════════════════════════════════
 
     @SuppressWarnings("deprecation")
-    public static class DL extends GollekDlTrainingFacade {
+    public static class DL extends GollekDlQualityProfileFacade {
         public enum TrainingPreset {
             REGRESSION_MSE_ADAMW,
             REGRESSION_MSE_SGD,

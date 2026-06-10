@@ -3,7 +3,9 @@ package tech.kayys.gollek.ml.train;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -216,6 +218,25 @@ class TrainingLossFunctionTest {
     }
 
     @Test
+    void gollekDlFitClosesAnyAutoCloseableTrainLoaderAfterTraining() {
+        CloseableBatchLoader train = new CloseableBatchLoader(List.of(new Batch(
+                GradTensor.of(new float[] {1.0f, 3.0f}, 2, 1),
+                GradTensor.of(new float[] {2.0f, 1.0f}, 2, 1))));
+
+        TrainingSummary summary = Gollek.DL.fit(
+                new IdentityModel(),
+                train,
+                List.of(),
+                1,
+                0.01f,
+                Gollek.DL.TrainingPreset.REGRESSION_MSE_SGD,
+                Gollek.DL.trainingOptions().device("cpu").build());
+
+        assertEquals(2.5, summary.latestTrainLoss(), 1e-6);
+        assertTrue(train.closed);
+    }
+
+    @Test
     void gollekDlPoissonNllPresetTrainsLogRateOutputs() {
         List<Batch> train = List.of(new Batch(
                 GradTensor.of(new float[] {0.0f, 0.6931472f}, 2),
@@ -400,6 +421,28 @@ class TrainingLossFunctionTest {
         @Override
         public GradTensor forward(GradTensor input) {
             return input;
+        }
+    }
+
+    /**
+     * Test loader that proves trainer cleanup honors AutoCloseable rather than a concrete loader class.
+     */
+    private static final class CloseableBatchLoader implements Iterable<Batch>, AutoCloseable {
+        private final List<Batch> batches;
+        private boolean closed;
+
+        private CloseableBatchLoader(List<Batch> batches) {
+            this.batches = List.copyOf(batches);
+        }
+
+        @Override
+        public Iterator<Batch> iterator() {
+            return batches.iterator();
+        }
+
+        @Override
+        public void close() {
+            closed = true;
         }
     }
 

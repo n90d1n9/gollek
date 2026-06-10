@@ -314,6 +314,110 @@ static int gollek_metal_gated_ffn_matvec_half_impl(void* C,
     }
 }
 
+static int gollek_metal_gated_ffn_matvec_rows_bf16_impl(void* C,
+                           const void* A,
+                           const void* gateW,
+                           const void* upW,
+                           const void* downW,
+                           int M, int input_dim, int intermediate_dim, int output_dim,
+                           int activation_kind) {
+    GollekMetalPipelines* pipelines = gollek_metal_pipelines();
+    if (!g_initialized) return -1;
+    if (M <= 0 || input_dim <= 0 || intermediate_dim <= 0 || output_dim <= 0) return -2;
+    id<MTLComputePipelineState> pairPipeline = pipelines->matvec_bf16_rows_gated_pair_x4 != nil
+            ? pipelines->matvec_bf16_rows_gated_pair_x4
+            : pipelines->matvec_bf16_rows_gated_pair;
+    id<MTLComputePipelineState> downPipeline = pipelines->matvec_bf16_rows_x4 != nil
+            ? pipelines->matvec_bf16_rows_x4
+            : pipelines->matvec_bf16_rows;
+    if (pairPipeline == nil || downPipeline == nil) return -3;
+    if (pairPipeline.maxTotalThreadsPerThreadgroup < GOLLEK_MATVEC_THREADS_256
+            || downPipeline.maxTotalThreadsPerThreadgroup < GOLLEK_MATVEC_THREADS_256) {
+        return -3;
+    }
+    BOOL usePairX4 = pairPipeline == pipelines->matvec_bf16_rows_gated_pair_x4;
+    BOOL useDownX4 = downPipeline == pipelines->matvec_bf16_rows_x4;
+
+    @autoreleasepool {
+        size_t activation_bytes = (size_t)M * intermediate_dim * sizeof(float);
+        id<MTLBuffer> bufGate = nil;
+        id<MTLBuffer> bufUp = nil;
+        id<MTLBuffer> bufCombined = nil;
+        if (!ensure_swiglu_scratch(activation_bytes, &bufGate, &bufUp, &bufCombined)) {
+            return -4;
+        }
+
+        id<MTLBuffer> bufC = wrap_ptr(C, (size_t)M * output_dim * sizeof(float));
+        id<MTLBuffer> bufA = wrap_ptr((void*)A, (size_t)M * input_dim * sizeof(float));
+        id<MTLBuffer> bufGateW = wrap_weight_ptr(gateW, (size_t)intermediate_dim * input_dim * sizeof(uint16_t));
+        id<MTLBuffer> bufUpW = wrap_weight_ptr(upW, (size_t)intermediate_dim * input_dim * sizeof(uint16_t));
+        id<MTLBuffer> bufDownW = wrap_weight_ptr(downW, (size_t)output_dim * intermediate_dim * sizeof(uint16_t));
+        if (bufC == nil || bufA == nil || bufGateW == nil || bufUpW == nil || bufDownW == nil
+                || bufCombined == nil) {
+            return -4;
+        }
+
+        uint32_t rows = (uint32_t)M;
+        uint32_t inputK = (uint32_t)input_dim;
+        uint32_t interN = (uint32_t)intermediate_dim;
+        uint32_t outputN = (uint32_t)output_dim;
+        uint32_t activationKind = (uint32_t)activation_kind;
+        NSUInteger threads = GOLLEK_MATVEC_THREADS_256;
+
+        id<MTLCommandBuffer> cmd = [g_queue commandBuffer];
+
+        id<MTLComputeCommandEncoder> pairEnc = [cmd computeCommandEncoder];
+        [pairEnc setComputePipelineState:pairPipeline];
+        [pairEnc setBuffer:bufCombined offset:0 atIndex:0];
+        [pairEnc setBuffer:bufA offset:0 atIndex:1];
+        [pairEnc setBuffer:bufGateW offset:0 atIndex:2];
+        [pairEnc setBuffer:bufUpW offset:0 atIndex:3];
+        [pairEnc setBytes:&inputK length:sizeof(inputK) atIndex:4];
+        [pairEnc setBytes:&interN length:sizeof(interN) atIndex:5];
+        [pairEnc setBytes:&activationKind length:sizeof(activationKind) atIndex:6];
+        [pairEnc setBytes:&rows length:sizeof(rows) atIndex:7];
+        NSUInteger pairGroups = usePairX4
+                ? (((NSUInteger)intermediate_dim + 3u) / 4u)
+                : (NSUInteger)intermediate_dim;
+        [pairEnc dispatchThreadgroups:MTLSizeMake(pairGroups, (NSUInteger)M, 1)
+                 threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+        [pairEnc endEncoding];
+
+        id<MTLComputeCommandEncoder> downEnc = [cmd computeCommandEncoder];
+        [downEnc setComputePipelineState:downPipeline];
+        [downEnc setBuffer:bufC offset:0 atIndex:0];
+        [downEnc setBuffer:bufCombined offset:0 atIndex:1];
+        [downEnc setBuffer:bufDownW offset:0 atIndex:2];
+        [downEnc setBytes:&interN length:sizeof(interN) atIndex:3];
+        [downEnc setBytes:&outputN length:sizeof(outputN) atIndex:4];
+        [downEnc setBytes:&rows length:sizeof(rows) atIndex:5];
+        NSUInteger downGroups = useDownX4
+                ? (((NSUInteger)output_dim + 3u) / 4u)
+                : (NSUInteger)output_dim;
+        [downEnc dispatchThreadgroups:MTLSizeMake(downGroups, (NSUInteger)M, 1)
+                 threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+        [downEnc endEncoding];
+
+        [cmd commit];
+        [cmd waitUntilCompleted];
+        return ([cmd status] == MTLCommandBufferStatusCompleted) ? 0 : -1;
+    }
+}
+
+int gollek_metal_bf16_ffn_matvec_rows_variant(void) {
+    if (!g_initialized) return -1;
+    GollekMetalPipelines* pipelines = gollek_metal_pipelines();
+    if (pipelines->matvec_bf16_rows_gated_pair_x4 != nil
+            && pipelines->matvec_bf16_rows_x4 != nil) {
+        return 2;
+    }
+    if (pipelines->matvec_bf16_rows_gated_pair != nil
+            && pipelines->matvec_bf16_rows != nil) {
+        return 1;
+    }
+    return 0;
+}
+
 int gollek_metal_swiglu_ffn_matvec_half(void* C,
                            const void* A,
                            const void* gateW,
@@ -356,4 +460,24 @@ int gollek_metal_geglu_ffn_matvec_bf16(void* C,
     return gollek_metal_gated_ffn_matvec_half_impl(C, A, gateW, upW, downW,
             input_dim, intermediate_dim, output_dim, 1, 2,
             gollek_metal_pipelines()->gelu_ffn);
+}
+
+int gollek_metal_swiglu_ffn_matvec_rows_bf16(void* C,
+                           const void* A,
+                           const void* gateW,
+                           const void* upW,
+                           const void* downW,
+                           int M, int input_dim, int intermediate_dim, int output_dim) {
+    return gollek_metal_gated_ffn_matvec_rows_bf16_impl(C, A, gateW, upW, downW,
+            M, input_dim, intermediate_dim, output_dim, 1);
+}
+
+int gollek_metal_geglu_ffn_matvec_rows_bf16(void* C,
+                           const void* A,
+                           const void* gateW,
+                           const void* upW,
+                           const void* downW,
+                           int M, int input_dim, int intermediate_dim, int output_dim) {
+    return gollek_metal_gated_ffn_matvec_rows_bf16_impl(C, A, gateW, upW, downW,
+            M, input_dim, intermediate_dim, output_dim, 2);
 }

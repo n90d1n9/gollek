@@ -96,6 +96,7 @@ class DirectForwardMetalHalfLinearExecutionPlanTest {
     private static DirectForwardMetalCapabilities allCapabilities() {
         return new DirectForwardMetalCapabilities(
                 true, true, true, true, true, true, true, true, true, true,
-                true, true, true, true, true, true, true, true, true, true);
+                true, true, true, true, true, true, true, true, true, true,
+                true, true);
     }
 }

@@ -1,19 +1,13 @@
 package tech.kayys.gollek.ml.train;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * One-call packaging API for promotion gate artifacts plus their provenance manifest.
@@ -49,13 +43,6 @@ public final class TrainingReportPromotionGateArtifactPackage {
             "gollek.training.promotion.package.verification.evidence.v1";
     public static final String VERIFICATION_EVIDENCE_RECEIPT_FORMAT =
             "gollek.training.promotion.package.verification.evidence.receipt.v1";
-
-    private static final String REVIEW_JSON_ARTIFACT = "reviewJson";
-    private static final String REVIEW_MARKDOWN_ARTIFACT = "reviewMarkdown";
-    private static final String GATE_JSON_ARTIFACT = "json";
-    private static final String GATE_MARKDOWN_ARTIFACT = "markdown";
-    private static final String GATE_JUNIT_XML_ARTIFACT = "junitXml";
-    private static final String SOURCE_REPORT_ARTIFACT_PREFIX = "sourceReport.";
 
     private TrainingReportPromotionGateArtifactPackage() {
     }
@@ -392,11 +379,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (reportSha256 == null || reportSha256.isBlank()) {
                 throw new IllegalArgumentException("reportSha256 must not be blank");
             }
-            report = immutableMap(Objects.requireNonNull(report, "report must not be null"));
+            report = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(report, "report must not be null"));
         }
 
         public String format() {
-            return stringValue(report, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(report, "format").orElse("UNKNOWN");
         }
 
         public boolean passed() {
@@ -404,21 +392,25 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public Path packageDirectory() {
-            return objectValue(report, "inspection")
-                    .flatMap(inspection -> pathValue(inspection, "directory"))
+            return TrainingReportPromotionGateMapValues.objectValue(report, "inspection")
+                    .flatMap(inspection -> TrainingReportPromotionGateMapValues.pathValue(inspection, "directory"))
                     .orElse(null);
         }
 
         public Path manifestFile() {
-            return objectValue(report, "manifestVerification")
-                    .flatMap(manifest -> objectValue(manifest, "inspection"))
-                    .flatMap(inspection -> pathValue(inspection, "manifestFile"))
+            return TrainingReportPromotionGateMapValues.objectValue(report, "manifestVerification")
+                    .flatMap(manifest -> TrainingReportPromotionGateMapValues.objectValue(manifest, "inspection"))
+                    .flatMap(inspection -> TrainingReportPromotionGateMapValues.pathValue(
+                            inspection,
+                            "manifestFile"))
                     .orElse(null);
         }
 
         public String manifestSha256() {
-            return objectValue(report, "manifestVerification")
-                    .flatMap(manifest -> stringValue(manifest, "actualManifestSha256"))
+            return TrainingReportPromotionGateMapValues.objectValue(report, "manifestVerification")
+                    .flatMap(manifest -> TrainingReportPromotionGateMapValues.stringValue(
+                            manifest,
+                            "actualManifestSha256"))
                     .orElse(null);
         }
 
@@ -733,11 +725,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (receiptSha256 == null || receiptSha256.isBlank()) {
                 throw new IllegalArgumentException("receiptSha256 must not be blank");
             }
-            receipt = immutableMap(Objects.requireNonNull(receipt, "receipt must not be null"));
+            receipt = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(receipt, "receipt must not be null"));
         }
 
         public String format() {
-            return stringValue(receipt, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "format").orElse("UNKNOWN");
         }
 
         public boolean passed() {
@@ -745,31 +738,31 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public Path reportDirectory() {
-            return pathValue(receipt, "reportDirectory").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "reportDirectory").orElse(null);
         }
 
         public Path jsonReportFile() {
-            return pathValue(receipt, "jsonReportFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "jsonReportFile").orElse(null);
         }
 
         public String jsonReportSha256() {
-            return stringValue(receipt, "jsonReportSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "jsonReportSha256").orElse(null);
         }
 
         public Path markdownFile() {
-            return pathValue(receipt, "markdownFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "markdownFile").orElse(null);
         }
 
         public String markdownSha256() {
-            return stringValue(receipt, "markdownSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "markdownSha256").orElse(null);
         }
 
         public Path junitXmlFile() {
-            return pathValue(receipt, "junitXmlFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "junitXmlFile").orElse(null);
         }
 
         public String junitXmlSha256() {
-            return stringValue(receipt, "junitXmlSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "junitXmlSha256").orElse(null);
         }
 
         public Map<String, Object> toMap() {
@@ -889,19 +882,20 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (indexSha256 == null || indexSha256.isBlank()) {
                 throw new IllegalArgumentException("indexSha256 must not be blank");
             }
-            index = immutableMap(Objects.requireNonNull(index, "index must not be null"));
+            index = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(index, "index must not be null"));
         }
 
         public String format() {
-            return stringValue(index, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(index, "format").orElse("UNKNOWN");
         }
 
         public Path packageDirectory() {
-            return pathValue(index, "packageDirectory").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(index, "packageDirectory").orElse(null);
         }
 
         public Path reportDirectory() {
-            return pathValue(index, "reportDirectory").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(index, "reportDirectory").orElse(null);
         }
 
         public boolean passed() {
@@ -913,11 +907,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public String decisionStatus() {
-            return stringValue(index, "decisionStatus").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(index, "decisionStatus").orElse("UNKNOWN");
         }
 
         public Optional<String> decisionCandidate() {
-            return stringValue(index, "decisionCandidate");
+            return TrainingReportPromotionGateMapValues.stringValue(index, "decisionCandidate");
         }
 
         public Map<String, Object> toMap() {
@@ -1031,11 +1025,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (receiptSha256 == null || receiptSha256.isBlank()) {
                 throw new IllegalArgumentException("receiptSha256 must not be blank");
             }
-            receipt = immutableMap(Objects.requireNonNull(receipt, "receipt must not be null"));
+            receipt = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(receipt, "receipt must not be null"));
         }
 
         public String format() {
-            return stringValue(receipt, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "format").orElse("UNKNOWN");
         }
 
         public boolean passed() {
@@ -1043,11 +1038,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public Path indexFile() {
-            return pathValue(receipt, "indexFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "indexFile").orElse(null);
         }
 
         public String indexSha256() {
-            return stringValue(receipt, "indexSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "indexSha256").orElse(null);
         }
 
         public Map<String, Object> toMap() {
@@ -1204,11 +1199,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (reportSha256 == null || reportSha256.isBlank()) {
                 throw new IllegalArgumentException("reportSha256 must not be blank");
             }
-            report = immutableMap(Objects.requireNonNull(report, "report must not be null"));
+            report = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(report, "report must not be null"));
         }
 
         public String format() {
-            return stringValue(report, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(report, "format").orElse("UNKNOWN");
         }
 
         public boolean passed() {
@@ -1216,11 +1212,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public Path indexFile() {
-            return pathValue(report, "indexFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(report, "indexFile").orElse(null);
         }
 
         public String indexSha256() {
-            return stringValue(report, "indexSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(report, "indexSha256").orElse(null);
         }
 
         public Map<String, Object> toMap() {
@@ -1325,19 +1321,20 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (evidenceSha256 == null || evidenceSha256.isBlank()) {
                 throw new IllegalArgumentException("evidenceSha256 must not be blank");
             }
-            evidence = immutableMap(Objects.requireNonNull(evidence, "evidence must not be null"));
+            evidence = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(evidence, "evidence must not be null"));
         }
 
         public String format() {
-            return stringValue(evidence, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(evidence, "format").orElse("UNKNOWN");
         }
 
         public Path packageDirectory() {
-            return pathValue(evidence, "packageDirectory").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(evidence, "packageDirectory").orElse(null);
         }
 
         public Path reportDirectory() {
-            return pathValue(evidence, "reportDirectory").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(evidence, "reportDirectory").orElse(null);
         }
 
         public boolean passed() {
@@ -1349,11 +1346,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public String decisionStatus() {
-            return stringValue(evidence, "decisionStatus").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(evidence, "decisionStatus").orElse("UNKNOWN");
         }
 
         public Optional<String> decisionCandidate() {
-            return stringValue(evidence, "decisionCandidate");
+            return TrainingReportPromotionGateMapValues.stringValue(evidence, "decisionCandidate");
         }
 
         public Map<String, Object> toMap() {
@@ -1471,11 +1468,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             if (receiptSha256 == null || receiptSha256.isBlank()) {
                 throw new IllegalArgumentException("receiptSha256 must not be blank");
             }
-            receipt = immutableMap(Objects.requireNonNull(receipt, "receipt must not be null"));
+            receipt = TrainingReportPromotionGateMapValues.immutableMap(
+                    Objects.requireNonNull(receipt, "receipt must not be null"));
         }
 
         public String format() {
-            return stringValue(receipt, "format").orElse("UNKNOWN");
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "format").orElse("UNKNOWN");
         }
 
         public boolean passed() {
@@ -1483,11 +1481,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
         }
 
         public Path evidenceFile() {
-            return pathValue(receipt, "evidenceFile").orElse(null);
+            return TrainingReportPromotionGateMapValues.pathValue(receipt, "evidenceFile").orElse(null);
         }
 
         public String evidenceSha256() {
-            return stringValue(receipt, "evidenceSha256").orElse(null);
+            return TrainingReportPromotionGateMapValues.stringValue(receipt, "evidenceSha256").orElse(null);
         }
 
         public Map<String, Object> toMap() {
@@ -1755,33 +1753,7 @@ public final class TrainingReportPromotionGateArtifactPackage {
             TrainingReportPromotionGate.Result result,
             Options options,
             Instant generatedAt) throws IOException {
-        Path resolvedDirectory = Objects.requireNonNull(directory, "directory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        TrainingReportPromotionGate.Result resolvedResult =
-                Objects.requireNonNull(result, "result must not be null");
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-
-        TrainingReportPromotionArtifacts.ArtifactBundle review = TrainingReportPromotionArtifacts.write(
-                resolvedDirectory,
-                resolvedResult.review(),
-                resolvedOptions.review());
-        TrainingReportPromotionGateArtifacts.ArtifactBundle artifacts =
-                TrainingReportPromotionGateArtifacts.write(
-                        resolvedDirectory,
-                        resolvedResult,
-                        resolvedOptions.artifacts());
-        Map<String, Path> packageArtifacts = packageArtifactPaths(
-                review,
-                snapshotSourceReports(resolvedDirectory, review));
-        TrainingReportPromotionGateArtifactManifest.ManifestBundle manifest =
-                TrainingReportPromotionGateArtifactManifest.write(
-                        artifacts,
-                        packageArtifacts,
-                        resolvedOptions.manifest(),
-                        resolvedGeneratedAt);
-        return new PackageBundle(resolvedDirectory, review, artifacts, manifest);
+        return TrainingReportPromotionGatePackageWorkflow.write(directory, result, options, generatedAt);
     }
 
     public static VerifiedPackageBundle writeAndVerify(
@@ -1818,8 +1790,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Options options,
             Instant generatedAt,
             Path reportDirectory) throws IOException {
-        PackageBundle bundle = write(directory, result, options, generatedAt);
-        return verifyPackage(bundle, reportDirectory);
+        return TrainingReportPromotionGatePackageWorkflow.writeAndVerify(
+                directory,
+                result,
+                options,
+                generatedAt,
+                reportDirectory);
     }
 
     public static PackageBundle run(
@@ -1837,19 +1813,13 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path outputDirectory,
             Options options,
             Instant generatedAt) throws IOException {
-        Path resolvedOutputDirectory = Objects.requireNonNull(outputDirectory, "outputDirectory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        TrainingReportPromotionGate.Request request = new TrainingReportPromotionGate.Request(
+        return TrainingReportPromotionGatePackageWorkflow.run(
                 reportFiles,
                 baselineName,
                 policy,
-                resolvedOutputDirectory,
-                resolvedOptions.review());
-        TrainingReportPromotionGate.Result result = TrainingReportPromotionGate.evaluate(request);
-        return write(resolvedOutputDirectory, result, resolvedOptions, resolvedGeneratedAt);
+                outputDirectory,
+                options,
+                generatedAt);
     }
 
     public static VerifiedPackageBundle runAndVerify(
@@ -1892,8 +1862,14 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Options options,
             Instant generatedAt,
             Path reportDirectory) throws IOException {
-        PackageBundle bundle = run(reportFiles, baselineName, policy, outputDirectory, options, generatedAt);
-        return verifyPackage(bundle, reportDirectory);
+        return TrainingReportPromotionGatePackageWorkflow.runAndVerify(
+                reportFiles,
+                baselineName,
+                policy,
+                outputDirectory,
+                options,
+                generatedAt,
+                reportDirectory);
     }
 
     public static PackageBundle runWithSeverity(
@@ -1917,19 +1893,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path outputDirectory,
             Options options,
             Instant generatedAt) throws IOException {
-        Path resolvedOutputDirectory = Objects.requireNonNull(outputDirectory, "outputDirectory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        TrainingReportDiagnostics.Severity resolvedSeverity = Objects.requireNonNull(
-                maxAllowedDiagnosticSeverity,
-                "maxAllowedDiagnosticSeverity must not be null");
-        TrainingReportPortfolio.PromotionPolicy policy = TrainingReportPortfolio.PromotionPolicy.defaultPolicy()
-                .withMaxCandidateDiagnosticSeverity(resolvedSeverity);
-        return run(
+        return TrainingReportPromotionGatePackageWorkflow.runWithSeverity(
                 reportFiles,
                 baselineName,
-                policy,
-                resolvedOutputDirectory,
+                maxAllowedDiagnosticSeverity,
+                outputDirectory,
                 options,
                 generatedAt);
     }
@@ -1974,14 +1942,14 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Options options,
             Instant generatedAt,
             Path reportDirectory) throws IOException {
-        PackageBundle bundle = runWithSeverity(
+        return TrainingReportPromotionGatePackageWorkflow.runWithSeverityAndVerify(
                 reportFiles,
                 baselineName,
                 maxAllowedDiagnosticSeverity,
                 outputDirectory,
                 options,
-                generatedAt);
-        return verifyPackage(bundle, reportDirectory);
+                generatedAt,
+                reportDirectory);
     }
 
     public static PackageInspection read(Path directory) throws IOException {
@@ -1989,21 +1957,12 @@ public final class TrainingReportPromotionGateArtifactPackage {
     }
 
     public static PackageInspection read(Path directory, Options options) throws IOException {
-        Path resolvedDirectory = Objects.requireNonNull(directory, "directory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest =
-                TrainingReportPromotionGateArtifactManifest.read(
-                        resolvedDirectory,
-                        resolvedOptions.manifest());
-        return readFromManifest(manifest, resolvedOptions);
+        return TrainingReportPromotionGatePackageWorkflow.read(directory, options);
     }
 
     public static TrainingReportPromotionGateArtifactManifest.ManifestVerification verify(
             PackageBundle bundle) throws IOException {
-        Objects.requireNonNull(bundle, "bundle must not be null");
-        return TrainingReportPromotionGateArtifactManifest.verify(bundle.manifest());
+        return TrainingReportPromotionGatePackageWorkflow.verify(bundle);
     }
 
     public static TrainingReportPromotionGateArtifactManifest.ManifestVerification verify(Path directory)
@@ -2021,73 +1980,21 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path directory,
             String expectedManifestSha256,
             Options options) throws IOException {
-        Path resolvedDirectory = Objects.requireNonNull(directory, "directory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        return TrainingReportPromotionGateArtifactManifest.verify(
-                resolvedDirectory,
-                expectedManifestSha256,
-                resolvedOptions.manifest());
+        return TrainingReportPromotionGatePackageWorkflow.verify(directory, expectedManifestSha256, options);
     }
 
     public static PackageVerification verifyComplete(PackageBundle bundle) throws IOException {
-        Objects.requireNonNull(bundle, "bundle must not be null");
-        TrainingReportPromotionGateArtifactManifest.ManifestVerification manifestVerification = verify(bundle);
-        PackageInspection inspection = readFromManifest(manifestVerification.inspection(), Options.defaults());
-        SourceSnapshotVerification sourceSnapshotVerification = verifySourceReportSnapshots(inspection);
-        return packageVerification(inspection, manifestVerification, sourceSnapshotVerification);
+        return TrainingReportPromotionGatePackageWorkflow.verifyComplete(bundle);
     }
 
     public static VerifiedPackageBundle verifyPackage(PackageBundle bundle) throws IOException {
-        Objects.requireNonNull(bundle, "bundle must not be null");
-        return verifyPackage(bundle, bundle.directory());
+        return TrainingReportPromotionGatePackageWorkflow.verifyPackage(bundle);
     }
 
     public static VerifiedPackageBundle verifyPackage(
             PackageBundle bundle,
             Path reportDirectory) throws IOException {
-        PackageBundle resolvedBundle = Objects.requireNonNull(bundle, "bundle must not be null");
-        PackageVerification verification = verifyComplete(resolvedBundle);
-        VerificationReportBundle reports = writeVerificationReports(reportDirectory, verification);
-        VerificationReportBundleReceipt reportBundleReceipt = verifyVerificationReportBundleAndWriteReceipt(
-                reports.directory(),
-                reports.json().reportSha256(),
-                defaultVerificationReportBundleReceiptFile(reports.directory()));
-        VerifiedPackageBundle verifiedPackage = new VerifiedPackageBundle(
-                resolvedBundle,
-                reports,
-                reportBundleReceipt);
-        VerificationIndex index = writeVerificationIndex(
-                defaultVerificationIndexFile(reports.directory()),
-                verifiedPackage);
-        VerificationIndexReceipt receipt = verifyVerificationIndexAndWriteReceipt(
-                index.indexFile(),
-                index.indexSha256(),
-                defaultVerificationIndexReceiptFile(reports.directory()));
-        VerificationIndexPackageAuditReport packageAuditReport = auditVerificationIndexPackageAndWriteReport(
-                index.indexFile(),
-                index.indexSha256(),
-                defaultVerificationIndexPackageAuditFile(reports.directory()));
-        VerifiedPackageBundle verifiedPackageWithAudit =
-                new VerifiedPackageBundle(resolvedBundle, reports, reportBundleReceipt, index, receipt,
-                        packageAuditReport);
-        VerificationEvidenceManifest evidence = writeVerificationEvidenceManifest(
-                defaultVerificationEvidenceFile(reports.directory()),
-                verifiedPackageWithAudit);
-        VerificationEvidenceReceipt evidenceReceipt = verifyVerificationEvidenceManifestAndWriteReceipt(
-                evidence.evidenceFile(),
-                evidence.evidenceSha256(),
-                defaultVerificationEvidenceReceiptFile(reports.directory()));
-        return new VerifiedPackageBundle(
-                resolvedBundle,
-                reports,
-                reportBundleReceipt,
-                index,
-                receipt,
-                packageAuditReport,
-                evidence,
-                evidenceReceipt);
+        return TrainingReportPromotionGatePackageWorkflow.verifyPackage(bundle, reportDirectory);
     }
 
     public static PackageRefresh refreshComplete(Path directory) throws IOException {
@@ -2105,40 +2012,11 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Options options,
             Instant generatedAt,
             Path reportDirectory) throws IOException {
-        Path resolvedDirectory = Objects.requireNonNull(directory, "directory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        Path resolvedReportDirectory = Objects.requireNonNull(reportDirectory, "reportDirectory must not be null")
-                .toAbsolutePath()
-                .normalize();
-
-        TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest =
-                TrainingReportPromotionGateArtifactManifest.read(
-                        resolvedDirectory,
-                        resolvedOptions.manifest());
-        verifyNonRefreshableManifestArtifacts(
-                manifest,
-                Set.of(GATE_MARKDOWN_ARTIFACT, GATE_JUNIT_XML_ARTIFACT));
-        TrainingReportPromotionGateArtifacts.ArtifactInspection artifacts =
-                TrainingReportPromotionGateArtifacts.refreshDerivedFiles(
-                        requiredManifestArtifact(manifest, GATE_JSON_ARTIFACT).file(),
-                        requiredManifestArtifact(manifest, GATE_MARKDOWN_ARTIFACT).file(),
-                        requiredManifestArtifact(manifest, GATE_JUNIT_XML_ARTIFACT).file());
-        TrainingReportPromotionGateArtifactManifest.ManifestInspection refreshedManifest =
-                TrainingReportPromotionGateArtifactManifest.refresh(manifest, resolvedGeneratedAt);
-        PackageVerification verification = verifyComplete(resolvedDirectory, null, resolvedOptions);
-        VerificationReportBundle reports = writeVerificationReports(resolvedReportDirectory, verification);
-        VerificationReportBundleVerification reportVerification =
-                verifyVerificationReportBundle(resolvedReportDirectory, reports.json().reportSha256());
-        return new PackageRefresh(
-                resolvedDirectory,
-                refreshedManifest,
-                artifacts,
-                verification,
-                reports,
-                reportVerification);
+        return TrainingReportPromotionGatePackageWorkflow.refreshComplete(
+                directory,
+                options,
+                generatedAt,
+                reportDirectory);
     }
 
     public static PackageVerification verifyComplete(Path directory) throws IOException {
@@ -2154,18 +2032,7 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path directory,
             String expectedManifestSha256,
             Options options) throws IOException {
-        Path resolvedDirectory = Objects.requireNonNull(directory, "directory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        TrainingReportPromotionGateArtifactManifest.ManifestVerification manifestVerification =
-                TrainingReportPromotionGateArtifactManifest.verify(
-                        resolvedDirectory,
-                        expectedManifestSha256,
-                        resolvedOptions.manifest());
-        PackageInspection inspection = readFromManifest(manifestVerification.inspection(), resolvedOptions);
-        SourceSnapshotVerification sourceSnapshotVerification = verifySourceReportSnapshots(inspection);
-        return packageVerification(inspection, manifestVerification, sourceSnapshotVerification);
+        return TrainingReportPromotionGatePackageWorkflow.verifyComplete(directory, expectedManifestSha256, options);
     }
 
     public static VerificationReport verifyCompleteAndWriteReport(Path directory) throws IOException {
@@ -2335,19 +2202,9 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationReport writeVerificationReport(
             Path reportFile,
             PackageVerification verification) throws IOException {
-        Path resolvedReportFile = Objects.requireNonNull(reportFile, "reportFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedReportFile,
-                TrainerJson.toJson(verificationReportMap(resolvedVerification, Instant.now())) + "\n");
-        return new VerificationReport(
-                resolvedReportFile,
-                TrainerCheckpointIO.sha256Hex(resolvedReportFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationReport(
+                reportFile,
+                verification);
     }
 
     public static VerificationReportInspection readVerificationReport(Path reportFile) throws IOException {
@@ -2367,57 +2224,25 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationMarkdownReport writeVerificationMarkdownReport(
             Path markdownFile,
             PackageVerification verification) throws IOException {
-        Path resolvedMarkdownFile = Objects.requireNonNull(markdownFile, "markdownFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedMarkdownFile,
-                renderVerificationMarkdown(resolvedVerification));
-        return new VerificationMarkdownReport(
-                resolvedMarkdownFile,
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationMarkdownReport(
+                markdownFile,
+                verification);
     }
 
     public static VerificationJUnitXmlReport writeVerificationJUnitXmlReport(
             Path junitXmlFile,
             PackageVerification verification) throws IOException {
-        Path resolvedJunitXmlFile = Objects.requireNonNull(junitXmlFile, "junitXmlFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedJunitXmlFile,
-                renderVerificationJUnitXml(resolvedVerification));
-        return new VerificationJUnitXmlReport(
-                resolvedJunitXmlFile,
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationJUnitXmlReport(
+                junitXmlFile,
+                verification);
     }
 
     public static VerificationReportBundle writeVerificationReports(
             Path reportDirectory,
             PackageVerification verification) throws IOException {
-        Path resolvedReportDirectory = Objects.requireNonNull(reportDirectory, "reportDirectory must not be null")
-                .toAbsolutePath()
-                .normalize();
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        return new VerificationReportBundle(
-                resolvedReportDirectory,
-                writeVerificationReport(defaultVerificationReportFile(resolvedReportDirectory), resolvedVerification),
-                writeVerificationMarkdownReport(
-                        defaultVerificationMarkdownFile(resolvedReportDirectory),
-                        resolvedVerification),
-                writeVerificationJUnitXmlReport(
-                        defaultVerificationJunitXmlFile(resolvedReportDirectory),
-                        resolvedVerification));
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationReports(
+                reportDirectory,
+                verification);
     }
 
     public static VerificationReportBundleInspection readVerificationReportBundle(Path reportDirectory)
@@ -2441,19 +2266,9 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationReportBundleReceipt writeVerificationReportBundleReceipt(
             Path receiptFile,
             VerificationReportBundleVerification verification) throws IOException {
-        Path resolvedReceiptFile = Objects.requireNonNull(receiptFile, "receiptFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerificationReportBundleVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedReceiptFile,
-                TrainerJson.toJson(verificationReportBundleReceiptMap(resolvedVerification, Instant.now())) + "\n");
-        return new VerificationReportBundleReceipt(
-                resolvedReceiptFile,
-                TrainerCheckpointIO.sha256Hex(resolvedReceiptFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationReportBundleReceipt(
+                receiptFile,
+                verification);
     }
 
     public static VerificationReportBundleReceipt verifyVerificationReportBundleAndWriteReceipt(
@@ -2466,9 +2281,10 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path reportDirectory,
             String expectedJsonReportSha256,
             Path receiptFile) throws IOException {
-        VerificationReportBundleVerification verification =
-                verifyVerificationReportBundle(reportDirectory, expectedJsonReportSha256);
-        return writeVerificationReportBundleReceipt(receiptFile, verification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.verifyVerificationReportBundleAndWriteReceipt(
+                reportDirectory,
+                expectedJsonReportSha256,
+                receiptFile);
     }
 
     public static VerificationReportBundleReceiptInspection readVerificationReportBundleReceipt(Path receiptFile)
@@ -2492,18 +2308,9 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationIndex writeVerificationIndex(
             Path indexFile,
             VerifiedPackageBundle verifiedPackage) throws IOException {
-        Path resolvedIndexFile = Objects.requireNonNull(indexFile, "indexFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerifiedPackageBundle resolvedVerifiedPackage = Objects.requireNonNull(
-                verifiedPackage,
-                "verifiedPackage must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedIndexFile,
-                TrainerJson.toJson(verificationIndexMap(resolvedVerifiedPackage, Instant.now())) + "\n");
-        return new VerificationIndex(
-                resolvedIndexFile,
-                TrainerCheckpointIO.sha256Hex(resolvedIndexFile));
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationIndex(
+                indexFile,
+                verifiedPackage);
     }
 
     public static VerificationIndexInspection readVerificationIndex(Path indexFile) throws IOException {
@@ -2533,47 +2340,16 @@ public final class TrainingReportPromotionGateArtifactPackage {
 
     public static VerificationIndexPackageAudit auditVerificationIndexPackage(
             VerificationIndexVerification indexVerification) throws IOException {
-        VerificationIndexVerification resolvedIndexVerification = Objects.requireNonNull(
-                indexVerification,
-                "indexVerification must not be null");
-        List<String> failures = new ArrayList<>(resolvedIndexVerification.failures());
-        PackageVerification packageVerification = null;
-        Path packageDirectory = resolvedIndexVerification.inspection().packageDirectory();
-        if (packageDirectory == null) {
-            failures.add("Verification index package audit cannot resolve packageDirectory from "
-                    + resolvedIndexVerification.inspection().indexFile());
-        } else {
-            try {
-                packageVerification = verifyComplete(
-                        packageDirectory,
-                        indexedManifestSha256(resolvedIndexVerification.inspection()).orElse(null),
-                        Options.defaults());
-                failures.addAll(packageVerification.failures());
-            } catch (IOException error) {
-                failures.add("Complete package verification failed for "
-                        + packageDirectory + ": " + error.getMessage());
-            }
-        }
-        return new VerificationIndexPackageAudit(
-                resolvedIndexVerification,
-                packageVerification,
-                failures);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.auditVerificationIndexPackage(
+                indexVerification);
     }
 
     public static VerificationIndexPackageAuditReport writeVerificationIndexPackageAuditReport(
             Path reportFile,
             VerificationIndexPackageAudit audit) throws IOException {
-        Path resolvedReportFile = Objects.requireNonNull(reportFile, "reportFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerificationIndexPackageAudit resolvedAudit = Objects.requireNonNull(audit, "audit must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedReportFile,
-                TrainerJson.toJson(verificationIndexPackageAuditReportMap(resolvedAudit, Instant.now())) + "\n");
-        return new VerificationIndexPackageAuditReport(
-                resolvedReportFile,
-                TrainerCheckpointIO.sha256Hex(resolvedReportFile),
-                resolvedAudit);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationIndexPackageAuditReport(
+                reportFile,
+                audit);
     }
 
     public static VerificationIndexPackageAuditReportInspection readVerificationIndexPackageAuditReport(
@@ -2604,25 +2380,18 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path indexFile,
             String expectedIndexSha256,
             Path reportFile) throws IOException {
-        VerificationIndexPackageAudit audit = auditVerificationIndexPackage(indexFile, expectedIndexSha256);
-        return writeVerificationIndexPackageAuditReport(reportFile, audit);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.auditVerificationIndexPackageAndWriteReport(
+                indexFile,
+                expectedIndexSha256,
+                reportFile);
     }
 
     public static VerificationEvidenceManifest writeVerificationEvidenceManifest(
             Path evidenceFile,
             VerifiedPackageBundle verifiedPackage) throws IOException {
-        Path resolvedEvidenceFile = Objects.requireNonNull(evidenceFile, "evidenceFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerifiedPackageBundle resolvedVerifiedPackage = Objects.requireNonNull(
-                verifiedPackage,
-                "verifiedPackage must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedEvidenceFile,
-                TrainerJson.toJson(verificationEvidenceManifestMap(resolvedVerifiedPackage, Instant.now())) + "\n");
-        return new VerificationEvidenceManifest(
-                resolvedEvidenceFile,
-                TrainerCheckpointIO.sha256Hex(resolvedEvidenceFile));
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationEvidenceManifest(
+                evidenceFile,
+                verifiedPackage);
     }
 
     public static VerificationEvidenceInspection readVerificationEvidenceManifest(Path evidenceFile)
@@ -2644,19 +2413,9 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationEvidenceReceipt writeVerificationEvidenceReceipt(
             Path receiptFile,
             VerificationEvidenceVerification verification) throws IOException {
-        Path resolvedReceiptFile = Objects.requireNonNull(receiptFile, "receiptFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerificationEvidenceVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedReceiptFile,
-                TrainerJson.toJson(verificationEvidenceReceiptMap(resolvedVerification, Instant.now())) + "\n");
-        return new VerificationEvidenceReceipt(
-                resolvedReceiptFile,
-                TrainerCheckpointIO.sha256Hex(resolvedReceiptFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationEvidenceReceipt(
+                receiptFile,
+                verification);
     }
 
     public static VerificationEvidenceReceipt verifyVerificationEvidenceManifestAndWriteReceipt(
@@ -2669,9 +2428,10 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path evidenceFile,
             String expectedEvidenceSha256,
             Path receiptFile) throws IOException {
-        VerificationEvidenceVerification verification =
-                verifyVerificationEvidenceManifest(evidenceFile, expectedEvidenceSha256);
-        return writeVerificationEvidenceReceipt(receiptFile, verification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.verifyVerificationEvidenceManifestAndWriteReceipt(
+                evidenceFile,
+                expectedEvidenceSha256,
+                receiptFile);
     }
 
     public static VerificationEvidenceReceiptInspection readVerificationEvidenceReceipt(Path receiptFile)
@@ -2693,19 +2453,9 @@ public final class TrainingReportPromotionGateArtifactPackage {
     public static VerificationIndexReceipt writeVerificationIndexReceipt(
             Path receiptFile,
             VerificationIndexVerification verification) throws IOException {
-        Path resolvedReceiptFile = Objects.requireNonNull(receiptFile, "receiptFile must not be null")
-                .toAbsolutePath()
-                .normalize();
-        VerificationIndexVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        TrainerCheckpointIO.writeStringAtomically(
-                resolvedReceiptFile,
-                TrainerJson.toJson(verificationIndexReceiptMap(resolvedVerification, Instant.now())) + "\n");
-        return new VerificationIndexReceipt(
-                resolvedReceiptFile,
-                TrainerCheckpointIO.sha256Hex(resolvedReceiptFile),
-                resolvedVerification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.writeVerificationIndexReceipt(
+                receiptFile,
+                verification);
     }
 
     public static VerificationIndexReceiptInspection readVerificationIndexReceipt(Path receiptFile)
@@ -2734,8 +2484,10 @@ public final class TrainingReportPromotionGateArtifactPackage {
             Path indexFile,
             String expectedIndexSha256,
             Path receiptFile) throws IOException {
-        VerificationIndexVerification verification = verifyVerificationIndex(indexFile, expectedIndexSha256);
-        return writeVerificationIndexReceipt(receiptFile, verification);
+        return TrainingReportPromotionGatePackageVerificationArtifacts.verifyVerificationIndexAndWriteReceipt(
+                indexFile,
+                expectedIndexSha256,
+                receiptFile);
     }
 
     public static String renderVerificationJUnitXml(PackageVerification verification) {
@@ -2743,44 +2495,7 @@ public final class TrainingReportPromotionGateArtifactPackage {
     }
 
     public static String renderVerificationMarkdown(PackageVerification verification) {
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        PackageInspection inspection = resolvedVerification.inspection();
-        TrainingReportPromotionGateArtifactManifest.ManifestVerification manifest =
-                resolvedVerification.manifestVerification();
-        SourceSnapshotVerification sourceSnapshots = resolvedVerification.sourceSnapshotVerification();
-
-        StringBuilder markdown = new StringBuilder();
-        markdown.append("# Gollek Promotion Gate Package Verification\n\n");
-        markdown.append("| Field | Value |\n");
-        markdown.append("| --- | --- |\n");
-        markdownRow(markdown, "Status", status(resolvedVerification.passed()));
-        markdownRow(markdown, "Package", inspection.directory().toString());
-        markdownRow(markdown, "Decision", inspection.manifest().decisionStatus());
-        markdownRow(markdown, "Promotable", Boolean.toString(inspection.promotable()));
-        inspection.manifest().decisionCandidate()
-                .ifPresent(candidate -> markdownRow(markdown, "Candidate", candidate));
-        markdownRow(markdown, "Manifest", status(manifest.passed()));
-        markdownRow(markdown, "Manifest checksum", matchStatus(manifest.manifestSha256Matches()));
-        markdownRow(markdown, "Artifact bytes", matchStatus(manifest.artifactBytesMatch()));
-        markdownRow(markdown, "Artifact checksums", matchStatus(manifest.artifactSha256Match()));
-        manifest.artifactVerificationOptional()
-                .ifPresent(artifactVerification -> markdownRow(
-                        markdown,
-                        "JUnit XML",
-                        artifactVerification.junitXmlWellFormed() ? "well formed" : "invalid"));
-        markdownRow(markdown, "Source report snapshots", status(sourceSnapshots.passed()));
-        markdownRow(markdown, "Expected source snapshots",
-                Integer.toString(sourceSnapshots.expectedSourceReportArtifactNames().size()));
-        markdownRow(markdown, "Present source snapshots",
-                Integer.toString(sourceSnapshots.presentSourceReportArtifactNames().size()));
-        markdown.append('\n');
-
-        appendArtifactTable(markdown, inspection);
-        appendSourceSnapshotSection(markdown, sourceSnapshots);
-        appendFailures(markdown, resolvedVerification.failures());
-        return markdown.toString();
+        return TrainingReportPromotionGatePackageMarkdown.render(verification);
     }
 
     public static Path defaultVerificationReportFile(Path directory) {
@@ -2847,58 +2562,23 @@ public final class TrainingReportPromotionGateArtifactPackage {
     }
 
     public static List<SourceReportSnapshot> sourceReportSnapshots(PackageInspection inspection) {
-        Objects.requireNonNull(inspection, "inspection must not be null");
-        List<SourceReportSnapshot> snapshots = new ArrayList<>();
-        Set<String> artifactNames = new LinkedHashSet<>();
-        for (TrainingReportPromotionArtifacts.SourceReport report : inspection.review().sourceReports()) {
-            String artifactName = sourceReportArtifactName(report, artifactNames);
-            inspection.manifest().artifact(artifactName)
-                    .ifPresent(artifact -> snapshots.add(new SourceReportSnapshot(report, artifact)));
-            artifactNames.add(artifactName);
-        }
-        return List.copyOf(snapshots);
+        return TrainingReportPromotionGateSourceSnapshots.snapshots(inspection);
     }
 
     public static List<String> expectedSourceReportArtifactNames(PackageInspection inspection) {
-        Objects.requireNonNull(inspection, "inspection must not be null");
-        Set<String> artifactNames = new LinkedHashSet<>();
-        for (TrainingReportPromotionArtifacts.SourceReport report : inspection.review().sourceReports()) {
-            artifactNames.add(sourceReportArtifactName(report, artifactNames));
-        }
-        return List.copyOf(artifactNames);
+        return TrainingReportPromotionGateSourceSnapshots.expectedArtifactNames(inspection);
     }
 
     public static List<String> presentSourceReportArtifactNames(PackageInspection inspection) {
-        Objects.requireNonNull(inspection, "inspection must not be null");
-        List<String> artifactNames = new ArrayList<>();
-        for (String artifactName : inspection.manifest().artifacts().keySet()) {
-            if (artifactName.startsWith(SOURCE_REPORT_ARTIFACT_PREFIX)) {
-                artifactNames.add(artifactName);
-            }
-        }
-        return List.copyOf(artifactNames);
+        return TrainingReportPromotionGateSourceSnapshots.presentArtifactNames(inspection);
     }
 
     public static List<String> missingSourceReportArtifactNames(PackageInspection inspection) {
-        Set<String> present = new LinkedHashSet<>(presentSourceReportArtifactNames(inspection));
-        List<String> missing = new ArrayList<>();
-        for (String artifactName : expectedSourceReportArtifactNames(inspection)) {
-            if (!present.contains(artifactName)) {
-                missing.add(artifactName);
-            }
-        }
-        return List.copyOf(missing);
+        return TrainingReportPromotionGateSourceSnapshots.missingArtifactNames(inspection);
     }
 
     public static List<String> unexpectedSourceReportArtifactNames(PackageInspection inspection) {
-        Set<String> expected = new LinkedHashSet<>(expectedSourceReportArtifactNames(inspection));
-        List<String> unexpected = new ArrayList<>();
-        for (String artifactName : presentSourceReportArtifactNames(inspection)) {
-            if (!expected.contains(artifactName)) {
-                unexpected.add(artifactName);
-            }
-        }
-        return List.copyOf(unexpected);
+        return TrainingReportPromotionGateSourceSnapshots.unexpectedArtifactNames(inspection);
     }
 
     public static SourceSnapshotVerification verifySourceReportSnapshots(Path directory) throws IOException {
@@ -2912,619 +2592,7 @@ public final class TrainingReportPromotionGateArtifactPackage {
 
     public static SourceSnapshotVerification verifySourceReportSnapshots(PackageInspection inspection)
             throws IOException {
-        Objects.requireNonNull(inspection, "inspection must not be null");
-        List<SourceReportSnapshot> snapshots = new ArrayList<>();
-        List<String> failures = new ArrayList<>();
-        Set<String> artifactNames = new LinkedHashSet<>();
-        Set<String> expectedArtifactNames = new LinkedHashSet<>();
-        for (TrainingReportPromotionArtifacts.SourceReport report : inspection.review().sourceReports()) {
-            String artifactName = sourceReportArtifactName(report, artifactNames);
-            artifactNames.add(artifactName);
-            expectedArtifactNames.add(artifactName);
-            TrainingReportPromotionGateArtifactManifest.ArtifactEntry artifact =
-                    inspection.manifest().artifact(artifactName).orElse(null);
-            if (artifact == null) {
-                failures.add("Missing packaged source report snapshot for "
-                        + report.role() + " " + report.name() + " (" + artifactName + ")");
-                continue;
-            }
-            SourceReportSnapshot snapshot = new SourceReportSnapshot(report, artifact);
-            snapshots.add(snapshot);
-            verifySourceReportSnapshot(snapshot, failures);
-        }
-        verifyNoUnexpectedSourceReportArtifacts(inspection, expectedArtifactNames, failures);
-        return new SourceSnapshotVerification(inspection, snapshots, failures);
+        return TrainingReportPromotionGateSourceSnapshots.verify(inspection);
     }
 
-    private static Map<String, Object> verificationIndexMap(
-            VerifiedPackageBundle verifiedPackage,
-            Instant generatedAt) {
-        VerifiedPackageBundle resolvedVerifiedPackage = Objects.requireNonNull(
-                verifiedPackage,
-                "verifiedPackage must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        PackageVerification verification = resolvedVerifiedPackage.verification();
-        PackageInspection inspection = verification.inspection();
-        SourceSnapshotVerification sourceSnapshots = verification.sourceSnapshotVerification();
-
-        Map<String, Object> reports = new LinkedHashMap<>();
-        reports.put("json", verificationIndexFile(
-                resolvedVerifiedPackage.reports().json().reportFile(),
-                resolvedVerifiedPackage.reports().json().reportSha256()));
-        reports.put("markdown", verificationIndexFile(
-                resolvedVerifiedPackage.reports().markdown().markdownFile(),
-                resolvedVerifiedPackage.reports().markdown().markdownSha256()));
-        reports.put("junitXml", verificationIndexFile(
-                resolvedVerifiedPackage.reports().junitXml().junitXmlFile(),
-                resolvedVerifiedPackage.reports().junitXml().junitXmlSha256()));
-        if (resolvedVerifiedPackage.reportBundleReceipt() != null) {
-            reports.put("receipt", verificationIndexFile(
-                    resolvedVerifiedPackage.reportBundleReceipt().receiptFile(),
-                    resolvedVerifiedPackage.reportBundleReceipt().receiptSha256()));
-        }
-
-        Map<String, Object> sourceSnapshotIndex = new LinkedHashMap<>();
-        sourceSnapshotIndex.put("expected", sourceSnapshots.expectedSourceReportArtifactNames().size());
-        sourceSnapshotIndex.put("present", sourceSnapshots.presentSourceReportArtifactNames().size());
-        sourceSnapshotIndex.put("missing", sourceSnapshots.missingSourceReportArtifactNames());
-        sourceSnapshotIndex.put("unexpected", sourceSnapshots.unexpectedSourceReportArtifactNames());
-        sourceSnapshotIndex.put("snapshots", sourceSnapshots.snapshots().stream()
-                .map(TrainingReportPromotionGateArtifactPackage::sourceSnapshotIndex)
-                .toList());
-
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_INDEX_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("packageDirectory", resolvedVerifiedPackage.directory().toString());
-        map.put("reportDirectory", resolvedVerifiedPackage.reports().directory().toString());
-        map.put("passed", resolvedVerifiedPackage.passed());
-        map.put("promotable", resolvedVerifiedPackage.promotable());
-        map.put("decisionStatus", inspection.manifest().decisionStatus());
-        inspection.manifest().decisionCandidate().ifPresent(candidate -> map.put("decisionCandidate", candidate));
-        map.put("manifest", verificationIndexFile(
-                inspection.manifest().manifestFile(),
-                inspection.manifest().manifestSha256()));
-        map.put("reports", reports);
-        map.put("sourceReportSnapshots", sourceSnapshotIndex);
-        map.put("failures", verification.failures());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationReportMap(
-            PackageVerification verification,
-            Instant generatedAt) {
-        PackageVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_REPORT_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.putAll(resolvedVerification.toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationIndexReceiptMap(
-            VerificationIndexVerification verification,
-            Instant generatedAt) {
-        VerificationIndexVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_INDEX_RECEIPT_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("passed", resolvedVerification.passed());
-        map.put("indexFile", resolvedVerification.inspection().indexFile().toString());
-        map.put("indexSha256", resolvedVerification.inspection().indexSha256());
-        map.put("indexSha256Matches", resolvedVerification.indexSha256Matches());
-        map.put("schemaValid", resolvedVerification.schemaValid());
-        map.put("referencedSha256Match", resolvedVerification.referencedSha256Match());
-        map.put("failures", resolvedVerification.failures());
-        map.put("verification", resolvedVerification.toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationReportBundleReceiptMap(
-            VerificationReportBundleVerification verification,
-            Instant generatedAt) {
-        VerificationReportBundleVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        VerificationReportBundleInspection inspection = resolvedVerification.inspection();
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_REPORT_BUNDLE_RECEIPT_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("passed", resolvedVerification.passed());
-        map.put("reportDirectory", inspection.directory().toString());
-        map.put("jsonReportFile", inspection.json().reportFile().toString());
-        map.put("jsonReportSha256", inspection.json().reportSha256());
-        map.put("markdownFile", inspection.markdownFile().toString());
-        map.put("markdownSha256", inspection.markdownSha256());
-        map.put("junitXmlFile", inspection.junitXmlFile().toString());
-        map.put("junitXmlSha256", inspection.junitXmlSha256());
-        map.put("jsonReportVerified", resolvedVerification.jsonReportVerified());
-        map.put("markdownMatchesRendered", resolvedVerification.markdownMatchesRendered());
-        map.put("junitXmlMatchesRendered", resolvedVerification.junitXmlMatchesRendered());
-        map.put("failures", resolvedVerification.failures());
-        map.put("verification", resolvedVerification.toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationEvidenceReceiptMap(
-            VerificationEvidenceVerification verification,
-            Instant generatedAt) {
-        VerificationEvidenceVerification resolvedVerification = Objects.requireNonNull(
-                verification,
-                "verification must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_EVIDENCE_RECEIPT_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("passed", resolvedVerification.passed());
-        map.put("evidenceFile", resolvedVerification.inspection().evidenceFile().toString());
-        map.put("evidenceSha256", resolvedVerification.inspection().evidenceSha256());
-        map.put("evidenceSha256Matches", resolvedVerification.evidenceSha256Matches());
-        map.put("schemaValid", resolvedVerification.schemaValid());
-        map.put("evidenceFilesSha256Match", resolvedVerification.evidenceFilesSha256Match());
-        map.put("packageArtifactsSha256Match", resolvedVerification.packageArtifactsSha256Match());
-        map.put("failures", resolvedVerification.failures());
-        map.put("verification", resolvedVerification.toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationIndexPackageAuditReportMap(
-            VerificationIndexPackageAudit audit,
-            Instant generatedAt) {
-        VerificationIndexPackageAudit resolvedAudit = Objects.requireNonNull(audit, "audit must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_INDEX_PACKAGE_AUDIT_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("passed", resolvedAudit.passed());
-        map.put("indexFile", resolvedAudit.indexVerification().inspection().indexFile().toString());
-        map.put("indexSha256", resolvedAudit.indexVerification().inspection().indexSha256());
-        map.put("indexPassed", resolvedAudit.indexVerification().passed());
-        map.put("packagePassed", resolvedAudit.packageVerification() != null
-                && resolvedAudit.packageVerification().passed());
-        map.put("failures", resolvedAudit.failures());
-        map.put("audit", resolvedAudit.toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> verificationEvidenceManifestMap(
-            VerifiedPackageBundle verifiedPackage,
-            Instant generatedAt) {
-        VerifiedPackageBundle resolvedVerifiedPackage = Objects.requireNonNull(
-                verifiedPackage,
-                "verifiedPackage must not be null");
-        Instant resolvedGeneratedAt = Objects.requireNonNull(generatedAt, "generatedAt must not be null");
-        PackageInspection inspection = resolvedVerifiedPackage.verification().inspection();
-
-        Map<String, Object> evidenceFiles = new LinkedHashMap<>();
-        evidenceFiles.put("manifest", verificationIndexFile(
-                inspection.manifest().manifestFile(),
-                inspection.manifest().manifestSha256()));
-        evidenceFiles.put("verificationJson", verificationIndexFile(
-                resolvedVerifiedPackage.reports().json().reportFile(),
-                resolvedVerifiedPackage.reports().json().reportSha256()));
-        evidenceFiles.put("verificationMarkdown", verificationIndexFile(
-                resolvedVerifiedPackage.reports().markdown().markdownFile(),
-                resolvedVerifiedPackage.reports().markdown().markdownSha256()));
-        evidenceFiles.put("verificationJunitXml", verificationIndexFile(
-                resolvedVerifiedPackage.reports().junitXml().junitXmlFile(),
-                resolvedVerifiedPackage.reports().junitXml().junitXmlSha256()));
-        if (resolvedVerifiedPackage.reportBundleReceipt() != null) {
-            evidenceFiles.put("verificationReportBundleReceipt", verificationIndexFile(
-                    resolvedVerifiedPackage.reportBundleReceipt().receiptFile(),
-                    resolvedVerifiedPackage.reportBundleReceipt().receiptSha256()));
-        }
-        if (resolvedVerifiedPackage.index() != null) {
-            evidenceFiles.put("verificationIndex", verificationIndexFile(
-                    resolvedVerifiedPackage.index().indexFile(),
-                    resolvedVerifiedPackage.index().indexSha256()));
-        }
-        if (resolvedVerifiedPackage.receipt() != null) {
-            evidenceFiles.put("verificationIndexReceipt", verificationIndexFile(
-                    resolvedVerifiedPackage.receipt().receiptFile(),
-                    resolvedVerifiedPackage.receipt().receiptSha256()));
-        }
-        if (resolvedVerifiedPackage.packageAuditReport() != null) {
-            evidenceFiles.put("verificationIndexPackageAudit", verificationIndexFile(
-                    resolvedVerifiedPackage.packageAuditReport().reportFile(),
-                    resolvedVerifiedPackage.packageAuditReport().reportSha256()));
-        }
-
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("format", VERIFICATION_EVIDENCE_FORMAT);
-        map.put("generatedAt", resolvedGeneratedAt.toString());
-        map.put("packageDirectory", resolvedVerifiedPackage.directory().toString());
-        map.put("reportDirectory", resolvedVerifiedPackage.reports().directory().toString());
-        map.put("passed", resolvedVerifiedPackage.passed());
-        map.put("promotable", resolvedVerifiedPackage.promotable());
-        map.put("decisionStatus", inspection.manifest().decisionStatus());
-        inspection.manifest().decisionCandidate().ifPresent(candidate -> map.put("decisionCandidate", candidate));
-        map.put("evidenceFiles", evidenceFiles);
-        map.put("packageArtifacts", packageArtifactsToMap(inspection.manifest().artifacts()));
-        map.put("sourceReportSnapshots", resolvedVerifiedPackage.verification()
-                .sourceSnapshotVerification()
-                .toMap());
-        return Map.copyOf(map);
-    }
-
-    private static Optional<String> indexedManifestSha256(VerificationIndexInspection inspection) {
-        return objectValue(inspection.index(), "manifest")
-                .flatMap(manifest -> stringValue(manifest, "sha256"));
-    }
-
-    private static Map<String, Object> packageArtifactsToMap(
-            Map<String, TrainingReportPromotionGateArtifactManifest.ArtifactEntry> artifacts) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        for (Map.Entry<String, TrainingReportPromotionGateArtifactManifest.ArtifactEntry> entry : artifacts.entrySet()) {
-            values.put(entry.getKey(), entry.getValue().toMap());
-        }
-        return Map.copyOf(values);
-    }
-
-    private static Map<String, Object> verificationIndexFile(Path file, String sha256) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("file", Objects.requireNonNull(file, "file must not be null")
-                .toAbsolutePath()
-                .normalize()
-                .toString());
-        map.put("sha256", Objects.requireNonNull(sha256, "sha256 must not be null"));
-        return Map.copyOf(map);
-    }
-
-    private static Map<String, Object> sourceSnapshotIndex(SourceReportSnapshot snapshot) {
-        SourceReportSnapshot resolvedSnapshot = Objects.requireNonNull(snapshot, "snapshot must not be null");
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("role", resolvedSnapshot.role());
-        map.put("name", resolvedSnapshot.name());
-        map.put("artifact", resolvedSnapshot.artifact().name());
-        map.put("file", resolvedSnapshot.snapshotFile().toString());
-        map.put("bytes", resolvedSnapshot.artifact().bytes());
-        map.put("sha256", resolvedSnapshot.artifact().sha256());
-        map.put("manifestBytesMatchSource", resolvedSnapshot.manifestBytesMatchSource());
-        map.put("manifestSha256MatchesSource", resolvedSnapshot.manifestSha256MatchesSource());
-        return Map.copyOf(map);
-    }
-
-    private static Optional<String> stringValue(Map<String, ?> map, String key) {
-        Object value = map.get(key);
-        if (value instanceof String text && !text.isBlank()) {
-            return Optional.of(text);
-        }
-        return Optional.empty();
-    }
-
-    private static Optional<Path> pathValue(Map<String, ?> map, String key) {
-        return stringValue(map, key).flatMap(value -> {
-            try {
-                return Optional.of(Path.of(value).toAbsolutePath().normalize());
-            } catch (InvalidPathException ignored) {
-                return Optional.empty();
-            }
-        });
-    }
-
-    private static Optional<Map<String, Object>> objectValue(Map<String, ?> map, String key) {
-        Object value = map.get(key);
-        if (value instanceof Map<?, ?> object) {
-            return Optional.of(immutableMap(object));
-        }
-        return Optional.empty();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> immutableMap(Map<?, ?> map) {
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
-        if (snapshot instanceof Map<?, ?> snapshotMap) {
-            return (Map<String, Object>) snapshotMap;
-        }
-        return Map.of();
-    }
-
-    private static Map<String, Path> packageArtifactPaths(
-            TrainingReportPromotionArtifacts.ArtifactBundle review,
-            Map<String, Path> sourceSnapshots) {
-        Map<String, Path> artifacts = new LinkedHashMap<>();
-        artifacts.put(REVIEW_JSON_ARTIFACT, review.jsonFile());
-        artifacts.put(REVIEW_MARKDOWN_ARTIFACT, review.markdownFile());
-        artifacts.putAll(sourceSnapshots);
-        return Map.copyOf(artifacts);
-    }
-
-    private static Map<String, Path> snapshotSourceReports(
-            Path directory,
-            TrainingReportPromotionArtifacts.ArtifactBundle review) throws IOException {
-        TrainingReportPromotionArtifacts.ArtifactInspection inspection =
-                TrainingReportPromotionArtifacts.readFiles(review.jsonFile(), review.markdownFile());
-        Map<String, Path> snapshots = new LinkedHashMap<>();
-        Set<String> fileNames = new LinkedHashSet<>();
-        for (TrainingReportPromotionArtifacts.SourceReport report : inspection.sourceReports()) {
-            if (report.source() == null || !Files.isRegularFile(report.source())) {
-                continue;
-            }
-            String artifactName = sourceReportArtifactName(report, snapshots.keySet());
-            String fileName = sourceReportFileName(report, fileNames);
-            Path target = directory.resolve(fileName).toAbsolutePath().normalize();
-            if (!Files.exists(target) || !Files.isSameFile(report.source(), target)) {
-                Files.copy(report.source(), target, StandardCopyOption.REPLACE_EXISTING);
-            }
-            snapshots.put(artifactName, target);
-            fileNames.add(fileName);
-        }
-        return Map.copyOf(snapshots);
-    }
-
-    private static String sourceReportArtifactName(
-            TrainingReportPromotionArtifacts.SourceReport report,
-            Set<String> existing) {
-        String base = SOURCE_REPORT_ARTIFACT_PREFIX + safeToken(report.role()) + "." + safeToken(report.name());
-        String name = base;
-        int suffix = 2;
-        while (existing.contains(name)) {
-            name = base + "." + suffix++;
-        }
-        return name;
-    }
-
-    private static String sourceReportFileName(
-            TrainingReportPromotionArtifacts.SourceReport report,
-            Set<String> existing) {
-        String base = "source-report-" + safeToken(report.role()) + "-" + safeToken(report.name());
-        String suffix = sourceFileSuffix(report);
-        String fileName = base + suffix;
-        int duplicate = 2;
-        while (existing.contains(fileName)) {
-            fileName = base + "-" + duplicate++ + suffix;
-        }
-        return fileName;
-    }
-
-    private static String sourceFileSuffix(TrainingReportPromotionArtifacts.SourceReport report) {
-        String sha = report.sha256();
-        String fingerprint = sha == null || sha.isBlank() ? "" : "-" + sha.substring(0, Math.min(12, sha.length()));
-        String extension = fileExtension(report.source());
-        return fingerprint + extension;
-    }
-
-    private static String fileExtension(Path source) {
-        if (source == null || source.getFileName() == null) {
-            return ".json";
-        }
-        String fileName = source.getFileName().toString();
-        int dot = fileName.lastIndexOf('.');
-        if (dot <= 0 || dot == fileName.length() - 1) {
-            return ".json";
-        }
-        String extension = fileName.substring(dot);
-        return extension.length() > 16 ? ".json" : extension;
-    }
-
-    private static String safeToken(String value) {
-        String text = value == null ? "report" : value.trim().toLowerCase(java.util.Locale.ROOT);
-        StringBuilder token = new StringBuilder();
-        for (int index = 0; index < text.length(); index++) {
-            char ch = text.charAt(index);
-            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
-                token.append(ch);
-            } else if (token.length() > 0 && token.charAt(token.length() - 1) != '-') {
-                token.append('-');
-            }
-        }
-        while (token.length() > 0 && token.charAt(token.length() - 1) == '-') {
-            token.setLength(token.length() - 1);
-        }
-        return token.length() == 0 ? "report" : token.toString();
-    }
-
-    private static void verifySourceReportSnapshot(SourceReportSnapshot snapshot, List<String> failures)
-            throws IOException {
-        TrainingReportPromotionArtifacts.SourceReport sourceReport = snapshot.sourceReport();
-        TrainingReportPromotionGateArtifactManifest.ArtifactEntry artifact = snapshot.artifact();
-        if (!snapshot.manifestBytesMatchSource()) {
-            failures.add("Packaged source report snapshot byte size does not match review provenance for "
-                    + sourceReport.role() + " " + sourceReport.name());
-        }
-        if (!snapshot.manifestSha256MatchesSource()) {
-            failures.add("Packaged source report snapshot SHA-256 does not match review provenance for "
-                    + sourceReport.role() + " " + sourceReport.name());
-        }
-        if (!Files.isRegularFile(artifact.file())) {
-            failures.add("Packaged source report snapshot is missing for "
-                    + sourceReport.role() + " " + sourceReport.name() + ": " + artifact.file());
-            return;
-        }
-        long actualBytes = Files.size(artifact.file());
-        if (actualBytes != artifact.bytes()) {
-            failures.add("Packaged source report snapshot byte size mismatch for " + artifact.file()
-                    + " (expected " + artifact.bytes() + " bytes, got " + actualBytes + " bytes)");
-        }
-        String actualSha256 = TrainerCheckpointIO.sha256Hex(artifact.file());
-        if (!artifact.sha256().equalsIgnoreCase(actualSha256)) {
-            failures.add("Packaged source report snapshot SHA-256 mismatch for " + artifact.file()
-                    + " (expected " + artifact.sha256() + ", got " + actualSha256 + ")");
-        }
-    }
-
-    private static void verifyNonRefreshableManifestArtifacts(
-            TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest,
-            Set<String> refreshableArtifactNames) throws IOException {
-        for (TrainingReportPromotionGateArtifactManifest.ArtifactEntry artifact : manifest.artifacts().values()) {
-            if (refreshableArtifactNames.contains(artifact.name())) {
-                continue;
-            }
-            if (!Files.isRegularFile(artifact.file())) {
-                throw new IOException("Cannot refresh promotion package because non-refreshable artifact is missing: "
-                        + artifact.name() + " (" + artifact.file() + ")");
-            }
-            long actualBytes = Files.size(artifact.file());
-            if (actualBytes != artifact.bytes()) {
-                throw new IOException("Cannot refresh promotion package because non-refreshable artifact byte size "
-                        + "changed: " + artifact.name() + " (" + artifact.file() + ")");
-            }
-            String actualSha256 = TrainerCheckpointIO.sha256Hex(artifact.file());
-            if (!artifact.sha256().equalsIgnoreCase(actualSha256)) {
-                throw new IOException("Cannot refresh promotion package because non-refreshable artifact SHA-256 "
-                        + "changed: " + artifact.name() + " (" + artifact.file() + ")");
-            }
-        }
-    }
-
-    private static TrainingReportPromotionGateArtifactManifest.ArtifactEntry requiredManifestArtifact(
-            TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest,
-            String artifactName) throws IOException {
-        return manifest.artifact(artifactName)
-                .orElseThrow(() -> new IOException(
-                        "Cannot refresh promotion package because manifest is missing required artifact: "
-                                + artifactName));
-    }
-
-    private static void verifyNoUnexpectedSourceReportArtifacts(
-            PackageInspection inspection,
-            Set<String> expectedArtifactNames,
-            List<String> failures) {
-        for (String artifactName : inspection.manifest().artifacts().keySet()) {
-            if (!artifactName.startsWith(SOURCE_REPORT_ARTIFACT_PREFIX)
-                    || expectedArtifactNames.contains(artifactName)) {
-                continue;
-            }
-            failures.add("Unexpected packaged source report snapshot in manifest: " + artifactName);
-        }
-    }
-
-    private static PackageVerification packageVerification(
-            PackageInspection inspection,
-            TrainingReportPromotionGateArtifactManifest.ManifestVerification manifestVerification,
-            SourceSnapshotVerification sourceSnapshotVerification) {
-        List<String> failures = new ArrayList<>();
-        failures.addAll(manifestVerification.failures());
-        failures.addAll(sourceSnapshotVerification.failures());
-        return new PackageVerification(
-                inspection,
-                manifestVerification,
-                sourceSnapshotVerification,
-                failures);
-    }
-
-    private static PackageInspection readFromManifest(
-            TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest,
-            Options options) throws IOException {
-        TrainingReportPromotionGateArtifactManifest.ManifestInspection resolvedManifest =
-                Objects.requireNonNull(manifest, "manifest must not be null");
-        Options resolvedOptions = options == null ? Options.defaults() : options;
-        Path directory = resolvedManifest.directory();
-        TrainingReportPromotionArtifacts.ArtifactInspection review =
-                readReviewArtifacts(directory, resolvedManifest, resolvedOptions.review());
-        TrainingReportPromotionGateArtifacts.ArtifactInspection artifacts =
-                TrainingReportPromotionGateArtifactManifest.readArtifacts(resolvedManifest);
-        return new PackageInspection(directory, resolvedManifest, review, artifacts);
-    }
-
-    private static void appendArtifactTable(StringBuilder markdown, PackageInspection inspection) {
-        markdown.append("## Package Artifacts\n\n");
-        markdown.append("| Artifact | Bytes | SHA-256 |\n");
-        markdown.append("| --- | ---: | --- |\n");
-        for (TrainingReportPromotionGateArtifactManifest.ArtifactEntry artifact
-                : inspection.manifest().artifacts().values()) {
-            markdown.append("| ")
-                    .append(markdownCell(artifact.name()))
-                    .append(" | ")
-                    .append(artifact.bytes())
-                    .append(" | `")
-                    .append(artifact.sha256())
-                    .append("` |\n");
-        }
-        markdown.append('\n');
-    }
-
-    private static void appendSourceSnapshotSection(
-            StringBuilder markdown,
-            SourceSnapshotVerification sourceSnapshots) {
-        markdown.append("## Source Report Snapshots\n\n");
-        if (sourceSnapshots.snapshots().isEmpty()) {
-            markdown.append("No source report snapshots were packaged.\n\n");
-        } else {
-            markdown.append("| Role | Name | Artifact | SHA-256 |\n");
-            markdown.append("| --- | --- | --- | --- |\n");
-            for (SourceReportSnapshot snapshot : sourceSnapshots.snapshots()) {
-                markdown.append("| ")
-                        .append(markdownCell(snapshot.role()))
-                        .append(" | ")
-                        .append(markdownCell(snapshot.name()))
-                        .append(" | ")
-                        .append(markdownCell(snapshot.artifact().name()))
-                        .append(" | `")
-                        .append(snapshot.artifact().sha256())
-                        .append("` |\n");
-            }
-            markdown.append('\n');
-        }
-        appendNamedList(markdown, "Missing snapshots", sourceSnapshots.missingSourceReportArtifactNames());
-        appendNamedList(markdown, "Unexpected snapshots", sourceSnapshots.unexpectedSourceReportArtifactNames());
-    }
-
-    private static void appendFailures(StringBuilder markdown, List<String> failures) {
-        markdown.append("## Failures\n\n");
-        if (failures.isEmpty()) {
-            markdown.append("None.\n");
-            return;
-        }
-        for (String failure : failures) {
-            markdown.append("- ").append(markdownLine(failure)).append('\n');
-        }
-    }
-
-    private static void appendNamedList(StringBuilder markdown, String title, List<String> values) {
-        markdown.append("### ").append(title).append("\n\n");
-        if (values.isEmpty()) {
-            markdown.append("None.\n\n");
-            return;
-        }
-        for (String value : values) {
-            markdown.append("- `").append(value).append("`\n");
-        }
-        markdown.append('\n');
-    }
-
-    private static void markdownRow(StringBuilder markdown, String field, String value) {
-        markdown.append("| ")
-                .append(markdownCell(field))
-                .append(" | ")
-                .append(markdownCell(value))
-                .append(" |\n");
-    }
-
-    private static String status(boolean passed) {
-        return passed ? "PASS" : "FAIL";
-    }
-
-    private static String matchStatus(boolean matched) {
-        return matched ? "match" : "mismatch";
-    }
-
-    private static String markdownCell(String value) {
-        return markdownLine(value).replace("|", "\\|");
-    }
-
-    private static String markdownLine(String value) {
-        return value == null ? "" : value.replace("\r", " ").replace("\n", " ").trim();
-    }
-
-    private static TrainingReportPromotionArtifacts.ArtifactInspection readReviewArtifacts(
-            Path directory,
-            TrainingReportPromotionGateArtifactManifest.ManifestInspection manifest,
-            TrainingReportPromotionArtifacts.Options options) throws IOException {
-        TrainingReportPromotionGateArtifactManifest.ArtifactEntry json =
-                manifest.artifact(REVIEW_JSON_ARTIFACT).orElse(null);
-        TrainingReportPromotionGateArtifactManifest.ArtifactEntry markdown =
-                manifest.artifact(REVIEW_MARKDOWN_ARTIFACT).orElse(null);
-        if (json != null && markdown != null) {
-            return TrainingReportPromotionArtifacts.readFiles(json.file(), markdown.file());
-        }
-        return TrainingReportPromotionArtifacts.read(directory, options);
-    }
 }

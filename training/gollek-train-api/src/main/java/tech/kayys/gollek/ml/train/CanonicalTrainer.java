@@ -12,7 +12,6 @@ import tech.kayys.gollek.ml.optim.GradScaler;
 import tech.kayys.gollek.ml.optim.LRScheduler;
 import tech.kayys.gollek.ml.optim.Optimizer;
 import tech.kayys.gollek.train.data.DataLoader.Batch;
-import tech.kayys.gollek.train.data.PrefetchingIterable;
 import tech.kayys.gollek.trainer.CanonicalTrainerRuntime;
 import tech.kayys.gollek.trainer.Trainers;
 import tech.kayys.gollek.trainer.api.TrainerSession;
@@ -45,8 +44,10 @@ public final class CanonicalTrainer implements AutoCloseable {
     private final TrainerBatchGuards.FailureRecorder batchFailures;
     private final TrainerMetricRuntime metricRuntime;
     private final TrainerBatchRuntime batchRuntime;
+    private final TrainerRuntimeProfiler runtimeProfiler = new TrainerRuntimeProfiler();
     private final TrainerGradientClipConfig gradientClip;
     private final boolean parameterUpdateDiagnostics;
+    private final int parameterUpdateDiagnosticsIntervalSteps;
     private final boolean dataDistributionDiagnostics;
     private final int earlyStoppingPatience;
     private final double earlyStoppingMinDelta;
@@ -119,9 +120,11 @@ public final class CanonicalTrainer implements AutoCloseable {
                 gradScaler,
                 metricRuntime,
                 throughputStats,
-                batchFailures);
+                batchFailures,
+                runtimeProfiler);
         this.gradientClip = TrainerGradientClipConfig.of(builder.gradientClip, builder.gradientClipValue);
         this.parameterUpdateDiagnostics = builder.parameterUpdateDiagnostics;
+        this.parameterUpdateDiagnosticsIntervalSteps = builder.parameterUpdateDiagnosticsIntervalSteps;
         this.dataDistributionDiagnostics = builder.dataDistributionDiagnostics;
         this.earlyStoppingPatience = Math.max(0, builder.earlyStoppingPatience);
         this.earlyStoppingMinDelta = Math.max(0.0, builder.earlyStoppingMinDelta);
@@ -185,7 +188,10 @@ public final class CanonicalTrainer implements AutoCloseable {
                         this.gradientClip,
                         batchFailures,
                         this::stepBatchScheduler,
-                        this.parameterUpdateDiagnostics),
+                        TrainerParameterUpdateDiagnosticsPolicy.of(
+                                this.parameterUpdateDiagnostics,
+                                this.parameterUpdateDiagnosticsIntervalSteps),
+                        runtimeProfiler),
                 this.gradientAccumulationSteps,
                 this.mixedPrecision,
                 this.gradScaler,
@@ -298,7 +304,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                         accelerationStatusAtStart,
                         failOnAcceleratorFallback);
                 ensureCheckpointStateLoaded();
-                runtime.fit(trainLoader);
+                runtime.fit(TrainerProfiledIterable.train(trainLoader, runtimeProfiler));
                 captureDataLoaderPlanMetadata(trainLoader, null);
                 captureDataDistributionMetadata(trainLoader, null);
                 persistReportSafely(runtime.summary());
@@ -307,7 +313,7 @@ public final class CanonicalTrainer implements AutoCloseable {
                 throwIfNonFiniteDetected();
                 throwIfInvalidMetricDetected();
             } finally {
-                closePrefetchingLoader(trainLoader);
+                closeCloseableLoader(trainLoader);
             }
         }
     }
@@ -322,7 +328,9 @@ public final class CanonicalTrainer implements AutoCloseable {
                         accelerationStatusAtStart,
                         failOnAcceleratorFallback);
                 ensureCheckpointStateLoaded();
-                runtime.fit(trainLoader, validationLoader);
+                runtime.fit(
+                        TrainerProfiledIterable.train(trainLoader, runtimeProfiler),
+                        TrainerProfiledIterable.validation(validationLoader, runtimeProfiler));
                 captureDataLoaderPlanMetadata(trainLoader, validationLoader);
                 captureDataDistributionMetadata(trainLoader, validationLoader);
                 persistReportSafely(runtime.summary());
@@ -395,15 +403,19 @@ public final class CanonicalTrainer implements AutoCloseable {
     }
 
     private static void closePrefetchingLoaders(Iterable<Batch> trainLoader, Iterable<Batch> validationLoader) {
-        closePrefetchingLoader(trainLoader);
+        closeCloseableLoader(trainLoader);
         if (validationLoader != trainLoader) {
-            closePrefetchingLoader(validationLoader);
+            closeCloseableLoader(validationLoader);
         }
     }
 
-    private static void closePrefetchingLoader(Iterable<Batch> loader) {
-        if (loader instanceof PrefetchingIterable<?> prefetched) {
-            prefetched.close();
+    private static void closeCloseableLoader(Iterable<Batch> loader) {
+        if (loader instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                throw new IllegalStateException("failed to close training data loader", e);
+            }
         }
     }
 
@@ -669,12 +681,14 @@ public final class CanonicalTrainer implements AutoCloseable {
                         optimizationRuntime.pendingGradientAccumulationBatches(),
                         optimizationRuntime.optimizerStepCount(),
                         gradientClip,
+                        parameterUpdateDiagnosticsIntervalSteps,
                         optimizationRuntime.latestGradientDiagnostics(),
                         optimizationRuntime.latestParameterDiagnostics(),
                         optimizationRuntime.latestParameterUpdateDiagnostics()),
                 new TrainerSummaryAssembler.Throughput(
                         throughputStats.trainTotal(),
                         throughputStats.validationTotal()),
+                new TrainerSummaryAssembler.RuntimeProfile(runtimeProfiler.toMetadata("runtimeProfile")),
                 new TrainerSummaryAssembler.AccelerationInfo(
                         preferredDevice,
                         Acceleration.status(preferredDevice),
@@ -912,6 +926,7 @@ public final class CanonicalTrainer implements AutoCloseable {
         private double gradientClipValue = 0.0;
         private int gradientAccumulationSteps = 1;
         private boolean parameterUpdateDiagnostics = false;
+        private int parameterUpdateDiagnosticsIntervalSteps = 1;
         private boolean dataDistributionDiagnostics = false;
         private boolean mixedPrecision = false;
         private GradScaler gradScaler;
@@ -1027,6 +1042,11 @@ public final class CanonicalTrainer implements AutoCloseable {
 
         public Builder parameterUpdateDiagnostics(boolean enabled) {
             this.parameterUpdateDiagnostics = enabled;
+            return this;
+        }
+
+        public Builder parameterUpdateDiagnosticsIntervalSteps(int intervalSteps) {
+            this.parameterUpdateDiagnosticsIntervalSteps = Math.max(1, intervalSteps);
             return this;
         }
 

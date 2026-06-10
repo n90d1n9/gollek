@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["modernbert_decoder", "modernbert-decoder", "modern_bert_decoder"]
   }
 }

@@ -16,3 +16,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.quarkus:quarkus-junit")
 }
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+}

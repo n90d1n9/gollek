@@ -4,10 +4,8 @@ import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.gollek.spi.model.ModelRuntimeTraits.PromptBosPolicy;
 
 import java.util.List;
-import java.util.Set;
 
 /**
  * Google Gemma 3 text architecture adapter.
@@ -148,16 +146,7 @@ public class Gemma3TextFamily implements ModelArchitecture {
 
     @Override
     public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
-        return new ModelRuntimeTraits(
-                false,
-                true,
-                false,
-                false,
-                PromptBosPolicy.GEMMA_TURN_AWARE,
-                Set.of(),
-                false,
-                false,
-                ModelRuntimeTraits.AttentionRuntimeTraits.gemma3Text());
+        return Gemma3RuntimeProfile.text(config);
     }
 
     @Override

@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "wordpiece",
     "families": ["grounding_dino", "grounding-dino", "mm_grounding_dino", "mm-grounding-dino"]
   }
 }

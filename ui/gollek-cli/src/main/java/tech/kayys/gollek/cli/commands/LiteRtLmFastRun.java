@@ -67,6 +67,10 @@ public final class LiteRtLmFastRun {
     private static final Pattern JSON_OBJECT_PATTERN = Pattern.compile("\\{.*?}", Pattern.DOTALL);
     private static final Pattern BARE_QUESTION_PATTERN = Pattern.compile(
             "(?i)^(who|what|where|when|why|how|which|whom|whose|is|are|was|were|do|does|did|can|could|should|would|will|may|might)\\b.*[^.?!]$");
+    private static final String SHORT_QUESTION_INSTRUCTION =
+            "Answer directly and concisely in one or two sentences. Do not ask a clarification question. "
+                    + "If a term is ambiguous, answer the most common meaning first and mention common alternatives briefly.\n"
+                    + "Question: ";
 
     private LiteRtLmFastRun() {
     }
@@ -90,14 +94,20 @@ public final class LiteRtLmFastRun {
         }
     }
 
-    private static int run(String[] args) {
+    static int run(String[] args) {
         try {
             FastArgs parsed = FastArgs.parse(args);
             if (!parsed.supported()) {
                 return FALLBACK_TO_FULL_CLI;
             }
-            Optional<Path> modelPath = resolveLiteRtLmModel(parsed);
-            if (modelPath.isEmpty()) {
+            if (daemonEnabled()) {
+                OptionalInt daemonStatus = requestExistingDaemon(args);
+                if (daemonStatus.isPresent()) {
+                    return daemonStatus.getAsInt();
+                }
+            }
+            Optional<RouteResolution> route = resolveLiteRtLmRoute(parsed);
+            if (route.isEmpty()) {
                 return FALLBACK_TO_FULL_CLI;
             }
             if (daemonEnabled()) {
@@ -106,7 +116,7 @@ public final class LiteRtLmFastRun {
                     return daemonStatus.getAsInt();
                 }
             }
-            generate(modelPath.get(), parsed);
+            generate(route.get(), parsed);
             return 0;
         } catch (Throwable throwable) {
             if (Boolean.getBoolean("gollek.litert.fast_run.debug")) {
@@ -128,7 +138,7 @@ public final class LiteRtLmFastRun {
                 printPrewarmUsage(System.err);
                 return 2;
             }
-            if (resolveLiteRtLmModel(parsed).isEmpty()) {
+            if (resolveLiteRtLmRoute(parsed).isEmpty()) {
                 System.err.println("LiteRT-LM daemon prewarm could not resolve a .litertlm model.");
                 return 2;
             }
@@ -223,10 +233,27 @@ public final class LiteRtLmFastRun {
     }
 
     static Optional<Path> resolveLiteRtLmModel(FastArgs args) {
+        return resolveLiteRtLmRoute(args).map(RouteResolution::path);
+    }
+
+    static Optional<RouteResolution> resolveLiteRtLmRoute(FastArgs args) {
+        long startNanos = System.nanoTime();
+        Optional<RouteMatch> match = resolveLiteRtLmRouteMatch(args);
+        long durationNanos = System.nanoTime() - startNanos;
+        return match.map(found -> new RouteResolution(
+                found.path(),
+                found.source(),
+                found.cacheHit(),
+                liteRtModelFormat(found.path()),
+                durationNanos));
+    }
+
+    private static Optional<RouteMatch> resolveLiteRtLmRouteMatch(FastArgs args) {
         if (args.modelFile != null) {
             Optional<Path> explicit = resolvePath(Path.of(args.modelFile));
             if (explicit.isPresent()) {
-                return findLiteRtLmFromExplicitPath(explicit.get());
+                return findLiteRtLmFromExplicitPath(explicit.get())
+                        .map(path -> new RouteMatch(path, "modelFile", false));
             }
         }
         if (args.model != null) {
@@ -234,14 +261,17 @@ public final class LiteRtLmFastRun {
             if (direct.isPresent()) {
                 Optional<Path> found = findLiteRtLmFromExplicitPath(direct.get());
                 if (found.isPresent()) {
-                    return found;
+                    return Optional.of(new RouteMatch(found.get(), "model", false));
                 }
             }
-            Optional<Path> fastIndexed = findIndexedLiteRtModelPath(args.model);
+            Optional<RouteMatch> fastIndexed = findIndexedLiteRtModelRoute(args.model);
             if (fastIndexed.isPresent()) {
-                Optional<Path> found = findLiteRtLmFromExplicitPath(fastIndexed.get());
+                Optional<Path> found = findLiteRtLmFromExplicitPath(fastIndexed.get().path());
                 if (found.isPresent()) {
-                    return found;
+                    return Optional.of(new RouteMatch(
+                            found.get(),
+                            fastIndexed.get().source(),
+                            fastIndexed.get().cacheHit()));
                 }
             }
             try {
@@ -250,7 +280,20 @@ public final class LiteRtLmFastRun {
                         && isLiteRtIndexEntry(indexed.get())
                         && indexed.get().path != null
                         && !indexed.get().path.isBlank()) {
-                    return findLiteRtLmFromExplicitPath(Path.of(indexed.get().path));
+                    return findLiteRtLmFromExplicitPath(Path.of(indexed.get().path))
+                            .map(path -> new RouteMatch(path, "local-index-litert", true));
+                }
+                if (indexed.isPresent()
+                        && isSafetensorIndexEntry(indexed.get())
+                        && indexed.get().path != null
+                        && !indexed.get().path.isBlank()) {
+                    Optional<Path> cachedGemma4LiteRt = findCachedGemma4LiteRtModelPath(indexed.get().path);
+                    if (cachedGemma4LiteRt.isPresent()) {
+                        return Optional.of(new RouteMatch(
+                                cachedGemma4LiteRt.get(),
+                                "cached-gemma4-litert",
+                                true));
+                    }
                 }
             } catch (Throwable ignored) {
                 // Full CLI has the complete resolver if the lightweight index read fails.
@@ -273,10 +316,14 @@ public final class LiteRtLmFastRun {
     }
 
     static Optional<Path> findIndexedLiteRtModelPath(String ref) {
+        return findIndexedLiteRtModelRoute(ref).map(RouteMatch::path);
+    }
+
+    static Optional<RouteMatch> findIndexedLiteRtModelRoute(String ref) {
         if (ref == null || ref.isBlank()) {
             return Optional.empty();
         }
-        Path indexPath = Path.of(System.getProperty("user.home"), ".gollek", "models", "index.json");
+        Path indexPath = modelIndexPath();
         if (!Files.isRegularFile(indexPath)) {
             return Optional.empty();
         }
@@ -291,7 +338,10 @@ public final class LiteRtLmFastRun {
                 if (candidate.path() != null && !candidate.path().isBlank()) {
                     candidates.add(candidate);
                     if (matchesIndexEntry(candidate, needle) && isLiteRtIndexObject(candidate)) {
-                        return Optional.of(Path.of(candidate.path()));
+                        return Optional.of(new RouteMatch(
+                                Path.of(candidate.path()),
+                                "fast-index-litert",
+                                true));
                     }
                 }
             }
@@ -300,13 +350,35 @@ public final class LiteRtLmFastRun {
                         .filter(candidate -> matchesIndexEntry(candidate, needle))
                         .findFirst();
                 if (requested.isPresent()) {
-                    return findEquivalentLiteRtModelPath(candidates, requested.get());
+                    return findEquivalentLiteRtModelPath(candidates, requested.get())
+                            .map(path -> new RouteMatch(
+                                    path,
+                                    "fast-index-equivalent-litert",
+                                    true));
                 }
             }
         } catch (Exception ignored) {
             // Full CLI resolver remains available if the lightweight parse fails.
         }
         return Optional.empty();
+    }
+
+    static record RouteResolution(
+            Path path,
+            String source,
+            boolean cacheHit,
+            String selectedArtifact,
+            long durationNanos) {
+
+        RouteResolution withDurationNanos(long durationNanos) {
+            return new RouteResolution(path, source, cacheHit, selectedArtifact, durationNanos);
+        }
+    }
+
+    static record RouteMatch(
+            Path path,
+            String source,
+            boolean cacheHit) {
     }
 
     private static boolean matchesIndexEntry(IndexCandidate candidate, String ref) {
@@ -334,6 +406,32 @@ public final class LiteRtLmFastRun {
             return true;
         }
         return entry.path != null && isLiteRtPathString(entry.path);
+    }
+
+    private static boolean isSafetensorIndexEntry(LocalModelIndex.Entry entry) {
+        if (entry == null) {
+            return false;
+        }
+        String format = entry.format == null ? "" : entry.format.trim().toLowerCase(Locale.ROOT);
+        if (format.equals("safetensor") || format.equals("safetensors")) {
+            return true;
+        }
+        String path = entry.path == null ? "" : entry.path.trim().toLowerCase(Locale.ROOT);
+        return path.endsWith(".safetensors") || path.contains("/safetensors/");
+    }
+
+    private static Optional<Path> findCachedGemma4LiteRtModelPath(String safetensorPath) {
+        DirectSafetensorRoutePolicy.AlternateRuntimeSelection selection =
+                DirectSafetensorRoutePolicy.selectCachedGemma4MobileQatLiteRtAlternateRuntime(
+                        "safetensor",
+                        safetensorPath,
+                        safetensorPath,
+                        false,
+                        true);
+        if (!selection.selected() || selection.localPath() == null || selection.localPath().isBlank()) {
+            return Optional.empty();
+        }
+        return findLiteRtLmFromExplicitPath(Path.of(selection.localPath()));
     }
 
     private static boolean isLiteRtIndexObject(IndexCandidate candidate) {
@@ -466,6 +564,7 @@ public final class LiteRtLmFastRun {
     private static boolean isCanonicalNoiseToken(String token) {
         return switch (token) {
             case "google", "litert", "community", "lm", "gguf", "safetensor", "safetensors",
+                    "qat", "mobile", "transformers",
                     "q4", "q5", "q6", "q8", "k", "m", "f16", "fp16", "bf16" -> true;
             default -> false;
         };
@@ -632,17 +731,18 @@ public final class LiteRtLmFastRun {
         return score;
     }
 
-    private static void generate(Path modelPath, FastArgs args) throws Exception {
-        generate(modelPath, args, System.out, System.err, null, "fast path");
+    private static void generate(RouteResolution route, FastArgs args) throws Exception {
+        generate(route, args, System.out, System.err, null, "fast path");
     }
 
     private static void generate(
-            Path modelPath,
+            RouteResolution route,
             FastArgs args,
             PrintStream out,
             PrintStream err,
             EngineCache engineCache,
             String runnerName) throws Exception {
+        Path modelPath = route.path();
         long startNanos = System.nanoTime();
         Files.createDirectories(cacheDir());
         Engine.Companion.setNativeMinLogSeverity(nativeLogSeverity());
@@ -743,7 +843,11 @@ public final class LiteRtLmFastRun {
                 if (Boolean.getBoolean("gollek.litert.fast_run.profile")) {
                     long first = firstChunkNanos.get();
                     err.printf(Locale.ROOT,
-                            "[Fast LiteRT-LM profile] cache+config=%.3fs engineInit=%.3fs conversation=%.3fs firstChunk=%.3fs total=%.3fs%n",
+                            "[Fast LiteRT-LM profile] routeResolve=%.3fs routeCacheHit=%s selectedArtifact=%s routeSource=%s cache+config=%.3fs engineInit=%.3fs conversation=%.3fs firstChunk=%.3fs total=%.3fs%n",
+                            seconds(route.durationNanos()),
+                            route.cacheHit(),
+                            route.selectedArtifact(),
+                            route.source(),
                             seconds(beforeEngineInitNanos - startNanos),
                             seconds(afterEngineInitNanos - beforeEngineInitNanos),
                             seconds(afterConversationCreateNanos - afterEngineInitNanos),
@@ -1023,7 +1127,7 @@ public final class LiteRtLmFastRun {
         if (stripped.isEmpty() || !BARE_QUESTION_PATTERN.matcher(stripped).matches()) {
             return prompt;
         }
-        return Character.toUpperCase(stripped.charAt(0)) + stripped.substring(1) + "?";
+        return SHORT_QUESTION_INSTRUCTION + Character.toUpperCase(stripped.charAt(0)) + stripped.substring(1) + "?";
     }
 
     static boolean questionNormalizationEnabled() {
@@ -1078,8 +1182,12 @@ public final class LiteRtLmFastRun {
         return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.daemon", "false"));
     }
 
+    private static OptionalInt requestExistingDaemon(String[] rawArgs) {
+        return sendDaemonRequestWithRetries(DAEMON_MAGIC, rawArgs, daemonRequestRetryMillis());
+    }
+
     private static OptionalInt requestDaemon(String[] rawArgs) {
-        OptionalInt status = sendDaemonRequestWithRetries(DAEMON_MAGIC, rawArgs, daemonRequestRetryMillis());
+        OptionalInt status = requestExistingDaemon(rawArgs);
         if (status.isPresent()) {
             return status;
         }
@@ -1171,6 +1279,7 @@ public final class LiteRtLmFastRun {
             command.add("-Xmx" + System.getProperty("gollek.litert.fast_run.daemon_heap",
                     System.getProperty("gollek.litert.fast_run.heap", "8g")));
             command.add("-XX:MaxDirectMemorySize=" + System.getProperty("gollek.litert.fast_run.daemon_direct_memory", "24g"));
+            addDaemonCrashDiagnostics(command);
             command.add("--enable-preview");
             command.add("--add-modules");
             command.add("jdk.incubator.vector");
@@ -1202,6 +1311,24 @@ public final class LiteRtLmFastRun {
         }
     }
 
+    private static void addDaemonCrashDiagnostics(List<String> command) {
+        String defaultErrorFile = daemonLogFile().getParent()
+                .resolve("litert-fast-daemon-hs_err_pid%p.log")
+                .toString();
+        command.add("-XX:ErrorFile=" + System.getProperty(
+                "gollek.litert.fast_run.daemon_error_file",
+                defaultErrorFile));
+        if (Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.daemon_signal_log", "false"))) {
+            String defaultSignalLog = daemonLogFile().getParent()
+                    .resolve("litert-fast-daemon-signal-%p.log")
+                    .toString();
+            command.add("-Xlog:os+signal=info:file=" + System.getProperty(
+                    "gollek.litert.fast_run.daemon_signal_log_file",
+                    defaultSignalLog)
+                    + ":time,uptime,level,tags");
+        }
+    }
+
     private static boolean startDetachedDaemon(List<String> command) throws IOException, InterruptedException {
         String launcher = daemonLauncherMode();
         if (Boolean.getBoolean("gollek.litert.fast_run.debug")) {
@@ -1217,8 +1344,7 @@ public final class LiteRtLmFastRun {
     }
 
     static String daemonLauncherMode() {
-        String defaultLauncher = isMacOs() ? "launchctl" : "nohup";
-        String launcher = System.getProperty("gollek.litert.fast_run.daemon_launcher", defaultLauncher)
+        String launcher = System.getProperty("gollek.litert.fast_run.daemon_launcher", "auto")
                 .trim()
                 .toLowerCase(Locale.ROOT);
         return switch (launcher) {
@@ -1344,6 +1470,10 @@ public final class LiteRtLmFastRun {
              EngineCache engineCache = new EngineCache()) {
             port = server.getLocalPort();
             writeDaemonPort(port);
+            final int daemonPort = port;
+            Runtime.getRuntime().addShutdownHook(new Thread(
+                    () -> daemonLog("shutdown hook port=%d", daemonPort),
+                    "gollek-litert-fast-daemon-shutdown-log"));
             server.setSoTimeout(1000);
             long lastRequestNanos = System.nanoTime();
             long idleSeconds = Long.getLong("gollek.litert.fast_run.daemon_idle_seconds", 900L);
@@ -1356,7 +1486,9 @@ public final class LiteRtLmFastRun {
             while (!stop.get()) {
                 try (Socket socket = server.accept()) {
                     lastRequestNanos = System.nanoTime();
-                    stop.set(handleDaemonClient(socket, engineCache));
+                    boolean shouldStop = handleDaemonClient(socket, engineCache);
+                    stop.set(shouldStop);
+                    daemonLog("request complete port=%d stop=%s", port, shouldStop);
                 } catch (SocketTimeoutException ignored) {
                     if (System.nanoTime() - lastRequestNanos > idleNanos) {
                         daemonLog("idle timeout after %ds", idleSeconds);
@@ -1406,28 +1538,29 @@ public final class LiteRtLmFastRun {
                 writeStatus(framed, FALLBACK_TO_FULL_CLI);
                 return false;
             }
-            Optional<Path> modelPath = resolveLiteRtLmModel(parsed);
-            if (modelPath.isEmpty()) {
+            Optional<RouteResolution> route = engineCache.resolveRoute(parsed);
+            if (route.isEmpty()) {
                 writeStatus(framed, FALLBACK_TO_FULL_CLI);
                 return false;
             }
             daemonLog("%s request model=%s backend=%s maxTokens=%d",
                     prewarmRequest ? "prewarm" : "run",
-                    modelPath.get().getFileName(),
+                    route.get().path().getFileName(),
                     normalizedBackend(parsed.backend),
                     parsed.maxTokens);
             try (PrintStream out = new PrintStream(new FramedOutputStream(framed, 1), true, StandardCharsets.UTF_8);
                  PrintStream err = new PrintStream(new FramedOutputStream(framed, 2), true, StandardCharsets.UTF_8)) {
                 if (prewarmRequest) {
-                    prewarmEngine(modelPath.get(), parsed, out, engineCache);
+                    prewarmEngine(route.get().path(), parsed, out, engineCache);
                 } else {
-                    generate(modelPath.get(), parsed, out, err, engineCache, "daemon");
+                    generate(route.get(), parsed, out, err, engineCache, "daemon");
                 }
                 out.flush();
                 err.flush();
             }
             writeStatus(framed, 0);
         } catch (Throwable throwable) {
+            daemonLog("request failed reason=%s", summarize(throwable));
             try {
                 DataOutputStream framed = new DataOutputStream(socket.getOutputStream());
                 writeFrame(framed, 2, ("LiteRT-LM daemon request failed: " + summarize(throwable) + System.lineSeparator())
@@ -1601,11 +1734,11 @@ public final class LiteRtLmFastRun {
         if (info.isEmpty()) {
             return OptionalInt.empty();
         }
-        if (!isDaemonProcessAlive(info.get().pid())) {
+        if (strictDaemonKey() && !daemonKey().equals(info.get().key())) {
             discardStaleDaemon(info.get());
             return OptionalInt.empty();
         }
-        if (strictDaemonKey() && !daemonKey().equals(info.get().key())) {
+        if (verifyDaemonPid() && info.get().pid() > 0 && !isDaemonProcessAlive(info.get().pid())) {
             discardStaleDaemon(info.get());
             return OptionalInt.empty();
         }
@@ -1681,6 +1814,7 @@ public final class LiteRtLmFastRun {
         System.err.printf("%tF %<tT [litert-daemon] %s%n",
                 System.currentTimeMillis(),
                 String.format(Locale.ROOT, format, args));
+        System.err.flush();
     }
 
     private static void discardStaleDaemon(DaemonInfo info) {
@@ -1723,6 +1857,10 @@ public final class LiteRtLmFastRun {
 
     static boolean strictDaemonKey() {
         return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.strict_daemon_key", "true"));
+    }
+
+    static boolean verifyDaemonPid() {
+        return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.verify_daemon_pid", "true"));
     }
 
     private static void deleteDaemonPortFile() {
@@ -2010,8 +2148,57 @@ public final class LiteRtLmFastRun {
         }
     }
 
+    static final class RouteResolutionCache {
+        private final Map<String, RouteResolution> routes = new HashMap<>();
+        private String modelIndexFingerprint = "";
+
+        synchronized Optional<RouteResolution> resolve(FastArgs args) {
+            if (!daemonRouteCacheEnabled()) {
+                return resolveLiteRtLmRoute(args);
+            }
+            long startNanos = System.nanoTime();
+            String currentIndexFingerprint = modelIndexFingerprint();
+            if (!currentIndexFingerprint.equals(modelIndexFingerprint)) {
+                routes.clear();
+                modelIndexFingerprint = currentIndexFingerprint;
+                daemonLog("route cache cleared after model index change");
+            }
+            String key = routeCacheKey(args, currentIndexFingerprint);
+            RouteResolution cached = routes.get(key);
+            if (cached != null && routeStillAvailable(cached)) {
+                daemonLog("route cache hit source=%s artifact=%s path=%s",
+                        cached.source(),
+                        cached.selectedArtifact(),
+                        cached.path().getFileName());
+                return Optional.of(cached.withDurationNanos(System.nanoTime() - startNanos));
+            }
+            if (cached != null) {
+                routes.remove(key);
+                daemonLog("route cache evicted stale path=%s", cached.path().getFileName());
+            }
+            Optional<RouteResolution> resolved = resolveLiteRtLmRoute(args);
+            resolved.ifPresent(route -> {
+                routes.put(key, route);
+                daemonLog("route cache stored source=%s artifact=%s path=%s",
+                        route.source(),
+                        route.selectedArtifact(),
+                        route.path().getFileName());
+            });
+            return resolved;
+        }
+
+        synchronized int size() {
+            return routes.size();
+        }
+    }
+
     private static final class EngineCache implements AutoCloseable {
+        private final RouteResolutionCache routeCache = new RouteResolutionCache();
         private final Map<String, EngineLease> engines = new HashMap<>();
+
+        private Optional<RouteResolution> resolveRoute(FastArgs args) {
+            return routeCache.resolve(args);
+        }
 
         private synchronized EngineLease acquire(Path modelPath, String requestedBackend, int engineMaxNumTokens) {
             String key = engineCacheKey(modelPath, requestedBackend, engineMaxNumTokens);
@@ -2044,6 +2231,45 @@ public final class LiteRtLmFastRun {
                 engine.forceClose();
             }
             engines.clear();
+        }
+    }
+
+    static boolean daemonRouteCacheEnabled() {
+        return Boolean.parseBoolean(System.getProperty("gollek.litert.fast_run.daemon_route_cache", "true"));
+    }
+
+    private static boolean routeStillAvailable(RouteResolution route) {
+        return route != null && route.path() != null && Files.isRegularFile(route.path());
+    }
+
+    private static String routeCacheKey(FastArgs args, String indexFingerprint) {
+        return "model=" + nullToEmpty(args.model)
+                + "|modelFile=" + nullToEmpty(args.modelFile)
+                + "|cwd=" + Path.of("").toAbsolutePath().normalize()
+                + "|home=" + System.getProperty("user.home", "")
+                + "|autoEquivalent=" + equivalentLiteRtFastPathEnabled()
+                + "|index=" + indexFingerprint;
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static Path modelIndexPath() {
+        return Path.of(System.getProperty("user.home"), ".gollek", "models", "index.json");
+    }
+
+    private static String modelIndexFingerprint() {
+        Path indexPath = modelIndexPath();
+        try {
+            Path normalized = indexPath.toAbsolutePath().normalize();
+            if (Files.isRegularFile(normalized)) {
+                return normalized + "|size=" + Files.size(normalized)
+                        + "|mtime=" + Files.getLastModifiedTime(normalized).toMillis();
+            }
+            return normalized + "|missing";
+        } catch (Exception ignored) {
+            return indexPath.toString() + "|unknown";
         }
     }
 

@@ -40,6 +40,10 @@ done
 backend="${GOLLEK_FAKE_BACKEND:-CPU}"
 probe="${GOLLEK_FAKE_PROBE:-tensor=blk.0.attn_q.weight, type=Q4_K, rows=2304, cols=1536, sampledRows=16, dot=1.000ms, dotChecksum=1.0, matVecRows=4096, cache=1.000ms, preparedMatVecReady=true, parallelMatVec=5.0ms, matVecChecksum=1.0, cachedGenericMatVec=6.0ms, cachedChecksum=1.0}"
 java_probe="${GOLLEK_FAKE_JAVA_PROBE:-$probe}"
+if [[ -n "${GOLLEK_FAKE_RUN_EXIT:-}" ]]; then
+    printf '%s\n' "${GOLLEK_FAKE_RUN_OUTPUT:-fake gollek run failure}" >&2
+    exit "$GOLLEK_FAKE_RUN_EXIT"
+fi
 case "$engine" in
     benchmark)
         cat <<EOF
@@ -94,7 +98,7 @@ EOF
         printf 'warm\n' > "$litert_state"
         cat <<EOF
 Jakarta is in Indonesia.
-profile(engineInit=0.001s, firstChunk=0.001s, total=0.001s, backend=${backend}, warmEngine=${warm_engine})
+profile(routeResolve=0.002s, routeCacheHit=true, selectedArtifact=litertlm, routeSource=fake-index, engineInit=0.001s, firstChunk=0.001s, total=0.001s, backend=${backend}, warmEngine=${warm_engine})
 [Stream updates: 1, Duration: 1.00s, Speed: 10.00 t/s]
 EOF
         ;;
@@ -138,6 +142,25 @@ export GOLLEK_FAKE_STATE_DIR="$TMP_DIR"
 
 GOLLEK_FAKE_BACKEND=GPU expect_failure litert_generic_gpu \
     bash "$ROOT_DIR/scripts/bench-litert-fast-run.sh" "${COMMON_ARGS[@]}"
+LITERT_FAILURE_SUMMARY="$TMP_DIR/litert-failure-summary.tsv"
+set +e
+GOLLEK_FAKE_BACKEND='GPU/Metal' \
+GOLLEK_FAKE_RUN_EXIT=64 \
+GOLLEK_FAKE_RUN_OUTPUT='/dev/fd/62: Operation not permitted' \
+    bash "$ROOT_DIR/scripts/bench-litert-fast-run.sh" --gollek-bin "$FAKE_GOLLEK" --warm-threshold-ms 2000 --cold-threshold-ms 2000 --warmup-runs 0 --require-metal --summary-file "$LITERT_FAILURE_SUMMARY" \
+    >"$TMP_DIR/litert_run_failure.out" 2>"$TMP_DIR/litert_run_failure.err"
+litert_run_failure_exit=$?
+set -e
+if [[ "$litert_run_failure_exit" -ne 64 ]] \
+        || ! grep -q 'FAIL: cold command exited with status 64' "$TMP_DIR/litert_run_failure.err" \
+        || ! grep -q '/dev/fd/62: Operation not permitted' "$TMP_DIR/litert_run_failure.err" \
+        || ! grep -q $'^cold\tn/a\tunknown\tn/a\tn/a\tn/a\tn/a\tn/a\tn/a\tn/a\tn/a\t' "$LITERT_FAILURE_SUMMARY"; then
+    echo "Expected LiteRT benchmark to preserve command-exit diagnostics and summary log path" >&2
+    cat "$TMP_DIR/litert_run_failure.out" >&2
+    cat "$TMP_DIR/litert_run_failure.err" >&2
+    cat "$LITERT_FAILURE_SUMMARY" >&2
+    exit 1
+fi
 rm -f "$TMP_DIR/litert-daemon-state"
 GOLLEK_FAKE_BACKEND='GPU/Metal' \
     expect_failure_message litert_warm_only_without_daemon 'did not reuse the LiteRT daemon engine' \
@@ -186,8 +209,8 @@ LITERT_SUMMARY="$TMP_DIR/litert-summary.tsv"
 printf 'warm\n' > "$TMP_DIR/litert-daemon-state"
 GOLLEK_FAKE_BACKEND='GPU/Metal' expect_success litert_summary \
     bash "$ROOT_DIR/scripts/bench-litert-fast-run.sh" --gollek-bin "$FAKE_GOLLEK" --warm-threshold-ms 2000 --warmup-runs 0 --require-metal --warm-only --summary-file "$LITERT_SUMMARY"
-if ! grep -q $'^case\tdurationMs\tbackend\twarmEngine\tengineInitMs\tfirstChunkMs\ttotalMs\tlog$' "$LITERT_SUMMARY" \
-        || ! grep -q $'^warm\t1000\tGPU/Metal\ttrue\t1\t1\t1\t' "$LITERT_SUMMARY"; then
+if ! grep -q $'^case\tdurationMs\tbackend\twarmEngine\tengineInitMs\tfirstChunkMs\ttotalMs\trouteResolveMs\trouteCacheHit\tselectedArtifact\trouteSource\tlog$' "$LITERT_SUMMARY" \
+        || ! grep -q $'^warm\t1000\tGPU/Metal\ttrue\t1\t1\t1\t2\ttrue\tlitertlm\tfake-index\t' "$LITERT_SUMMARY"; then
     echo "Expected LiteRT benchmark summary file with warm metrics" >&2
     cat "$LITERT_SUMMARY" >&2
     exit 1

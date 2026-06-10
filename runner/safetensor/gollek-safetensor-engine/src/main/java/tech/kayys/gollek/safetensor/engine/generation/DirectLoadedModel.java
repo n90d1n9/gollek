@@ -1,7 +1,7 @@
 package tech.kayys.gollek.safetensor.engine.generation;
 
 import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPolicy.buildBaseStopTokenIds;
-import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPolicy.buildGreedySamplingMasks;
+import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPolicy.buildTokenSamplingMasks;
 
 import java.lang.foreign.Arena;
 import java.nio.file.Path;
@@ -30,7 +30,7 @@ public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
     private final ModelArchitecture architecture;
     private final ModelRuntimeTraits runtimeTraits;
     private final Set<Integer> baseStopTokenIds;
-    private final GreedySamplingMasks baseGreedySamplingMasks;
+    private final TokenSamplingMasks baseTokenSamplingMasks;
     private final Map<String, AccelTensor> weights;
     private final Arena weightArena;
 
@@ -52,7 +52,7 @@ public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
         this.architecture = Objects.requireNonNull(architecture, "architecture must not be null");
         this.runtimeTraits = ModelRuntimeTraitsResolver.resolve(this.architecture, this.config, runtimeTraits);
         this.baseStopTokenIds = buildBaseStopTokenIds(tokenizer, this.config);
-        this.baseGreedySamplingMasks = buildGreedySamplingMasks(tokenizer, this.baseStopTokenIds,
+        this.baseTokenSamplingMasks = buildTokenSamplingMasks(tokenizer, this.baseStopTokenIds,
                 this.config.vocabSize(), this.runtimeTraits);
         this.weightArena = weightArena;
     }
@@ -104,8 +104,8 @@ public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
         return baseStopTokenIds;
     }
 
-    GreedySamplingMasks baseGreedySamplingMasks() {
-        return baseGreedySamplingMasks;
+    TokenSamplingMasks baseTokenSamplingMasks() {
+        return baseTokenSamplingMasks;
     }
 
     public QuantizationEngine.QuantStrategy getQuantStrategy() {

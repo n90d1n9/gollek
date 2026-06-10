@@ -502,14 +502,17 @@ public final class TrainingReportPortfolioArtifactPackageReport {
         TrainerCheckpointIO.writeStringAtomically(jsonFile, renderJson(resolvedVerification) + "\n");
         TrainerCheckpointIO.writeStringAtomically(markdownFile, renderMarkdown(resolvedVerification));
         TrainerCheckpointIO.writeStringAtomically(junitXmlFile, renderJunitXml(resolvedVerification));
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint = TrainingReportArtifactFingerprint.of(junitXmlFile);
         return new ReportBundle(
                 resolvedDirectory,
                 jsonFile,
                 markdownFile,
                 junitXmlFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(junitXmlFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256(),
                 resolvedVerification);
     }
 
@@ -568,6 +571,12 @@ public final class TrainingReportPortfolioArtifactPackageReport {
             throw new IOException("Portfolio package verification report JSON must be an object: "
                     + resolvedJsonFile);
         }
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint junitXmlFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJunitXmlFile);
         return new ReportInspection(
                 commonDirectory(resolvedJsonFile, resolvedMarkdownFile, resolvedJunitXmlFile),
                 resolvedJsonFile,
@@ -576,9 +585,9 @@ public final class TrainingReportPortfolioArtifactPackageReport {
                 stringKeyMap(map),
                 markdown,
                 junitXml,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedJunitXmlFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                junitXmlFingerprint.sha256());
     }
 
     public static ReportVerification verify(ReportBundle bundle) throws IOException {

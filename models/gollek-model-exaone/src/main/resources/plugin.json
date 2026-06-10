@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["exaone4", "exaone_moe", "exaone-moe"]
   }
 }

@@ -134,11 +134,13 @@ final class TrainerSummaryAssembler {
                 request.optimization().pendingGradientAccumulationBatches(),
                 request.optimization().optimizerStepCount(),
                 request.optimization().gradientClip(),
+                request.optimization().parameterUpdateDiagnosticsIntervalSteps(),
                 request.optimization().gradients(),
                 request.optimization().parameters(),
                 request.optimization().updates());
         TrainerThroughputStats.putPhaseMetadata(metadata, "train", request.throughput().trainTotal());
         TrainerThroughputStats.putPhaseMetadata(metadata, "validation", request.throughput().validationTotal());
+        metadata.putAll(request.runtimeProfile().metadata());
         TrainerAccelerationMetadata.put(
                 metadata,
                 request.acceleration().requestedDevice(),
@@ -176,6 +178,7 @@ final class TrainerSummaryAssembler {
             History history,
             Optimization optimization,
             Throughput throughput,
+            RuntimeProfile runtimeProfile,
             AccelerationInfo acceleration,
             References references) {
     }
@@ -298,6 +301,7 @@ final class TrainerSummaryAssembler {
             int pendingGradientAccumulationBatches,
             int optimizerStepCount,
             TrainerGradientClipConfig gradientClip,
+            int parameterUpdateDiagnosticsIntervalSteps,
             TrainerOptimizationMetadata.GradientDiagnostics gradients,
             TrainerOptimizationMetadata.ParameterDiagnostics parameters,
             TrainerOptimizationMetadata.UpdateDiagnostics updates) {
@@ -306,6 +310,12 @@ final class TrainerSummaryAssembler {
     record Throughput(
             ThroughputSnapshot trainTotal,
             ThroughputSnapshot validationTotal) {
+    }
+
+    record RuntimeProfile(Map<String, Object> metadata) {
+        RuntimeProfile {
+            metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        }
     }
 
     record AccelerationInfo(

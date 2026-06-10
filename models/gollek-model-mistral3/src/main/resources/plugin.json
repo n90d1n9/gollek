@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["tekken", "hf-bpe", "vision-text-processor"],
     "families": ["mistral3", "mistral_3", "mistral-3"]
   }
 }

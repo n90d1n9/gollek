@@ -67,10 +67,10 @@ public record DiscreteTokenDatasetTrainerCheckpointSelectionPolicy(
     public static DiscreteTokenDatasetTrainerCheckpointSelectionPolicy fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetTrainerCheckpointSelectionPolicy(
-                requiredBoolean(metadata, "requireReady"),
-                requiredBoolean(metadata, "requireResumeReport"),
-                requiredBoolean(metadata, "failOnInventoryFailures"),
-                optionalBoolean(metadata, "failOnLineageIssues", false),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "requireReady"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "requireResumeReport"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "failOnInventoryFailures"),
+                DiscreteTokenDatasetMetadataSupport.optionalBoolean(metadata, "failOnLineageIssues", false),
                 expectationFromMetadata(metadata));
     }
 
@@ -231,41 +231,6 @@ public record DiscreteTokenDatasetTrainerCheckpointSelectionPolicy(
             return DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(map);
         }
         throw new IllegalArgumentException("metadata field 'expectation' must be a map");
-    }
-
-    private static boolean requiredBoolean(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        return booleanValue(value, key);
-    }
-
-    private static boolean optionalBoolean(Map<?, ?> metadata, String key, boolean defaultValue) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            return defaultValue;
-        }
-        return booleanValue(metadata.get(key), key);
-    }
-
-    private static boolean booleanValue(Object value, String key) {
-        if (value instanceof Boolean bool) {
-            return bool;
-        }
-        if (value instanceof CharSequence text) {
-            String normalized = text.toString().trim();
-            if ("true".equalsIgnoreCase(normalized)) {
-                return true;
-            }
-            if ("false".equalsIgnoreCase(normalized)) {
-                return false;
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a boolean");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
     }
 
     public static final class Builder {

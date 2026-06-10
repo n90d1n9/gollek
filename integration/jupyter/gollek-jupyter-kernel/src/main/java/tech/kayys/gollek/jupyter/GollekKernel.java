@@ -40,12 +40,21 @@ import static tech.kayys.gollek.jupyter.NotebookDependencyRenderer.jarAddedPrevi
 import static tech.kayys.gollek.jupyter.NotebookDependencyRenderer.localMavenArtifactAddedPreview;
 import static tech.kayys.gollek.jupyter.NotebookDependencyRenderer.missingMavenArtifactPreview;
 import static tech.kayys.gollek.jupyter.NotebookDependencyRenderer.remoteMavenArtifactAddedPreview;
-import static tech.kayys.gollek.jupyter.NotebookFiles.collectGrepMatches;
+import static tech.kayys.gollek.jupyter.NotebookFiles.collectFileNameMatches;
+import static tech.kayys.gollek.jupyter.NotebookFiles.collectTextMatches;
 import static tech.kayys.gollek.jupyter.NotebookFiles.computeDiskUsage;
-import static tech.kayys.gollek.jupyter.NotebookFiles.formatPathEntry;
+import static tech.kayys.gollek.jupyter.NotebookFiles.computeFileStats;
+import static tech.kayys.gollek.jupyter.NotebookFiles.computeLineDiff;
+import static tech.kayys.gollek.jupyter.NotebookFiles.computeSha256;
+import static tech.kayys.gollek.jupyter.NotebookFiles.listDirectoryEntries;
+import static tech.kayys.gollek.jupyter.NotebookFiles.readHead;
+import static tech.kayys.gollek.jupyter.NotebookFiles.readTail;
 import static tech.kayys.gollek.jupyter.NotebookFiles.readUtf8Preview;
+import static tech.kayys.gollek.jupyter.NotebookFiles.treeLines;
+import static tech.kayys.gollek.jupyter.NotebookFileMagicOptions.parseArchiveEntryOptions;
 import static tech.kayys.gollek.jupyter.NotebookFileMagicOptions.parseExtractOptions;
 import static tech.kayys.gollek.jupyter.NotebookFileMagicOptions.parseLinePreviewOptions;
+import static tech.kayys.gollek.jupyter.NotebookFileMagicOptions.parsePathPairOptions;
 import static tech.kayys.gollek.jupyter.NotebookFileMagicOptions.parseSearchOptions;
 import static tech.kayys.gollek.jupyter.NotebookFileRenderer.diffPreview;
 import static tech.kayys.gollek.jupyter.NotebookFileRenderer.directoryPreview;
@@ -58,6 +67,9 @@ import static tech.kayys.gollek.jupyter.NotebookFileRenderer.treePreview;
 import static tech.kayys.gollek.jupyter.NotebookFileRenderer.wordCountPreview;
 import static tech.kayys.gollek.jupyter.NotebookFileRenderer.workingDirectoryChangedPreview;
 import static tech.kayys.gollek.jupyter.NotebookFileRenderer.workingDirectoryPreview;
+import static tech.kayys.gollek.jupyter.NotebookPathTargets.directoryTargetError;
+import static tech.kayys.gollek.jupyter.NotebookPathTargets.fileOrDirectoryTargetError;
+import static tech.kayys.gollek.jupyter.NotebookPathTargets.regularFileTargetError;
 import static tech.kayys.gollek.jupyter.NotebookRuntimeRenderer.classLocationPreview;
 import static tech.kayys.gollek.jupyter.NotebookRuntimeRenderer.envPreview;
 import static tech.kayys.gollek.jupyter.NotebookRuntimeRenderer.resetPreview;
@@ -101,10 +113,16 @@ import tech.kayys.gollek.jupyter.NotebookCharts.LinePlotPoint;
 import tech.kayys.gollek.jupyter.NotebookCharts.ScatterPoint;
 import tech.kayys.gollek.jupyter.NotebookArchives.ArchiveEntry;
 import tech.kayys.gollek.jupyter.NotebookArchives.ArchiveListing;
+import tech.kayys.gollek.jupyter.NotebookFileMagicOptions.ArchiveEntryOptions;
 import tech.kayys.gollek.jupyter.NotebookFileMagicOptions.ExtractOptions;
 import tech.kayys.gollek.jupyter.NotebookFileMagicOptions.LinePreviewOptions;
+import tech.kayys.gollek.jupyter.NotebookFileMagicOptions.PathPairOptions;
 import tech.kayys.gollek.jupyter.NotebookFileMagicOptions.SearchOptions;
+import tech.kayys.gollek.jupyter.NotebookFiles.DiffResult;
 import tech.kayys.gollek.jupyter.NotebookFiles.DiskUsageStats;
+import tech.kayys.gollek.jupyter.NotebookFiles.FileStats;
+import tech.kayys.gollek.jupyter.NotebookFiles.LineWindow;
+import tech.kayys.gollek.jupyter.NotebookFiles.Sha256Digest;
 import tech.kayys.gollek.jupyter.NotebookFiles.TextPreview;
 import tech.kayys.gollek.jupyter.NotebookDataLoader.DelimitedTable;
 import tech.kayys.gollek.jupyter.NotebookDependencies.MavenMagicArgs;
@@ -142,7 +160,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Stream;
 
 public class GollekKernel extends BaseKernel {
 
@@ -423,11 +440,9 @@ public class GollekKernel extends BaseKernel {
             if (Path.of(rawPath).isAbsolute()) {
                 next = Path.of(rawPath).normalize();
             }
-            if (!Files.exists(next)) {
-                return new DisplayData("Directory not found: " + next);
-            }
-            if (!Files.isDirectory(next)) {
-                return new DisplayData("Not a directory: " + next);
+            String targetError = directoryTargetError(next, "Directory not found: ", "Not a directory: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             currentDirectory = next.toAbsolutePath().normalize();
             System.setProperty("user.dir", currentDirectory.toString());
@@ -439,15 +454,8 @@ public class GollekKernel extends BaseKernel {
 
     private DisplayData renderLs() {
         Path cwd = currentDirectory;
-        try (Stream<Path> stream = Files.list(cwd)) {
-            List<Path> entries = stream
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
-                    .limit(50)
-                    .toList();
-            List<String> labels = entries.stream()
-                    .map(entry -> formatPathEntry(entry))
-                    .toList();
-            return displayPreview(directoryPreview(cwd.toString(), labels));
+        try {
+            return displayPreview(directoryPreview(cwd.toString(), listDirectoryEntries(cwd, 50)));
         } catch (Exception e) {
             return new DisplayData("Unable to list directory: " + e.getMessage());
         }
@@ -461,29 +469,16 @@ public class GollekKernel extends BaseKernel {
             }
             root = root.toAbsolutePath().normalize();
             final Path treeRoot = root;
-            if (!Files.exists(treeRoot)) {
-                return new DisplayData("Tree target not found: " + treeRoot);
-            }
-            if (!Files.isDirectory(treeRoot)) {
-                return new DisplayData("Tree target is not a directory: " + treeRoot);
-            }
-
-            List<String> lines = new java.util.ArrayList<>();
-            lines.add("Tree(" + treeRoot + ")");
-            try (Stream<Path> stream = Files.walk(treeRoot, 3)) {
-                stream
-                        .filter(path -> !path.equals(treeRoot))
-                        .sorted(Comparator.comparing(Path::toString, String.CASE_INSENSITIVE_ORDER))
-                        .limit(60)
-                        .forEach(path -> {
-                            Path relative = treeRoot.relativize(path);
-                            int depth = relative.getNameCount();
-                            String indent = "  ".repeat(Math.max(0, depth - 1));
-                            lines.add(indent + formatPathEntry(path));
-                        });
+            String targetError = directoryTargetError(
+                    treeRoot,
+                    "Tree target not found: ",
+                    "Tree target is not a directory: "
+            );
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
-            return displayPreview(treePreview(treeRoot.toString(), lines));
+            return displayPreview(treePreview(treeRoot.toString(), treeLines(treeRoot, 60, 3)));
         } catch (Exception e) {
             return new DisplayData("Unable to render tree: " + e.getMessage());
         }
@@ -495,11 +490,13 @@ public class GollekKernel extends BaseKernel {
                     ? currentDirectory
                     : resolveNotebookPath(rawPath);
             target = target.toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("DU target not found: " + target);
-            }
-            if (!Files.isRegularFile(target) && !Files.isDirectory(target)) {
-                return new DisplayData("DU target is not a file or directory: " + target);
+            String targetError = fileOrDirectoryTargetError(
+                    target,
+                    "DU target not found: ",
+                    "DU target is not a file or directory: "
+            );
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
             DiskUsageStats stats = computeDiskUsage(target, MAX_DU_ENTRIES);
@@ -516,11 +513,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
             TextPreview preview = readUtf8Preview(target, MAX_CAT_BYTES);
@@ -539,15 +534,12 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(options.path()).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
-            }
-            List<String> lines = Files.readAllLines(target, java.nio.charset.StandardCharsets.UTF_8);
-            List<String> preview = lines.stream().limit(options.lines()).toList();
-            return displayPreview(linePreview("Head", target.toString(), preview, lines.size()));
+            LineWindow window = readHead(target, options.lines());
+            return displayPreview(linePreview("Head", target.toString(), window.lines(), window.totalLines()));
         } catch (Exception e) {
             return new DisplayData("Unable to read file head: " + e.getMessage());
         }
@@ -562,16 +554,12 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(options.path()).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
-            }
-            List<String> lines = Files.readAllLines(target, java.nio.charset.StandardCharsets.UTF_8);
-            int fromIndex = Math.max(0, lines.size() - options.lines());
-            List<String> preview = lines.subList(fromIndex, lines.size());
-            return displayPreview(linePreview("Tail", target.toString(), preview, lines.size()));
+            LineWindow window = readTail(target, options.lines());
+            return displayPreview(linePreview("Tail", target.toString(), window.lines(), window.totalLines()));
         } catch (Exception e) {
             return new DisplayData("Unable to read file tail: " + e.getMessage());
         }
@@ -588,25 +576,20 @@ public class GollekKernel extends BaseKernel {
             Path target = options.path() == null
                     ? currentDirectory
                     : resolveNotebookPath(options.path()).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("Grep target not found: " + target);
+            String targetError = fileOrDirectoryTargetError(
+                    target,
+                    "Grep target not found: ",
+                    "Grep target is not a file or directory: "
+            );
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
-
-            List<String> matches = new java.util.ArrayList<>();
-            if (Files.isRegularFile(target)) {
-                collectGrepMatches(target, target.getFileName().toString(), options.pattern(), matches, 50);
-            } else if (Files.isDirectory(target)) {
-                try (Stream<Path> stream = Files.walk(target, 3)) {
-                    stream.filter(Files::isRegularFile)
-                            .sorted(Comparator.comparing(Path::toString, String.CASE_INSENSITIVE_ORDER))
-                            .limit(80)
-                            .forEach(path -> collectGrepMatches(path, target.relativize(path).toString(), options.pattern(), matches, 50));
-                }
-            } else {
-                return new DisplayData("Grep target is not a file or directory: " + target);
-            }
-
-            return displayPreview(matchesPreview("Grep", "Grep", options.pattern(), matches));
+            return displayPreview(matchesPreview(
+                    "Grep",
+                    "Grep",
+                    options.pattern(),
+                    collectTextMatches(target, options.pattern(), 80, 50, 3)
+            ));
         } catch (Exception e) {
             return new DisplayData("Unable to search text: " + e.getMessage());
         }
@@ -623,33 +606,20 @@ public class GollekKernel extends BaseKernel {
             Path target = options.path() == null
                     ? currentDirectory
                     : resolveNotebookPath(options.path()).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("Find target not found: " + target);
+            String targetError = fileOrDirectoryTargetError(
+                    target,
+                    "Find target not found: ",
+                    "Find target is not a file or directory: "
+            );
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
-
-            List<String> matches = new java.util.ArrayList<>();
-            if (Files.isRegularFile(target)) {
-                String name = target.getFileName().toString();
-                if (name.contains(options.pattern())) {
-                    matches.add(name);
-                }
-            } else if (Files.isDirectory(target)) {
-                try (Stream<Path> stream = Files.walk(target, 3)) {
-                    stream.filter(path -> !path.equals(target))
-                            .sorted(Comparator.comparing(Path::toString, String.CASE_INSENSITIVE_ORDER))
-                            .limit(120)
-                            .forEach(path -> {
-                                String relative = target.relativize(path).toString();
-                                if (relative.contains(options.pattern())) {
-                                    matches.add(Files.isDirectory(path) ? relative + "/" : relative);
-                                }
-                            });
-                }
-            } else {
-                return new DisplayData("Find target is not a file or directory: " + target);
-            }
-
-            return displayPreview(matchesPreview("FindFile", "Find File", options.pattern(), matches));
+            return displayPreview(matchesPreview(
+                    "FindFile",
+                    "Find File",
+                    options.pattern(),
+                    collectFileNameMatches(target, options.pattern(), 120, 3)
+            ));
         } catch (Exception e) {
             return new DisplayData("Unable to search file names: " + e.getMessage());
         }
@@ -661,22 +631,19 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
-            String text = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
-            long lines = text.isEmpty() ? 0 : text.lines().count();
-            long words = text.isBlank() ? 0 : java.util.Arrays.stream(text.trim().split("\\s+"))
-                    .filter(token -> !token.isBlank())
-                    .count();
-            int chars = text.length();
-            long bytes = Files.size(target);
-
-            return displayPreview(wordCountPreview(target.toString(), lines, words, chars, bytes));
+            FileStats stats = computeFileStats(target);
+            return displayPreview(wordCountPreview(
+                    target.toString(),
+                    stats.lines(),
+                    stats.words(),
+                    stats.chars(),
+                    stats.bytes()
+            ));
         } catch (Exception e) {
             return new DisplayData("Unable to compute file stats: " + e.getMessage());
         }
@@ -688,99 +655,46 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            try (java.io.InputStream in = Files.newInputStream(target)) {
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = in.read(buffer)) >= 0) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            String hash = toHex(digest.digest());
-            long bytes = Files.size(target);
-            return displayPreview(sha256Preview(target.toString(), bytes, hash));
+            Sha256Digest digest = computeSha256(target);
+            return displayPreview(sha256Preview(target.toString(), digest.bytes(), digest.hash()));
         } catch (Exception e) {
             return new DisplayData("Unable to compute SHA-256: " + e.getMessage());
         }
     }
 
-    private String toHex(byte[] bytes) {
-        StringBuilder out = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) {
-            out.append(String.format(Locale.ROOT, "%02x", value & 0xff));
-        }
-        return out.toString();
-    }
-
     private DisplayData renderDiff(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return new DisplayData("Usage: %diff <LEFT_PATH> <RIGHT_PATH>");
-        }
-        int split = raw.indexOf(' ');
-        if (split <= 0) {
-            return new DisplayData("Usage: %diff <LEFT_PATH> <RIGHT_PATH>");
-        }
-        String leftPart = raw.substring(0, split).trim();
-        String rightPart = raw.substring(split + 1).trim();
-        if (leftPart.isBlank() || rightPart.isBlank()) {
-            return new DisplayData("Usage: %diff <LEFT_PATH> <RIGHT_PATH>");
+        PathPairOptions options;
+        try {
+            options = parsePathPairOptions("diff", "LEFT_PATH", "RIGHT_PATH", raw);
+        } catch (IllegalArgumentException e) {
+            return new DisplayData(e.getMessage());
         }
         try {
-            Path left = resolveNotebookPath(leftPart).toAbsolutePath().normalize();
-            Path right = resolveNotebookPath(rightPart).toAbsolutePath().normalize();
-            if (!Files.exists(left)) {
-                return new DisplayData("Left file not found: " + left);
+            Path left = resolveNotebookPath(options.leftPath()).toAbsolutePath().normalize();
+            Path right = resolveNotebookPath(options.rightPath()).toAbsolutePath().normalize();
+            String leftError = regularFileTargetError(left, "Left file not found: ", "Left path is not a file: ");
+            if (leftError != null) {
+                return new DisplayData(leftError);
             }
-            if (!Files.exists(right)) {
-                return new DisplayData("Right file not found: " + right);
-            }
-            if (!Files.isRegularFile(left)) {
-                return new DisplayData("Left path is not a file: " + left);
-            }
-            if (!Files.isRegularFile(right)) {
-                return new DisplayData("Right path is not a file: " + right);
+            String rightError = regularFileTargetError(right, "Right file not found: ", "Right path is not a file: ");
+            if (rightError != null) {
+                return new DisplayData(rightError);
             }
 
-            List<String> leftLines = Files.readAllLines(left, java.nio.charset.StandardCharsets.UTF_8);
-            List<String> rightLines = Files.readAllLines(right, java.nio.charset.StandardCharsets.UTF_8);
-            int max = Math.max(leftLines.size(), rightLines.size());
-            List<String> diffLines = new java.util.ArrayList<>();
-            int changed = 0;
-            int added = 0;
-            int removed = 0;
-            for (int i = 0; i < max; i++) {
-                String leftLine = i < leftLines.size() ? leftLines.get(i) : null;
-                String rightLine = i < rightLines.size() ? rightLines.get(i) : null;
-                if (java.util.Objects.equals(leftLine, rightLine)) {
-                    continue;
-                }
-                changed++;
-                if (leftLine != null) {
-                    diffLines.add("- " + (i + 1) + ": " + leftLine);
-                    removed++;
-                }
-                if (rightLine != null) {
-                    diffLines.add("+ " + (i + 1) + ": " + rightLine);
-                    added++;
-                }
-            }
+            DiffResult diff = computeLineDiff(left, right);
 
             return displayPreview(diffPreview(
                     left.toString(),
                     right.toString(),
-                    changed,
-                    added,
-                    removed,
-                    diffLines
+                    diff.changed(),
+                    diff.added(),
+                    diff.removed(),
+                    diff.lines()
             ));
         } catch (Exception e) {
             return new DisplayData("Unable to diff files: " + e.getMessage());
@@ -793,11 +707,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
             ArchiveListing listing = listZip(target);
@@ -809,33 +721,25 @@ public class GollekKernel extends BaseKernel {
     }
 
     private DisplayData renderZipCat(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return new DisplayData("Usage: %zipcat <ZIP_PATH> <ENTRY_PATH>");
-        }
-        int split = raw.indexOf(' ');
-        if (split <= 0) {
-            return new DisplayData("Usage: %zipcat <ZIP_PATH> <ENTRY_PATH>");
-        }
-        String zipPart = raw.substring(0, split).trim();
-        String entryPart = raw.substring(split + 1).trim();
-        if (zipPart.isBlank() || entryPart.isBlank()) {
-            return new DisplayData("Usage: %zipcat <ZIP_PATH> <ENTRY_PATH>");
+        ArchiveEntryOptions options;
+        try {
+            options = parseArchiveEntryOptions("zipcat", "ZIP_PATH", raw);
+        } catch (IllegalArgumentException e) {
+            return new DisplayData(e.getMessage());
         }
         try {
-            Path target = resolveNotebookPath(zipPart).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("Zip file not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            Path target = resolveNotebookPath(options.archivePath()).toAbsolutePath().normalize();
+            String targetError = regularFileTargetError(target, "Zip file not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
-            ArchiveEntry entry = readZipEntry(target, entryPart);
+            ArchiveEntry entry = readZipEntry(target, options.entryPath());
             if (entry == null) {
-                return new DisplayData("Zip entry not found: " + entryPart);
+                return new DisplayData("Zip entry not found: " + options.entryPath());
             }
             if (entry.directory()) {
-                return new DisplayData("Zip entry is a directory: " + entryPart);
+                return new DisplayData("Zip entry is a directory: " + options.entryPath());
             }
             byte[] bytes = entry.bytes();
             boolean truncated = bytes.length > MAX_CAT_BYTES;
@@ -844,7 +748,7 @@ public class GollekKernel extends BaseKernel {
                     "ZipEntry",
                     "Zip Entry",
                     target.toString(),
-                    entryPart,
+                    options.entryPath(),
                     bytes.length,
                     previewBytes,
                     truncated
@@ -861,11 +765,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
             ArchiveListing listing = listTar(target);
@@ -877,40 +779,32 @@ public class GollekKernel extends BaseKernel {
     }
 
     private DisplayData renderTarCat(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return new DisplayData("Usage: %tarcat <TAR_PATH> <ENTRY_PATH>");
-        }
-        int split = raw.indexOf(' ');
-        if (split <= 0) {
-            return new DisplayData("Usage: %tarcat <TAR_PATH> <ENTRY_PATH>");
-        }
-        String tarPart = raw.substring(0, split).trim();
-        String entryPart = raw.substring(split + 1).trim();
-        if (tarPart.isBlank() || entryPart.isBlank()) {
-            return new DisplayData("Usage: %tarcat <TAR_PATH> <ENTRY_PATH>");
+        ArchiveEntryOptions options;
+        try {
+            options = parseArchiveEntryOptions("tarcat", "TAR_PATH", raw);
+        } catch (IllegalArgumentException e) {
+            return new DisplayData(e.getMessage());
         }
         try {
-            Path target = resolveNotebookPath(tarPart).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("Tar file not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            Path target = resolveNotebookPath(options.archivePath()).toAbsolutePath().normalize();
+            String targetError = regularFileTargetError(target, "Tar file not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
 
-            ArchiveEntry entry = readTarEntryPreview(target, entryPart, MAX_CAT_BYTES);
+            ArchiveEntry entry = readTarEntryPreview(target, options.entryPath(), MAX_CAT_BYTES);
             if (entry == null) {
-                return new DisplayData("Tar entry not found: " + entryPart);
+                return new DisplayData("Tar entry not found: " + options.entryPath());
             }
             if (entry.directory()) {
-                return new DisplayData("Tar entry is a directory: " + entryPart);
+                return new DisplayData("Tar entry is a directory: " + options.entryPath());
             }
             boolean truncated = entry.size() > MAX_CAT_BYTES;
             NotebookPreview preview = archiveEntryPreview(
                     "TarEntry",
                     "Tar Entry",
                     target.toString(),
-                    entryPart,
+                    options.entryPath(),
                     entry.size(),
                     entry.bytes(),
                     truncated
@@ -930,11 +824,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path archive = resolveNotebookPath(options.archivePath()).toAbsolutePath().normalize();
-            if (!Files.exists(archive)) {
-                return new DisplayData("Archive not found: " + archive);
-            }
-            if (!Files.isRegularFile(archive)) {
-                return new DisplayData("Archive path is not a file: " + archive);
+            String archiveError = regularFileTargetError(archive, "Archive not found: ", "Archive path is not a file: ");
+            if (archiveError != null) {
+                return new DisplayData(archiveError);
             }
             Path output = resolveExtractOutputPath(options.entryPath(), options.outputPath());
             ArchiveEntry entry = readArchiveEntryBytes(archive, options.entryPath(), MAX_EXTRACT_BYTES);
@@ -988,11 +880,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String text = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8).trim();
             if (text.isEmpty()) {
@@ -1702,11 +1592,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String markdown = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = markdownPreview(target.toString(), markdown);
@@ -1722,11 +1610,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String htmlSource = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = htmlPreview(target.toString(), htmlSource);
@@ -1742,11 +1628,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String yaml = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = yamlPreview(target.toString(), yaml);
@@ -1762,11 +1646,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String toml = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = tomlPreview(target.toString(), toml);
@@ -1782,11 +1664,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String xml = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = xmlPreview(target.toString(), xml);
@@ -1802,11 +1682,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String ini = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = iniPreview(target.toString(), ini);
@@ -1822,11 +1700,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String source = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = propertiesPreview(target.toString(), source);
@@ -1842,11 +1718,9 @@ public class GollekKernel extends BaseKernel {
         }
         try {
             Path target = resolveNotebookPath(rawPath).toAbsolutePath().normalize();
-            if (!Files.exists(target)) {
-                return new DisplayData("File not found: " + target);
-            }
-            if (!Files.isRegularFile(target)) {
-                return new DisplayData("Not a file: " + target);
+            String targetError = regularFileTargetError(target, "File not found: ", "Not a file: ");
+            if (targetError != null) {
+                return new DisplayData(targetError);
             }
             String source = Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
             NotebookPreview preview = envFilePreview(target.toString(), source);

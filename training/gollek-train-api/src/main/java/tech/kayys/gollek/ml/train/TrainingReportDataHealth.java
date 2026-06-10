@@ -3,6 +3,7 @@ package tech.kayys.gollek.ml.train;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -85,11 +86,39 @@ public record TrainingReportDataHealth(
         return combine(loaderPlan.recommendedActions(), distribution.recommendedActions());
     }
 
+    public String issueSummary(String fallback) {
+        String severity = firstNonBlank(issueSeverities());
+        String code = firstNonBlank(issueCodes());
+        String action = firstNonBlank(recommendedActions());
+        if (!severity.isBlank()) {
+            return issueSummaryWithSeverity(severity, code, action);
+        }
+        if (errorCount() > 0) {
+            return issueSummaryWithSeverity("error", code, action);
+        }
+        if (warningCount() > 0) {
+            return issueSummaryWithSeverity("warning", code, action);
+        }
+        if (!code.isBlank()) {
+            return "inspect data-health issue " + code;
+        }
+        if (!action.isBlank()) {
+            return action;
+        }
+        return fallback == null || fallback.isBlank()
+                ? "inspect trainer data-loader and distribution health"
+                : fallback.trim();
+    }
+
     public List<Map<String, Object>> issues() {
         List<Map<String, Object>> issues = new ArrayList<>();
         issues.addAll(loaderPlan.issues());
         issues.addAll(distribution.issues());
         return List.copyOf(issues);
+    }
+
+    public List<Map<String, Object>> issueSummaries() {
+        return TrainingReportHealthIssueSummaries.from(issues());
     }
 
     public Map<String, Object> toMap() {
@@ -107,6 +136,7 @@ public record TrainingReportDataHealth(
         map.put("issueSeverities", issueSeverities());
         map.put("recommendedActions", recommendedActions());
         map.put("issues", issues());
+        map.put("issueSummaries", issueSummaries());
         return Map.copyOf(map);
     }
 
@@ -117,12 +147,35 @@ public record TrainingReportDataHealth(
         return List.copyOf(values);
     }
 
+    private static String issueSummaryWithSeverity(String severity, String code, String action) {
+        String normalizedSeverity = severity.trim().toLowerCase(Locale.ROOT);
+        if (!code.isBlank() && !action.isBlank()) {
+            return normalizedSeverity + " " + code + " - " + action;
+        }
+        if (!code.isBlank()) {
+            return normalizedSeverity + " " + code;
+        }
+        if (!action.isBlank()) {
+            return normalizedSeverity + " - " + action;
+        }
+        return normalizedSeverity;
+    }
+
+    private static String firstNonBlank(List<String> values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> mapValue(Object value) {
         if (!(value instanceof Map<?, ?> map)) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
         return snapshot instanceof Map<?, ?> snapshotMap
                 ? (Map<String, Object>) snapshotMap
                 : Map.of();

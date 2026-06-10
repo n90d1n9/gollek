@@ -28,7 +28,6 @@ import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.sdk.model.ModelResolution;
 import tech.kayys.gollek.sdk.model.PullProgress;
 import tech.kayys.gollek.sdk.exception.SdkException;
-import tech.kayys.gollek.models.core.ChatTemplateFormatter;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceEngine;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
@@ -65,7 +64,6 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
@@ -74,7 +72,10 @@ import javax.sound.sampled.SourceDataLine;
 import tech.kayys.gollek.cli.chat.ChatUIRenderer;
 import tech.kayys.gollek.cli.runtime.CliMetalRuntime;
 import tech.kayys.gollek.cli.util.CliInferenceFeatures;
+import tech.kayys.gollek.cli.util.ExternalModelFamilyPluginScope;
+import tech.kayys.gollek.cli.util.ExternalPluginClasspath;
 import tech.kayys.gollek.cli.util.PluginAvailabilityChecker;
+import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.sdk.util.GollekHome;
 import tech.kayys.suling.FlacLibraryCheck;
@@ -90,15 +91,6 @@ import tech.kayys.suling.audio.Suling;
 @Unremovable
 @Command(name = "run", description = "Run inference using a specified model")
 public class RunCommand implements Runnable {
-    private static final Pattern GEMMA4_THOUGHT_CHANNEL =
-            Pattern.compile("^<\\|channel>thought\\n.*?<channel\\|>", Pattern.DOTALL);
-    private static final Pattern GEMMA4_GENERIC_CHANNEL_OPEN =
-            Pattern.compile("^<\\|channel>[^\\n]*\\n", Pattern.DOTALL);
-    private static final String DEFAULT_RUN_SYSTEM_PROMPT = "Answer directly and briefly.";
-    private static final String QWEN_SAFETENSOR_RUN_SYSTEM_PROMPT = "You are a helpful assistant.";
-    private static final String DISABLE_DEFAULT_RUN_SYSTEM_PROPERTY = "gollek.cli.disable_default_run_system";
-    private static final String ENABLE_GEMMA3_ALTERNATE_RUNTIME_PROPERTY =
-            "gollek.cli.enable_gemma3_alternate_runtime";
     private static final String MOSS_AUDIO_TOKENIZER_REPOSITORY =
             "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX";
     private static final String MOSS_AUDIO_TOKENIZER_MODEL_SPEC =
@@ -155,6 +147,12 @@ public class RunCommand implements Runnable {
     @Option(names = {
             "--provider" }, description = "Provider: native, litert, llamacpp, safetensor, libtorch(experimental), gemini, openai, anthropic, cerebras. Omit for auto-detection.", arity = "0..1", fallbackValue = "")
     String providerId;
+
+    @Option(names = { "--runner" },
+            description = "Runner route: auto, safetensor, gguf, litert, or hybrid. Omit for auto-detection.",
+            arity = "0..1",
+            fallbackValue = "auto")
+    String runner;
 
     @Option(names = {
             "--import" }, description = "Import (move) the model file/dir into the gollek model repository (~/.gollek/models/)")
@@ -473,6 +471,20 @@ public class RunCommand implements Runnable {
     @Option(names = { "--plugin" }, description = "Explicit plugin/engine to use (e.g. llamacpp, java, bnb)")
     public String pluginId;
 
+    @Option(names = {
+            ExternalPluginClasspath.OPTION_PLUGIN_CLASSPATH,
+            ExternalPluginClasspath.OPTION_EXTERNAL_PLUGIN_CLASSPATH },
+            split = ",",
+            description = ExternalPluginClasspath.MODEL_FAMILY_OPTION_DESCRIPTION)
+    List<String> externalPluginClasspath = new ArrayList<>();
+
+    @Option(names = {
+            ExternalPluginClasspath.OPTION_PLUGIN_DIR,
+            ExternalPluginClasspath.OPTION_EXTERNAL_PLUGIN_DIR },
+            split = ",",
+            description = ExternalPluginClasspath.PLUGIN_DIRECTORY_OPTION_DESCRIPTION)
+    List<String> externalPluginDirectories = new ArrayList<>();
+
     @Option(names = { "--engine", "--gguf-engine" }, description = "GGUF engine mode: auto, java, llamacpp, benchmark")
     String ggufEngine;
 
@@ -488,16 +500,37 @@ public class RunCommand implements Runnable {
     @Option(names = { "--benchmark", "--bench" }, description = "Compare Java-native GGUF probe with llama.cpp fallback")
     boolean benchmarkGguf;
 
+    @Option(names = { "--profile", "--onnx-profile" },
+            description = "Request runner profile metadata and print detailed runtime performance breakdowns")
+    boolean runtimeProfile;
+
     @Option(names = {
             "--prefer-alternate-runtime" }, description = "Allow Gemma safetensor checkpoints to route to local LiteRT/GGUF companion artifacts")
     boolean preferAlternateRuntime;
+
+    @Option(names = { "--route-report-json", "--route-report", "--dry-run-route" },
+            description = "Resolve runner/provider/model routing, print JSON, and exit before inference")
+    boolean routeReportJson;
+
+    @Option(names = { "--route-report-allow-pull", "--dry-run-route-allow-pull" },
+            description = "Allow route-report mode to resolve/pull missing models through repository providers")
+    boolean routeReportAllowPull;
+
+    @Option(names = { "--route-report-require-local", "--dry-run-route-require-local" },
+            description = "Exit non-zero when route-report mode cannot resolve a local runnable model artifact")
+    boolean routeReportRequireLocal;
 
     @Parameters(arity = "0..*", hidden = true)
     List<String> positionalArgs = new ArrayList<>();
 
     @Override
     public void run() {
-        try {
+        try (ExternalModelFamilyPluginScope ignored =
+                ExternalModelFamilyPluginScope.attach(
+                        externalPluginClasspath,
+                        externalPluginDirectories,
+                        RunCommand.class,
+                        pluginChecker)) {
             if (parentCommand != null) {
                 parentCommand.bootstrapInheritedEnvironment();
             }
@@ -533,6 +566,32 @@ public class RunCommand implements Runnable {
 
             providerId = normalizeRequestedProvider(providerId);
             boolean providerExplicit = providerId != null && !providerId.isBlank();
+            boolean requestedProviderExplicit = providerExplicit;
+            String requestedProviderId = providerId;
+            String requestedFormat = format;
+            RunnerRoutePolicy.Selection runnerSelection = RunnerRoutePolicy.select(
+                    runner,
+                    providerId,
+                    format,
+                    providerExplicit,
+                    preferAlternateRuntime,
+                    forceGguf);
+            if (!runnerSelection.valid()) {
+                System.err.println("Error: " + runnerSelection.error());
+                requestProcessExit(1);
+                return;
+            }
+            RunnerRouteReport runnerRouteReport = RunnerRouteReport.from(
+                    runner,
+                    requestedProviderId,
+                    requestedProviderExplicit,
+                    requestedFormat,
+                    runnerSelection);
+            providerId = runnerSelection.providerId();
+            format = runnerSelection.format();
+            preferAlternateRuntime = runnerSelection.preferAlternateRuntime();
+            forceGguf = runnerSelection.forceGguf();
+            providerExplicit = providerId != null && !providerId.isBlank();
             boolean preferOnnxResolution = shouldPreferOnnxResolution(modelId, format, providerId);
             if (preferOnnxResolution) {
                 if (!providerExplicit) {
@@ -544,7 +603,11 @@ public class RunCommand implements Runnable {
             }
             ensureBuiltinProviderRegistration();
 
-            if (tryStandaloneGgufFastPath()) {
+            if (!routeReportJson && tryCachedGemma4MobileQatLiteRtFastPath(requestedProviderExplicit, requestedProviderId)) {
+                return;
+            }
+
+            if (!routeReportJson && tryStandaloneGgufFastPath()) {
                 return;
             }
 
@@ -563,11 +626,11 @@ public class RunCommand implements Runnable {
                 System.err.println("CRITICAL: Platform detection failed: " + t.getMessage());
                 return;
             }
-            if (CliMetalRuntime.isMetal(detectedPlatform)) {
+            if (!routeReportJson && CliMetalRuntime.isMetal(detectedPlatform)) {
                 ensureMetalRuntimeInitialized();
             }
 
-            if (parentCommand != null && parentCommand.verbose) {
+            if (!routeReportJson && parentCommand != null && parentCommand.verbose) {
                 System.out.println(ChatUIRenderer.CYAN + "Platform: " + detectedPlatform.getDisplayName() + ChatUIRenderer.RESET);
                 if (detectedPlatform.isCpu()) {
                     System.out.println(ChatUIRenderer.YELLOW + "⚠️  Running on CPU (GPU acceleration not available)" + ChatUIRenderer.RESET);
@@ -586,7 +649,10 @@ public class RunCommand implements Runnable {
             }
 
             boolean isMetalPlatform = CliMetalRuntime.isMetal(detectedPlatform);
-            if (isMetalPlatform && !isMetalNativeRuntimeActive() && !allowCpuFallbackWhenMetalRequested()) {
+            if (!routeReportJson
+                    && isMetalPlatform
+                    && !isMetalNativeRuntimeActive()
+                    && !allowCpuFallbackWhenMetalRequested()) {
                 System.err.println("Error: Metal platform selected but native Metal runtime is not active.");
                 System.err.println("Refusing CPU fallback for this run so performance behavior stays explicit.");
                 System.err.println("Set GOLLEK_ALLOW_CPU_FALLBACK=true to override.");
@@ -608,11 +674,13 @@ public class RunCommand implements Runnable {
             boolean customModelPathUsed = false;
             String finalLocalPath = null;
             String requestedModelRef = modelId;
-            uiRenderer.setJsonMode(enableJsonSse || jsonMode || listTtsVoicesJson || ocrJsonOutput);
-            uiRenderer.printBanner();
+            uiRenderer.setJsonMode(enableJsonSse || jsonMode || listTtsVoicesJson || ocrJsonOutput || routeReportJson);
+            if (!routeReportJson) {
+                uiRenderer.printBanner();
+            }
 
             if (isMcpProvider()) {
-                if (!ttsVoicesJsonOutput()) {
+                if (!quietRouteResolutionOutput()) {
                     System.out.println("MCP provider selected; skipping local model lookup.");
                 }
             } else if (modelFile != null && !modelFile.isBlank()) {
@@ -626,7 +694,7 @@ public class RunCommand implements Runnable {
                 if (importModel || copyModel) {
                     var res = sdk.importModel(filePath, importModel);
                     filePath = Paths.get(res.getLocalPath());
-                    if (!ttsVoicesJsonOutput()) {
+                    if (!quietRouteResolutionOutput()) {
                         System.out.println((importModel ? "Imported" : "Copied") + " model to: " + filePath.toAbsolutePath());
                     }
                 }
@@ -635,12 +703,19 @@ public class RunCommand implements Runnable {
                 finalLocalPath = modelId;
                 customModelPathUsed = true;
 
+                String inferredFormat = formatForLocalModelPath(filePath);
+                if ((format == null || format.isBlank()) && inferredFormat != null) {
+                    format = inferredFormat;
+                }
+                if (!providerExplicit && (providerId == null || providerId.isBlank())) {
+                    providerId = providerForFormat(inferredFormat);
+                }
                 if ("native".equals(providerId)) {
                     if (modelFile.endsWith(".litertlm") || modelFile.endsWith(".tflite") || modelFile.endsWith(".task")) {
                         providerId = "litert";
                     }
                 }
-                if (!ttsVoicesJsonOutput()) {
+                if (!quietRouteResolutionOutput()) {
                     System.out.println("Model path: " + filePath.toAbsolutePath());
                 }
 
@@ -655,7 +730,7 @@ public class RunCommand implements Runnable {
                 if (importModel || copyModel) {
                     var res = sdk.importModel(dirPath, importModel);
                     dirPath = Paths.get(res.getLocalPath());
-                    if (!ttsVoicesJsonOutput()) {
+                    if (!quietRouteResolutionOutput()) {
                         System.out.println((importModel ? "Imported" : "Copied") + " model to: " + dirPath.toAbsolutePath());
                     }
                 }
@@ -666,7 +741,10 @@ public class RunCommand implements Runnable {
                 if (!providerExplicit) {
                     providerId = providerForModelDirectory(dirPath);
                 }
-                if (!ttsVoicesJsonOutput()) {
+                if (format == null || format.isBlank()) {
+                    format = formatForModelDirectory(dirPath);
+                }
+                if (!quietRouteResolutionOutput()) {
                     System.out.println("Model dir: " + dirPath.toAbsolutePath());
                 }
 
@@ -676,12 +754,19 @@ public class RunCommand implements Runnable {
                     System.err.println("Error: Model file not found: " + modelPath);
                     return;
                 }
-                if (!ttsVoicesJsonOutput()) {
+                if (!quietRouteResolutionOutput()) {
                     System.out.println("Using model from: " + customModelPath.toAbsolutePath());
                 }
                 modelId = customModelPath.toAbsolutePath().toString();
                 finalLocalPath = modelId;
                 customModelPathUsed = true;
+                String inferredFormat = formatForLocalModelPath(customModelPath);
+                if ((format == null || format.isBlank()) && inferredFormat != null) {
+                    format = inferredFormat;
+                }
+                if (!providerExplicit && (providerId == null || providerId.isBlank())) {
+                    providerId = providerForFormat(inferredFormat);
+                }
             }
 
             if (!customModelPathUsed && modelId != null && !modelId.isBlank()) {
@@ -702,128 +787,142 @@ public class RunCommand implements Runnable {
                                     providerId = inferred;
                                 }
                             }
-                            if (!ttsVoicesJsonOutput() && !jsonMode && !ocrJsonOutput) {
+                            if (format == null || format.isBlank()) {
+                                format = inferFormatFromIndex(entry);
+                            }
+                            if (!quietRouteResolutionOutput() && !jsonMode && !ocrJsonOutput) {
                                 System.out.println("Resolved local model index entry: " + finalLocalPath);
                             }
                         }
                     }
-                } catch (Exception ignored) {
+                } catch (Exception indexLookupFailure) {
                     // Fallback to normal SDK resolution flow.
                 }
             }
 
+            boolean routeReportRepositoryResolutionSkipped = false;
             if (!customModelPathUsed && (modelFile == null || modelFile.isBlank()) && (modelDir == null || modelDir.isBlank())
                     && (modelPath == null || modelPath.isEmpty())) {
-                // Prepare model using SDK (this handles pulling, registration, and conversion)
-                try {
-                    String quant = ggufQuant != null ? ggufQuant : (ggufOutType != null ? ggufOutType : "Q4_K_M");
-                    var resolution = sdk.ensureModelAvailable(modelId, (String) format, pluginId, forceGguf, quant,
-                            fallbackModelIds == null ? List.of() : fallbackModelIds,
-                            (Consumer<PullProgress>) progress -> {
-                        if (ttsVoicesJsonOutput()) {
-                            return;
-                        }
-                        if (progress.getTotal() > 0) {
-                            System.out.printf("\r%s %s %3d%% (%d/%d MB)",
-                                    ChatUIRenderer.CYAN + progress.getStatus() + ChatUIRenderer.RESET,
-                                    progress.getProgressBar(20),
-                                    progress.getPercentComplete(),
-                                    progress.getCompleted() / 1024 / 1024,
-                                    progress.getTotal() / 1024 / 1024);
-                        } else {
-                            System.out.print("\r" + ChatUIRenderer.CYAN + progress.getStatus() + ChatUIRenderer.RESET);
-                        }
-                    });
-                    if (!ttsVoicesJsonOutput()) {
-                        System.out.println();
-                    }
-
-                    modelId = resolution.getModelId();
-                    if (resolution.getLocalPath() != null) {
-                        finalLocalPath = resolution.getLocalPath();
-                        String displayPath = finalLocalPath;
-                        String userHome = System.getProperty("user.home");
-                        if (userHome != null && displayPath.startsWith(userHome)) {
-                            displayPath = "~" + displayPath.substring(userHome.length());
-                        }
-                        if (!ttsVoicesJsonOutput()) {
-                            System.out.println("Model ready at: " + displayPath);
-                        }
-                        customModelPathUsed = true;
-                    }
-                    if (!customModelPathUsed) {
-                        LocalModelIndex.Entry downloaded = autoPullHfRepositoryForRunIfNeeded(
-                                requestedModelRef != null ? requestedModelRef : modelId,
-                                preferredLocalIndexFormat(requestedModelRef, format, providerId));
-                        if (downloaded != null && downloaded.path != null && Files.exists(Path.of(downloaded.path))) {
-                            finalLocalPath = Path.of(downloaded.path).toAbsolutePath().toString();
-                            modelId = finalLocalPath;
-                            customModelPathUsed = true;
-                            if (!providerExplicit) {
-                                String inferred = inferProviderFromIndex(downloaded);
-                                if (inferred != null && !inferred.isBlank()) {
-                                    providerId = inferred;
-                                }
-                            }
-                            if (!ttsVoicesJsonOutput()) {
-                                System.out.println("Model ready at: " + displayPath(Path.of(finalLocalPath)));
-                            }
-                        } else if (requiresLocalHfRepositoryResolution(requestedModelRef, providerId)) {
-                            return;
-                        }
-                    }
-
-                    if (resolution.getNotice() != null && !resolution.getNotice().isBlank()) {
-                        String notice = resolution.getNotice();
-                        String compatibilityIssue = detectSafetensorCompatibilityIssue(providerId, finalLocalPath);
-                        boolean staleGemma4Notice = notice.contains("Gemma4 multimodal text checkpoints")
-                                && compatibilityIssue == null;
-                        if (!staleGemma4Notice && !ttsVoicesJsonOutput()) {
-                            System.out.println(notice);
-                        }
-                    }
-                    
-                    if (providerId == null || providerId.isBlank()) {
-                        providerId = resolution.getProviderId();
-                    }
-                    if ((providerId == null || providerId.isBlank()) && resolution.getLocalPath() != null) {
-                        providerId = sdk.autoSelectProvider(modelId, forceGguf, quant).orElse(null);
-                        if (providerId != null) {
-                            sdk.setPreferredProvider(providerId);
-                        }
-                    }
-
-                } catch (Exception e) {
+                if (!shouldAllowRepositoryResolutionDuringRouteReport()) {
+                    routeReportRepositoryResolutionSkipped = true;
+                } else {
+                    // Prepare model using SDK (this handles pulling, registration, and conversion).
                     try {
-                        LocalModelIndex.Entry downloaded = autoPullHfRepositoryForRunIfNeeded(
-                                requestedModelRef != null ? requestedModelRef : modelId,
-                                preferredLocalIndexFormat(requestedModelRef, format, providerId));
-                        if (downloaded != null && downloaded.path != null && Files.exists(Path.of(downloaded.path))) {
-                            finalLocalPath = Path.of(downloaded.path).toAbsolutePath().toString();
-                            modelId = finalLocalPath;
-                            customModelPathUsed = true;
-                            if (!providerExplicit) {
-                                String inferred = inferProviderFromIndex(downloaded);
-                                if (inferred != null && !inferred.isBlank()) {
-                                    providerId = inferred;
-                                }
+                        String quant = ggufQuant != null ? ggufQuant : (ggufOutType != null ? ggufOutType : "Q4_K_M");
+                        var resolution = sdk.ensureModelAvailable(modelId, (String) format, pluginId, forceGguf, quant,
+                                fallbackModelIds == null ? List.of() : fallbackModelIds,
+                                (Consumer<PullProgress>) progress -> {
+                            if (quietRouteResolutionOutput()) {
+                                return;
                             }
-                            if (!ttsVoicesJsonOutput()) {
-                                System.out.println("Model ready at: " + displayPath(Path.of(finalLocalPath)));
+                            if (progress.getTotal() > 0) {
+                                System.out.printf("\r%s %s %3d%% (%d/%d MB)",
+                                        ChatUIRenderer.CYAN + progress.getStatus() + ChatUIRenderer.RESET,
+                                        progress.getProgressBar(20),
+                                        progress.getPercentComplete(),
+                                        progress.getCompleted() / 1024 / 1024,
+                                        progress.getTotal() / 1024 / 1024);
+                            } else {
+                                System.out.print("\r" + ChatUIRenderer.CYAN + progress.getStatus() + ChatUIRenderer.RESET);
+                            }
+                        });
+                        if (!quietRouteResolutionOutput()) {
+                            System.out.println();
+                        }
+
+                        modelId = resolution.getModelId();
+                        if (resolution.getLocalPath() != null) {
+                            finalLocalPath = resolution.getLocalPath();
+                            String displayPath = finalLocalPath;
+                            String userHome = System.getProperty("user.home");
+                            if (userHome != null && displayPath.startsWith(userHome)) {
+                                displayPath = "~" + displayPath.substring(userHome.length());
+                            }
+                            if (!quietRouteResolutionOutput()) {
+                                System.out.println("Model ready at: " + displayPath);
+                            }
+                            customModelPathUsed = true;
+                        }
+                        if (!customModelPathUsed) {
+                            LocalModelIndex.Entry downloaded = autoPullHfRepositoryForRunIfNeeded(
+                                    requestedModelRef != null ? requestedModelRef : modelId,
+                                    preferredLocalIndexFormat(requestedModelRef, format, providerId));
+                            if (downloaded != null && downloaded.path != null && Files.exists(Path.of(downloaded.path))) {
+                                finalLocalPath = Path.of(downloaded.path).toAbsolutePath().toString();
+                                modelId = finalLocalPath;
+                                customModelPathUsed = true;
+                                if (!providerExplicit) {
+                                    String inferred = inferProviderFromIndex(downloaded);
+                                    if (inferred != null && !inferred.isBlank()) {
+                                        providerId = inferred;
+                                    }
+                                }
+                                if (format == null || format.isBlank()) {
+                                    format = inferFormatFromIndex(downloaded);
+                                }
+                                if (!quietRouteResolutionOutput()) {
+                                    System.out.println("Model ready at: " + displayPath(Path.of(finalLocalPath)));
+                                }
+                            } else if (requiresLocalHfRepositoryResolution(requestedModelRef, providerId)) {
+                                return;
                             }
                         }
-                    } catch (Exception fallbackError) {
-                        System.err.println("\nError: Failed to prepare model: " + fallbackError.getMessage());
-                        return;
-                    }
-                    if (!customModelPathUsed) {
-                        System.err.println("\nError: Failed to prepare model: " + e.getMessage());
-                        return;
+
+                        if (resolution.getNotice() != null && !resolution.getNotice().isBlank()) {
+                            String notice = resolution.getNotice();
+                            String compatibilityIssue = detectSafetensorCompatibilityIssue(providerId, finalLocalPath);
+                            boolean staleGemma4Notice = notice.contains("Gemma4 multimodal text checkpoints")
+                                    && compatibilityIssue == null;
+                            if (!staleGemma4Notice && !quietRouteResolutionOutput()) {
+                                System.out.println(notice);
+                            }
+                        }
+
+                        if (providerId == null || providerId.isBlank()) {
+                            providerId = resolution.getProviderId();
+                        }
+                        if ((providerId == null || providerId.isBlank()) && resolution.getLocalPath() != null) {
+                            providerId = sdk.autoSelectProvider(modelId, forceGguf, quant).orElse(null);
+                            if (providerId != null) {
+                                sdk.setPreferredProvider(providerId);
+                            }
+                        }
+
+                    } catch (Exception e) {
+                        try {
+                            LocalModelIndex.Entry downloaded = autoPullHfRepositoryForRunIfNeeded(
+                                    requestedModelRef != null ? requestedModelRef : modelId,
+                                    preferredLocalIndexFormat(requestedModelRef, format, providerId));
+                            if (downloaded != null && downloaded.path != null && Files.exists(Path.of(downloaded.path))) {
+                                finalLocalPath = Path.of(downloaded.path).toAbsolutePath().toString();
+                                modelId = finalLocalPath;
+                                customModelPathUsed = true;
+                                if (!providerExplicit) {
+                                    String inferred = inferProviderFromIndex(downloaded);
+                                    if (inferred != null && !inferred.isBlank()) {
+                                        providerId = inferred;
+                                    }
+                                }
+                                if (format == null || format.isBlank()) {
+                                    format = inferFormatFromIndex(downloaded);
+                                }
+                                if (!quietRouteResolutionOutput()) {
+                                    System.out.println("Model ready at: " + displayPath(Path.of(finalLocalPath)));
+                                }
+                            }
+                        } catch (Exception fallbackError) {
+                            System.err.println("\nError: Failed to prepare model: " + fallbackError.getMessage());
+                            return;
+                        }
+                        if (!customModelPathUsed) {
+                            System.err.println("\nError: Failed to prepare model: " + e.getMessage());
+                            return;
+                        }
                     }
                 }
             }
 
-            if (!ttsVoicesJsonOutput()) {
+            if (!quietRouteResolutionOutput()) {
                 tech.kayys.gollek.cli.util.QuantSuggestionDetector.suggestIfNeeded(
                         modelId, finalLocalPath, quantizeStrategy, false);
             }
@@ -834,13 +933,146 @@ public class RunCommand implements Runnable {
                 return;
             }
             finalLocalPath = providerLocalPathResolution.localPath();
-            Gemma3RuntimeSelection gemma3Selection = maybeSelectGemma3AlternateRuntime(providerId, modelId,
-                    finalLocalPath, providerExplicit);
-            if (gemma3Selection != null) {
+            DirectSafetensorRoutePolicy.AlternateRuntimeSelection gemma3Selection =
+                    DirectSafetensorRoutePolicy.selectGemma3AlternateRuntime(
+                            providerId, modelId, finalLocalPath, providerExplicit,
+                            preferAlternateRuntime, this::isProviderActive);
+            if (!quietRouteResolutionOutput() && gemma3Selection.hasNotice()) {
+                System.out.println(gemma3Selection.notice());
+            }
+            if (gemma3Selection.selected()) {
+                String previousProviderId = providerId;
+                String previousFormat = format;
                 providerId = gemma3Selection.provider();
                 finalLocalPath = gemma3Selection.localPath();
+                format = gemma3Selection.format();
+                runnerRouteReport = runnerRouteReport.withRuntimeRedirect(
+                        previousProviderId,
+                        previousFormat,
+                        providerId,
+                        format,
+                        gemma3Selection.reason(),
+                        gemma3Selection.cacheHit(),
+                        gemma3Selection.cacheKind());
+                if ("gguf".equalsIgnoreCase(format)) {
+                    modelId = finalLocalPath;
+                }
             }
-            if (!validateGemma3ExecutionRoute(providerId, modelId, finalLocalPath)) {
+            DirectSafetensorRoutePolicy.AlternateRuntimeSelection gemma4MobileQatSelection =
+                    DirectSafetensorRoutePolicy.selectGemma4MobileQatAlternateRuntime(
+                            providerId, modelId, finalLocalPath, providerExplicit,
+                            preferAlternateRuntime, this::isRuntimeRouteActive);
+            if (!quietRouteResolutionOutput() && gemma4MobileQatSelection.hasNotice()) {
+                System.out.println(gemma4MobileQatSelection.notice());
+            }
+            if (gemma4MobileQatSelection.selected()) {
+                String previousProviderId = providerId;
+                String previousFormat = format;
+                providerId = gemma4MobileQatSelection.provider();
+                finalLocalPath = gemma4MobileQatSelection.localPath();
+                format = gemma4MobileQatSelection.format();
+                runnerRouteReport = runnerRouteReport.withRuntimeRedirect(
+                        previousProviderId,
+                        previousFormat,
+                        providerId,
+                        format,
+                        gemma4MobileQatSelection.reason(),
+                        gemma4MobileQatSelection.cacheHit(),
+                        gemma4MobileQatSelection.cacheKind());
+            }
+            DirectSafetensorRoutePolicy.AlternateRuntimeSelection gemma4TextSelection =
+                    DirectSafetensorRoutePolicy.selectGemma4TextAlternateRuntime(
+                            providerId, modelId, finalLocalPath, providerExplicit,
+                            preferAlternateRuntime, this::isRuntimeRouteActive);
+            if (!quietRouteResolutionOutput() && gemma4TextSelection.hasNotice()) {
+                System.out.println(gemma4TextSelection.notice());
+            }
+            if (gemma4TextSelection.selected()) {
+                String previousProviderId = providerId;
+                String previousFormat = format;
+                providerId = gemma4TextSelection.provider();
+                finalLocalPath = gemma4TextSelection.localPath();
+                modelId = finalLocalPath;
+                format = gemma4TextSelection.format();
+                runnerRouteReport = runnerRouteReport.withRuntimeRedirect(
+                        previousProviderId,
+                        previousFormat,
+                        providerId,
+                        format,
+                        gemma4TextSelection.reason(),
+                        gemma4TextSelection.cacheHit(),
+                        gemma4TextSelection.cacheKind());
+            }
+            DirectSafetensorRoutePolicy.AlternateRuntimeSelection communityTextGgufSelection =
+                    DirectSafetensorRoutePolicy.selectCommunityTextGgufAlternateRuntime(
+                            providerId, modelId, finalLocalPath, providerExplicit,
+                            preferAlternateRuntime, this::isRuntimeRouteActive);
+            if (!quietRouteResolutionOutput() && communityTextGgufSelection.hasNotice()) {
+                System.out.println(communityTextGgufSelection.notice());
+            }
+            if (communityTextGgufSelection.selected()) {
+                String previousProviderId = providerId;
+                String previousFormat = format;
+                providerId = communityTextGgufSelection.provider();
+                finalLocalPath = communityTextGgufSelection.localPath();
+                modelId = finalLocalPath;
+                format = communityTextGgufSelection.format();
+                runnerRouteReport = runnerRouteReport.withRuntimeRedirect(
+                        previousProviderId,
+                        previousFormat,
+                        providerId,
+                        format,
+                        communityTextGgufSelection.reason(),
+                        communityTextGgufSelection.cacheHit(),
+                        communityTextGgufSelection.cacheKind());
+            }
+            DirectSafetensorRoutePolicy.RouteValidation gemma3RouteValidation =
+                    DirectSafetensorRoutePolicy.validateGemma3ExecutionRoute(providerId, modelId, finalLocalPath);
+            if (!gemma3RouteValidation.allowed()) {
+                gemma3RouteValidation.messages().forEach(System.err::println);
+                return;
+            }
+
+            List<String> normalizedInputImages = normalizedInputImagePaths();
+            if (routeReportJson) {
+                String routeExecutionProviderId = routeExecutionProviderId(providerId, finalLocalPath);
+                RunnerRouteReport effectiveRouteReport =
+                        runnerRouteReport.withEffectiveRoute(routeExecutionProviderId, format);
+                if (direct) {
+                    routeExecutionProviderId = "safetensor";
+                    effectiveRouteReport = effectiveRouteReport.withEffectiveRoute(routeExecutionProviderId, format);
+                }
+                effectiveRouteReport = applyCachedBenchmarkRouteProfile(
+                        effectiveRouteReport,
+                        requestedModelRef,
+                        modelId,
+                        finalLocalPath);
+                RoutePreflightReport routePreflight = RoutePreflightReport.evaluate(
+                        requestedModelRef,
+                        modelId,
+                        finalLocalPath,
+                        routeExecutionProviderId,
+                        format,
+                        routeReportAllowPull,
+                        routeReportRequireLocal);
+                routePreflight = DirectSafetensorRoutePreflight.applyGemma4UnifiedValidation(
+                        routePreflight,
+                        routeExecutionProviderId,
+                        modelId,
+                        finalLocalPath,
+                        !normalizedInputImages.isEmpty(),
+                        ocrMode);
+                printJsonPayload(RouteReportPayloads.routeReportPayload(
+                        effectiveRouteReport,
+                        requestedModelRef,
+                        modelId,
+                        finalLocalPath,
+                        routeExecutionProviderId,
+                        format,
+                        routeReportAllowPull,
+                        routeReportRepositoryResolutionSkipped,
+                        routePreflight));
+                requestProcessExit(routePreflight.exitCode());
                 return;
             }
 
@@ -894,7 +1126,6 @@ public class RunCommand implements Runnable {
                 return;
             }
 
-            List<String> normalizedInputImages = normalizedInputImagePaths();
             if (!validateInputImages(normalizedInputImages)) {
                 requestProcessExit(1);
                 return;
@@ -922,25 +1153,39 @@ public class RunCommand implements Runnable {
                 prompt = "";
             }
 
+            if (tryStandaloneLiteRtFastPath(finalLocalPath)) {
+                return;
+            }
+
+            if (tryStandaloneGgufFastPath(true)) {
+                return;
+            }
+
             if (!ensureMossTtsCodecAvailableIfNeeded(modelId, finalLocalPath)) {
                 requestProcessExit(1);
                 return;
             }
 
-            boolean libtorchSafetensorCliBridge =
-                    "libtorch".equalsIgnoreCase(providerId)
-                            && finalLocalPath != null
-                            && !finalLocalPath.isBlank()
-                            && (isSafetensorCheckpointDir(finalLocalPath) || isSafetensorWeightFile(finalLocalPath));
-            String executionProviderId = libtorchSafetensorCliBridge ? "safetensor" : providerId;
+            String executionProviderId = routeExecutionProviderId(providerId, finalLocalPath);
+            RunnerRouteReport effectiveRunnerRouteReport =
+                    runnerRouteReport.withEffectiveRoute(executionProviderId, format);
+            forcedExecutionRouteMetadata = effectiveRunnerRouteReport.toMetadata();
 
             if (direct) {
                 providerId = "safetensor";
                 sdk.setPreferredProvider("safetensor");
                 executionProviderId = "safetensor";
+                effectiveRunnerRouteReport = effectiveRunnerRouteReport.withEffectiveRoute(executionProviderId, format);
+                forcedExecutionRouteMetadata = effectiveRunnerRouteReport.toMetadata();
             } else if (executionProviderId != null && !executionProviderId.isEmpty()) {
                 sdk.setPreferredProvider(executionProviderId);
             }
+            effectiveRunnerRouteReport = applyCachedBenchmarkRouteProfile(
+                    effectiveRunnerRouteReport,
+                    requestedModelRef,
+                    modelId,
+                    finalLocalPath);
+            forcedExecutionRouteMetadata = effectiveRunnerRouteReport.toMetadata();
 
             String litertPreflightFailure = detectUnsupportedLiteRtPreflight(executionProviderId, finalLocalPath);
             if (litertPreflightFailure != null) {
@@ -950,6 +1195,36 @@ public class RunCommand implements Runnable {
                 }
                 System.err.println(litertPreflightFailure);
                 requestProcessExit();
+                return;
+            }
+
+            DirectSafetensorRoutePolicy.RouteValidation gemma4UnifiedMultimodalRouteValidation =
+                    DirectSafetensorRoutePolicy.validateGemma4UnifiedMultimodalExecutionRoute(
+                            executionProviderId,
+                            modelId,
+                            finalLocalPath,
+                            !normalizedInputImages.isEmpty(),
+                            ocrMode);
+            if (!gemma4UnifiedMultimodalRouteValidation.allowed()) {
+                if (!enableJsonSse) {
+                    uiRenderer.printModelInfo(modelId, providerId, format, null, false);
+                    printQuantizationInfo();
+                }
+                gemma4UnifiedMultimodalRouteValidation.messages().forEach(System.err::println);
+                requestProcessExit(1);
+                return;
+            }
+
+            DirectSafetensorRoutePolicy.RouteValidation gemma4UnifiedRouteValidation =
+                    DirectSafetensorRoutePolicy.validateGemma4UnifiedExecutionRoute(
+                            executionProviderId, modelId, finalLocalPath);
+            if (!gemma4UnifiedRouteValidation.allowed()) {
+                if (!enableJsonSse) {
+                    uiRenderer.printModelInfo(modelId, providerId, format, null, false);
+                    printQuantizationInfo();
+                }
+                gemma4UnifiedRouteValidation.messages().forEach(System.err::println);
+                requestProcessExit(1);
                 return;
             }
             
@@ -1017,9 +1292,21 @@ public class RunCommand implements Runnable {
                 requestBuilder.parameter("kv_cache_quant", quantizeKv);
             }
 
+            if (runtimeProfile) {
+                requestBuilder.parameter("profile", true);
+                requestBuilder.parameter("onnx_profile", true);
+                requestBuilder.metadata("profile", true);
+                requestBuilder.metadata("onnx_profile", true);
+            }
+
             if (seed != null) requestBuilder.parameter("seed", seed);
             if (steps != null) requestBuilder.parameter("steps", steps);
             if (format != null) requestBuilder.parameter("format", format);
+            requestBuilder.metadata(effectiveRunnerRouteReport.toMetadata());
+            if (runner != null && !runner.isBlank()) {
+                requestBuilder.parameter("runner", effectiveRunnerRouteReport.normalizedRunner());
+                requestBuilder.metadata("runner", effectiveRunnerRouteReport.normalizedRunner());
+            }
             if (featurePipelineId != null && !featurePipelineId.isBlank()) {
                 String pipelineId = featurePipelineId.trim();
                 requestBuilder.parameter("pipeline", pipelineId);
@@ -1129,6 +1416,8 @@ public class RunCommand implements Runnable {
             CliInferenceFeatures.applyTools(requestBuilder, requestedTools, requestedToolChoice);
             CliInferenceFeatures.applyRagMetadata(requestBuilder, ragContext, embeddingModel);
 
+            boolean libtorchSafetensorCliBridge = "libtorch".equalsIgnoreCase(providerId)
+                    && "safetensor".equalsIgnoreCase(executionProviderId);
             String effectiveSystemPrompt = effectiveRunSystemPrompt(executionProviderId, finalLocalPath);
             if (effectiveSystemPrompt != null && !effectiveSystemPrompt.isEmpty()) {
                 requestBuilder.message(Message.system(effectiveSystemPrompt));
@@ -1159,15 +1448,20 @@ public class RunCommand implements Runnable {
                 printQuantizationInfo();
                 if (libtorchSafetensorCliBridge) {
                     forcedExecutionRouteMetadata = bridgeExecutionRouteMetadata();
+                    forcedExecutionRouteMetadata =
+                            mergeExecutionRouteMetadata(effectiveRunnerRouteReport.toMetadata(),
+                                    forcedExecutionRouteMetadata);
                     printExecutionRouteInfo(forcedExecutionRouteMetadata);
                 } else {
-                    forcedExecutionRouteMetadata = Map.of();
+                    forcedExecutionRouteMetadata = effectiveRunnerRouteReport.toMetadata();
                 }
             }
 
             if (shouldUseDirectSafetensorRunPath(providerId, finalLocalPath)) {
-                boolean useCliDirectSystemPrompt = (systemPrompt != null && !systemPrompt.isBlank())
-                        || isQwenSafetensorModel(executionProviderId, finalLocalPath);
+                DirectSafetensorRunProfile directProfile =
+                        directSafetensorRunProfile(executionProviderId, finalLocalPath);
+                boolean useCliDirectSystemPrompt =
+                        DirectSafetensorRoutePolicy.shouldForwardSystemPromptToDirectPath(systemPrompt, directProfile);
                 String explicitDirectSystemPrompt = useCliDirectSystemPrompt
                         ? effectiveSystemPrompt
                         : null;
@@ -1189,6 +1483,7 @@ public class RunCommand implements Runnable {
                 java.util.concurrent.atomic.AtomicLong firstTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
                 java.util.concurrent.atomic.AtomicLong lastTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
                 long streamStartTime = System.currentTimeMillis();
+                String streamFinalLocalPath = finalLocalPath;
 
                 sdk.streamCompletion(request)
                         .subscribe().with(
@@ -1202,7 +1497,7 @@ public class RunCommand implements Runnable {
                                             try {
                                                 byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
                                                 imageBuffer.write(decoded);
-                                            } catch (Exception ignored) {}
+                                            } catch (Exception imageDecodeFailure) {}
                                         }
                                         return;
                                     }
@@ -1250,7 +1545,17 @@ public class RunCommand implements Runnable {
                                     double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
                                     Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
                                     Map<String, Object> streamMetrics = observedStreamMetrics(
-                                            metricsRef.get(), tokenCount.get(), duration, ttftMs);
+                                            effectiveExecutionRouteMetadata(metricsRef.get()),
+                                            tokenCount.get(),
+                                            duration,
+                                            ttftMs);
+                                    recordRouteBenchmarkProfile(
+                                            request.getModel(),
+                                            streamFinalLocalPath,
+                                            streamMetrics,
+                                            tokenCount.get(),
+                                            duration,
+                                            audioOutput.hasOutput());
                                     if (enableJsonSse) {
                                         printOpenAiSseFinal(request.getRequestId(), request.getModel());
                                     } else {
@@ -1630,6 +1935,13 @@ public class RunCommand implements Runnable {
                         i++;
                     }
                 }
+                case "--runner" -> {
+                    if (runner == null || runner.isBlank()) {
+                        runner = replayArgValue(replayArgs, ++i, flag);
+                    } else {
+                        i++;
+                    }
+                }
                 case "--prompt" -> {
                     if (prompt == null || prompt.isBlank()) {
                         prompt = replayArgValue(replayArgs, ++i, flag);
@@ -1753,6 +2065,9 @@ public class RunCommand implements Runnable {
         if (providerId == null || providerId.isBlank()) {
             providerId = jsonText(root, "provider");
         }
+        if (runner == null || runner.isBlank()) {
+            runner = jsonText(root, "runner");
+        }
         if (prompt == null || prompt.isBlank()) {
             prompt = jsonText(root, "prompt");
         }
@@ -1809,7 +2124,7 @@ public class RunCommand implements Runnable {
 
     private static boolean replayFlagTakesValue(String flag) {
         return Set.of(
-                "--model", "--modelDir", "--modelFile", "--model-path", "--provider", "--prompt",
+                "--model", "--modelDir", "--modelFile", "--model-path", "--provider", "--runner", "--prompt",
                 "--voice", "--tts-voice", "--audio-format", "--tts-audio-format", "--seed", "--output", "-o",
                 "--audio-quality", "--tts-audio-quality", "--audio-bitrate", "--audio-bitrate-kbps",
                 "--tts-bitrate", "--tts-bitrate-kbps", "--audio-channels", "--tts-audio-channels",
@@ -2157,6 +2472,24 @@ public class RunCommand implements Runnable {
 
     private boolean ttsVoicesJsonOutput() {
         return jsonMode || listTtsVoicesJson;
+    }
+
+    private boolean quietRouteResolutionOutput() {
+        return ttsVoicesJsonOutput() || routeReportJson;
+    }
+
+    boolean shouldAllowRepositoryResolutionDuringRouteReport() {
+        return !routeReportJson || routeReportAllowPull;
+    }
+
+    private String routeExecutionProviderId(String provider, String localPath) {
+        if ("libtorch".equalsIgnoreCase(provider)
+                && localPath != null
+                && !localPath.isBlank()
+                && (isSafetensorCheckpointDir(localPath) || isSafetensorWeightFile(localPath))) {
+            return "safetensor";
+        }
+        return provider;
     }
 
     private void printTtsVoicesJson(
@@ -4445,14 +4778,40 @@ public class RunCommand implements Runnable {
     }
 
     private String providerForModelDirectory(Path dirPath) {
+        String detectedFormat = formatForModelDirectory(dirPath);
+        String provider = providerForFormat(detectedFormat);
+        return provider != null ? provider : "safetensor";
+    }
+
+    private String formatForModelDirectory(Path dirPath) {
         String detectedFormat = ManifestStore.detectFormat(dirPath);
-        if ("onnx".equalsIgnoreCase(detectedFormat)) {
-            return "onnx";
+        if (detectedFormat == null || detectedFormat.isBlank() || "unknown".equalsIgnoreCase(detectedFormat)) {
+            return null;
         }
-        if ("litert".equalsIgnoreCase(detectedFormat)) {
+        return canonicalModelFormat(detectedFormat);
+    }
+
+    private String formatForLocalModelPath(Path modelPath) {
+        if (modelPath == null || modelPath.getFileName() == null) {
+            return null;
+        }
+        String name = modelPath.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".gguf")) {
+            return "gguf";
+        }
+        if (name.endsWith(".litertlm") || name.endsWith(".tflite") || name.endsWith(".task")) {
             return "litert";
         }
-        return "safetensor";
+        if (name.endsWith(".onnx")) {
+            return "onnx";
+        }
+        if (name.endsWith(".safetensors") || name.endsWith(".safetensor")) {
+            return "safetensors";
+        }
+        if (name.endsWith(".pt") || name.endsWith(".pth") || name.endsWith(".pts")) {
+            return "torchscript";
+        }
+        return null;
     }
 
     private boolean shouldPreferOnnxResolution(String requestedModel, String requestedFormat, String requestedProvider) {
@@ -5046,90 +5405,31 @@ public class RunCommand implements Runnable {
     }
 
     private boolean shouldUseDirectSafetensorRunPath(String currentProvider, String localPath) {
-        if (!"safetensor".equalsIgnoreCase(currentProvider)) {
-            return false;
-        }
         Path checkpointPath = resolveSafetensorCheckpointPath(localPath);
-        if (checkpointPath == null || !isSafetensorCheckpointDir(checkpointPath.toString())) {
-            return false;
-        }
-        String modelType = readModelType(checkpointPath);
-        if (modelType != null && modelType.trim().toLowerCase(Locale.ROOT).startsWith("gemma4")) {
-            // Gemma-4 currently regressed badly on the legacy direct one-shot
-            // path; route through the provider-backed path instead.
-            return false;
-        }
-        if (sessionId != null && !sessionId.isBlank()) {
-            return false;
-        }
-        if (grammar != null && !grammar.isBlank()) {
-            return false;
-        }
-        return prompt != null && !prompt.isBlank() && directInferenceEngine() != null;
+        return DirectSafetensorRoutePolicy.shouldUseDirectRun(
+                currentProvider,
+                checkpointPath,
+                checkpointPath != null && isSafetensorCheckpointDir(checkpointPath.toString()),
+                sessionId,
+                grammar,
+                prompt,
+                directInferenceEngine() != null);
     }
 
     private String effectiveRunSystemPrompt(String providerId, String localPath) {
-        if (systemPrompt != null && !systemPrompt.isBlank()) {
-            return systemPrompt;
-        }
-        if (Boolean.getBoolean(DISABLE_DEFAULT_RUN_SYSTEM_PROPERTY)) {
-            return null;
-        }
-        if (isQwenSafetensorModel(providerId, localPath)) {
-            return QWEN_SAFETENSOR_RUN_SYSTEM_PROMPT;
-        }
-        return DEFAULT_RUN_SYSTEM_PROMPT;
+        return DirectSafetensorRoutePolicy.effectiveSystemPrompt(
+                systemPrompt,
+                directSafetensorRunProfile(providerId, localPath));
     }
 
-    private boolean isQwenSafetensorModel(String providerId, String localPath) {
-        if (!"safetensor".equalsIgnoreCase(providerId) || localPath == null || localPath.isBlank()) {
-            return false;
-        }
-        Path checkpointPath = resolveSafetensorCheckpointPath(localPath);
-        if (checkpointPath == null) {
-            return false;
-        }
-        String modelType = readModelType(checkpointPath);
-        return modelType != null && modelType.trim().toLowerCase(Locale.ROOT).startsWith("qwen");
+    private DirectSafetensorRunProfile directSafetensorRunProfile(String providerId, String localPath) {
+        return DirectSafetensorRoutePolicy.profileForProvider(
+                providerId,
+                resolveSafetensorCheckpointPath(localPath));
     }
 
     private boolean shouldUseDirectLiteRtStreamPath(String currentProvider, String localPath) {
-        if (!"litert".equalsIgnoreCase(currentProvider)) {
-            return false;
-        }
-        if (localPath == null || localPath.isBlank()) {
-            return false;
-        }
-        if (!Boolean.getBoolean("gollek.cli.enable_direct_litert_stream")) {
-            return false;
-        }
-        return looksLikeLiteRtArtifactOrDirectory(localPath);
-    }
-
-    private boolean looksLikeLiteRtArtifactOrDirectory(String localPath) {
-        try {
-            Path path = Path.of(localPath).toAbsolutePath().normalize();
-            if (Files.isRegularFile(path)) {
-                String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-                return isLiteRtFileName(name);
-            }
-            if (!Files.isDirectory(path)) {
-                return false;
-            }
-            try (var stream = Files.list(path)) {
-                return stream
-                        .filter(Files::isRegularFile)
-                        .map(candidate -> candidate.getFileName().toString().toLowerCase(Locale.ROOT))
-                        .anyMatch(this::isLiteRtFileName);
-            }
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
-    private boolean isLiteRtFileName(String name) {
-        return name != null
-                && (name.endsWith(".litertlm") || name.endsWith(".task") || name.endsWith(".tflite"));
+        return DirectSafetensorRoutePolicy.shouldUseDirectLiteRtStreamPath(currentProvider, localPath);
     }
 
     private InferenceResponse runDirectSafetensorCompletion(String localPath, String userPrompt,
@@ -5138,8 +5438,8 @@ public class RunCommand implements Runnable {
         if (modelPath == null) {
             throw new IllegalArgumentException("Invalid safetensor model path: " + localPath);
         }
-        String modelType = readModelType(modelPath);
-        float effectiveRepeatPenalty = normalizeDirectRepeatPenalty(modelType, repeatPenalty);
+        DirectSafetensorRunProfile profile = DirectSafetensorRunProfile.load(modelPath);
+        float effectiveRepeatPenalty = DirectSafetensorTextPolicy.normalizeRepeatPenalty(profile, repeatPenalty);
         GenerationConfig.KvCacheQuantization kvQuant = GenerationConfig.KvCacheQuantization.NONE;
         if ("int8".equalsIgnoreCase(quantizeKv)) {
             kvQuant = GenerationConfig.KvCacheQuantization.INT8;
@@ -5157,11 +5457,11 @@ public class RunCommand implements Runnable {
                 .kvCacheQuant(kvQuant)
                 .seed(seed != null ? seed.longValue() : -1L)
                 .build();
-        String preparedPrompt = prepareDirectSafetensorPrompt(modelType, effectiveSystemPrompt, userPrompt);
+        String preparedPrompt = DirectSafetensorTextPolicy.preparePrompt(profile, effectiveSystemPrompt, userPrompt);
         InferenceResponse response = directInferenceEngine().generate(preparedPrompt, modelPath, config)
                 .await()
                 .atMost(Duration.ofMinutes(5));
-        return sanitizeDirectSafetensorResponse(response, modelType);
+        return DirectSafetensorTextPolicy.sanitizeResponse(response, profile);
     }
 
     private Path resolveSafetensorCheckpointPath(String localPath) {
@@ -5185,17 +5485,6 @@ public class RunCommand implements Runnable {
         } catch (Exception ignored) {
             return null;
         }
-    }
-
-    private float normalizeDirectRepeatPenalty(String modelType, double requestedRepeatPenalty) {
-        if (modelType == null || modelType.isBlank()) {
-            return (float) requestedRepeatPenalty;
-        }
-        String normalized = modelType.trim().toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("gemma4") && Math.abs(requestedRepeatPenalty - 1.1d) < 1.0e-6) {
-            return 1.0f;
-        }
-        return (float) requestedRepeatPenalty;
     }
 
     private GenerationConfig.SamplingStrategy resolveDirectSamplingStrategy() {
@@ -5328,101 +5617,6 @@ public class RunCommand implements Runnable {
                 || name.endsWith(".tfl");
     }
 
-    private String prepareDirectSafetensorPrompt(String modelType, String systemPrompt, String userPrompt) {
-        if (userPrompt == null || userPrompt.isBlank()) {
-            return userPrompt;
-        }
-        if (looksLikePreformattedPrompt(userPrompt)) {
-            return userPrompt;
-        }
-        if (!shouldFormatDirectPrompt(modelType)) {
-            return userPrompt;
-        }
-        try {
-            if (systemPrompt != null && !systemPrompt.isBlank()) {
-                return ChatTemplateFormatter.format(List.of(Message.system(systemPrompt), Message.user(userPrompt)),
-                        modelType);
-            }
-            return ChatTemplateFormatter.format(List.of(Message.user(userPrompt)), modelType);
-        } catch (Exception ignored) {
-            return userPrompt;
-        }
-    }
-
-    private boolean shouldFormatDirectPrompt(String modelType) {
-        if (modelType == null || modelType.isBlank()) {
-            return false;
-        }
-        String normalized = modelType.trim().toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("gemma4")) {
-            // The official Gemma-4 turn template is now supported without
-            // double-BOS injection, but the one-shot local direct path still
-            // produces worse first-token quality for this checkpoint than the
-            // historical raw-prompt path. Keep raw prompt here until the
-            // remaining Gemma-4 forward/prefill semantics are fixed.
-            return false;
-        }
-        return normalized.startsWith("gemma")
-                || normalized.startsWith("llama")
-                || normalized.startsWith("mistral")
-                || normalized.startsWith("mixtral")
-                || normalized.startsWith("phi")
-                || normalized.startsWith("qwen");
-    }
-
-    private boolean looksLikePreformattedPrompt(String prompt) {
-        if (prompt == null) {
-            return false;
-        }
-        String trimmed = prompt.stripLeading();
-        if (trimmed.startsWith("<bos>")) {
-            trimmed = trimmed.substring("<bos>".length()).stripLeading();
-        }
-        return trimmed.startsWith("<|turn>")
-                || trimmed.startsWith("<start_of_turn>")
-                || trimmed.startsWith("<|im_start|>")
-                || trimmed.startsWith("<|begin_of_text|>")
-                || trimmed.startsWith("[INST]");
-    }
-
-    private String readModelType(Path modelPath) {
-        if (modelPath == null) {
-            return "";
-        }
-        try {
-            Path configDir = Files.isRegularFile(modelPath) ? modelPath.getParent() : modelPath;
-            if (configDir == null) {
-                return "";
-            }
-            ModelConfig config = ModelConfig.fromDirectory(configDir, new ObjectMapper());
-            return config.modelType() != null ? config.modelType() : "";
-        } catch (Exception ignored) {
-            return "";
-        }
-    }
-
-    private InferenceResponse sanitizeDirectSafetensorResponse(InferenceResponse response, String modelType) {
-        if (response == null || response.getContent() == null) {
-            return response;
-        }
-        String normalized = modelType == null ? "" : modelType.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.startsWith("gemma4")) {
-            return response;
-        }
-
-        String content = response.getContent();
-        content = GEMMA4_THOUGHT_CHANNEL.matcher(content).replaceFirst("");
-        content = GEMMA4_GENERIC_CHANNEL_OPEN.matcher(content).replaceFirst("");
-        content = content.replace("<channel|>", "");
-        content = content.replace("<turn|>", "");
-        content = content.replace("<|tool_response>", "");
-
-        if (content.equals(response.getContent())) {
-            return response;
-        }
-        return response.toBuilder().content(content).build();
-    }
-
     private String detectSafetensorCompatibilityIssue(String providerId, String localPath) {
         if (!"safetensor".equalsIgnoreCase(providerId) || localPath == null || localPath.isBlank()) {
             return null;
@@ -5435,12 +5629,22 @@ public class RunCommand implements Runnable {
             Path configPath = Path.of(localPath).resolve("config.json");
             ModelConfig parsed = ModelConfig.load(configPath, new ObjectMapper());
             String modelType = parsed.modelType() == null ? "" : parsed.modelType().toLowerCase(Locale.ROOT);
+            String architecture = parsed.primaryArchitecture() == null
+                    ? ""
+                    : parsed.primaryArchitecture().toLowerCase(Locale.ROOT);
+            boolean gemma4UnifiedWrapper = isGemma4UnifiedWrapper(modelType, architecture);
             boolean resolvedGemma4Text = modelType.startsWith("gemma4")
                     && parsed.hiddenSize() > 0
                     && parsed.numHiddenLayers() > 0
                     && parsed.numAttentionHeads() > 0;
             if (resolvedGemma4Text) {
                 return null;
+            }
+            if (gemma4UnifiedWrapper) {
+                return "this local safetensor runtime build recognizes Gemma 4 unified checkpoints like "
+                        + Path.of(localPath).getFileName()
+                        + ", but does not run their unified multimodal embedder path yet. "
+                        + "Use a runtime plugin with Gemma 4 unified support, or convert to a supported artifact.";
             }
         } catch (Exception ignored) {
             // Fall back to raw config heuristics only when structured parsing cannot
@@ -5451,11 +5655,25 @@ public class RunCommand implements Runnable {
             Path configPath = Path.of(localPath).resolve("config.json");
             String config = Files.readString(configPath);
             boolean gemma4Conditional = config.contains("\"Gemma4ForConditionalGeneration\"")
+                    || config.contains("\"Gemma4ForMultimodalLM\"")
+                    || config.contains("\"Gemma4ForImageTextToText\"")
                     || config.contains("\"model_type\": \"gemma4\"");
+            boolean gemma4Unified = config.contains("\"model_type\": \"gemma4_unified\"")
+                    || config.contains("\"Gemma4ForMultimodalLM\"")
+                    || config.contains("\"Gemma4ForImageTextToText\"");
             boolean multimodalWrapper = config.contains("\"vision_config\"")
                     || config.contains("\"audio_config\"");
             boolean hasTextConfig = config.contains("\"text_config\"");
 
+            if (gemma4Unified && multimodalWrapper && hasTextConfig) {
+                return null;
+            }
+            if (gemma4Unified && multimodalWrapper) {
+                return "this local safetensor runtime build recognizes Gemma 4 unified checkpoints like "
+                        + Path.of(localPath).getFileName()
+                        + ", but does not run their unified multimodal embedder path yet. "
+                        + "Use a runtime plugin with Gemma 4 unified support, or convert to a supported artifact.";
+            }
             if (gemma4Conditional && multimodalWrapper && !hasTextConfig) {
                 return "this local safetensor runtime build does not reliably support Gemma4 multimodal text checkpoints like "
                         + Path.of(localPath).getFileName()
@@ -5466,6 +5684,12 @@ public class RunCommand implements Runnable {
         }
 
         return null;
+    }
+
+    private boolean isGemma4UnifiedWrapper(String modelType, String architecture) {
+        return modelType.equals("gemma4_unified")
+                || architecture.equals("gemma4formultimodallm")
+                || architecture.equals("gemma4forimagetexttotext");
     }
 
     private String detectNativeGgufCompatibilityIssue(String providerId, String modelId, String localPath) {
@@ -5522,7 +5746,157 @@ public class RunCommand implements Runnable {
         return providerId != null && "mcp".equalsIgnoreCase(providerId.trim());
     }
 
+    boolean shouldTryStandaloneLiteRtFastPath(String localPath) {
+        if (routeReportJson) {
+            return false;
+        }
+        if (!Boolean.parseBoolean(System.getProperty("gollek.cli.enable_standalone_litert_fast_path", "true"))) {
+            return false;
+        }
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        if (providerId != null && !providerId.isBlank() && !isLiteRtProviderAlias(providerId)) {
+            return false;
+        }
+        return looksLikeLiteRtLmPath(localPath) && isSimpleStandaloneTextRun();
+    }
+
+    String[] buildStandaloneLiteRtFastRunArgs(String localPath) {
+        List<String> args = new java.util.ArrayList<>();
+        args.add("run");
+        args.add("--modelFile");
+        args.add(localPath);
+        args.add("--prompt");
+        args.add(prompt);
+        args.add("--max-tokens");
+        args.add(Integer.toString(maxTokens));
+        args.add("--temperature");
+        args.add(Double.toString(temperature));
+        args.add("--top-k");
+        args.add(Integer.toString(topK));
+        args.add("--top-p");
+        args.add(Double.toString(topP));
+        args.add("--provider");
+        args.add("litert");
+        return args.toArray(String[]::new);
+    }
+
+    private boolean tryStandaloneLiteRtFastPath(String localPath) {
+        if (!shouldTryStandaloneLiteRtFastPath(localPath)) {
+            return false;
+        }
+        int status = LiteRtLmFastRun.run(buildStandaloneLiteRtFastRunArgs(localPath));
+        if (status == 42) {
+            return false;
+        }
+        if (status == 0) {
+            requestProcessExit();
+            return true;
+        }
+        System.exit(status);
+        return true;
+    }
+
+    private boolean tryCachedGemma4MobileQatLiteRtFastPath(boolean providerExplicit) {
+        return tryCachedGemma4MobileQatLiteRtFastPath(providerExplicit, providerId);
+    }
+
+    private boolean tryCachedGemma4MobileQatLiteRtFastPath(boolean providerExplicit, String requestedProviderId) {
+        if (!shouldTryCachedGemma4MobileQatLiteRtFastPath(providerExplicit, requestedProviderId)) {
+            return false;
+        }
+        Optional<LocalModelIndex.Entry> indexed = findSafetensorIndexEntry(modelId);
+        if (indexed.isEmpty()) {
+            return false;
+        }
+        LocalModelIndex.Entry entry = indexed.get();
+        DirectSafetensorRoutePolicy.AlternateRuntimeSelection selection =
+                DirectSafetensorRoutePolicy.selectCachedGemma4MobileQatLiteRtAlternateRuntime(
+                        "safetensor",
+                        entry.path,
+                        entry.path,
+                        providerExplicit,
+                        preferAlternateRuntime);
+        if (!selection.selected()) {
+            return false;
+        }
+        providerId = selection.provider();
+        int status = LiteRtLmFastRun.run(buildStandaloneLiteRtFastRunArgs(selection.localPath()));
+        if (status == 42) {
+            return false;
+        }
+        if (status == 0) {
+            requestProcessExit();
+            return true;
+        }
+        System.exit(status);
+        return true;
+    }
+
+    boolean shouldTryCachedGemma4MobileQatLiteRtFastPath(boolean providerExplicit) {
+        return shouldTryCachedGemma4MobileQatLiteRtFastPath(providerExplicit, providerId);
+    }
+
+    boolean shouldTryCachedGemma4MobileQatLiteRtFastPath(boolean providerExplicit, String requestedProviderId) {
+        if (!Boolean.parseBoolean(System.getProperty("gollek.cli.enable_cached_gemma4_litert_fast_path", "true"))) {
+            return false;
+        }
+        if (modelId == null || modelId.isBlank()) {
+            return false;
+        }
+        if (modelFile != null && !modelFile.isBlank()) {
+            return false;
+        }
+        if (modelDir != null && !modelDir.isBlank()) {
+            return false;
+        }
+        if (modelPath != null && !modelPath.isEmpty()) {
+            return false;
+        }
+        if (requestedProviderId != null && !requestedProviderId.isBlank() && !isLiteRtProviderAlias(requestedProviderId)) {
+            return false;
+        }
+        if (providerExplicit && !isLiteRtProviderAlias(requestedProviderId)) {
+            return false;
+        }
+        return isSimpleStandaloneTextRun();
+    }
+
+    private Optional<LocalModelIndex.Entry> findSafetensorIndexEntry(String modelRef) {
+        if (modelRef == null || modelRef.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            Optional<LocalModelIndex.Entry> indexed = LocalModelIndex.find(modelRef, "safetensor");
+            if (indexed.isPresent()
+                    && indexed.get().path != null
+                    && !indexed.get().path.isBlank()
+                    && Files.exists(Path.of(indexed.get().path))) {
+                return indexed;
+            }
+        } catch (Exception ignored) {
+            // Fall back below to the default index lookup.
+        }
+        try {
+            Optional<LocalModelIndex.Entry> indexed = LocalModelIndex.find(modelRef);
+            if (indexed.isPresent()
+                    && "safetensor".equalsIgnoreCase(indexed.get().format)
+                    && indexed.get().path != null
+                    && !indexed.get().path.isBlank()
+                    && Files.exists(Path.of(indexed.get().path))) {
+                return indexed;
+            }
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
+        return Optional.empty();
+    }
+
     boolean shouldTryStandaloneGgufFastPath() {
+        if (routeReportJson) {
+            return false;
+        }
         if (prompt == null || prompt.isBlank()) {
             return false;
         }
@@ -5540,8 +5914,15 @@ public class RunCommand implements Runnable {
     }
 
     String[] buildStandaloneGgufFastRunArgs() {
+        return buildStandaloneGgufFastRunArgs(false);
+    }
+
+    String[] buildStandaloneGgufFastRunArgs(boolean suppressBanner) {
         List<String> args = new java.util.ArrayList<>();
         args.add("run");
+        if (suppressBanner) {
+            args.add("--no-banner");
+        }
         if (modelFile != null && !modelFile.isBlank()) {
             args.add("--modelFile");
             args.add(modelFile);
@@ -5586,10 +5967,14 @@ public class RunCommand implements Runnable {
     }
 
     private boolean tryStandaloneGgufFastPath() {
+        return tryStandaloneGgufFastPath(false);
+    }
+
+    private boolean tryStandaloneGgufFastPath(boolean suppressBanner) {
         if (!shouldTryStandaloneGgufFastPath()) {
             return false;
         }
-        int status = GgufFastRun.run(buildStandaloneGgufFastRunArgs());
+        int status = GgufFastRun.run(buildStandaloneGgufFastRunArgs(suppressBanner));
         if (GgufFastRun.isFallbackToFullCliStatus(status)) {
             return false;
         }
@@ -5609,6 +5994,55 @@ public class RunCommand implements Runnable {
                 || llamaCppGguf
                 || benchmarkGguf
                 || (ggufEngine != null && !ggufEngine.isBlank());
+    }
+
+    private boolean isSimpleStandaloneTextRun() {
+        return isBlank(systemPrompt)
+                && isBlank(grammar)
+                && isBlank(sessionId)
+                && isBlank(toolChoice)
+                && isBlank(embeddingModel)
+                && isBlank(inputImagePath)
+                && isEmpty(toolFiles)
+                && isEmpty(mcpTools)
+                && isEmpty(ragContexts)
+                && isEmpty(ragFiles)
+                && isEmpty(inputImagePaths)
+                && !jsonMode
+                && !enableJsonSse
+                && !ocrMode
+                && !ocrJsonOutput
+                && isBlank(ocrJsonOutputPath)
+                && isBlank(ocrOverlayOutputPath);
+    }
+
+    private static boolean isLiteRtProviderAlias(String value) {
+        if (value == null) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return normalized.equals("litert") || normalized.equals("litertlm");
+    }
+
+    private static boolean looksLikeLiteRtLmPath(String localPath) {
+        if (localPath == null || localPath.isBlank()) {
+            return false;
+        }
+        try {
+            Path path = Path.of(localPath);
+            return Files.isRegularFile(path)
+                    && path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".litertlm");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static boolean isEmpty(List<?> values) {
+        return values == null || values.isEmpty();
     }
 
     private String requestedGgufEngine() {
@@ -5692,6 +6126,13 @@ public class RunCommand implements Runnable {
         return providerForFormat(entry.format);
     }
 
+    private String inferFormatFromIndex(LocalModelIndex.Entry entry) {
+        if (entry == null || entry.format == null || entry.format.isBlank()) {
+            return null;
+        }
+        return canonicalModelFormat(entry.format);
+    }
+
     private String providerForFormat(String format) {
         if (format == null) {
             return null;
@@ -5730,148 +6171,6 @@ public class RunCommand implements Runnable {
         }
     }
 
-    private record Gemma3RuntimeSelection(String provider, String localPath) {
-    }
-
-    private Gemma3RuntimeSelection maybeSelectGemma3AlternateRuntime(String currentProvider, String requestedModelId,
-            String localPath, boolean providerExplicit) {
-        if (!allowGemma3AlternateRuntime(providerExplicit)) {
-            return null;
-        }
-        if (currentProvider == null || localPath == null || localPath.isBlank()) {
-            return null;
-        }
-        if (!"safetensor".equalsIgnoreCase(currentProvider)) {
-            return null;
-        }
-        try {
-            Path path = Path.of(localPath);
-            Path modelDir = Files.isDirectory(path) ? path : path.getParent();
-            if (modelDir == null || !Files.isDirectory(modelDir)) {
-                return null;
-            }
-            String modelType = readModelType(modelDir);
-            if (modelType == null || !modelType.trim().toLowerCase(Locale.ROOT).startsWith("gemma3")) {
-                return null;
-            }
-
-            Optional<Path> litert = findPreferredAlternateArtifact(modelDir, requestedModelId, ".litertlm", ".tflite", ".task");
-            if (litert.isPresent() && isProviderActive("litert")) {
-                Path selected = litert.get().toAbsolutePath().normalize();
-                System.out.println("Detected Gemma3 safetensor checkpoint; switching to LiteRT runtime artifact: " + selected);
-                return new Gemma3RuntimeSelection("litert", selected.toString());
-            }
-
-            Optional<Path> gguf = findPreferredAlternateArtifact(modelDir, requestedModelId, ".gguf");
-            if (gguf.isPresent() && isProviderActive("gguf")) {
-                Path selected = gguf.get().toAbsolutePath().normalize();
-                System.out.println("Detected Gemma3 safetensor checkpoint; switching to GGUF runtime artifact: " + selected);
-                return new Gemma3RuntimeSelection("gguf", selected.toString());
-            }
-
-            if (litert.isPresent() || gguf.isPresent()) {
-                System.out.println("Detected Gemma3 alternate runtime artifact, but provider is not currently available in this build."
-                        + " Available providers are shown by: gollek modules");
-            }
-        } catch (Exception ignored) {
-            // Keep original route on any failure.
-        }
-        return null;
-    }
-
-    private boolean allowGemma3AlternateRuntime(boolean providerExplicit) {
-        if (preferAlternateRuntime) {
-            return true;
-        }
-        if (providerExplicit) {
-            return false;
-        }
-        return Boolean.getBoolean(ENABLE_GEMMA3_ALTERNATE_RUNTIME_PROPERTY);
-    }
-
-    private Optional<Path> findPreferredAlternateArtifact(Path dir, String requestedModelId, String... suffixes) {
-        if (dir == null || suffixes == null || suffixes.length == 0) {
-            return Optional.empty();
-        }
-        String modelHint = normalizeArtifactHint(requestedModelId);
-        try (var stream = Files.walk(dir, 2)) {
-            Optional<Path> preferred = stream.filter(Files::isRegularFile)
-                    .filter(p -> hasAnySuffix(p, suffixes))
-                    .filter(p -> isCompatibleAlternateArtifact(p, modelHint))
-                    .findFirst();
-            if (preferred.isPresent()) {
-                return preferred;
-            }
-            // Keep legacy fallback only when there is no model-specific hint.
-            if (modelHint == null || modelHint.isBlank()) {
-                return findFirstRegularFile(dir, suffixes);
-            }
-            return Optional.empty();
-        } catch (Exception ignored) {
-            return Optional.empty();
-        }
-    }
-
-    private boolean hasAnySuffix(Path path, String... suffixes) {
-        if (path == null || suffixes == null || suffixes.length == 0) {
-            return false;
-        }
-        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        for (String suffix : suffixes) {
-            if (suffix != null && name.endsWith(suffix.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isCompatibleAlternateArtifact(Path candidate, String modelHint) {
-        String filename = candidate.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (filename.contains("tiny_garden")) {
-            return false;
-        }
-        if (modelHint == null || modelHint.isBlank()) {
-            return true;
-        }
-        String normalizedName = normalizeArtifactHint(filename);
-        if (normalizedName.contains(modelHint)) {
-            return true;
-        }
-        // functiongemma checkpoint must not auto-route to unrelated tiny artifacts.
-        if (modelHint.contains("functiongemma")) {
-            return normalizedName.contains("functiongemma");
-        }
-        return true;
-    }
-
-    private String normalizeArtifactHint(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
-    }
-
-    private Optional<Path> findFirstRegularFile(Path dir, String... suffixes) {
-        if (dir == null || suffixes == null || suffixes.length == 0) {
-            return Optional.empty();
-        }
-        try (var stream = Files.walk(dir, 2)) {
-            return stream.filter(Files::isRegularFile)
-                    .filter(p -> {
-                        String name = p.getFileName().toString().toLowerCase(Locale.ROOT);
-                        for (String suffix : suffixes) {
-                            if (suffix != null && name.endsWith(suffix.toLowerCase(Locale.ROOT))) {
-                                return true;
-                            }
-                        }
-                        return false;
-                    })
-                    .findFirst();
-        } catch (Exception ignored) {
-            return Optional.empty();
-        }
-    }
-
     private boolean isProviderActive(String provider) {
         if (provider == null || provider.isBlank()) {
             return false;
@@ -5887,6 +6186,26 @@ public class RunCommand implements Runnable {
                     .filter(Objects::nonNull)
                     .map(id -> id.trim().toLowerCase(Locale.ROOT))
                     .anyMatch(normalized::equals);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean isRuntimeRouteActive(String runtimeId) {
+        if (isProviderActive(runtimeId)) {
+            return true;
+        }
+        String normalized = runtimeId == null ? "" : runtimeId.trim().toLowerCase(Locale.ROOT);
+        if (!"gguf".equals(normalized)) {
+            return false;
+        }
+        try {
+            return pluginChecker != null
+                    && pluginChecker.getRunnerPluginIds().stream()
+                    .map(id -> id == null ? "" : id.toLowerCase(Locale.ROOT))
+                    .anyMatch(id -> id.equals("gguf")
+                            || id.equals("gguf-runner")
+                            || id.contains("gguf"));
         } catch (Exception ignored) {
             return false;
         }
@@ -6147,6 +6466,14 @@ public class RunCommand implements Runnable {
                 tps,
                 ttftMillis(metadata),
                 metadata,
+                audioResponse);
+        int outputTokens = response.getOutputTokens() > 0 ? response.getOutputTokens() : response.getTokensUsed();
+        recordRouteBenchmarkProfile(
+                response.getModel(),
+                response.getModel(),
+                metadata,
+                outputTokens,
+                response.getDurationMs(),
                 audioResponse);
     }
 
@@ -6547,8 +6874,12 @@ public class RunCommand implements Runnable {
         Object backend = metadata.get("execution_backend");
         Object bridgeMode = metadata.get("provider_bridge_mode");
         Object bridgeReason = metadata.get("provider_bridge_reason");
+        Object runnerRoute = metadata.get(
+                RunnerRouteReportFields.metadataKey(RunnerRouteReportFields.Report.NORMALIZED_RUNNER));
+        Object runnerMode = metadata.get(
+                RunnerRouteReportFields.metadataKey(RunnerRouteReportFields.Report.MODE));
 
-        if (requested == null && effective == null && backend == null && bridgeMode == null) {
+        if (requested == null && effective == null && backend == null && bridgeMode == null && runnerRoute == null) {
             return;
         }
 
@@ -6565,6 +6896,13 @@ public class RunCommand implements Runnable {
         }
         if (backend != null) {
             line.append(" (backend=").append(backend).append(")");
+        }
+        if (runnerRoute != null) {
+            line.append(" (runner=").append(runnerRoute);
+            if (runnerMode != null && !RunnerRoutePolicy.AUTO.equals(String.valueOf(runnerMode))) {
+                line.append(", mode=").append(runnerMode);
+            }
+            line.append(")");
         }
         if (bridgeMode != null) {
             line.append(" [").append(bridgeMode);
@@ -6584,14 +6922,36 @@ public class RunCommand implements Runnable {
         if (forcedExecutionRouteMetadata == null || forcedExecutionRouteMetadata.isEmpty()) {
             return responseMetadata;
         }
-        if (responseMetadata.containsKey("requested_provider")
-                || responseMetadata.containsKey("effective_provider")
-                || responseMetadata.containsKey("provider_bridge_mode")) {
-            return responseMetadata;
+        return mergeExecutionRouteMetadata(forcedExecutionRouteMetadata, responseMetadata);
+    }
+
+    private RunnerRouteReport applyCachedBenchmarkRouteProfile(
+            RunnerRouteReport report,
+            String requestedModel,
+            String effectiveModel,
+            String localPath) {
+        return RunnerRouteBenchmarkCache.profileFor(report, requestedModel, effectiveModel, localPath)
+                .map(report::withRouteProfile)
+                .orElse(report);
+    }
+
+    private void recordRouteBenchmarkProfile(
+            String model,
+            String localPath,
+            Map<String, Object> metadata,
+            int outputTokens,
+            long durationMs,
+            boolean audioOutput) {
+        if (audioOutput || isAudioMetadata(metadata)) {
+            return;
         }
-        Map<String, Object> merged = new LinkedHashMap<>(forcedExecutionRouteMetadata);
-        merged.putAll(responseMetadata);
-        return merged;
+        RunnerRouteBenchmarkCache.record(
+                model,
+                model,
+                localPath,
+                metadata,
+                outputTokens,
+                durationMs);
     }
 
     private Map<String, Object> bridgeExecutionRouteMetadata() {
@@ -6601,6 +6961,19 @@ public class RunCommand implements Runnable {
         route.put("provider_bridge_mode", "cli_libtorch_to_safetensor");
         route.put("provider_bridge_reason", "raw_safetensor_checkpoint");
         return route;
+    }
+
+    private Map<String, Object> mergeExecutionRouteMetadata(
+            Map<String, Object> baseMetadata,
+            Map<String, Object> overlayMetadata) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (baseMetadata != null && !baseMetadata.isEmpty()) {
+            merged.putAll(baseMetadata);
+        }
+        if (overlayMetadata != null && !overlayMetadata.isEmpty()) {
+            merged.putAll(overlayMetadata);
+        }
+        return merged;
     }
 
     private void printQuantCacheInfo(Map<String, Object> metadata) {
@@ -7051,6 +7424,9 @@ public class RunCommand implements Runnable {
             payload.put("output_sha256", sha256Hex(absoluteAudioPath));
             payload.put("model", modelId);
             payload.put("provider", providerId);
+            if (runner != null && !runner.isBlank()) {
+                payload.put("runner", runner);
+            }
             payload.put("prompt", prompt);
             String voiceSelector = effectiveTtsVoiceSelector();
             if (voiceSelector != null && !voiceSelector.isBlank()) {
@@ -7103,6 +7479,9 @@ public class RunCommand implements Runnable {
             payload.put("output_sha256", sha256Hex(absoluteImagePath));
             payload.put("model", modelId);
             payload.put("provider", providerId);
+            if (runner != null && !runner.isBlank()) {
+                payload.put("runner", runner);
+            }
             payload.put("prompt", prompt);
             payload.put("image_format", imageOutputExtension(absoluteImagePath, metadata));
             addImageParameter(payload, "seed", imageReplaySeed(metadata));
@@ -7133,6 +7512,7 @@ public class RunCommand implements Runnable {
         args.add("run");
         addReplayModelArgs(args, modelId);
         addStringArg(args, "--provider", providerId);
+        addStringArg(args, "--runner", runner);
         addStringArg(args, "--prompt", prompt);
         addStringArg(args, "--seed", imageReplaySeed(metadata));
         addStringArg(args, "--steps", steps);
@@ -7182,6 +7562,7 @@ public class RunCommand implements Runnable {
         args.add("run");
         addReplayModelArgs(args, modelId);
         addStringArg(args, "--provider", providerId);
+        addStringArg(args, "--runner", runner);
         addStringArg(args, "--prompt", prompt);
         addStringArg(args, "--voice", effectiveTtsVoiceSelector());
         addStringArg(args, "--audio-format", audioDefaultExtension(metadata));
@@ -7516,7 +7897,17 @@ public class RunCommand implements Runnable {
                                 double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
                                 Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
                                 Map<String, Object> streamMetrics = observedStreamMetrics(
-                                        metricsRef.get(), tokenCount.get(), duration, ttftMs);
+                                        effectiveExecutionRouteMetadata(metricsRef.get()),
+                                        tokenCount.get(),
+                                        duration,
+                                        ttftMs);
+                                recordRouteBenchmarkProfile(
+                                        request.getModel(),
+                                        providerRequest.getModel(),
+                                        streamMetrics,
+                                        tokenCount.get(),
+                                        duration,
+                                        audioOutput.hasOutput());
                                 if (!enableJsonSse) {
                                     System.err.println();
                                     System.err.println("Warning: ignored native provider shutdown bug after streaming output.");
@@ -7544,7 +7935,17 @@ public class RunCommand implements Runnable {
                             double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
                             Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
                             Map<String, Object> streamMetrics = observedStreamMetrics(
-                                    metricsRef.get(), tokenCount.get(), duration, ttftMs);
+                                    effectiveExecutionRouteMetadata(metricsRef.get()),
+                                    tokenCount.get(),
+                                    duration,
+                                    ttftMs);
+                            recordRouteBenchmarkProfile(
+                                    request.getModel(),
+                                    providerRequest.getModel(),
+                                    streamMetrics,
+                                    tokenCount.get(),
+                                    duration,
+                                    audioOutput.hasOutput());
                             if (enableJsonSse) {
                                 printOpenAiSseFinal(request.getRequestId(), request.getModel());
                             } else {
@@ -7621,50 +8022,6 @@ public class RunCommand implements Runnable {
             }
             return true;
         } catch (Exception e) { return false; }
-    }
-
-    private boolean validateGemma3ExecutionRoute(String provider, String requestedModelId, String localPath) {
-        if (provider == null || localPath == null || localPath.isBlank()) {
-            return true;
-        }
-        if (!"safetensor".equalsIgnoreCase(provider)) {
-            return true;
-        }
-        try {
-            Path path = Path.of(localPath);
-            Path modelDir = Files.isDirectory(path) ? path : path.getParent();
-            if (modelDir == null || !Files.isDirectory(modelDir)) {
-                return true;
-            }
-            String modelType = readModelType(modelDir);
-            if (modelType == null || !modelType.trim().toLowerCase(Locale.ROOT).startsWith("gemma3")) {
-                return true;
-            }
-            String hint = normalizeArtifactHint(requestedModelId);
-            if (hint.contains("functiongemma")) {
-                // FunctionGemma is expected to run through safetensor in this build.
-                return true;
-            }
-            Optional<Path> litert = findPreferredAlternateArtifact(modelDir, requestedModelId, ".litertlm", ".tflite", ".task");
-            Optional<Path> gguf = findPreferredAlternateArtifact(modelDir, requestedModelId, ".gguf");
-            if (litert.isPresent() || gguf.isPresent()) {
-                // There is at least one compatible alternate artifact candidate; let normal flow continue.
-                return true;
-            }
-
-            System.err.println("Error: Gemma3 safetensor direct path is disabled for quality/safety in this build.");
-            System.err.println("No compatible local runtime artifact was found for this checkpoint.");
-            if (hint.contains("functiongemma")) {
-                System.err.println("Hint: FunctionGemma currently needs a compatible GGUF/LiteRT artifact generated for this build profile.");
-            }
-            System.err.println("Try:");
-            System.err.println("  gollek pull gguf:google/functiongemma-270m-it");
-            System.err.println("  gollek run --provider gguf --model google/functiongemma-270m-it --prompt \"who are you\"");
-            System.err.println("If gguf provider is unavailable, rebuild with gguf runtime/plugin enabled.");
-            return false;
-        } catch (Exception ignored) {
-            return true;
-        }
     }
 
     private void printCompatibilityHintBeforeInference() {

@@ -1,0 +1,32 @@
+{
+  "_name_or_path": "google/gemma-4-12B-it",
+  "model_type": "gemma4_unified",
+  "architectures": ["Gemma4ForMultimodalLM"],
+  "processor_class": "Gemma4Processor",
+  "torch_dtype": "bfloat16",
+  "image_token_id": 258880,
+  "audio_token_id": 258881,
+  "video_token_id": 258882,
+  "text_config": {
+    "model_type": "gemma4_text",
+    "architectures": ["Gemma4ForCausalLM"],
+    "hidden_size": 5120,
+    "num_hidden_layers": 48,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 16,
+    "intermediate_size": 20480,
+    "vocab_size": 262144,
+    "max_position_embeddings": 262144,
+    "sliding_window": 1024,
+    "layer_types": ["sliding_attention", "full_attention"],
+    "hidden_activation": "gelu_pytorch_tanh"
+  },
+  "vision_config": {
+    "model_type": "gemma4_vision",
+    "architectures": ["Gemma4VisionModel"]
+  },
+  "audio_config": {
+    "model_type": "gemma4_audio",
+    "architectures": ["Gemma4AudioModel"]
+  }
+}

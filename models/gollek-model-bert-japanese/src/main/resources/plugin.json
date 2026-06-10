@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["bert_japanese", "bert-japanese"]
+    "families": ["bert_japanese", "bert-japanese"],
+    "tokenizerKinds": ["wordpiece", "sentencepiece"]
   }
 }

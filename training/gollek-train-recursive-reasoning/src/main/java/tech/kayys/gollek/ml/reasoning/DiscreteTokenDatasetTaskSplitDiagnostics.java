@@ -16,10 +16,7 @@ public record DiscreteTokenDatasetTaskSplitDiagnostics(
         int testCount) {
 
     public DiscreteTokenDatasetTaskSplitDiagnostics {
-        taskId = Objects.requireNonNull(taskId, "taskId must not be null");
-        if (taskId.isBlank()) {
-            throw new IllegalArgumentException("taskId must not be blank");
-        }
+        taskId = DiscreteTokenDatasetMetadataSupport.requireText(taskId, "taskId");
         exampleCount = requireNonNegative(exampleCount, "exampleCount");
         trainCount = requireNonNegative(trainCount, "trainCount");
         validationCount = requireNonNegative(validationCount, "validationCount");
@@ -32,11 +29,11 @@ public record DiscreteTokenDatasetTaskSplitDiagnostics(
     public static DiscreteTokenDatasetTaskSplitDiagnostics fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetTaskSplitDiagnostics(
-                requiredString(metadata, "taskId"),
-                requiredInt(metadata, "exampleCount"),
-                requiredInt(metadata, "trainCount"),
-                requiredInt(metadata, "validationCount"),
-                requiredInt(metadata, "testCount"));
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "taskId"),
+                DiscreteTokenDatasetMetadataSupport.requiredInt(metadata, "exampleCount"),
+                DiscreteTokenDatasetMetadataSupport.requiredInt(metadata, "trainCount"),
+                DiscreteTokenDatasetMetadataSupport.requiredInt(metadata, "validationCount"),
+                DiscreteTokenDatasetMetadataSupport.requiredInt(metadata, "testCount"));
     }
 
     public boolean hasTrainExamples() {
@@ -83,40 +80,4 @@ public record DiscreteTokenDatasetTaskSplitDiagnostics(
         return value;
     }
 
-    private static String requiredString(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof CharSequence text) {
-            return text.toString();
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static int requiredInt(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < Integer.MIN_VALUE
-                    || numericValue > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-            }
-            return number.intValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Integer.parseInt(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
-    }
 }

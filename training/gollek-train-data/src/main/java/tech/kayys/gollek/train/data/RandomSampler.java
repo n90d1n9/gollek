@@ -55,7 +55,7 @@ public final class RandomSampler implements IndexSampler {
 
     @Override
     public int sampleCount(int datasetSize) {
-        requireDatasetSize(datasetSize);
+        DataLoaderCounts.requireDatasetSize(datasetSize);
         int count = numSamples == null ? datasetSize : numSamples;
         if (!replacement && count > datasetSize) {
             throw new IllegalArgumentException(
@@ -75,11 +75,5 @@ public final class RandomSampler implements IndexSampler {
 
     public Integer numSamples() {
         return numSamples;
-    }
-
-    private static void requireDatasetSize(int datasetSize) {
-        if (datasetSize < 0) {
-            throw new IllegalArgumentException("datasetSize must be non-negative, got: " + datasetSize);
-        }
     }
 }

@@ -51,7 +51,13 @@ public class DirectForwardFfnService {
     public AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config, AccelTensor gateW,
             AccelTensor gateB, AccelTensor upW, AccelTensor upB, AccelTensor downW, AccelTensor downB,
             ForwardWorkspace ws, AccelTensor downOutputBuffer) {
-        return operators().swigluFfn(x, arch, config, gateW, gateB, upW, upB, downW, downB, ws, downOutputBuffer);
+        return swigluFfn(x, arch, config,
+                new DirectForwardGatedFfnWeights(gateW, gateB, upW, upB, downW, downB), ws, downOutputBuffer);
+    }
+
+    AccelTensor swigluFfn(AccelTensor x, ModelArchitecture arch, ModelConfig config,
+            DirectForwardGatedFfnWeights weights, ForwardWorkspace ws, AccelTensor downOutputBuffer) {
+        return operators().swigluFfn(x, arch, config, weights, ws, downOutputBuffer);
     }
 
     private DirectForwardOperators operators() {

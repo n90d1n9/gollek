@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-processor",
     "families": ["dinov2_with_registers", "dinov2-with-registers"]
   }
 }

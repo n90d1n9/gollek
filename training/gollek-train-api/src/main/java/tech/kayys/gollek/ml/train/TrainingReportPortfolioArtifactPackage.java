@@ -410,13 +410,12 @@ public final class TrainingReportPortfolioArtifactPackage {
                 throw new IOException("Cannot refresh portfolio package because non-refreshable artifact is missing: "
                         + artifact.name() + " (" + artifact.file() + ")");
             }
-            long actualBytes = Files.size(artifact.file());
-            if (actualBytes != artifact.bytes()) {
+            TrainingReportArtifactFingerprint fingerprint = TrainingReportArtifactFingerprint.of(artifact.file());
+            if (fingerprint.bytes() != artifact.bytes()) {
                 throw new IOException("Cannot refresh portfolio package because non-refreshable artifact byte size "
                         + "changed: " + artifact.name() + " (" + artifact.file() + ")");
             }
-            String actualSha256 = TrainerCheckpointIO.sha256Hex(artifact.file());
-            if (!artifact.sha256().equalsIgnoreCase(actualSha256)) {
+            if (!artifact.sha256().equalsIgnoreCase(fingerprint.sha256())) {
                 throw new IOException("Cannot refresh portfolio package because non-refreshable artifact SHA-256 "
                         + "changed: " + artifact.name() + " (" + artifact.file() + ")");
             }

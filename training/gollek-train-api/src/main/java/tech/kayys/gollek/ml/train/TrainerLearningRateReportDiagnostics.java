@@ -146,7 +146,7 @@ final class TrainerLearningRateReportDiagnostics {
         }
         Map<String, Object> copy = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet()) {
-            copy.put(String.valueOf(entry.getKey()), TrainerMetadataSupport.immutableSnapshot(entry.getValue()));
+            copy.put(String.valueOf(entry.getKey()), TrainingReportSnapshots.immutableSnapshot(entry.getValue()));
         }
         return Map.copyOf(copy);
     }

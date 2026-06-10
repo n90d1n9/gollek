@@ -61,6 +61,50 @@ class NotebookFileMagicOptionsTest {
     }
 
     @Test
+    void parseArchiveEntryOptionsReadsArchiveAndEntryPath() {
+        NotebookFileMagicOptions.ArchiveEntryOptions zip =
+                NotebookFileMagicOptions.parseArchiveEntryOptions("zipcat", "ZIP_PATH", "archive.zip nested/file.txt");
+        NotebookFileMagicOptions.ArchiveEntryOptions tar =
+                NotebookFileMagicOptions.parseArchiveEntryOptions("tarcat", "TAR_PATH", "archive.tar nested/file.txt");
+
+        assertEquals("archive.zip", zip.archivePath());
+        assertEquals("nested/file.txt", zip.entryPath());
+        assertEquals("archive.tar", tar.archivePath());
+        assertEquals("nested/file.txt", tar.entryPath());
+    }
+
+    @Test
+    void parseArchiveEntryOptionsPreservesMagicSpecificUsage() {
+        assertError("Usage: %zipcat <ZIP_PATH> <ENTRY_PATH>",
+                () -> NotebookFileMagicOptions.parseArchiveEntryOptions("zipcat", "ZIP_PATH", ""));
+        assertError("Usage: %zipcat <ZIP_PATH> <ENTRY_PATH>",
+                () -> NotebookFileMagicOptions.parseArchiveEntryOptions("zipcat", "ZIP_PATH", "archive.zip"));
+        assertError("Usage: %tarcat <TAR_PATH> <ENTRY_PATH>",
+                () -> NotebookFileMagicOptions.parseArchiveEntryOptions("tarcat", "TAR_PATH", "archive.tar "));
+    }
+
+    @Test
+    void parsePathPairOptionsReadsLeftAndRightPath() {
+        NotebookFileMagicOptions.PathPairOptions options =
+                NotebookFileMagicOptions.parsePathPairOptions(
+                        "diff",
+                        "LEFT_PATH",
+                        "RIGHT_PATH",
+                        "before.txt after.txt");
+
+        assertEquals("before.txt", options.leftPath());
+        assertEquals("after.txt", options.rightPath());
+    }
+
+    @Test
+    void parsePathPairOptionsPreservesUsageMessage() {
+        assertError("Usage: %diff <LEFT_PATH> <RIGHT_PATH>",
+                () -> NotebookFileMagicOptions.parsePathPairOptions("diff", "LEFT_PATH", "RIGHT_PATH", null));
+        assertError("Usage: %diff <LEFT_PATH> <RIGHT_PATH>",
+                () -> NotebookFileMagicOptions.parsePathPairOptions("diff", "LEFT_PATH", "RIGHT_PATH", "before.txt"));
+    }
+
+    @Test
     void parseExtractOptionsReadsRequiredAndOptionalPaths() {
         NotebookFileMagicOptions.ExtractOptions defaultOutput =
                 NotebookFileMagicOptions.parseExtractOptions("archive.zip nested/file.txt");

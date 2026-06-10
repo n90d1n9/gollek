@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gollek.ai/schemas/training/checkpoint-lineage-health-validation.v1.schema.json",
+  "title": "Gollek checkpoint lineage health validation report",
+  "description": "Stable valid/invalid report emitted when recursive-reasoning checkpoint lineage health payloads are validated.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "kind",
+    "schemaVersion",
+    "status",
+    "valid",
+    "code",
+    "message",
+    "schemaId",
+    "expectedKind",
+    "expectedSchemaVersion",
+    "payloadSummary",
+    "errors"
+  ],
+  "properties": {
+    "kind": {
+      "const": "checkpoint-lineage-health-validation"
+    },
+    "schemaVersion": {
+      "const": "gollek.checkpoint-lineage-health-validation.v1"
+    },
+    "status": {
+      "enum": [
+        "valid",
+        "invalid"
+      ]
+    },
+    "valid": {
+      "type": "boolean"
+    },
+    "code": {
+      "enum": [
+        "GOLLEK_LINEAGE_HEALTH_VALID",
+        "GOLLEK_LINEAGE_HEALTH_INVALID",
+        "GOLLEK_LINEAGE_HEALTH_JSON_INVALID",
+        "GOLLEK_LINEAGE_HEALTH_READ_ERROR"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schemaId": {
+      "const": "https://gollek.ai/schemas/training/checkpoint-lineage-health.v1.schema.json"
+    },
+    "expectedKind": {
+      "const": "checkpoint-lineage-health"
+    },
+    "expectedSchemaVersion": {
+      "const": "gollek.checkpoint-lineage-health.v1"
+    },
+    "payloadSummary": {
+      "$ref": "#/$defs/payloadSummary"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "valid": {
+            "const": true
+          }
+        },
+        "required": [
+          "valid"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "valid"
+          },
+          "code": {
+            "const": "GOLLEK_LINEAGE_HEALTH_VALID"
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "valid": {
+            "const": false
+          }
+        },
+        "required": [
+          "valid"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "invalid"
+          },
+          "code": {
+            "enum": [
+              "GOLLEK_LINEAGE_HEALTH_INVALID",
+              "GOLLEK_LINEAGE_HEALTH_JSON_INVALID",
+              "GOLLEK_LINEAGE_HEALTH_READ_ERROR"
+            ]
+          },
+          "errors": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "payloadSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "healthScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "issueCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "issueDetailCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "blockingIssueCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "failingCheckCount": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "primaryIssueCode": {
+          "type": "string"
+        },
+        "primaryIssueType": {
+          "type": "string"
+        },
+        "primaryFailingCheckCode": {
+          "type": "string"
+        },
+        "primaryFailingCheckType": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

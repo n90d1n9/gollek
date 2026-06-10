@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelFamilyContractValidatorTest {
@@ -89,6 +90,114 @@ class ModelFamilyContractValidatorTest {
         Set<String> codes = codes(ModelFamilyContractValidator.validate(plugin));
 
         assertTrue(codes.contains("architecture_adapter_unclaimed"));
+    }
+
+    @Test
+    void pendingTokenizerMetadataAllowsDocumentedDescriptorlessTokenizer() {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "pending_tokenizer",
+                        "Pending Tokenizer",
+                        List.of("pending_tokenizer"),
+                        List.of(),
+                        List.of(ModelFamilyCapability.CAUSAL_LM, ModelFamilyCapability.TOKENIZER),
+                        Map.of(
+                                "bundle_profile", "experimental",
+                                "origin", "3rdparty/transformers/src/transformers/models/pending_tokenizer",
+                                "tokenizer_metadata_status", "pending",
+                                "tokenizer_metadata_pending_reason",
+                                "tokenizer descriptor pending upstream tokenizer fixture"));
+            }
+        };
+
+        Set<String> codes = codes(ModelFamilyContractValidator.validate(plugin));
+
+        assertFalse(codes.contains("tokenizer_capability_without_descriptor"));
+        assertFalse(codes.contains("tokenizer_metadata_pending_reason_missing"));
+    }
+
+    @Test
+    void tokenizerMetadataChecklistReportsDrift() {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "ready_tokenizer_without_descriptor",
+                        "Ready Tokenizer Without Descriptor",
+                        List.of("ready_tokenizer_without_descriptor"),
+                        List.of(),
+                        List.of(ModelFamilyCapability.CAUSAL_LM, ModelFamilyCapability.TOKENIZER),
+                        Map.of(
+                                "bundle_profile", "optional",
+                                "origin", "3rdparty/transformers/src/transformers/models/ready_tokenizer",
+                                "tokenizer_metadata_status", "ready",
+                                "tokenizer_metadata_pending_reason", "stale pending reason"));
+            }
+        };
+
+        Set<String> codes = codes(ModelFamilyContractValidator.validate(plugin));
+
+        assertTrue(codes.contains("tokenizer_metadata_ready_without_descriptor"));
+        assertTrue(codes.contains("tokenizer_metadata_pending_reason_without_pending_status"));
+    }
+
+    @Test
+    void unifiedRuntimeRequirementsMustBeDiscoverableAndClaimed() {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "runtime_requirement_drift",
+                        "Runtime Requirement Drift",
+                        List.of("claimed_runtime_type"),
+                        List.of(),
+                        List.of(ModelFamilyCapability.MULTIMODAL, ModelFamilyCapability.VISION),
+                        Map.of(
+                                "bundle_profile", "optional",
+                                "origin", "3rdparty/transformers/src/transformers/models/runtime_requirement"));
+            }
+
+            @Override
+            public List<ModelFamilyUnifiedRuntimeRequirement> unifiedRuntimeRequirements() {
+                return List.of(new ModelFamilyUnifiedRuntimeRequirement(
+                        "unclaimed_runtime_type",
+                        List.of(),
+                        true,
+                        "requires a detached runtime",
+                        Map.of()));
+            }
+        };
+
+        Set<String> codes = codes(ModelFamilyContractValidator.validate(plugin));
+
+        assertTrue(codes.contains("unified_runtime_requirement_missing_metadata"));
+        assertTrue(codes.contains("unified_runtime_requirement_unclaimed_model_type"));
+        assertTrue(codes.contains("unified_runtime_requirement_missing_modalities"));
+    }
+
+    @Test
+    void originMetadataReportsUnsafePathShapes() {
+        ModelFamilyPlugin plugin = new ModelFamilyPlugin() {
+            @Override
+            public ModelFamilyDescriptor descriptor() {
+                return new ModelFamilyDescriptor(
+                        "bad_origin_shape",
+                        "Bad Origin Shape",
+                        List.of("bad_origin_shape"),
+                        List.of(),
+                        List.of(ModelFamilyCapability.CAUSAL_LM),
+                        Map.of(
+                                "bundle_profile", "optional",
+                                "origin", "tmp/models/bad origin"));
+            }
+        };
+
+        Set<String> codes = codes(ModelFamilyContractValidator.validate(plugin));
+
+        assertTrue(codes.contains("origin_contains_whitespace"));
+        assertTrue(codes.contains("unexpected_origin_path"));
     }
 
     @Test
@@ -196,6 +305,7 @@ class ModelFamilyContractValidatorTest {
 
         assertTrue(entry.causalLm());
         assertTrue(entry.tokenizer());
+        assertTrue(!entry.moe());
         assertTrue(entry.architectureAdapterPresent());
         assertTrue(entry.directSafetensorReady());
         assertTrue(entry.compactSummary().contains("matrix_family[optional]"));

@@ -55,6 +55,8 @@ Intended near-term scope:
     directory snapshots, checkpoint inventory scans, reusable checkpoint
     selection policies for latest-ready versus latest-resume-ready restores,
     checkpoint inspection reports for JBang, dashboards, and CI restore gates,
+    per-gate stable action codes/hints plus prioritized next-action plans and
+    one-object action-plan handoffs for automation-safe resume repair,
     one-object trainer provenance specs, and report-friendly metadata export
   - backend-neutral padded token dataset batcher with input/target masks,
     sequence lengths, known-solution counts, and per-example metadata

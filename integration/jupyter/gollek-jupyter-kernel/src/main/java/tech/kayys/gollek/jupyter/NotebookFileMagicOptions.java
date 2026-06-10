@@ -2,6 +2,9 @@ package tech.kayys.gollek.jupyter;
 
 import java.util.List;
 
+/**
+ * Parses filesystem and archive magic arguments into small validated option records.
+ */
 final class NotebookFileMagicOptions {
 
     private NotebookFileMagicOptions() {
@@ -10,6 +13,10 @@ final class NotebookFileMagicOptions {
     record LinePreviewOptions(int lines, String path) {}
 
     record SearchOptions(String pattern, String path) {}
+
+    record ArchiveEntryOptions(String archivePath, String entryPath) {}
+
+    record PathPairOptions(String leftPath, String rightPath) {}
 
     record ExtractOptions(boolean dryRun, String archivePath, String entryPath, String outputPath) {}
 
@@ -65,6 +72,42 @@ final class NotebookFileMagicOptions {
             throw new IllegalArgumentException(usage);
         }
         return new SearchOptions(pattern, pathPart);
+    }
+
+    static ArchiveEntryOptions parseArchiveEntryOptions(String magicName, String archiveLabel, String raw) {
+        String usage = "Usage: %" + magicName + " <" + archiveLabel + "> <ENTRY_PATH>";
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.isBlank()) {
+            throw new IllegalArgumentException(usage);
+        }
+        int split = trimmed.indexOf(' ');
+        if (split <= 0) {
+            throw new IllegalArgumentException(usage);
+        }
+        String archivePath = trimmed.substring(0, split).trim();
+        String entryPath = trimmed.substring(split + 1).trim();
+        if (archivePath.isBlank() || entryPath.isBlank()) {
+            throw new IllegalArgumentException(usage);
+        }
+        return new ArchiveEntryOptions(archivePath, entryPath);
+    }
+
+    static PathPairOptions parsePathPairOptions(String magicName, String leftLabel, String rightLabel, String raw) {
+        String usage = "Usage: %" + magicName + " <" + leftLabel + "> <" + rightLabel + ">";
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.isBlank()) {
+            throw new IllegalArgumentException(usage);
+        }
+        int split = trimmed.indexOf(' ');
+        if (split <= 0) {
+            throw new IllegalArgumentException(usage);
+        }
+        String leftPath = trimmed.substring(0, split).trim();
+        String rightPath = trimmed.substring(split + 1).trim();
+        if (leftPath.isBlank() || rightPath.isBlank()) {
+            throw new IllegalArgumentException(usage);
+        }
+        return new PathPairOptions(leftPath, rightPath);
     }
 
     static ExtractOptions parseExtractOptions(String raw) {

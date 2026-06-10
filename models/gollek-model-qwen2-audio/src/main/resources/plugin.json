@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["hf-bpe", "audio-processor"],
     "families": ["qwen2_audio", "qwen2_audio_encoder"]
   }
 }

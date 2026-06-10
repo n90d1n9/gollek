@@ -98,6 +98,8 @@ final class TrainerDataLoaderPlanHealthRules {
                     "set an explicit loader seed when reproducible training runs are required",
                     evidence(prefix, metadata)));
         }
+
+        TrainerDataLoaderPrefetchHealthRules.addIssues(metadata, issues, prefix, phase, batchCount);
     }
 
     private static TrainerHealthIssue issue(

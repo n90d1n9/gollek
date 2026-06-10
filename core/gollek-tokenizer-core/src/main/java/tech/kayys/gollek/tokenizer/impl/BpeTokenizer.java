@@ -301,11 +301,22 @@ public final class BpeTokenizer implements Tokenizer {
 
     @Override
     public String decode(long[] tokens, DecodeOptions options) {
-        if (tokens == null || tokens.length == 0) return "";
+        return decode(tokens, 0, tokens == null ? 0 : tokens.length, options);
+    }
+
+    @Override
+    public String decode(long[] tokens, int offset, int length, DecodeOptions options) {
+        if (tokens == null || length == 0) return "";
+        if (offset < 0 || length < 0 || offset > tokens.length || length > tokens.length - offset) {
+            throw new IndexOutOfBoundsException("Token decode range offset=" + offset
+                    + " length=" + length + " is outside token count " + tokens.length);
+        }
         
         // Accumulate all bytes first to correctly handle multi-token UTF-8 characters
         java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-        for (long id : tokens) {
+        int end = offset + length;
+        for (int i = offset; i < end; i++) {
+            long id = tokens[i];
             String tok = idToToken.get((int) id);
             if (tok != null) {
                 decodeToStream(tok, baos);

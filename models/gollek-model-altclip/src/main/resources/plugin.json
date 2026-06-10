@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "sentencepiece",
     "families": ["altclip", "altclip_text_model", "altclip_vision_model"]
   }
 }

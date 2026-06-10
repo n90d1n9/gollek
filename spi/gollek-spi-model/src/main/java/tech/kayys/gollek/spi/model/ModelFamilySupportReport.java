@@ -44,9 +44,13 @@ public record ModelFamilySupportReport(
     }
 
     public static ModelFamilySupportReport from(ModelFamilyPlugin plugin) {
-        ModelFamilyDescriptor descriptor = plugin.descriptor();
-        List<ModelArchitecture> adapters = safeAdapters(plugin);
-        List<ModelTokenizerDescriptor> tokenizers = safeTokenizers(plugin);
+        return from((ModelFamilyRuntimeAdapter) plugin);
+    }
+
+    public static ModelFamilySupportReport from(ModelFamilyRuntimeAdapter adapter) {
+        ModelFamilyDescriptor descriptor = adapter.descriptor();
+        List<ModelArchitecture> adapters = safeAdapters(adapter);
+        List<ModelTokenizerDescriptor> tokenizers = safeTokenizers(adapter);
         List<String> adapterIds = adapters.stream()
                 .map(ModelFamilySupportReport::safeAdapterId)
                 .filter(id -> !id.isBlank())
@@ -176,20 +180,20 @@ public record ModelFamilySupportReport(
         return Collections.unmodifiableMap(new LinkedHashMap<>(new TreeMap<>(values)));
     }
 
-    private static List<ModelArchitecture> safeAdapters(ModelFamilyPlugin plugin) {
+    private static List<ModelArchitecture> safeAdapters(ModelFamilyRuntimeAdapter adapter) {
         try {
-            List<ModelArchitecture> adapters = plugin.architectureAdapters();
+            List<ModelArchitecture> adapters = adapter.architectureAdapters();
             return adapters == null ? List.of() : adapters.stream()
-                    .filter(adapter -> adapter != null)
+                    .filter(candidate -> candidate != null)
                     .toList();
         } catch (RuntimeException error) {
             return List.of();
         }
     }
 
-    private static List<ModelTokenizerDescriptor> safeTokenizers(ModelFamilyPlugin plugin) {
+    private static List<ModelTokenizerDescriptor> safeTokenizers(ModelFamilyRuntimeAdapter adapter) {
         try {
-            List<ModelTokenizerDescriptor> tokenizers = plugin.tokenizerDescriptors();
+            List<ModelTokenizerDescriptor> tokenizers = adapter.tokenizerDescriptors();
             return tokenizers == null ? List.of() : tokenizers.stream()
                     .filter(tokenizer -> tokenizer != null)
                     .toList();

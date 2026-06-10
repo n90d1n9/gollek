@@ -19,6 +19,13 @@ Options:
   --contracts PATH       Gate contracts TSV
   --noise PATH           Noise summary TSV
   --bundle PATH          Artifact bundle TSV
+  --diagnosis PATH       Single workflow diagnosis TSV
+  --current-diagnosis PATH
+                         Current run diagnosis TSV
+  --baseline-diagnosis PATH
+                         Baseline diagnosis TSV
+  --diagnosis-diff-summary PATH
+                         Diagnosis comparison summary TSV
   --help                 Show this help
 USAGE
 }
@@ -32,6 +39,10 @@ METRIC_SUMMARY=""
 CONTRACTS=""
 NOISE=""
 BUNDLE=""
+DIAGNOSIS=""
+CURRENT_DIAGNOSIS=""
+BASELINE_DIAGNOSIS=""
+DIAGNOSIS_DIFF_SUMMARY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +64,14 @@ while [[ $# -gt 0 ]]; do
     --noise=*) NOISE="${1#*=}"; shift ;;
     --bundle) BUNDLE="$2"; shift 2 ;;
     --bundle=*) BUNDLE="${1#*=}"; shift ;;
+    --diagnosis) DIAGNOSIS="$2"; shift 2 ;;
+    --diagnosis=*) DIAGNOSIS="${1#*=}"; shift ;;
+    --current-diagnosis) CURRENT_DIAGNOSIS="$2"; shift 2 ;;
+    --current-diagnosis=*) CURRENT_DIAGNOSIS="${1#*=}"; shift ;;
+    --baseline-diagnosis) BASELINE_DIAGNOSIS="$2"; shift 2 ;;
+    --baseline-diagnosis=*) BASELINE_DIAGNOSIS="${1#*=}"; shift ;;
+    --diagnosis-diff-summary) DIAGNOSIS_DIFF_SUMMARY="$2"; shift 2 ;;
+    --diagnosis-diff-summary=*) DIAGNOSIS_DIFF_SUMMARY="${1#*=}"; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 2 ;;
   esac
@@ -100,6 +119,29 @@ config_value() {
   ' "$CONFIG"
 }
 
+key_value_from_file() {
+  local file="$1"
+  local key="$2"
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    return 1
+  fi
+  awk -v key="$key" '
+    BEGIN { FS = "\t" }
+    NR > 1 && $1 == key {
+      value = $0
+      sub(/^[^\t]*\t/, "", value)
+      print value
+      found = 1
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+diagnosis_value() {
+  key_value_from_file "$1" "$2" 2>/dev/null || true
+}
+
 result_field() {
   local stage="$1"
   local field="$2"
@@ -139,6 +181,18 @@ if [[ -z "$CONTRACTS" ]]; then
 fi
 if [[ -z "$BUNDLE" ]]; then
   BUNDLE="$(config_value bundle 2>/dev/null || true)"
+fi
+if [[ -z "$DIAGNOSIS" ]]; then
+  DIAGNOSIS="$(config_value diagnosis 2>/dev/null || true)"
+fi
+if [[ -z "$CURRENT_DIAGNOSIS" ]]; then
+  CURRENT_DIAGNOSIS="$(config_value currentDiagnosis 2>/dev/null || true)"
+fi
+if [[ -z "$BASELINE_DIAGNOSIS" ]]; then
+  BASELINE_DIAGNOSIS="$(config_value baselineDiagnosis 2>/dev/null || true)"
+fi
+if [[ -z "$DIAGNOSIS_DIFF_SUMMARY" ]]; then
+  DIAGNOSIS_DIFF_SUMMARY="$(config_value diagnosisDiffSummary 2>/dev/null || true)"
 fi
 
 parent="${OUT%/*}"
@@ -389,6 +443,54 @@ else
 fi)"
 IFS="$DECISION_FIELD_SEP" read -r BUNDLE_ARTIFACTS BUNDLE_PRESENT BUNDLE_MISSING BUNDLE_BLANK BUNDLE_REQUIRED_MISSING FIRST_BUNDLE_MISSING_KIND FIRST_BUNDLE_MISSING_PATH <<< "$BUNDLE_SUMMARY"
 
+PRIMARY_DIAGNOSIS="$DIAGNOSIS"
+if [[ -z "$PRIMARY_DIAGNOSIS" && -n "$CURRENT_DIAGNOSIS" ]]; then
+  PRIMARY_DIAGNOSIS="$CURRENT_DIAGNOSIS"
+fi
+PRIMARY_STAGE="$(diagnosis_value "$PRIMARY_DIAGNOSIS" primaryStage)"
+PRIMARY_METRIC="$(diagnosis_value "$PRIMARY_DIAGNOSIS" primaryMetric)"
+PRIMARY_VALUE_MS="$(diagnosis_value "$PRIMARY_DIAGNOSIS" primaryValueMs)"
+PRIMARY_SHARE_OF_ORT_PERCENT="$(diagnosis_value "$PRIMARY_DIAGNOSIS" primaryShareOfOrtPercent)"
+PRIMARY_SHARE_OF_DURATION_PERCENT="$(diagnosis_value "$PRIMARY_DIAGNOSIS" primaryShareOfDurationPercent)"
+PRIMARY_RECOMMENDATION="$(diagnosis_value "$PRIMARY_DIAGNOSIS" recommendation)"
+
+CURRENT_PRIMARY_STAGE="$(diagnosis_value "$CURRENT_DIAGNOSIS" primaryStage)"
+CURRENT_PRIMARY_METRIC="$(diagnosis_value "$CURRENT_DIAGNOSIS" primaryMetric)"
+CURRENT_PRIMARY_VALUE_MS="$(diagnosis_value "$CURRENT_DIAGNOSIS" primaryValueMs)"
+CURRENT_PRIMARY_SHARE_OF_ORT_PERCENT="$(diagnosis_value "$CURRENT_DIAGNOSIS" primaryShareOfOrtPercent)"
+CURRENT_PRIMARY_SHARE_OF_DURATION_PERCENT="$(diagnosis_value "$CURRENT_DIAGNOSIS" primaryShareOfDurationPercent)"
+CURRENT_RECOMMENDATION="$(diagnosis_value "$CURRENT_DIAGNOSIS" recommendation)"
+
+BASELINE_PRIMARY_STAGE="$(diagnosis_value "$BASELINE_DIAGNOSIS" primaryStage)"
+BASELINE_PRIMARY_METRIC="$(diagnosis_value "$BASELINE_DIAGNOSIS" primaryMetric)"
+BASELINE_PRIMARY_VALUE_MS="$(diagnosis_value "$BASELINE_DIAGNOSIS" primaryValueMs)"
+BASELINE_PRIMARY_SHARE_OF_ORT_PERCENT="$(diagnosis_value "$BASELINE_DIAGNOSIS" primaryShareOfOrtPercent)"
+BASELINE_PRIMARY_SHARE_OF_DURATION_PERCENT="$(diagnosis_value "$BASELINE_DIAGNOSIS" primaryShareOfDurationPercent)"
+BASELINE_RECOMMENDATION="$(diagnosis_value "$BASELINE_DIAGNOSIS" recommendation)"
+
+DIAGNOSIS_STAGE_CHANGED=""
+if [[ -n "$CURRENT_PRIMARY_STAGE" && -n "$BASELINE_PRIMARY_STAGE" ]]; then
+  if [[ "$CURRENT_PRIMARY_STAGE" == "$BASELINE_PRIMARY_STAGE" ]]; then
+    DIAGNOSIS_STAGE_CHANGED="false"
+  else
+    DIAGNOSIS_STAGE_CHANGED="true"
+  fi
+fi
+DIAGNOSIS_DIFF_COMPARED_STAGES="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" comparedStages)"
+DIAGNOSIS_DIFF_FASTER_STAGES="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" fasterStages)"
+DIAGNOSIS_DIFF_SLOWER_STAGES="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" slowerStages)"
+DIAGNOSIS_DIFF_SAME_STAGES="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" sameStages)"
+DIAGNOSIS_DIFF_SKIPPED_STAGES="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" skippedStages)"
+DIAGNOSIS_DIFF_PRIMARY_CHANGED="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" primaryStageChanged)"
+DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_STAGE="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSlowdownStage)"
+DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_METRIC="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSlowdownMetric)"
+DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_MS="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSlowdownMs)"
+DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_PERCENT="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSlowdownPercent)"
+DIAGNOSIS_DIFF_LARGEST_SPEEDUP_STAGE="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSpeedupStage)"
+DIAGNOSIS_DIFF_LARGEST_SPEEDUP_METRIC="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSpeedupMetric)"
+DIAGNOSIS_DIFF_LARGEST_SPEEDUP_MS="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSpeedupMs)"
+DIAGNOSIS_DIFF_LARGEST_SPEEDUP_PERCENT="$(diagnosis_value "$DIAGNOSIS_DIFF_SUMMARY" largestSpeedupPercent)"
+
 write_row() {
   printf '%s\t%s\n' "$(safe_tsv_field "$1")" "$(safe_tsv_field "${2:-}")"
 }
@@ -403,6 +505,39 @@ write_row() {
   write_row failureStage "$FAILURE_STAGE"
   write_row failureExitCode "$FAILURE_EXIT_CODE"
   write_row failureReason "$FAILURE_REASON"
+  write_row primaryStage "$PRIMARY_STAGE"
+  write_row primaryMetric "$PRIMARY_METRIC"
+  write_row primaryValueMs "$PRIMARY_VALUE_MS"
+  write_row primaryShareOfOrtPercent "$PRIMARY_SHARE_OF_ORT_PERCENT"
+  write_row primaryShareOfDurationPercent "$PRIMARY_SHARE_OF_DURATION_PERCENT"
+  write_row recommendation "$PRIMARY_RECOMMENDATION"
+  write_row currentPrimaryStage "$CURRENT_PRIMARY_STAGE"
+  write_row currentPrimaryMetric "$CURRENT_PRIMARY_METRIC"
+  write_row currentPrimaryValueMs "$CURRENT_PRIMARY_VALUE_MS"
+  write_row currentPrimaryShareOfOrtPercent "$CURRENT_PRIMARY_SHARE_OF_ORT_PERCENT"
+  write_row currentPrimaryShareOfDurationPercent "$CURRENT_PRIMARY_SHARE_OF_DURATION_PERCENT"
+  write_row currentRecommendation "$CURRENT_RECOMMENDATION"
+  write_row baselinePrimaryStage "$BASELINE_PRIMARY_STAGE"
+  write_row baselinePrimaryMetric "$BASELINE_PRIMARY_METRIC"
+  write_row baselinePrimaryValueMs "$BASELINE_PRIMARY_VALUE_MS"
+  write_row baselinePrimaryShareOfOrtPercent "$BASELINE_PRIMARY_SHARE_OF_ORT_PERCENT"
+  write_row baselinePrimaryShareOfDurationPercent "$BASELINE_PRIMARY_SHARE_OF_DURATION_PERCENT"
+  write_row baselineRecommendation "$BASELINE_RECOMMENDATION"
+  write_row diagnosisStageChanged "$DIAGNOSIS_STAGE_CHANGED"
+  write_row diagnosisDiffComparedStages "$DIAGNOSIS_DIFF_COMPARED_STAGES"
+  write_row diagnosisDiffFasterStages "$DIAGNOSIS_DIFF_FASTER_STAGES"
+  write_row diagnosisDiffSlowerStages "$DIAGNOSIS_DIFF_SLOWER_STAGES"
+  write_row diagnosisDiffSameStages "$DIAGNOSIS_DIFF_SAME_STAGES"
+  write_row diagnosisDiffSkippedStages "$DIAGNOSIS_DIFF_SKIPPED_STAGES"
+  write_row diagnosisDiffPrimaryStageChanged "$DIAGNOSIS_DIFF_PRIMARY_CHANGED"
+  write_row diagnosisDiffLargestSlowdownStage "$DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_STAGE"
+  write_row diagnosisDiffLargestSlowdownMetric "$DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_METRIC"
+  write_row diagnosisDiffLargestSlowdownMs "$DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_MS"
+  write_row diagnosisDiffLargestSlowdownPercent "$DIAGNOSIS_DIFF_LARGEST_SLOWDOWN_PERCENT"
+  write_row diagnosisDiffLargestSpeedupStage "$DIAGNOSIS_DIFF_LARGEST_SPEEDUP_STAGE"
+  write_row diagnosisDiffLargestSpeedupMetric "$DIAGNOSIS_DIFF_LARGEST_SPEEDUP_METRIC"
+  write_row diagnosisDiffLargestSpeedupMs "$DIAGNOSIS_DIFF_LARGEST_SPEEDUP_MS"
+  write_row diagnosisDiffLargestSpeedupPercent "$DIAGNOSIS_DIFF_LARGEST_SPEEDUP_PERCENT"
   write_row regressionFailures "$REGRESSION_FAILURES"
   write_row regressionSkips "$REGRESSION_SKIPS"
   write_row regressionCompared "$REGRESSION_COMPARED"
@@ -439,6 +574,10 @@ write_row() {
   write_row config "$CONFIG"
   write_row results "$RESULTS"
   write_row bundle "$BUNDLE"
+  write_row diagnosis "$PRIMARY_DIAGNOSIS"
+  write_row currentDiagnosis "$CURRENT_DIAGNOSIS"
+  write_row baselineDiagnosis "$BASELINE_DIAGNOSIS"
+  write_row diagnosisDiffSummary "$DIAGNOSIS_DIFF_SUMMARY"
   write_row comparison "$COMPARISON"
   write_row metricSummary "$METRIC_SUMMARY"
   write_row contracts "$CONTRACTS"

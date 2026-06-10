@@ -116,15 +116,6 @@ public class Qwen3Family implements ModelArchitecture {
 
         @Override
         public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
-            return new ModelRuntimeTraits(
-                    false,
-                    false,
-                    true,
-                    false,
-                    ModelRuntimeTraits.PromptBosPolicy.DEFAULT,
-                    java.util.Set.of(),
-                    false,
-                    false,
-                    ModelRuntimeTraits.AttentionRuntimeTraits.qwenText(config));
+            return QwenRuntimeProfile.text(config);
         }
     }

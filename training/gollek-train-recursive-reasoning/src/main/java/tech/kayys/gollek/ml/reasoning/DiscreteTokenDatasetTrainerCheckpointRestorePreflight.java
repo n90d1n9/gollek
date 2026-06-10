@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Current-plan resume preflight for a selected recursive-reasoning restore target.
@@ -61,8 +62,91 @@ public record DiscreteTokenDatasetTrainerCheckpointRestorePreflight(
         return resumeReport.explanation();
     }
 
+    public List<DiscreteTokenDatasetCheckpointResumeGate> gates() {
+        return resumeReport.gates();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeGateSummary gateSummary() {
+        return resumeReport.gateSummary();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeActionPlan actionPlan() {
+        return resumeReport.actionPlan();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeReadinessBadge readinessBadge() {
+        return resumeReport.readinessBadge();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> nextActions() {
+        return resumeReport.nextActions();
+    }
+
+    public Optional<DiscreteTokenDatasetCheckpointResumeAction> primaryAction() {
+        return resumeReport.primaryAction();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> requiredActions() {
+        return resumeReport.requiredActions();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> warningActions() {
+        return resumeReport.warningActions();
+    }
+
+    public List<String> actionCodes() {
+        return resumeReport.actionCodes();
+    }
+
+    public List<String> requiredActionCodes() {
+        return resumeReport.requiredActionCodes();
+    }
+
+    public List<String> warningActionCodes() {
+        return resumeReport.warningActionCodes();
+    }
+
     public DiscreteTokenDatasetTrainerCheckpointRestorePreflight requireReady() {
         resumeReport.requireReady();
+        return this;
+    }
+
+    public DiscreteTokenDatasetTrainerCheckpointRestorePreflight requireAllGatesAccepted() {
+        resumeReport.requireAllGatesAccepted();
+        return this;
+    }
+
+    public DiscreteTokenDatasetTrainerCheckpointRestorePreflight requireNoRequiredActions() {
+        resumeReport.requireNoRequiredActions();
+        return this;
+    }
+
+    public DiscreteTokenDatasetTrainerCheckpointRestorePreflight requireMetadataMatch(Map<?, ?> metadata) {
+        Objects.requireNonNull(metadata, "metadata must not be null");
+        Map<?, ?> currentResumeReport =
+                DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "currentResumeReport");
+        DiscreteTokenDatasetCheckpointResumeExplanation.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "explanation"));
+        DiscreteTokenDatasetCheckpointResumeGateSummary.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(currentResumeReport, "gateSummary"),
+                resumeReport.gates());
+        DiscreteTokenDatasetCheckpointResumeActionPlan.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "actionPlan"));
+        DiscreteTokenDatasetCheckpointResumeReadinessBadge.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "readinessBadge"));
+        DiscreteTokenDatasetCheckpointResumeActionPlan.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(currentResumeReport, "actionPlan"));
+        DiscreteTokenDatasetCheckpointResumeReadinessBadge.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(currentResumeReport, "readinessBadge"));
+
+        Map<String, Object> expected = toMetadata();
+        for (Map.Entry<String, Object> entry : expected.entrySet()) {
+            Object actual = DiscreteTokenDatasetMetadataSupport.required(metadata, entry.getKey());
+            if (!DiscreteTokenDatasetMetadataSupport.metadataValueMatches(entry.getValue(), actual)) {
+                throw new IllegalArgumentException(
+                        "restore preflight field '" + entry.getKey() + "' does not match resume report");
+            }
+        }
         return this;
     }
 
@@ -93,6 +177,12 @@ public record DiscreteTokenDatasetTrainerCheckpointRestorePreflight(
         metadata.put("compatibilityMode", resumeReport.compatibilityMode().id());
         metadata.put("forceAccepted", resumeReport.forceAccepted());
         metadata.put("compatibilityWarnings", resumeReport.compatibilityWarnings());
+        metadata.put("gateSummary", resumeReport.gateSummary().toMetadata());
+        metadata.put("actionPlan", resumeReport.actionPlan().toMetadata());
+        metadata.put("readinessBadge", resumeReport.readinessBadge().toMetadata());
+        metadata.put("gates", resumeReport.gates().stream()
+                .map(DiscreteTokenDatasetCheckpointResumeGate::toMetadata)
+                .toList());
         metadata.put("policyTracked", resumeReport.policyTracked());
         metadata.put("rejectionReasons", resumeReport.rejectionReasons());
         metadata.put("expectation", resumeReport.expectation().toMetadata());
@@ -129,6 +219,8 @@ public record DiscreteTokenDatasetTrainerCheckpointRestorePreflight(
         metadata.put("ready", ready());
         metadata.put("rejectionReasons", rejectionReasons());
         metadata.put("explanation", explanation().toMetadata());
+        metadata.put("actionPlan", actionPlan().toMetadata());
+        metadata.put("readinessBadge", readinessBadge().toMetadata());
         if (resumeReport.currentPlanReport() != null) {
             metadata.put("currentPlanReport", resumeReport.currentPlanReport().toMetadata());
         }

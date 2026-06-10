@@ -110,6 +110,16 @@ class DiscreteTokenDatasetTrainerCheckpointInspectionReportTest {
         assertTrue(graph.cycleRunIds().isEmpty());
         assertEquals("checkpoint-lineage-health", graph.healthMetadata().get("kind"));
         assertEquals("gollek.checkpoint-lineage-health.v1", graph.healthMetadata().get("schemaVersion"));
+        DiscreteTokenDatasetCheckpointLineageHealthSnapshot healthySnapshot = graph.healthSnapshot();
+        assertEquals(graph.healthMetadata(), healthySnapshot.toMetadata());
+        assertEquals("checkpoint-lineage-health", healthySnapshot.kind());
+        assertEquals("gollek.checkpoint-lineage-health.v1", healthySnapshot.schemaVersion());
+        assertTrue(healthySnapshot.isCurrentSchema());
+        healthySnapshot.requireCurrentSchema();
+        healthySnapshot.requireHealthy();
+        assertFalse(healthySnapshot.hasFailures());
+        assertTrue(healthySnapshot.primaryIssueCode().isEmpty());
+        assertTrue(healthySnapshot.primaryFailingCheckCode().isEmpty());
         assertEquals(0, graph.healthMetadata().get("issueCount"));
         assertEquals(0, graph.healthMetadata().get("issueDetailCount"));
         assertEquals(0, graph.healthMetadata().get("blockingIssueCount"));
@@ -191,6 +201,23 @@ class DiscreteTokenDatasetTrainerCheckpointInspectionReportTest {
         assertTrue(graph.primaryIssueAction().orElseThrow().contains("Restore the parent checkpoint"));
         assertEquals("checkpoint-lineage-health", graph.healthMetadata().get("kind"));
         assertEquals("gollek.checkpoint-lineage-health.v1", graph.healthMetadata().get("schemaVersion"));
+        DiscreteTokenDatasetCheckpointLineageHealthSnapshot unhealthySnapshot =
+                DiscreteTokenDatasetCheckpointLineageHealthSnapshot.fromMetadata(graph.healthMetadata());
+        assertEquals(graph.healthMetadata(), unhealthySnapshot.toMetadata());
+        assertTrue(unhealthySnapshot.isCurrentSchema());
+        unhealthySnapshot.requireCurrentSchema();
+        assertTrue(unhealthySnapshot.hasFailures());
+        assertEquals("unhealthy", unhealthySnapshot.status());
+        assertEquals(1, unhealthySnapshot.failingCheckCount());
+        assertEquals("GOLLEK_LINEAGE_MISSING_PARENT", unhealthySnapshot.primaryIssueCode().orElseThrow());
+        assertEquals("missing-parent", unhealthySnapshot.primaryIssueType().orElseThrow());
+        assertTrue(unhealthySnapshot.primaryIssueAction().orElseThrow().contains("Restore the parent checkpoint"));
+        assertEquals("parentExists", unhealthySnapshot.primaryFailingCheckName().orElseThrow());
+        assertEquals("missing-parent", unhealthySnapshot.primaryFailingCheckType().orElseThrow());
+        assertEquals("GOLLEK_LINEAGE_MISSING_PARENT", unhealthySnapshot.primaryFailingCheckCode().orElseThrow());
+        assertTrue(unhealthySnapshot.primaryFailingCheckAction().orElseThrow()
+                .contains("Restore the parent checkpoint"));
+        assertThrows(IllegalStateException.class, unhealthySnapshot::requireHealthy);
         assertEquals(5, graph.checks().size());
         assertEquals(4, graph.passingCheckCount());
         assertEquals(1, graph.failingCheckCount());

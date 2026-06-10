@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,6 +29,18 @@ class CohereModelFamilyPluginTest {
     }
 
     @Test
+    void cohere2FixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new CohereModelFamilyPlugin(),
+                fixture("cohere2"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "cohere2 fixture should match descriptor, tokenizer, and direct adapter claims");
+    }
+
+    @Test
     void publishesCohere2DirectArchitectureAdapterAndTokenizer() {
         CohereModelFamilyPlugin plugin = new CohereModelFamilyPlugin();
 
@@ -35,6 +50,7 @@ class CohereModelFamilyPluginTest {
         assertTrue(plugin.architectureAdapters().get(0) instanceof CohereR2Family);
         assertEquals(List.of("cohere", "cohere2"), plugin.descriptor().modelTypes());
         assertEquals(List.of("CohereForCausalLM", "Cohere2ForCausalLM"), plugin.descriptor().architectureClassNames());
+        assertEquals("cohere2_text_adapter_only", plugin.descriptor().metadata().get("direct_safetensor_scope"));
         assertEquals(List.of("cohere-hf-bpe"), plugin.tokenizerDescriptors().stream()
                 .map(ModelTokenizerDescriptor::id)
                 .toList());
@@ -59,5 +75,10 @@ class CohereModelFamilyPluginTest {
         assertEquals("model.layers.12.mlp.gate_proj.weight", architecture.layerFfnGateWeight(12));
         assertEquals("model.layers.12.mlp.up_proj.weight", architecture.layerFfnUpWeight(12));
         assertEquals("model.layers.12.mlp.down_proj.weight", architecture.layerFfnDownWeight(12));
+    }
+
+    private static Path fixture(String familyId) throws Exception {
+        return Path.of(Objects.requireNonNull(
+                CohereModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
     }
 }

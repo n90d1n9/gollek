@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-text-processor",
     "families": ["vision_text_dual_encoder", "vision-text-dual-encoder"]
   }
 }

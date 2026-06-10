@@ -75,8 +75,16 @@ final class AgentValidationMapper {
         normalized.put("trace_id", trace.asMap().get("trace_id"));
         normalized.put("model", request.model());
         normalized.put("input_count", request.inputs().size());
+        normalized.put("input_lengths", request.inputs().stream()
+                .map(input -> input != null ? input.length() : 0)
+                .toList());
+        if (request.parameters().containsKey("dimensions")) {
+            normalized.put("requested_dimensions", request.parameters().get("dimensions"));
+        }
+        normalized.put("encoding_format", request.parameters().getOrDefault("encoding_format", "float"));
         normalized.put("parameter_keys", sortedKeys(request.parameters()));
         normalized.put("metadata", request.parameters().getOrDefault("metadata", Map.of()));
+        normalized.put("rag", embeddingRagSummary());
         payload.put("normalized", normalized);
         return payload;
     }
@@ -152,6 +160,15 @@ final class AgentValidationMapper {
         if (alias != null) {
             summary.put("alias", alias);
         }
+        return summary;
+    }
+
+    private static Map<String, Object> embeddingRagSummary() {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("embedding_generation", true);
+        summary.put("retrieval_execution", false);
+        summary.put("retrieval_policy_owned_by", "agent_orchestrator");
+        summary.put("vector_store_owned_by", "agent_orchestrator");
         return summary;
     }
 

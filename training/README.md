@@ -226,12 +226,277 @@ gollek/
 ├── ml/gollek-ml-hub/           # ModelHub, HF/local repositories, SafeTensors
 ├── ml/gollek-ml-export/        # ONNX, GGUF, LiteRT exporters and benchmark
 ├── ml/gollek-ml-byte-latent/   # Planned byte-latent language-model family
-├── ml/gollek-ml-recursive-reasoning/ # Planned recursive reasoning family (GRAM-style)
+├── training/gollek-train-recursive-reasoning/ # Recursive reasoning family (GRAM-style), :ml:gollek-ml-recursive-reasoning
 ├── ml/gollek-ml-api/           # Gollek.java umbrella ML entry point
 ├── trainer/gollek-trainer-api/ # Canonical trainer session/config contracts
 ├── trainer/gollek-trainer/     # Trainer bridge/runtime facade
 └── examples/gollek-ml-examples/# Samples and migration-era examples
 ```
+
+## Verification
+
+Run the Gradle-wired training module checks from `gollek/`:
+
+```bash
+./gradlew --no-daemon checkTrainingModules
+```
+
+Run the full training gate for CI/release validation:
+
+```bash
+./gradlew --no-daemon verifyTrainingGates
+```
+
+Run the optional advisory metadata gate without executing advisory candidate
+tests:
+
+```bash
+./gradlew --no-daemon verifyTrainingAdvisoryGates
+```
+
+The advisory gate writes coverage first, then reuses that generated coverage
+artifact for candidate selection and candidate-lock drift checks.
+
+For a faster metadata-only CI preflight that avoids Gradle project
+configuration, run:
+
+```bash
+scripts/verify-training-advisory-gates-fast.py
+```
+
+The fast path derives the hard-check and advisory reports from
+`settings.gradle.kts`, checked-in training build files, and the training gate
+registry. It validates both `training-module-checks.lock.json` and
+`training-module-candidates.lock.json` drift without starting Gradle. It also
+writes `training-module-fast-gate-summary.json` for CI jobs that need one
+machine-readable pass/fail artifact.
+
+Validate the fast metadata gate contract itself:
+
+```bash
+scripts/test-training-fast-gate.sh
+```
+
+Compare the fast metadata reports against the Gradle-generated reports when
+the Gradle gate logic changes:
+
+```bash
+bash scripts/test-training-fast-gradle-parity.sh
+```
+
+Force a specific selected-candidate parity case:
+
+```bash
+bash scripts/test-training-fast-gradle-parity.sh --candidate audio,vision
+```
+
+Keep a parity artifact bundle with raw reports, normalized JSON, diff files,
+logs, `training-gradle-parity-summary.json`, and a human-readable `README.md`:
+
+```bash
+bash scripts/test-training-fast-gradle-parity.sh \
+  --candidate audio,vision \
+  --artifact-dir /tmp/gollek-training-gradle-parity
+```
+
+Without `--candidate`, the parity test uses
+`GOLLEK_TRAINING_PARITY_CANDIDATES` or picks the first available advisory
+candidates from the generated coverage report. Without `--artifact-dir`, it
+uses `GOLLEK_TRAINING_PARITY_ARTIFACT_DIR` when set.
+
+CI runs the same fast metadata gate through
+`.github/workflows/training-fast-gate.yml` for training registry, lock, and
+training project metadata changes.
+
+Gradle parity runs separately through
+`.github/workflows/training-gradle-parity.yml`. That workflow sets up JDK 25,
+generates the Gradle reports, generates the fast reports, and diffs the shared
+JSON contracts. It writes the parity receipt into the GitHub Actions step
+summary and uploads the parity artifact bundle even on failure. It is
+intentionally separate from the fast gate so the metadata preflight can remain
+cheap while Gradle alignment still has a repeatable CI entry point.
+
+Inspect the registered training checks:
+
+```bash
+./gradlew --no-daemon printTrainingModuleChecks
+```
+
+Validate the registry without running module tests:
+
+```bash
+./gradlew --no-daemon validateTrainingModuleChecks
+```
+
+Write a machine-readable registry report:
+
+```bash
+./gradlew --no-daemon writeTrainingModuleChecksReport
+```
+
+The report includes a stable SHA-256 `registryFingerprint` over the registered
+training check labels and task paths.
+
+Validate the generated report/schema contract:
+
+```bash
+./gradlew --no-daemon validateTrainingModuleChecksReportContract
+```
+
+Write advisory coverage for all Gradle-included projects under `gollek/training`:
+
+```bash
+./gradlew --no-daemon writeTrainingModuleCoverageReport
+```
+
+Inspect that coverage report from the terminal:
+
+```bash
+./gradlew --no-daemon printTrainingModuleCoverageJson
+```
+
+Print a concise coverage summary with suggested checks to promote:
+
+```bash
+./gradlew --no-daemon printTrainingModuleCoverageSummary
+```
+
+Run advisory tests for all candidate modules before promoting them into the
+hard gate:
+
+```bash
+./gradlew --no-daemon checkTrainingModuleCandidateTests
+```
+
+Run only selected advisory candidates by label:
+
+```bash
+./gradlew --no-daemon validateTrainingModuleCandidateSelection -PgollekTrainingCandidate=audio
+./gradlew --no-daemon printTrainingModuleCandidateSelectionJson -PgollekTrainingCandidate=audio
+./gradlew --no-daemon checkTrainingModuleCandidateTests -PgollekTrainingCandidate=audio
+./gradlew --no-daemon checkTrainingModuleCandidateTests -PgollekTrainingCandidate=audio,vision
+```
+
+Print copy-pasteable registry snippets for promotion:
+
+```bash
+./gradlew --no-daemon printTrainingModuleCandidatePromotionSnippets -PgollekTrainingCandidate=audio
+```
+
+Generate a guarded fast promotion plan without editing the registry:
+
+```bash
+scripts/verify-training-advisory-gates-fast.py \
+  --candidate audio \
+  --promote-selected \
+  --dry-run
+```
+
+Validate an existing promotion plan artifact without regenerating reports:
+
+```bash
+scripts/verify-training-advisory-gates-fast.py \
+  --validate-promotion-plan build/reports/gollek/training-module-promotion-plan.json \
+  --promotion-plan-validation-report-file build/reports/gollek/training-module-promotion-plan-validation.json
+```
+
+Apply an intentional selected-candidate promotion and refresh the checked-in
+hard/advisory locks:
+
+```bash
+scripts/verify-training-advisory-gates-fast.py \
+  --candidate audio \
+  --promote-selected
+```
+
+The fast promotion path requires concrete `--candidate` labels; empty,
+`all`, and `*` selections are rejected for promotion so broad advisory coverage
+cannot accidentally become a hard gate change. Dry-run promotion writes a
+`training-module-promotion-plan.json` artifact with the snippets, selected
+tasks, follow-up commands, and a stable SHA-256 `promotionFingerprint` over the
+selected candidates plus the logical registry/lock mutation targets. Apply mode
+snapshots the training registry and both metadata locks first, then rolls those
+files back if promotion validation or report writing fails.
+
+The coverage report shows which training projects have tests and which of those
+projects are currently registered in the hard training gate. It is advisory by
+default so experimental modules can remain visible without immediately breaking
+CI. The `candidateChecks` section lists ready-to-consider `TrainingModuleCheck`
+entries for tested projects that are not yet part of the hard gate. The
+candidate selection report also includes `nextCommands` with the selected
+`-PgollekTrainingCandidate=...` value preserved and a stable SHA-256
+`selectionFingerprint` over the selected candidate rows.
+
+Write or refresh the checked-in registry lock after an intentional gate change:
+
+```bash
+./gradlew --no-daemon writeTrainingModuleChecksLock
+```
+
+Validate the current registry against the checked-in lock:
+
+```bash
+./gradlew --no-daemon validateTrainingModuleChecksLock
+```
+
+Validate the generated lock drift report contract:
+
+```bash
+./gradlew --no-daemon validateTrainingModuleChecksLockDriftReportContract
+```
+
+Write or validate the optional advisory candidate lock:
+
+```bash
+./gradlew --no-daemon writeTrainingModuleCandidateLock
+./gradlew --no-daemon validateTrainingModuleCandidateLock
+./gradlew --no-daemon printTrainingModuleCandidateLockDriftJson
+```
+
+The report and schema are written to:
+
+- `gollek/build/reports/gollek/training-module-checks.json`
+- `gollek/build/reports/gollek/training-module-checks.v2.schema.json`
+- `gollek/build/reports/gollek/training-module-checks-lock-drift.json`
+- `gollek/build/reports/gollek/training-module-coverage.json`
+- `gollek/build/reports/gollek/training-module-candidate-selection.json`
+- `gollek/build/reports/gollek/training-module-candidates-lock-drift.json`
+- `gollek/build/reports/gollek/training-module-fast-gate-summary.json`
+
+The checked-in lock lives at
+`gollek/gradle/training-module-checks.lock.json`.
+The optional advisory candidate lock lives at
+`gollek/gradle/training-module-candidates.lock.json`.
+
+The training gate build logic lives in
+`gollek/buildSrc/src/main/kotlin/gollek.training-gates.gradle.kts`.
+The compatibility entry point remains
+`gollek/gradle/training-module-checks.gradle.kts`.
+
+For the recursive reasoning family only:
+
+```bash
+./gradlew --no-daemon checkRecursiveReasoningTraining
+```
+
+## Adding a Gradle-Wired Training Module
+
+1. Include the module in `gollek/settings.gradle.kts` with the intended
+   project path.
+2. Run `./gradlew --no-daemon printTrainingModuleCoverageSummary` to confirm
+   the module appears in training coverage and review suggested gate entries.
+3. Generate a dry-run promotion plan:
+   `scripts/verify-training-advisory-gates-fast.py --candidate <label> --promote-selected --dry-run`.
+4. Validate the focused advisory selection:
+   `./gradlew --no-daemon validateTrainingModuleCandidateSelection -PgollekTrainingCandidate=<label>`.
+5. Write or inspect the candidate selection report:
+   `./gradlew --no-daemon printTrainingModuleCandidateSelectionJson -PgollekTrainingCandidate=<label>`.
+6. Run a focused advisory readiness pass before promotion:
+   `./gradlew --no-daemon checkTrainingModuleCandidateTests -PgollekTrainingCandidate=<label>`.
+7. Apply the selected promotion and refresh both training metadata locks:
+   `scripts/verify-training-advisory-gates-fast.py --candidate <label> --promote-selected`.
+8. Run `./gradlew --no-daemon verifyTrainingGates` before handing the change
+   to CI.
 
 Fast Byte Latent Transformer style work belongs in a new byte-latent language
 modeling family, not in the diffusion OPD stack. See

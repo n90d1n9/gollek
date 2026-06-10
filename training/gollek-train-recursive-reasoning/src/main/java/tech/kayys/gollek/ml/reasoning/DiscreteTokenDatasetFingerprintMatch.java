@@ -48,8 +48,10 @@ public record DiscreteTokenDatasetFingerprintMatch(
     public static DiscreteTokenDatasetFingerprintMatch fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         DiscreteTokenDatasetFingerprintMatch match = verify(
-                DiscreteTokenDatasetFingerprint.fromMetadata(requiredMap(metadata, "expected")),
-                DiscreteTokenDatasetFingerprint.fromMetadata(requiredMap(metadata, "actual")));
+                DiscreteTokenDatasetFingerprint.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "expected")),
+                DiscreteTokenDatasetFingerprint.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "actual")));
         verifyOptionalStatus(metadata, match);
         return match;
     }
@@ -141,14 +143,6 @@ public record DiscreteTokenDatasetFingerprintMatch(
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     }
 
-    private static Map<?, ?> requiredMap(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Map<?, ?> map) {
-            return map;
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
     private static void verifyOptionalStatus(Map<?, ?> metadata, DiscreteTokenDatasetFingerprintMatch match) {
         if (metadata.containsKey("status") && metadata.get("status") != null) {
             Object value = metadata.get("status");
@@ -164,10 +158,4 @@ public record DiscreteTokenDatasetFingerprintMatch(
         }
     }
 
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
-    }
 }

@@ -27,6 +27,9 @@ public final class TrainingReportDataHealthMarkdown {
         appendLine(markdown, row("Distribution", dataHealth.distribution()));
         appendLine(markdown, "");
         appendIssues(markdown, dataHealth.issueCodes());
+        markdown.append(TrainingReportHealthIssueMarkdown.renderDetails(
+                "Data Health Issue Details",
+                dataHealth.issues()));
         appendActions(markdown, dataHealth.recommendedActions());
         return markdown.toString();
     }

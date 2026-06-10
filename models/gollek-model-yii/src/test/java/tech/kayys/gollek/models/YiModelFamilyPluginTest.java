@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +26,18 @@ class YiModelFamilyPluginTest {
                         .map(ModelFamilyContractViolation::summary)
                         .toList(),
                 "yi model-family plugin should satisfy the shared plugin contract");
+    }
+
+    @Test
+    void yiFixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new YiModelFamilyPlugin(),
+                fixture("yi"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "yi fixture should match descriptor, tokenizer, and direct adapter claims");
     }
 
     @Test
@@ -46,7 +61,7 @@ class YiModelFamilyPluginTest {
         YiFamily architecture = new YiFamily();
 
         assertEquals(List.of("YiForCausalLM", "LlamaForCausalLM"), architecture.supportedArchClassNames());
-        assertEquals(List.of("yi"), architecture.supportedModelTypes());
+        assertEquals(List.of("yi", "yi_1_5"), architecture.supportedModelTypes());
         assertEquals("model.embed_tokens.weight", architecture.embedTokensWeight());
         assertEquals("model.norm.weight", architecture.finalNormWeight());
         assertEquals("lm_head.weight", architecture.lmHeadWeight());
@@ -59,5 +74,10 @@ class YiModelFamilyPluginTest {
         assertEquals("model.layers.11.mlp.gate_proj.weight", architecture.layerFfnGateWeight(11));
         assertEquals("model.layers.11.mlp.up_proj.weight", architecture.layerFfnUpWeight(11));
         assertEquals("model.layers.11.mlp.down_proj.weight", architecture.layerFfnDownWeight(11));
+    }
+
+    private static Path fixture(String familyId) throws Exception {
+        return Path.of(Objects.requireNonNull(
+                YiModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
     }
 }

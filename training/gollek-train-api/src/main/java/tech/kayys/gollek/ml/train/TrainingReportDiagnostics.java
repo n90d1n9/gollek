@@ -909,7 +909,7 @@ public final class TrainingReportDiagnostics {
         if (evidence == null || evidence.isEmpty()) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(evidence);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(evidence);
         if (snapshot instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }

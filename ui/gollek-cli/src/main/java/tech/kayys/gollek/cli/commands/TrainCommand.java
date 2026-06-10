@@ -34,6 +34,8 @@ import tech.kayys.gollek.ml.train.TrainingReportPromotionGate;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifactManifest;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifactPackage;
 import tech.kayys.gollek.ml.train.TrainingReportPromotionGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeInputProfileGateArtifacts;
+import tech.kayys.gollek.ml.train.TrainingReportRuntimeProfileBudgetGateArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportValidationArtifacts;
 import tech.kayys.gollek.ml.train.TrainingReportValidationPolicy;
 
@@ -47,6 +49,12 @@ import tech.kayys.gollek.ml.train.TrainingReportValidationPolicy;
                 TrainCommand.ValidateReport.class,
                 TrainCommand.VerifyValidationArtifacts.class,
                 TrainCommand.RefreshValidationArtifacts.class,
+                TrainRuntimeInputGateCommands.RuntimeInputGate.class,
+                TrainRuntimeInputGateCommands.VerifyRuntimeInputGateArtifacts.class,
+                TrainRuntimeInputGateCommands.RefreshRuntimeInputGateArtifacts.class,
+                TrainRuntimeProfileBudgetGateCommands.RuntimeProfileBudgetGate.class,
+                TrainRuntimeProfileBudgetGateCommands.VerifyRuntimeProfileBudgetGateArtifacts.class,
+                TrainRuntimeProfileBudgetGateCommands.RefreshRuntimeProfileBudgetGateArtifacts.class,
                 TrainCommand.ActionPlan.class,
                 TrainCommand.CompareReports.class,
                 TrainCommand.VerifyComparisonArtifacts.class,
@@ -77,6 +85,12 @@ public class TrainCommand implements Runnable {
         System.out.println("  validate-report <report.json>       Validate a canonical trainer report");
         System.out.println("  verify-validation-artifacts <dir>   Verify validation artifact bundle integrity");
         System.out.println("  refresh-validation-artifacts <dir>  Regenerate validation Markdown/JUnit from JSON");
+        System.out.println("  runtime-input-gate <report.json>    Gate runtime input-profile bottlenecks");
+        System.out.println("  verify-runtime-input-gate-artifacts <dir> Verify runtime input gate artifacts");
+        System.out.println("  refresh-runtime-input-gate-artifacts <dir> Regenerate runtime input gate Markdown/JUnit");
+        System.out.println("  runtime-profile-budget-gate <report.json> Gate runtime profile budgets");
+        System.out.println("  verify-runtime-profile-budget-gate-artifacts <dir> Verify runtime profile budget artifacts");
+        System.out.println("  refresh-runtime-profile-budget-gate-artifacts <dir> Regenerate runtime profile budget reports");
         System.out.println("  action-plan <report.json>           Print trainer diagnostics and remediation actions");
         System.out.println("  compare-reports --baseline file --candidate file Compare two trainer reports");
         System.out.println("  verify-comparison-artifacts <dir>   Verify comparison artifact integrity");
@@ -1194,6 +1208,8 @@ public class TrainCommand implements Runnable {
                 case PORTFOLIO_PACKAGE -> verifyPortfolioPackage(directory, format);
                 case PROMOTION_GATE -> verifyPromotionGate(directory, format);
                 case PROMOTION_PACKAGE -> verifyPromotionPackage(directory, format);
+                case RUNTIME_INPUT_GATE -> verifyRuntimeInputGate(directory, format);
+                case RUNTIME_PROFILE_BUDGET_GATE -> verifyRuntimeProfileBudgetGate(directory, format);
                 case SMOKE_RUNTIME -> verifySmokeRuntime(directory, format);
             };
         }
@@ -1287,6 +1303,28 @@ public class TrainCommand implements Runnable {
             return verification.passed();
         }
 
+        private boolean verifyRuntimeInputGate(Path directory, OutputFormat format) throws IOException {
+            TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verification =
+                    TrainingReportRuntimeInputProfileGateArtifacts.verify(directory);
+            if (format == OutputFormat.JSON) {
+                printJson(ArtifactKind.RUNTIME_INPUT_GATE, verification.toMap());
+            } else {
+                printRuntimeInputGateSummary(verification);
+            }
+            return verification.passed();
+        }
+
+        private boolean verifyRuntimeProfileBudgetGate(Path directory, OutputFormat format) throws IOException {
+            TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactVerification verification =
+                    TrainingReportRuntimeProfileBudgetGateArtifacts.verify(directory);
+            if (format == OutputFormat.JSON) {
+                printJson(ArtifactKind.RUNTIME_PROFILE_BUDGET_GATE, verification.toMap());
+            } else {
+                TrainRuntimeProfileBudgetGateFormatter.printAutoVerificationSummary(verification);
+            }
+            return verification.passed();
+        }
+
         private static ArtifactKind detectKind(Path directory) {
             boolean portfolioPackage = hasFile(directory, TrainingReportPortfolioArtifactManifest.DEFAULT_FILE_NAME);
             boolean promotionPackage = hasFile(directory, TrainingReportPromotionGateArtifactManifest.DEFAULT_FILE_NAME);
@@ -1313,6 +1351,12 @@ public class TrainCommand implements Runnable {
             }
             if (hasFile(directory, TrainingReportPromotionGateArtifacts.DEFAULT_JSON_FILE_NAME)) {
                 matches.add(ArtifactKind.PROMOTION_GATE);
+            }
+            if (hasFile(directory, TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JSON_FILE_NAME)) {
+                matches.add(ArtifactKind.RUNTIME_INPUT_GATE);
+            }
+            if (hasFile(directory, TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JSON_FILE_NAME)) {
+                matches.add(ArtifactKind.RUNTIME_PROFILE_BUDGET_GATE);
             }
             if (hasFile(directory, TrainerRuntimeSmokeArtifacts.DEFAULT_JSON_FILE_NAME)) {
                 matches.add(ArtifactKind.SMOKE_RUNTIME);
@@ -1447,6 +1491,11 @@ public class TrainCommand implements Runnable {
             printFailuresOrMessage(verification.passed(), verification.failures(), verification.message());
         }
 
+        private static void printRuntimeInputGateSummary(
+                TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verification) {
+            TrainRuntimeInputGateFormatter.printAutoVerificationSummary(verification);
+        }
+
         private static void printFailuresOrMessage(boolean passed, List<String> failures, String message) {
             if (!passed) {
                 for (String failure : failures) {
@@ -1466,6 +1515,8 @@ public class TrainCommand implements Runnable {
                     TrainingReportPortfolioArtifactManifest.DEFAULT_FILE_NAME,
                     TrainingReportPromotionGateArtifacts.DEFAULT_JSON_FILE_NAME,
                     TrainingReportPromotionGateArtifactManifest.DEFAULT_FILE_NAME,
+                    TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JSON_FILE_NAME,
+                    TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JSON_FILE_NAME,
                     TrainerRuntimeSmokeArtifacts.DEFAULT_JSON_FILE_NAME);
         }
 
@@ -1476,6 +1527,8 @@ public class TrainCommand implements Runnable {
             PORTFOLIO_PACKAGE("portfolio-package"),
             PROMOTION_GATE("promotion-gate"),
             PROMOTION_PACKAGE("promotion-package"),
+            RUNTIME_INPUT_GATE("runtime-input-gate"),
+            RUNTIME_PROFILE_BUDGET_GATE("runtime-profile-budget-gate"),
             SMOKE_RUNTIME("smoke-runtime");
 
             private final String label;
@@ -1535,6 +1588,10 @@ public class TrainCommand implements Runnable {
                         TrainingReportPortfolioArtifacts.DEFAULT_JSON_FILE_NAME));
                 boolean hasPromotionGateJson = Files.exists(directory.resolve(
                         TrainingReportPromotionGateArtifacts.DEFAULT_JSON_FILE_NAME));
+                boolean hasRuntimeInputGateJson = Files.exists(directory.resolve(
+                        TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JSON_FILE_NAME));
+                boolean hasRuntimeProfileBudgetGateJson = Files.exists(directory.resolve(
+                        TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JSON_FILE_NAME));
                 boolean hasSmokeRuntimeJson = Files.exists(directory.resolve(
                         TrainerRuntimeSmokeArtifacts.DEFAULT_JSON_FILE_NAME));
 
@@ -1542,6 +1599,8 @@ public class TrainCommand implements Runnable {
                         + (hasComparisonJson ? 1 : 0)
                         + (hasPortfolioJson ? 1 : 0)
                         + (hasPromotionGateJson ? 1 : 0)
+                        + (hasRuntimeInputGateJson ? 1 : 0)
+                        + (hasRuntimeProfileBudgetGateJson ? 1 : 0)
                         + (hasSmokeRuntimeJson ? 1 : 0);
                 if (matches != 1) {
                     throw new IllegalArgumentException(matches > 1
@@ -1555,6 +1614,10 @@ public class TrainCommand implements Runnable {
                                     + " or "
                                     + TrainingReportPromotionGateArtifacts.DEFAULT_JSON_FILE_NAME
                                     + " or "
+                                    + TrainingReportRuntimeInputProfileGateArtifacts.DEFAULT_JSON_FILE_NAME
+                                    + " or "
+                                    + TrainingReportRuntimeProfileBudgetGateArtifacts.DEFAULT_JSON_FILE_NAME
+                                    + " or "
                                     + TrainerRuntimeSmokeArtifacts.DEFAULT_JSON_FILE_NAME);
                 }
 
@@ -1566,6 +1629,12 @@ public class TrainCommand implements Runnable {
                 }
                 if (hasPromotionGateJson) {
                     return refreshPromotionGate(directory, format);
+                }
+                if (hasRuntimeInputGateJson) {
+                    return refreshRuntimeInputGate(directory, format);
+                }
+                if (hasRuntimeProfileBudgetGateJson) {
+                    return refreshRuntimeProfileBudgetGate(directory, format);
                 }
                 if (hasSmokeRuntimeJson) {
                     return refreshSmokeRuntime(directory, format);
@@ -1667,6 +1736,36 @@ public class TrainCommand implements Runnable {
                 System.out.println(JSON.writeValueAsString(smokeRuntimePayload(artifacts, verification)));
             } else {
                 printSmokeRuntimeSummary(artifacts, verification);
+            }
+            return verification.passed() ? 0 : 2;
+        }
+
+        private Integer refreshRuntimeInputGate(Path directory, OutputFormat format) throws IOException {
+            TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle artifacts =
+                    Gollek.DL.refreshTrainingReportRuntimeInputProfileGateArtifacts(directory);
+            TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verification =
+                    Gollek.DL.verifyTrainingReportRuntimeInputProfileGateArtifacts(artifacts);
+
+            if (format == OutputFormat.JSON) {
+                System.out.println(JSON.writeValueAsString(
+                        TrainRuntimeInputGateFormatter.artifactPayload(artifacts, verification)));
+            } else {
+                printRuntimeInputGateSummary(artifacts, verification);
+            }
+            return verification.passed() ? 0 : 2;
+        }
+
+        private Integer refreshRuntimeProfileBudgetGate(Path directory, OutputFormat format) throws IOException {
+            TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactBundle artifacts =
+                    Gollek.DL.refreshTrainingReportRuntimeProfileBudgetGateArtifacts(directory);
+            TrainingReportRuntimeProfileBudgetGateArtifacts.ArtifactVerification verification =
+                    Gollek.DL.verifyTrainingReportRuntimeProfileBudgetGateArtifacts(artifacts);
+
+            if (format == OutputFormat.JSON) {
+                System.out.println(JSON.writeValueAsString(
+                        TrainRuntimeProfileBudgetGateFormatter.artifactPayload(artifacts, verification)));
+            } else {
+                TrainRuntimeProfileBudgetGateFormatter.printRefreshSummary(artifacts, verification);
             }
             return verification.passed() ? 0 : 2;
         }
@@ -1819,6 +1918,12 @@ public class TrainCommand implements Runnable {
             }
         }
 
+        private static void printRuntimeInputGateSummary(
+                TrainingReportRuntimeInputProfileGateArtifacts.ArtifactBundle artifacts,
+                TrainingReportRuntimeInputProfileGateArtifacts.ArtifactVerification verification) {
+            TrainRuntimeInputGateFormatter.printRefreshSummary(artifacts, verification);
+        }
+
         private static void printPromotionPackageSummary(
                 TrainingReportPromotionGateArtifactPackage.PackageRefresh refresh) {
             TrainingReportPromotionGateArtifactPackage.PackageVerification verification = refresh.verification();
@@ -1916,6 +2021,7 @@ public class TrainCommand implements Runnable {
             payload.put("verification", verification.toMap());
             return Map.copyOf(payload);
         }
+
     }
 
     @Command(

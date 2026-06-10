@@ -32,9 +32,8 @@ record DirectForwardOperators(
                        String profileKey,
                        ModelConfig config,
                        AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.linear(new DirectForwardLinearRequest(
+        return DirectForwardLinearProjection.linear(DirectForwardLinearRequest.projection(
                 linearContext(config),
-                false,
                 input,
                 weight,
                 bias,
@@ -56,14 +55,28 @@ record DirectForwardOperators(
                               ModelConfig config,
                               String profileKey,
                               AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.ffnDownLinear(new DirectForwardLinearRequest(
+        return DirectForwardLinearProjection.ffnDownLinear(DirectForwardLinearRequest.projection(
                 linearContext(config),
-                false,
                 input,
                 weight,
                 bias,
                 profileKey,
                 outputBuffer));
+    }
+
+    AccelTensor swigluFfn(AccelTensor input,
+                          ModelArchitecture arch,
+                          ModelConfig config,
+                          DirectForwardGatedFfnWeights weights,
+                          ForwardWorkspace ws,
+                          AccelTensor downOutputBuffer) {
+        return swigluFfn(DirectForwardGatedFfnRequest.forward(
+                linearContext(config),
+                arch,
+                ws,
+                input,
+                weights,
+                downOutputBuffer));
     }
 
     AccelTensor swigluFfn(AccelTensor input,
@@ -77,21 +90,12 @@ record DirectForwardOperators(
                           AccelTensor downB,
                           ForwardWorkspace ws,
                           AccelTensor downOutputBuffer) {
-        return DirectForwardGatedFfn.forward(
-                runtime,
-                traitsResolver.resolve(config),
-                config,
-                false,
-                input,
-                arch,
-                gateW,
-                gateB,
-                upW,
-                upB,
-                downW,
-                downB,
-                ws,
-                downOutputBuffer);
+        return swigluFfn(input, arch, config,
+                new DirectForwardGatedFfnWeights(gateW, gateB, upW, upB, downW, downB), ws, downOutputBuffer);
+    }
+
+    AccelTensor swigluFfn(DirectForwardGatedFfnRequest request) {
+        return DirectForwardGatedFfn.forward(request);
     }
 
     private DirectForwardLinearContext linearContext(ModelConfig config) {

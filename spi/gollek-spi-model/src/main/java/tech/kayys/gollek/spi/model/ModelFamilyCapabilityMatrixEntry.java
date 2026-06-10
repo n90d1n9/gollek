@@ -22,6 +22,7 @@ public record ModelFamilyCapabilityMatrixEntry(
         boolean vision,
         boolean audio,
         boolean multimodal,
+        boolean moe,
         boolean training,
         boolean gguf,
         boolean onnx,
@@ -68,6 +69,7 @@ public record ModelFamilyCapabilityMatrixEntry(
                 capabilities.contains(ModelFamilyCapability.VISION),
                 capabilities.contains(ModelFamilyCapability.AUDIO),
                 capabilities.contains(ModelFamilyCapability.MULTIMODAL),
+                capabilities.contains(ModelFamilyCapability.MOE),
                 capabilities.contains(ModelFamilyCapability.TRAINING),
                 capabilities.contains(ModelFamilyCapability.GGUF),
                 capabilities.contains(ModelFamilyCapability.ONNX),
@@ -98,6 +100,7 @@ public record ModelFamilyCapabilityMatrixEntry(
                 + ",onnx=" + yesNo(onnx)
                 + ",train=" + yesNo(training)
                 + ",vlm=" + yesNo(multimodal)
+                + ",moe=" + yesNo(moe)
                 + ")";
     }
 

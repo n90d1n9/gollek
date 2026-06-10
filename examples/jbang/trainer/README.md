@@ -4,10 +4,31 @@ This folder is the canonical JBang lane for Gollek trainer runtime examples.
 
 ## Run
 
+From `gollek`, refresh the Gradle-built local artifacts first:
+
+```bash
+./gradlew publishJbangTrainerExamplesToMavenLocal
+./gradlew smokeJbangTrainerRuntimeProfileBudgetGate
+./gradlew verifyJbangTrainerRuntimeProfileBudgetGateOutput
+./gradlew smokeJbangTrainerQualityProfileCiGateEvidence
+./gradlew verifyJbangTrainerQualityProfileCiGateEvidenceOutput
+./gradlew verifyJbangTrainerEvidenceIndex
+./gradlew smokeJbangTrainerExamples
+```
+
+The Gradle smoke lane runs JBang with an isolated `build/jbang/.jbang` home and
+offline dependency resolution after publishing the local Gradle artifacts. Use
+`-Pgollek.jbang.trainer.offline=false` only when intentionally refreshing remote
+JBang dependencies.
+
 From `gollek/examples/jbang`:
 
 ```bash
 jbang trainer/trainer_runtime_bootstrap.java
+jbang trainer/trainer_runtime_profile_budget_gate.java
+jbang trainer/trainer_runtime_profile_budget_gate.java /tmp/gollek-runtime-budget --policy strict
+jbang trainer/trainer_quality_profile_ci_gate_evidence.java
+jbang trainer/trainer_quality_profile_ci_gate_evidence.java /tmp/gollek-ci-evidence --device auto --profile local-experiment
 jbang trainer/trainer_diffusion_opd_ddim.java
 jbang trainer/trainer_diffusion_opd_ddim.java 4
 jbang trainer/trainer_diffusion_opd_stable_diffusion_metal_bridge.java
@@ -197,6 +218,8 @@ jbang trainer/trainer_multilabel_bce_metrics.java metal
 - Canonical trainer builder usage (`Trainers.canonicalBuilder()`)
 - Training listener lifecycle callbacks
 - Training summary reporting
+- Runtime profile budget gate lifecycle with JSON/Markdown/JUnit artifact
+  writing and verification
 - One-command byte-latent smoke flow for fresh runs and resumed runs
 - Unified byte-latent workflow runner with `fresh`, `resume`, and `full` modes
 - Compact end-of-run workflow summary with fresh/resume checkpoint details
@@ -407,6 +430,14 @@ jbang trainer/trainer_multilabel_bce_metrics.java metal
 - Public `Gollek.DL.evaluate(...)` for no-grad validation/test loss and
   metrics
 - End-to-end toy classification with `trainer_classification_metrics.java`
+- End-to-end quality-profile CI evidence with
+  `trainer_quality_profile_ci_gate_evidence.java`
+  - Trains tiny baseline and candidate classifiers into canonical report files
+  - Runs `local-experiment` by default through the quality-profile CI gate
+  - Writes the CI manifest, JSON/Markdown/JUnit manifest verification report,
+    and verifies the persisted evidence bundle
+  - Supports `--out`, `--device`, `--profile`, `--baseline-epochs`,
+    `--candidate-epochs`, and `--fail-on-gate`
 - End-to-end interrupted/resumed regression with durable history in
   `trainer_resume_history.java`
 - End-to-end robust regression with `trainer_robust_regression_huber.java`
@@ -637,3 +668,43 @@ From `gollek/` project root:
 
 The task is Gradle-only and publishes the local snapshot runtime graph required
 by the trainer JBang examples.
+
+To validate the quality-profile CI gate evidence example end-to-end from
+Gradle:
+
+```bash
+./gradlew smokeJbangTrainerRuntimeProfileBudgetGate
+./gradlew verifyJbangTrainerRuntimeProfileBudgetGateOutput
+./gradlew smokeJbangTrainerQualityProfileCiGateEvidence
+./gradlew verifyJbangTrainerQualityProfileCiGateEvidenceOutput
+./gradlew verifyJbangTrainerEvidenceIndex
+./gradlew smokeJbangTrainerExamples
+```
+
+The runtime profile budget gate smoke task publishes the trainer JBang runtime
+graph, runs `trainer_runtime_profile_budget_gate.java`, and verifies the
+canonical runtime report plus JSON/Markdown/JUnit gate artifacts under
+`build/jbang/trainer/runtime-profile-budget-gate`. The same example also writes
+runtime input-profile gate artifacts under `runtime-input-profile-gate`, so a
+dominant `train.next()` hotspot now produces concrete `DataLoader.prefetch(...)`
+guidance in JSON/Markdown/JUnit evidence instead of only a generic runtime
+warning. The verifier also writes `runtime-profile-budget-gate.summary.txt` for
+compact CI uploads and quick human triage.
+
+The quality-profile focused smoke task publishes the trainer JBang runtime graph, runs
+`trainer_quality_profile_ci_gate_evidence.java`, requires the quality gate to
+pass, and writes its output under
+`build/jbang/trainer/quality-profile-ci-gate-evidence`. The verifier task then
+checks the canonical reports, CI manifest, JSON verification report, Markdown
+verification report, JUnit XML verification report, and compact
+`quality-profile-ci-gate.summary.txt` CI summary.
+
+The aggregate `verifyJbangTrainerEvidenceIndex` task checks both compact
+summaries, verifies every referenced artifact still exists, and writes
+`build/jbang/trainer/trainer-evidence-index.json` plus
+`trainer-evidence-index.summary.txt` as a single release/CI handoff point. The
+aggregate `smokeJbangTrainerExamples` task depends on this index, so the
+verifier-backed trainer smoke lane now fails if either lane is missing evidence
+or the combined index cannot be assembled. The Gradle lane uses an isolated
+`build/jbang/.jbang` home and offline JBang resolution by default so dependency
+refresh cannot silently hang CI.

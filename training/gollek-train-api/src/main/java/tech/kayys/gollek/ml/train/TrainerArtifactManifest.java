@@ -58,11 +58,13 @@ final class TrainerArtifactManifest {
         try (Reader reader = Files.newBufferedReader(resolvedManifestFile, StandardCharsets.UTF_8)) {
             properties.load(reader);
         }
+        TrainingReportArtifactFingerprint manifestFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedManifestFile);
         return new Inspection(
                 resolvedManifestFile,
                 formatVersion(properties),
                 generatedAt(properties),
-                TrainerCheckpointIO.sha256Hex(resolvedManifestFile),
+                manifestFingerprint.sha256(),
                 stringProperties(properties),
                 artifactEntries(properties));
     }
@@ -75,9 +77,10 @@ final class TrainerArtifactManifest {
             return;
         }
         String prefix = "artifact." + artifactName.trim() + '.';
+        TrainingReportArtifactFingerprint fingerprint = TrainingReportArtifactFingerprint.of(artifactFile);
         manifest.setProperty(prefix + "file", artifactFile.getFileName().toString());
-        manifest.setProperty(prefix + "bytes", Long.toString(Files.size(artifactFile)));
-        manifest.setProperty(prefix + "sha256", TrainerCheckpointIO.sha256Hex(artifactFile));
+        manifest.setProperty(prefix + "bytes", Long.toString(fingerprint.bytes()));
+        manifest.setProperty(prefix + "sha256", fingerprint.sha256());
     }
 
     private static int formatVersion(Properties properties) throws IOException {

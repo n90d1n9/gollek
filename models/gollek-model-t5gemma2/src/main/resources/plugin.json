@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "sentencepiece",
     "families": ["t5gemma2", "t5gemma2_text", "t5gemma2_encoder", "t5gemma2_decoder"]
   }
 }

@@ -41,6 +41,9 @@ Options:
   --noise-script PATH           Override noise stability checker
   --env-script PATH             Override environment fingerprint helper
   --bundle-script PATH          Override artifact bundle helper
+  --diagnose-script PATH        Override profile diagnosis helper
+  --diagnosis-compare-script PATH
+                                Override diagnosis stage comparison helper
   --decision-script PATH        Override decision summary helper
   --help                        Show this help
 
@@ -80,6 +83,8 @@ COMPARE_SCRIPT="${ROOT_DIR}/scripts/compare-onnx-profile-summary.sh"
 NOISE_SCRIPT="${ROOT_DIR}/scripts/check-onnx-profile-noise.sh"
 ENV_SCRIPT="${ROOT_DIR}/scripts/onnx-profile-env.sh"
 BUNDLE_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-bundle.sh"
+DIAGNOSE_SCRIPT="${ROOT_DIR}/scripts/diagnose-onnx-profile-summary.sh"
+DIAGNOSIS_COMPARE_SCRIPT="${ROOT_DIR}/scripts/compare-onnx-profile-diagnosis.sh"
 DECISION_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-decision.sh"
 
 while [[ $# -gt 0 ]]; do
@@ -133,6 +138,10 @@ while [[ $# -gt 0 ]]; do
     --env-script=*) ENV_SCRIPT="${1#*=}"; shift ;;
     --bundle-script) BUNDLE_SCRIPT="$2"; shift 2 ;;
     --bundle-script=*) BUNDLE_SCRIPT="${1#*=}"; shift ;;
+    --diagnose-script) DIAGNOSE_SCRIPT="$2"; shift 2 ;;
+    --diagnose-script=*) DIAGNOSE_SCRIPT="${1#*=}"; shift ;;
+    --diagnosis-compare-script) DIAGNOSIS_COMPARE_SCRIPT="$2"; shift 2 ;;
+    --diagnosis-compare-script=*) DIAGNOSIS_COMPARE_SCRIPT="${1#*=}"; shift ;;
     --decision-script) DECISION_SCRIPT="$2"; shift 2 ;;
     --decision-script=*) DECISION_SCRIPT="${1#*=}"; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -165,6 +174,14 @@ if [[ ! -f "$ENV_SCRIPT" ]]; then
 fi
 if [[ ! -f "$BUNDLE_SCRIPT" ]]; then
   echo "Required artifact bundle helper not found: $BUNDLE_SCRIPT" >&2
+  exit 2
+fi
+if [[ ! -x "$DIAGNOSE_SCRIPT" ]]; then
+  echo "Required profile diagnosis helper not found or not executable: $DIAGNOSE_SCRIPT" >&2
+  exit 2
+fi
+if [[ ! -x "$DIAGNOSIS_COMPARE_SCRIPT" ]]; then
+  echo "Required diagnosis comparison helper not found or not executable: $DIAGNOSIS_COMPARE_SCRIPT" >&2
   exit 2
 fi
 if [[ ! -x "$DECISION_SCRIPT" ]]; then
@@ -231,12 +248,31 @@ BASELINE_AGGREGATE="${SUMMARY_DIR}/baseline-aggregate.tsv"
 COMPARE_DIR="${SUMMARY_DIR}/compare"
 CURRENT_SUMMARY_DIR="${SUMMARY_DIR}/current-summary"
 BASELINE_SUMMARY_DIR="${SUMMARY_DIR}/baseline-summary"
+CURRENT_DIAGNOSIS_DIR="${SUMMARY_DIR}/current-diagnosis"
+CURRENT_DIAGNOSIS="${CURRENT_DIAGNOSIS_DIR}/diagnosis.tsv"
+CURRENT_DIAGNOSIS_STAGES="${CURRENT_DIAGNOSIS_DIR}/stages.tsv"
+CURRENT_DIAGNOSIS_REPORT="${CURRENT_DIAGNOSIS_DIR}/report.txt"
+BASELINE_DIAGNOSIS_DIR="${SUMMARY_DIR}/baseline-diagnosis"
+BASELINE_DIAGNOSIS="${BASELINE_DIAGNOSIS_DIR}/diagnosis.tsv"
+BASELINE_DIAGNOSIS_STAGES="${BASELINE_DIAGNOSIS_DIR}/stages.tsv"
+BASELINE_DIAGNOSIS_REPORT="${BASELINE_DIAGNOSIS_DIR}/report.txt"
+DIAGNOSIS_DIFF_DIR="${SUMMARY_DIR}/diagnosis-diff"
+DIAGNOSIS_DIFF="${DIAGNOSIS_DIFF_DIR}/comparison.tsv"
+DIAGNOSIS_DIFF_SUMMARY="${DIAGNOSIS_DIFF_DIR}/summary.tsv"
+DIAGNOSIS_DIFF_TABLE="${DIAGNOSIS_DIFF_DIR}/comparison-table.txt"
+DIAGNOSIS_DIFF_REPORT="${DIAGNOSIS_DIFF_DIR}/report.txt"
 BENCH_STDOUT="${SUMMARY_DIR}/bench.stdout.log"
 BENCH_STDERR="${SUMMARY_DIR}/bench.stderr.log"
 CURRENT_SUMMARY_STDOUT="${SUMMARY_DIR}/current-summary.stdout.log"
 CURRENT_SUMMARY_STDERR="${SUMMARY_DIR}/current-summary.stderr.log"
 BASELINE_SUMMARY_STDOUT="${SUMMARY_DIR}/baseline-summary.stdout.log"
 BASELINE_SUMMARY_STDERR="${SUMMARY_DIR}/baseline-summary.stderr.log"
+CURRENT_DIAGNOSIS_STDOUT="${SUMMARY_DIR}/current-diagnosis.stdout.log"
+CURRENT_DIAGNOSIS_STDERR="${SUMMARY_DIR}/current-diagnosis.stderr.log"
+BASELINE_DIAGNOSIS_STDOUT="${SUMMARY_DIR}/baseline-diagnosis.stdout.log"
+BASELINE_DIAGNOSIS_STDERR="${SUMMARY_DIR}/baseline-diagnosis.stderr.log"
+DIAGNOSIS_DIFF_STDOUT="${SUMMARY_DIR}/diagnosis-diff.stdout.log"
+DIAGNOSIS_DIFF_STDERR="${SUMMARY_DIR}/diagnosis-diff.stderr.log"
 COMPARE_STDOUT="${SUMMARY_DIR}/compare.stdout.log"
 COMPARE_STDERR="${SUMMARY_DIR}/compare.stderr.log"
 NOISE="${SUMMARY_DIR}/current-noise.tsv"
@@ -689,14 +725,26 @@ config_row compareScript "$COMPARE_SCRIPT"
 config_row noiseScript "$NOISE_SCRIPT"
 config_row envScript "$ENV_SCRIPT"
 config_row bundleScript "$BUNDLE_SCRIPT"
+config_row diagnoseScript "$DIAGNOSE_SCRIPT"
+config_row diagnosisCompareScript "$DIAGNOSIS_COMPARE_SCRIPT"
 config_row decisionScript "$DECISION_SCRIPT"
 config_row bundle "$BUNDLE"
 config_row bundleJson "$BUNDLE_JSON"
 config_row decision "$DECISION"
 config_row currentRaw "$CURRENT_RAW"
 config_row currentAggregate "$CURRENT_AGGREGATE"
+config_row currentDiagnosis "$CURRENT_DIAGNOSIS"
+config_row currentDiagnosisStages "$CURRENT_DIAGNOSIS_STAGES"
+config_row currentDiagnosisReport "$CURRENT_DIAGNOSIS_REPORT"
 config_row currentNoise "$NOISE"
 config_row baselineAggregate "$BASELINE_AGGREGATE"
+config_row baselineDiagnosis "$BASELINE_DIAGNOSIS"
+config_row baselineDiagnosisStages "$BASELINE_DIAGNOSIS_STAGES"
+config_row baselineDiagnosisReport "$BASELINE_DIAGNOSIS_REPORT"
+config_row diagnosisDiff "$DIAGNOSIS_DIFF"
+config_row diagnosisDiffSummary "$DIAGNOSIS_DIFF_SUMMARY"
+config_row diagnosisDiffTable "$DIAGNOSIS_DIFF_TABLE"
+config_row diagnosisDiffReport "$DIAGNOSIS_DIFF_REPORT"
 config_row maxRegressionPercent "$MAX_REGRESSION_PERCENT"
 config_row maxNoisePercent "$MAX_NOISE_PERCENT"
 config_row metrics "$METRICS"
@@ -724,8 +772,18 @@ write_regression_bundle() {
   gollek_onnx_performance_bundle_add "$BUNDLE" backendMetadata "$BACKEND_METADATA" required "Backend compatibility evidence"
   gollek_onnx_performance_bundle_add "$BUNDLE" currentRaw "$CURRENT_RAW" required "Current raw benchmark summary"
   gollek_onnx_performance_bundle_add "$BUNDLE" currentAggregate "$CURRENT_AGGREGATE" required "Current aggregate summary"
+  gollek_onnx_performance_bundle_add "$BUNDLE" currentDiagnosis "$CURRENT_DIAGNOSIS" optional "Current performance diagnosis"
+  gollek_onnx_performance_bundle_add "$BUNDLE" currentDiagnosisStages "$CURRENT_DIAGNOSIS_STAGES" optional "Current diagnosed stage ranking"
+  gollek_onnx_performance_bundle_add "$BUNDLE" currentDiagnosisReport "$CURRENT_DIAGNOSIS_REPORT" optional "Current human-readable diagnosis report"
   gollek_onnx_performance_bundle_add "$BUNDLE" currentNoise "$NOISE" optional "Current noise stability summary"
   gollek_onnx_performance_bundle_add "$BUNDLE" baselineAggregate "$BASELINE_AGGREGATE" required "Baseline aggregate used for comparison"
+  gollek_onnx_performance_bundle_add "$BUNDLE" baselineDiagnosis "$BASELINE_DIAGNOSIS" optional "Baseline performance diagnosis"
+  gollek_onnx_performance_bundle_add "$BUNDLE" baselineDiagnosisStages "$BASELINE_DIAGNOSIS_STAGES" optional "Baseline diagnosed stage ranking"
+  gollek_onnx_performance_bundle_add "$BUNDLE" baselineDiagnosisReport "$BASELINE_DIAGNOSIS_REPORT" optional "Baseline human-readable diagnosis report"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiff "$DIAGNOSIS_DIFF" optional "Current versus baseline diagnosis comparison"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiffSummary "$DIAGNOSIS_DIFF_SUMMARY" optional "Diagnosis comparison summary"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiffTable "$DIAGNOSIS_DIFF_TABLE" optional "Human-readable diagnosis comparison"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiffReport "$DIAGNOSIS_DIFF_REPORT" optional "Diagnosis comparison report"
   gollek_onnx_performance_bundle_add "$BUNDLE" comparison "${COMPARE_DIR}/comparison.tsv" required "Row-level regression comparison"
   gollek_onnx_performance_bundle_add "$BUNDLE" comparisonTable "${COMPARE_DIR}/comparison-table.txt" optional "Human-readable regression comparison"
   gollek_onnx_performance_bundle_add "$BUNDLE" metricSummary "${COMPARE_DIR}/metric-summary.tsv" optional "Per-metric regression summary"
@@ -736,6 +794,12 @@ write_regression_bundle() {
   gollek_onnx_performance_bundle_add "$BUNDLE" currentSummaryStderr "$CURRENT_SUMMARY_STDERR" optional "Current aggregation stderr"
   gollek_onnx_performance_bundle_add "$BUNDLE" baselineSummaryStdout "$BASELINE_SUMMARY_STDOUT" optional "Baseline aggregation stdout"
   gollek_onnx_performance_bundle_add "$BUNDLE" baselineSummaryStderr "$BASELINE_SUMMARY_STDERR" optional "Baseline aggregation stderr"
+  gollek_onnx_performance_bundle_add "$BUNDLE" currentDiagnosisStdout "$CURRENT_DIAGNOSIS_STDOUT" optional "Current diagnosis stdout"
+  gollek_onnx_performance_bundle_add "$BUNDLE" currentDiagnosisStderr "$CURRENT_DIAGNOSIS_STDERR" optional "Current diagnosis stderr"
+  gollek_onnx_performance_bundle_add "$BUNDLE" baselineDiagnosisStdout "$BASELINE_DIAGNOSIS_STDOUT" optional "Baseline diagnosis stdout"
+  gollek_onnx_performance_bundle_add "$BUNDLE" baselineDiagnosisStderr "$BASELINE_DIAGNOSIS_STDERR" optional "Baseline diagnosis stderr"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiffStdout "$DIAGNOSIS_DIFF_STDOUT" optional "Diagnosis comparison stdout"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisDiffStderr "$DIAGNOSIS_DIFF_STDERR" optional "Diagnosis comparison stderr"
   gollek_onnx_performance_bundle_add "$BUNDLE" compareStdout "$COMPARE_STDOUT" optional "Comparator stdout"
   gollek_onnx_performance_bundle_add "$BUNDLE" compareStderr "$COMPARE_STDERR" optional "Comparator stderr"
   gollek_onnx_performance_bundle_add "$BUNDLE" noiseStdout "$NOISE_STDOUT" optional "Noise checker stdout"
@@ -758,6 +822,65 @@ write_regression_artifacts() {
   write_regression_decision
   write_regression_bundle
   write_regression_decision
+}
+
+run_regression_diagnosis() {
+  local stage="$1"
+  local summary="$2"
+  local out_dir="$3"
+  local out="$4"
+  local stages_out="$5"
+  local stdout_log="$6"
+  local stderr_log="$7"
+
+  declare -a diagnosis_args=(
+    "$DIAGNOSE_SCRIPT"
+    "--summary" "$summary"
+    "--summary-dir" "$out_dir"
+    "--out" "$out"
+    "--stages-out" "$stages_out"
+    "--case" "${AGGREGATE_LABEL}-mean"
+  )
+  if [[ "$INCLUDE_WARMUP_AGGREGATE" -eq 1 ]]; then
+    diagnosis_args+=("--include-warmup")
+  fi
+
+  set +e
+  "${diagnosis_args[@]}" >"$stdout_log" 2>"$stderr_log"
+  local diagnosis_exit=$?
+  set -e
+  if [[ "$diagnosis_exit" -ne 0 || ! -f "$out" ]]; then
+    record_result "$stage" skip "$diagnosis_exit" "$out" "$stdout_log" "$stderr_log" diagnosis-unavailable
+    return 0
+  fi
+  record_result "$stage" pass 0 "$out" "$stdout_log" "$stderr_log"
+}
+
+run_regression_diagnosis_diff() {
+  if [[ ! -f "$BASELINE_DIAGNOSIS_STAGES" || ! -f "$CURRENT_DIAGNOSIS_STAGES" ]]; then
+    record_result diagnosis-diff skip 0 "$DIAGNOSIS_DIFF" "$DIAGNOSIS_DIFF_STDOUT" "$DIAGNOSIS_DIFF_STDERR" missing-diagnosis-stages
+    return 0
+  fi
+
+  declare -a diagnosis_diff_args=(
+    "$DIAGNOSIS_COMPARE_SCRIPT"
+    "--baseline-stages" "$BASELINE_DIAGNOSIS_STAGES"
+    "--current-stages" "$CURRENT_DIAGNOSIS_STAGES"
+    "--summary-dir" "$DIAGNOSIS_DIFF_DIR"
+    "--out" "$DIAGNOSIS_DIFF"
+    "--summary-out" "$DIAGNOSIS_DIFF_SUMMARY"
+    "--table-out" "$DIAGNOSIS_DIFF_TABLE"
+  )
+
+  set +e
+  "${diagnosis_diff_args[@]}" >"$DIAGNOSIS_DIFF_STDOUT" 2>"$DIAGNOSIS_DIFF_STDERR"
+  local diagnosis_diff_exit=$?
+  set -e
+  if [[ "$diagnosis_diff_exit" -ne 0 || ! -f "$DIAGNOSIS_DIFF" ]]; then
+    record_result diagnosis-diff skip "$diagnosis_diff_exit" "$DIAGNOSIS_DIFF" "$DIAGNOSIS_DIFF_STDOUT" "$DIAGNOSIS_DIFF_STDERR" diagnosis-diff-unavailable
+    return 0
+  fi
+  record_result diagnosis-diff pass 0 "$DIAGNOSIS_DIFF" "$DIAGNOSIS_DIFF_STDOUT" "$DIAGNOSIS_DIFF_STDERR"
 }
 
 ENVIRONMENT_EXIT=0
@@ -861,6 +984,7 @@ if [[ "$CURRENT_SUMMARY_EXIT" -ne 0 || ! -f "$CURRENT_AGGREGATE" ]]; then
   exit "$([[ "$CURRENT_SUMMARY_EXIT" -eq 0 ]] && printf 3 || printf '%s' "$CURRENT_SUMMARY_EXIT")"
 fi
 record_result current-aggregate pass 0 "$CURRENT_AGGREGATE" "$CURRENT_SUMMARY_STDOUT" "$CURRENT_SUMMARY_STDERR"
+run_regression_diagnosis current-diagnosis "$CURRENT_AGGREGATE" "$CURRENT_DIAGNOSIS_DIR" "$CURRENT_DIAGNOSIS" "$CURRENT_DIAGNOSIS_STAGES" "$CURRENT_DIAGNOSIS_STDOUT" "$CURRENT_DIAGNOSIS_STDERR"
 
 if [[ -n "$MAX_NOISE_PERCENT" ]]; then
   declare -a NOISE_ARGS=(
@@ -932,6 +1056,8 @@ else
   BASELINE_FOR_COMPARE="$BASELINE_AGGREGATE"
   record_result baseline-aggregate pass 0 "$BASELINE_FOR_COMPARE" "$BASELINE_SUMMARY_STDOUT" "$BASELINE_SUMMARY_STDERR"
 fi
+run_regression_diagnosis baseline-diagnosis "$BASELINE_FOR_COMPARE" "$BASELINE_DIAGNOSIS_DIR" "$BASELINE_DIAGNOSIS" "$BASELINE_DIAGNOSIS_STAGES" "$BASELINE_DIAGNOSIS_STDOUT" "$BASELINE_DIAGNOSIS_STDERR"
+run_regression_diagnosis_diff
 
 BACKEND_EXIT=0
 check_backend_metadata "$BASELINE_FOR_COMPARE" "$CURRENT_AGGREGATE" || BACKEND_EXIT=$?
@@ -996,10 +1122,26 @@ write_regression_artifacts
   echo "artifacts.backendMetadata=$BACKEND_METADATA"
   echo "artifacts.currentRaw=$CURRENT_RAW"
   echo "artifacts.currentAggregate=$CURRENT_AGGREGATE"
+  if [[ -f "$CURRENT_DIAGNOSIS" ]]; then
+    echo "artifacts.currentDiagnosis=$CURRENT_DIAGNOSIS"
+    echo "artifacts.currentDiagnosisStages=$CURRENT_DIAGNOSIS_STAGES"
+    echo "artifacts.currentDiagnosisReport=$CURRENT_DIAGNOSIS_REPORT"
+  fi
   if [[ -f "$NOISE" ]]; then
     echo "artifacts.currentNoise=$NOISE"
   fi
   echo "artifacts.baselineAggregate=$BASELINE_FOR_COMPARE"
+  if [[ -f "$BASELINE_DIAGNOSIS" ]]; then
+    echo "artifacts.baselineDiagnosis=$BASELINE_DIAGNOSIS"
+    echo "artifacts.baselineDiagnosisStages=$BASELINE_DIAGNOSIS_STAGES"
+    echo "artifacts.baselineDiagnosisReport=$BASELINE_DIAGNOSIS_REPORT"
+  fi
+  if [[ -f "$DIAGNOSIS_DIFF" ]]; then
+    echo "artifacts.diagnosisDiff=$DIAGNOSIS_DIFF"
+    echo "artifacts.diagnosisDiffSummary=$DIAGNOSIS_DIFF_SUMMARY"
+    echo "artifacts.diagnosisDiffTable=$DIAGNOSIS_DIFF_TABLE"
+    echo "artifacts.diagnosisDiffReport=$DIAGNOSIS_DIFF_REPORT"
+  fi
   echo "artifacts.comparison=${COMPARE_DIR}/comparison.tsv"
   echo "artifacts.compareReport=${COMPARE_DIR}/report.txt"
   echo

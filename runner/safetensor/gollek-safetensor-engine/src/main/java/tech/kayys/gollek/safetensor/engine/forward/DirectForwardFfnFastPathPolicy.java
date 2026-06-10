@@ -54,6 +54,10 @@ final class DirectForwardFfnFastPathPolicy {
         return ROUTING.shouldUseMetalGateUpMatvecFfn();
     }
 
+    static boolean shouldUseMetalMatvecFfnPrefillRows(ModelConfigTraits traits, long rows) {
+        return ROUTING.shouldUseMetalMatvecFfnPrefillRows(traits, rows);
+    }
+
     static boolean shouldValidateMetalMatvecFfn(boolean traceFfnFastPath) {
         return ROUTING.shouldValidateMetalMatvecFfn(traceFfnFastPath);
     }

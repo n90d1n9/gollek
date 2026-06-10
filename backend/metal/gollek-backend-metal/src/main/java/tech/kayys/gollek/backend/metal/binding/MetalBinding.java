@@ -67,6 +67,9 @@ public class MetalBinding {
     private static final String FN_GEGLU_FFN_MATVEC_HALF = "gollek_metal_geglu_ffn_matvec_half";
     private static final String FN_SWIGLU_FFN_MATVEC_BF16 = "gollek_metal_swiglu_ffn_matvec_bf16";
     private static final String FN_GEGLU_FFN_MATVEC_BF16 = "gollek_metal_geglu_ffn_matvec_bf16";
+    private static final String FN_SWIGLU_FFN_MATVEC_ROWS_BF16 = "gollek_metal_swiglu_ffn_matvec_rows_bf16";
+    private static final String FN_GEGLU_FFN_MATVEC_ROWS_BF16 = "gollek_metal_geglu_ffn_matvec_rows_bf16";
+    private static final String FN_BF16_FFN_MATVEC_ROWS_VARIANT = "gollek_metal_bf16_ffn_matvec_rows_variant";
     private static final String FN_MATVEC_TB_HALF = "gollek_metal_matvec_tb_half";
     private static final String FN_MATVEC_TB_HALF_MPS = "gollek_metal_matvec_tb_half_mps";
     private static final String FN_MATVEC_T_HALF = "gollek_metal_matvec_t_half";
@@ -466,6 +469,73 @@ public class MetalBinding {
         return !useCpuFallback() && handles.containsKey(FN_GEGLU_FFN_MATVEC_BF16);
     }
 
+    public boolean supportsSwigluFfnMatvecRowsBf16() {
+        return !useCpuFallback() && handles.containsKey(FN_SWIGLU_FFN_MATVEC_ROWS_BF16);
+    }
+
+    public boolean supportsGegluFfnMatvecRowsBf16() {
+        return !useCpuFallback() && handles.containsKey(FN_GEGLU_FFN_MATVEC_ROWS_BF16);
+    }
+
+    public int bf16FfnMatvecRowsVariant() {
+        if (useCpuFallback() || !handles.containsKey(FN_BF16_FFN_MATVEC_ROWS_VARIANT)) {
+            return 0;
+        }
+        return (int) invoke(FN_BF16_FFN_MATVEC_ROWS_VARIANT);
+    }
+
+    public boolean supportsSwigluGateUpMatvecHalf() {
+        return false;
+    }
+
+    public boolean supportsGegluGateUpMatvecHalf() {
+        return false;
+    }
+
+    public boolean supportsSwigluGateUpMatvecBf16() {
+        return false;
+    }
+
+    public boolean supportsGegluGateUpMatvecBf16() {
+        return false;
+    }
+
+    public int swigluGateUpMatvecHalf(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            int inputDim,
+            int intermediateDim) {
+        return -2;
+    }
+
+    public int gegluGateUpMatvecHalf(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            int inputDim,
+            int intermediateDim) {
+        return -2;
+    }
+
+    public int swigluGateUpMatvecBf16(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            int inputDim,
+            int intermediateDim) {
+        return -2;
+    }
+
+    public int gegluGateUpMatvecBf16(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            int inputDim,
+            int intermediateDim) {
+        return -2;
+    }
+
     public int swigluFfnHalf(MemorySegment C,
             MemorySegment A,
             MemorySegment gateW,
@@ -576,6 +646,44 @@ public class MetalBinding {
         }
         return (int) invoke(FN_GEGLU_FFN_MATVEC_BF16, C, A, gateW, upW, downW,
                 inputDim, intermediateDim, outputDim);
+    }
+
+    public int swigluFfnMatvecRowsBf16(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            MemorySegment downW,
+            int rows,
+            int inputDim,
+            int intermediateDim,
+            int outputDim) {
+        if (useCpuFallback()) {
+            throw new UnsupportedOperationException("Metal swigluFfnMatvecRowsBf16 not supported in CPU fallback");
+        }
+        if (!handles.containsKey(FN_SWIGLU_FFN_MATVEC_ROWS_BF16)) {
+            return -2;
+        }
+        return (int) invoke(FN_SWIGLU_FFN_MATVEC_ROWS_BF16, C, A, gateW, upW, downW,
+                rows, inputDim, intermediateDim, outputDim);
+    }
+
+    public int gegluFfnMatvecRowsBf16(MemorySegment C,
+            MemorySegment A,
+            MemorySegment gateW,
+            MemorySegment upW,
+            MemorySegment downW,
+            int rows,
+            int inputDim,
+            int intermediateDim,
+            int outputDim) {
+        if (useCpuFallback()) {
+            throw new UnsupportedOperationException("Metal gegluFfnMatvecRowsBf16 not supported in CPU fallback");
+        }
+        if (!handles.containsKey(FN_GEGLU_FFN_MATVEC_ROWS_BF16)) {
+            return -2;
+        }
+        return (int) invoke(FN_GEGLU_FFN_MATVEC_ROWS_BF16, C, A, gateW, upW, downW,
+                rows, inputDim, intermediateDim, outputDim);
     }
 
     public boolean supportsMatvecTransposedRightHalfPair() {
@@ -954,6 +1062,14 @@ public class MetalBinding {
         return (int) invoke(FN_TRANSPOSE2D, C, A, rows, cols);
     }
 
+    public boolean nativeScaleKernelAvailable() {
+        return false;
+    }
+
+    public int scale(MemorySegment C, MemorySegment A, float scale, int N) {
+        return -2;
+    }
+
     private boolean useCpuFallback() {
         return !isRuntimeActive();
     }
@@ -1077,6 +1193,15 @@ public class MetalBinding {
                 ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
                 ValueLayout.ADDRESS, ValueLayout.ADDRESS,
                 ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+        bind(FN_SWIGLU_FFN_MATVEC_ROWS_BF16, FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+        bind(FN_GEGLU_FFN_MATVEC_ROWS_BF16, FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+        bind(FN_BF16_FFN_MATVEC_ROWS_VARIANT, FunctionDescriptor.of(ValueLayout.JAVA_INT));
 
         bind(FN_MATVEC_TB_HALF, FunctionDescriptor.of(ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,

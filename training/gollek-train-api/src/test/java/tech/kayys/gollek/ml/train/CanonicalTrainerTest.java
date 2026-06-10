@@ -85,6 +85,12 @@ class CanonicalTrainerTest {
         assertEquals("healthy", summary.metadata().get("dataLoaderPlanHealthStatus"));
         assertEquals(Boolean.TRUE, summary.metadata().get("dataLoaderPlanHealthGatePassed"));
         assertEquals(0, summary.metadata().get("dataLoaderPlanHealthIssueCount"));
+        assertEquals(2L, summary.metadata().get("runtimeProfile.input.train.iterator.count"));
+        assertEquals(6L, summary.metadata().get("runtimeProfile.input.train.hasNext.count"));
+        assertEquals(4L, summary.metadata().get("runtimeProfile.input.train.next.count"));
+        assertEquals(2L, summary.metadata().get("runtimeProfile.input.validation.iterator.count"));
+        assertEquals(4L, summary.metadata().get("runtimeProfile.input.validation.hasNext.count"));
+        assertEquals(2L, summary.metadata().get("runtimeProfile.input.validation.next.count"));
     }
 
     @Test
@@ -2524,42 +2530,13 @@ class CanonicalTrainerTest {
     }
 
     @Test
-    void canonicalTrainerRejectsMismatchedTrainingBatchSamplesBeforeForward() throws Exception {
-        Path checkpointDir = Files.createTempDirectory("gollek-typed-trainer-invalid-batch");
-        Linear model = new Linear(1, 1, false);
-        model.parameters().get(0).data().data()[0] = 0.5f;
-        MSELoss mseLoss = new MSELoss();
-        List<Batch> train = List.of(new Batch(
-                GradTensor.of(new float[] {1f, 2f}, 2, 1),
-                GradTensor.of(new float[] {1f}, 1, 1)));
-
-        CanonicalTrainer trainer = CanonicalTrainer.builder()
-                .model(model)
-                .optimizer(SGD.builder(model.parameters(), 0.1f).build())
-                .loss(mseLoss::compute)
-                .epochs(1)
-                .checkpointDir(checkpointDir)
-                .build();
-
+    void dataLoaderBatchRejectsMismatchedTrainingSamplesBeforeTrainerForward() {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> trainer.fit(train, null));
-        assertTrue(error.getMessage().contains("train batch sample count mismatch"));
-        assertEquals(0.5f, model.parameters().get(0).data().data()[0], 1e-6f);
+                () -> new Batch(
+                        GradTensor.of(new float[] {1f, 2f}, 2, 1),
+                        GradTensor.of(new float[] {1f}, 1, 1)));
 
-        TrainingSummary summary = trainer.summary();
-        assertEquals(Boolean.TRUE, summary.metadata().get("failed"));
-        assertEquals(Boolean.TRUE, summary.metadata().get("batchDataGuardEnabled"));
-        assertEquals(Boolean.TRUE, summary.metadata().get("invalidBatchDetected"));
-        assertEquals("train", summary.metadata().get("invalidBatchPhase"));
-        assertEquals("sample-count-mismatch", summary.metadata().get("invalidBatchReason"));
-        assertEquals(Boolean.TRUE, summary.metadata().get("invalidBatchOptimizerStepSkipped"));
-        assertEquals("invalid-batch-train-sample-count-mismatch", summary.metadata().get("stopReason"));
-        assertEquals(0, ((Number) summary.metadata().get("optimizerStepCount")).intValue());
-        assertEquals(0, ((Number) summary.metadata().get("pendingGradientAccumulationBatches")).intValue());
-
-        assertTrue(Files.isRegularFile(checkpointDir.resolve("canonical-report.json")));
-        assertFalse(Files.exists(checkpointDir.resolve("canonical-model.safetensors")));
-        assertFalse(Files.exists(checkpointDir.resolve("canonical-optimizer.state")));
+        assertTrue(error.getMessage().contains("same batch dimension"));
     }
 
     @Test

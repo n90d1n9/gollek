@@ -535,6 +535,8 @@ public class ModelConfig {
                 .ifPresent(value -> cfg.numKvSharedLayers = value);
         metadataIntOptional(meta, arch + ".embedding_length_per_layer_input")
                 .ifPresent(value -> cfg.hiddenSizePerLayerInput = value);
+        metadataIntOptional(meta, arch + ".vocab_size_per_layer_input")
+                .ifPresent(value -> cfg.vocabSizePerLayerInput = value);
         metadataDoubleOptional(meta, arch + ".rope.freq_base_swa")
                 .ifPresent(value -> {
                     cfg.ropeLocalBaseFreq = value;
@@ -836,6 +838,10 @@ public class ModelConfig {
         if (normalized.contains("vaultgemma") || normalized.contains("vault_gemma")
                 || normalized.contains("vault-gemma")) {
             return "VaultGemmaForCausalLM";
+        }
+        if (normalized.contains("gemma4_unified") || normalized.contains("gemma4-unified")
+                || normalized.contains("gemma-4-unified")) {
+            return "Gemma4ForMultimodalLM";
         }
         if (normalized.contains("gemma4_audio") || normalized.contains("gemma4-audio")
                 || normalized.contains("gemma-4-audio")) {
@@ -2000,6 +2006,27 @@ public class ModelConfig {
     public void overrideNumAttentionHeads(int heads) {
         if (heads > 0) {
             this.numAttentionHeads = heads;
+        }
+    }
+
+    /** Override hidden size when config.json is unavailable or reconciled from weights. */
+    public void overrideHiddenSize(int size) {
+        if (size > 0) {
+            this.hiddenSize = size;
+        }
+    }
+
+    /** Override layer count when config.json is unavailable or reconciled from weights. */
+    public void overrideNumHiddenLayers(int layers) {
+        if (layers > 0) {
+            this.numHiddenLayers = layers;
+        }
+    }
+
+    /** Override FFN intermediate size when config.json is unavailable or reconciled from weights. */
+    public void overrideIntermediateSize(int size) {
+        if (size > 0) {
+            this.intermediateSize = size;
         }
     }
 

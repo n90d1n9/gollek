@@ -4,11 +4,8 @@ import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.gollek.spi.model.ModelRuntimeTraits.PromptBosPolicy;
 
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 /**
  * Google Gemma 4 text adapter. Multimodal wrappers stay guarded by runtime checks.
@@ -31,12 +28,13 @@ public class Gemma4Family implements ModelArchitecture {
 
     @Override
     public List<String> supportedArchClassNames() {
-        return List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration");
+        return List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration",
+                "Gemma4ForMultimodalLM", "Gemma4UnifiedForConditionalGeneration");
     }
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("gemma4", "gemma4_text");
+        return List.of("gemma4", "gemma4_text", "gemma4_unified", "gemma4_unified_text");
     }
 
     @Override
@@ -165,24 +163,7 @@ public class Gemma4Family implements ModelArchitecture {
 
     @Override
     public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
-        String modelType = config == null || config.modelType() == null
-                ? ""
-                : config.modelType().toLowerCase(Locale.ROOT);
-        boolean gemma4Text = modelType.startsWith("gemma4");
-        boolean perLayerInputs = config != null
-                && (config.hiddenSizePerLayerInput() > 0 || config.vocabSizePerLayerInput() > 0);
-        return new ModelRuntimeTraits(
-                gemma4Text,
-                false,
-                false,
-                perLayerInputs,
-                gemma4Text ? PromptBosPolicy.NEVER : PromptBosPolicy.GEMMA_TURN_AWARE,
-                gemma4Text ? ModelRuntimeTraits.GEMMA4_CONTROL_TOKEN_TEXTS : Set.of(),
-                gemma4Text,
-                gemma4Text,
-                gemma4Text
-                        ? ModelRuntimeTraits.AttentionRuntimeTraits.gemma4Text()
-                        : ModelRuntimeTraits.AttentionRuntimeTraits.generic(config, perLayerInputs));
+        return Gemma4RuntimeProfile.text(config);
     }
 
     @Override

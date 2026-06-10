@@ -84,6 +84,7 @@ A comprehensive collection of working examples demonstrating Gollek's capabiliti
 ### 🔌 **Third-Party Integrations**
 
 #### JBang Examples
+- [wayang_gollek_serving_bridge.java](jbang/integration/wayang_gollek_serving_bridge.java) - Wayang-Gollek agent runtime on top of Gollek serving APIs
 - [deeplearning4j_integration.java](jbang/integration/deeplearning4j_integration.java) - DL4J integration
 - [opennlp_integration.java](jbang/integration/opennlp_integration.java) - Apache OpenNLP
 - [smile_ml_integration.java](jbang/integration/smile_ml_integration.java) - Smile ML library
@@ -144,9 +145,9 @@ jupyter notebook examples/jupyter
 | **ML Framework / Compatibility** | ✅ 13 | ✅ 1 | Core API and migration examples |
 | **Edge/LiteRT** | ✅ 9 | ❌ | Mobile/edge inference |
 | **Quantization** | ✅ 5 | ❌ | Model compression |
-| **Integrations** | ✅ 5 | ❌ | Third-party libraries |
+| **Integrations** | ✅ 6 | ❌ | Third-party libraries and agent bridges |
 
-**Total**: 53+ JBang scripts, 2+ Jupyter notebooks
+**Total**: 54+ JBang scripts, 2+ Jupyter notebooks
 
 ## 🎯 Learning Paths
 
@@ -166,7 +167,8 @@ jupyter notebook examples/jupyter
 1. `omni_assistant.java` - Multimodal AI
 2. `gollek-quantizer-turboquant.java` - Quantization
 3. `video_analyst.java` - Video understanding
-4. `graph_fusion_example.java` - Optimization
+4. `wayang_gollek_serving_bridge.java` - Agent serving integration boundary
+5. `graph_fusion_example.java` - Optimization
 
 ## 📝 Creating Your Own Examples
 
@@ -221,5 +223,5 @@ We welcome new examples! Please follow these guidelines:
 
 ---
 
-**Last Updated**: April 14, 2026  
-**Total Examples**: 53+ JBang, 2+ Jupyter
+**Last Updated**: April 14, 2026
+**Total Examples**: 54+ JBang, 2+ Jupyter

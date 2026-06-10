@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "audio-processor",
     "families": ["seamless_m4t", "seamless_m4t_v2"]
   }
 }

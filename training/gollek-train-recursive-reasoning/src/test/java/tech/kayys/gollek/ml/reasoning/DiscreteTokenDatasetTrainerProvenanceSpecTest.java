@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -79,6 +80,10 @@ class DiscreteTokenDatasetTrainerProvenanceSpecTest {
         assertTrue(restorePreflight.ready());
         assertEquals("ready", restorePreflight.status());
         assertEquals("run-001", restorePreflight.restorePlan().runId());
+        assertTrue(restorePreflight.actionPlan().ready());
+        assertTrue(restorePreflight.actionPlan().readyWithoutWarnings());
+        assertEquals("continue", restorePreflight.actionPlan().primaryActionCode());
+        restorePreflight.requireNoRequiredActions();
         assertEquals("ready", ((Map<?, ?>) spec.trainingReportMetadata(resumeReport).get("resume")).get("status"));
     }
 
@@ -142,6 +147,15 @@ class DiscreteTokenDatasetTrainerProvenanceSpecTest {
         assertEquals("run-001", selected.runId());
         assertFalse(preflight.ready());
         assertEquals("blocked", preflight.status());
+        assertEquals(preflight.resumeReport().gates(), preflight.gates());
+        assertEquals(preflight.resumeReport().gateSummary(), preflight.gateSummary());
+        assertEquals(preflight.resumeReport().nextActions(), preflight.nextActions());
+        assertEquals(preflight.resumeReport().primaryAction().orElseThrow(), preflight.primaryAction().orElseThrow());
+        assertEquals(preflight.resumeReport().requiredActions(), preflight.requiredActions());
+        assertEquals(preflight.resumeReport().warningActions(), preflight.warningActions());
+        assertEquals(preflight.resumeReport().actionCodes(), preflight.actionCodes());
+        assertEquals(preflight.resumeReport().requiredActionCodes(), preflight.requiredActionCodes());
+        assertEquals(preflight.resumeReport().warningActionCodes(), preflight.warningActionCodes());
         assertTrue(preflight.rejectionReasons().stream()
                 .anyMatch(reason -> reason.contains("fingerprint")));
         assertEquals(
@@ -151,7 +165,40 @@ class DiscreteTokenDatasetTrainerProvenanceSpecTest {
                 "dataset-fingerprint-mismatch",
                 ((Map<?, ?>) preflight.toMetadata().get("explanation")).get("primaryCode"));
         assertTrue(((Map<?, ?>) preflight.toMetadata().get("currentPlanReport")).containsKey("readiness"));
+        assertEquals(
+                5,
+                ((List<?>) ((Map<?, ?>) preflight.toMetadata().get("currentResumeReport")).get("gates")).size());
+        assertEquals(
+                "blocked",
+                ((Map<?, ?>) ((Map<?, ?>) preflight.toMetadata().get("currentResumeReport"))
+                        .get("gateSummary")).get("status"));
+        assertEquals(
+                "rebuild-or-select-matching-dataset",
+                ((Map<?, ?>) preflight.toMetadata().get("actionPlan")).get("primaryActionCode"));
+        assertEquals(
+                "rebuild-or-select-matching-dataset",
+                ((Map<?, ?>) ((Map<?, ?>) preflight.toMetadata().get("currentResumeReport"))
+                        .get("actionPlan")).get("primaryActionCode"));
+        assertEquals(
+                "Blocked",
+                ((Map<?, ?>) preflight.toMetadata().get("readinessBadge")).get("label"));
+        preflight.requireMetadataMatch(preflight.toMetadata());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> preflight.requireMetadataMatch(
+                        replacingNestedMap(preflight.toMetadata(), "actionPlan", "primaryActionCode", "continue")));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> preflight.requireMetadataMatch(
+                        replacingNestedNestedMap(
+                                preflight.toMetadata(),
+                                "currentResumeReport",
+                                "gateSummary",
+                                "status",
+                                "accepted")));
         assertThrows(IllegalStateException.class, preflight::requireReady);
+        assertThrows(IllegalStateException.class, preflight::requireAllGatesAccepted);
+        assertThrows(IllegalStateException.class, preflight::requireNoRequiredActions);
         assertEquals(false, preflight.toMetadata().get("ready"));
         assertThrows(IllegalStateException.class, changed::requireRestorePreflightReady);
     }
@@ -224,6 +271,13 @@ class DiscreteTokenDatasetTrainerProvenanceSpecTest {
         assertEquals(DiscreteTokenDatasetCheckpointResumeCompatibilityMode.FORCE, changed.resumeCompatibilityMode());
         assertTrue(preflight.resumeReport().compatibilityWarnings().stream()
                 .anyMatch(warning -> warning.contains("fingerprint mismatch")));
+        assertEquals(1, preflight.resumeReport().warningGates().size());
+        assertEquals("review-forced-dataset-fingerprint", preflight.actionPlan().primaryActionCode());
+        assertFalse(preflight.actionPlan().readyWithoutWarnings());
+        assertEquals(preflight.actionPlan().actions(), preflight.nextActions());
+        assertEquals(preflight.actionPlan().warningActions(), preflight.warningActions());
+        preflight.requireMetadataMatch(preflight.toMetadata());
+        preflight.requireNoRequiredActions();
     }
 
     @Test
@@ -341,6 +395,54 @@ class DiscreteTokenDatasetTrainerProvenanceSpecTest {
 
     private static TrainingSummary summary() {
         return new TrainingSummary(1, 0.5d, 0, 0.75d, 0.5d, 10L, Map.of("base", "kept"));
+    }
+
+    private static Map<String, Object> replacingNestedMap(
+            Map<String, Object> metadata,
+            String key,
+            String nestedKey,
+            Object nestedValue) {
+        Object nested = metadata.get(key);
+        if (!(nested instanceof Map<?, ?> nestedMap)) {
+            throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
+        }
+        Map<String, Object> nestedCopy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : nestedMap.entrySet()) {
+            nestedCopy.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        nestedCopy.put(nestedKey, nestedValue);
+        Map<String, Object> copy = new LinkedHashMap<>(metadata);
+        copy.put(key, nestedCopy);
+        return copy;
+    }
+
+    private static Map<String, Object> replacingNestedNestedMap(
+            Map<String, Object> metadata,
+            String key,
+            String nestedKey,
+            String nestedNestedKey,
+            Object nestedNestedValue) {
+        Object nested = metadata.get(key);
+        if (!(nested instanceof Map<?, ?> nestedMap)) {
+            throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
+        }
+        Object nestedNested = nestedMap.get(nestedKey);
+        if (!(nestedNested instanceof Map<?, ?> nestedNestedMap)) {
+            throw new IllegalArgumentException("metadata field '" + key + "." + nestedKey + "' must be a map");
+        }
+        Map<String, Object> nestedNestedCopy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : nestedNestedMap.entrySet()) {
+            nestedNestedCopy.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        nestedNestedCopy.put(nestedNestedKey, nestedNestedValue);
+        Map<String, Object> nestedCopy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : nestedMap.entrySet()) {
+            nestedCopy.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        nestedCopy.put(nestedKey, nestedNestedCopy);
+        Map<String, Object> copy = new LinkedHashMap<>(metadata);
+        copy.put(key, nestedCopy);
+        return copy;
     }
 
     private static DiscreteTokenDatasetPlan cleanPlan() {

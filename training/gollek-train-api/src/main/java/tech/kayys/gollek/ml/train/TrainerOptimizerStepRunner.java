@@ -15,7 +15,9 @@ final class TrainerOptimizerStepRunner {
     private final TrainerGradientClipConfig gradientClip;
     private final TrainerBatchGuards.FailureRecorder failures;
     private final Runnable batchSchedulerStep;
-    private final boolean parameterUpdateDiagnostics;
+    private final TrainerParameterUpdateDiagnosticsPolicy parameterUpdateDiagnostics;
+    private final TrainerRuntimeProfiler profiler;
+    private int optimizerStepIndex;
 
     TrainerOptimizerStepRunner(
             Optimizer optimizer,
@@ -39,7 +41,8 @@ final class TrainerOptimizerStepRunner {
                 TrainerGradientClipConfig.norm(gradientClip),
                 failures,
                 batchSchedulerStep,
-                parameterUpdateDiagnostics);
+                TrainerParameterUpdateDiagnosticsPolicy.of(parameterUpdateDiagnostics, 1),
+                new TrainerRuntimeProfiler());
     }
 
     TrainerOptimizerStepRunner(
@@ -49,77 +52,152 @@ final class TrainerOptimizerStepRunner {
             TrainerBatchGuards.FailureRecorder failures,
             Runnable batchSchedulerStep,
             boolean parameterUpdateDiagnostics) {
+        this(
+                optimizer,
+                gradScaler,
+                gradientClip,
+                failures,
+                batchSchedulerStep,
+                TrainerParameterUpdateDiagnosticsPolicy.of(parameterUpdateDiagnostics, 1),
+                new TrainerRuntimeProfiler());
+    }
+
+    TrainerOptimizerStepRunner(
+            Optimizer optimizer,
+            GradScaler gradScaler,
+            TrainerGradientClipConfig gradientClip,
+            TrainerBatchGuards.FailureRecorder failures,
+            Runnable batchSchedulerStep,
+            boolean parameterUpdateDiagnostics,
+            TrainerRuntimeProfiler profiler) {
+        this(
+                optimizer,
+                gradScaler,
+                gradientClip,
+                failures,
+                batchSchedulerStep,
+                TrainerParameterUpdateDiagnosticsPolicy.of(parameterUpdateDiagnostics, 1),
+                profiler);
+    }
+
+    TrainerOptimizerStepRunner(
+            Optimizer optimizer,
+            GradScaler gradScaler,
+            TrainerGradientClipConfig gradientClip,
+            TrainerBatchGuards.FailureRecorder failures,
+            Runnable batchSchedulerStep,
+            TrainerParameterUpdateDiagnosticsPolicy parameterUpdateDiagnostics,
+            TrainerRuntimeProfiler profiler) {
         this.optimizer = Objects.requireNonNull(optimizer, "optimizer must not be null");
         this.gradScaler = gradScaler;
         this.gradientClip = Objects.requireNonNull(gradientClip, "gradientClip must not be null");
         this.failures = Objects.requireNonNull(failures, "failures must not be null");
         this.batchSchedulerStep = Objects.requireNonNull(batchSchedulerStep, "batchSchedulerStep must not be null");
-        this.parameterUpdateDiagnostics = parameterUpdateDiagnostics;
+        this.parameterUpdateDiagnostics = Objects.requireNonNull(
+                parameterUpdateDiagnostics,
+                "parameterUpdateDiagnostics must not be null");
+        this.profiler = Objects.requireNonNull(profiler, "profiler must not be null");
     }
 
     StepResult step(int pendingGradientAccumulationBatches) {
         if (pendingGradientAccumulationBatches <= 0) {
             return StepResult.noPendingGradients();
         }
-        TrainerTensorDiagnostics.scaleGradients(
-                optimizer.parameters(),
-                1.0f / pendingGradientAccumulationBatches);
-        if (gradScaler != null && gradScaler.unscaleAndCheck(optimizer)) {
+        profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_ACCUMULATION_SCALE,
+                () -> TrainerTensorDiagnostics.scaleGradients(
+                        optimizer.parameters(),
+                        1.0f / pendingGradientAccumulationBatches));
+        boolean overflow = gradScaler != null && profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_AMP_UNSCALE_CHECK,
+                () -> gradScaler.unscaleAndCheck(optimizer));
+        if (overflow) {
             double scaleBeforeUpdate = gradScaler.getScale();
-            gradScaler.update();
-            optimizer.zeroGrad();
+            profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_AMP_OVERFLOW_UPDATE, () -> gradScaler.update());
+            profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_ZERO_GRAD, () -> optimizer.zeroGrad());
             return StepResult.overflowSkipped(
                     scaleBeforeUpdate,
                     gradScaler.getScale());
         }
 
-        TensorDiagnostics gradientBeforeClip = TrainerTensorDiagnostics.gradients(optimizer.parameters());
-        TrainerTensorDiagnostics.requireFinite(gradientBeforeClip, "train", "gradient", true, failures);
+        TensorDiagnostics gradientBeforeClip = profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_DIAGNOSTICS_BEFORE_CLIP,
+                () -> TrainerTensorDiagnostics.gradients(optimizer.parameters()));
+        profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_VALIDATE_BEFORE_CLIP,
+                () -> TrainerTensorDiagnostics.requireFinite(gradientBeforeClip, "train", "gradient", true, failures));
         double gradientClipScale = 1.0;
         boolean gradientClipped = false;
         if (gradientClip.normEnabled()) {
-            GradientClipper.ClipResult clipResult =
-                    GradientClipper.clipByNormDetailed(optimizer.parameters(), (float) gradientClip.normThreshold());
+            GradientClipper.ClipResult clipResult = profiler.time(
+                    TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_NORM_CLIP,
+                    () -> GradientClipper.clipByNormDetailed(
+                            optimizer.parameters(),
+                            (float) gradientClip.normThreshold()));
             gradientClipScale = clipResult.scale();
             gradientClipped = clipResult.clipped();
         }
         if (gradientClip.valueEnabled()) {
-            TensorDiagnostics afterNormClip = TrainerTensorDiagnostics.gradients(optimizer.parameters());
+            TensorDiagnostics afterNormClip = profiler.time(
+                    TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_DIAGNOSTICS_AFTER_CLIP,
+                    () -> TrainerTensorDiagnostics.gradients(optimizer.parameters()));
             if (afterNormClip.maxAbs() > gradientClip.valueThreshold()) {
-                GradientClipper.clipByValue(
-                        optimizer.parameters(),
-                        (float) -gradientClip.valueThreshold(),
-                        (float) gradientClip.valueThreshold());
+                profiler.time(
+                        TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_VALUE_CLIP,
+                        () -> GradientClipper.clipByValue(
+                                optimizer.parameters(),
+                                (float) -gradientClip.valueThreshold(),
+                                (float) gradientClip.valueThreshold()));
                 gradientClipped = true;
             }
         }
-        TensorDiagnostics gradientAfterClip = TrainerTensorDiagnostics.gradients(optimizer.parameters());
-        TrainerTensorDiagnostics.requireFinite(gradientAfterClip, "train", "clipped-gradient", true, failures);
+        TensorDiagnostics gradientAfterClip = profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_DIAGNOSTICS_AFTER_CLIP,
+                () -> TrainerTensorDiagnostics.gradients(optimizer.parameters()));
+        profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_GRADIENT_VALIDATE_AFTER_CLIP,
+                () -> TrainerTensorDiagnostics.requireFinite(
+                        gradientAfterClip,
+                        "train",
+                        "clipped-gradient",
+                        true,
+                        failures));
 
         double lossScaleBeforeUpdate = gradScaler == null ? Double.NaN : gradScaler.getScale();
-        List<float[]> parametersBeforeStep = parameterUpdateDiagnostics
-                ? TrainerTensorDiagnostics.snapshotParameters(optimizer.parameters())
+        int nextOptimizerStepIndex = optimizerStepIndex + 1;
+        boolean captureParameterUpdates = parameterUpdateDiagnostics.shouldCapture(nextOptimizerStepIndex);
+        List<float[]> parametersBeforeStep = captureParameterUpdates
+                ? profiler.time(
+                        TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_SNAPSHOT,
+                        () -> TrainerTensorDiagnostics.snapshotParameters(optimizer.parameters()))
                 : List.of();
         if (gradScaler == null) {
-            optimizer.step();
+            profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_STEP, () -> optimizer.step());
         } else {
-            gradScaler.step(optimizer);
+            profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_STEP, () -> gradScaler.step(optimizer));
         }
-        TensorDiagnostics parameterUpdates = parameterUpdateDiagnostics
-                ? TrainerTensorDiagnostics.parameterUpdates(optimizer.parameters(), parametersBeforeStep)
+        TensorDiagnostics parameterUpdates = captureParameterUpdates
+                ? profiler.time(
+                        TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_UPDATE_DIAGNOSTICS,
+                        () -> TrainerTensorDiagnostics.parameterUpdates(optimizer.parameters(), parametersBeforeStep))
                 : TensorDiagnostics.empty();
-        TensorDiagnostics parametersAfterStep = TrainerTensorDiagnostics.parameters(optimizer.parameters());
-        TrainerTensorDiagnostics.requireFinite(parametersAfterStep, "train", "parameter", false, failures);
+        TensorDiagnostics parametersAfterStep = profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_DIAGNOSTICS,
+                () -> TrainerTensorDiagnostics.parameters(optimizer.parameters()));
+        profiler.time(
+                TrainerRuntimeProfiler.Phase.OPTIMIZER_PARAMETER_VALIDATE,
+                () -> TrainerTensorDiagnostics.requireFinite(parametersAfterStep, "train", "parameter", false, failures));
 
-        batchSchedulerStep.run();
+        profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_SCHEDULER_STEP, batchSchedulerStep);
         double lossScale = Double.NaN;
         boolean overflowDetected = false;
         if (gradScaler != null) {
-            gradScaler.update();
+            profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_AMP_UPDATE, () -> gradScaler.update());
             lossScale = gradScaler.getScale();
             overflowDetected = gradScaler.overflowDetected();
         }
-        optimizer.zeroGrad();
+        profiler.time(TrainerRuntimeProfiler.Phase.OPTIMIZER_ZERO_GRAD, () -> optimizer.zeroGrad());
+        optimizerStepIndex = nextOptimizerStepIndex;
         return StepResult.optimizerStepped(
                 gradScaler != null,
                 lossScaleBeforeUpdate,
@@ -129,7 +207,7 @@ final class TrainerOptimizerStepRunner {
                 gradientAfterClip,
                 gradientClipScale,
                 gradientClipped,
-                parameterUpdateDiagnostics,
+                captureParameterUpdates,
                 parameterUpdates,
                 parametersAfterStep);
     }

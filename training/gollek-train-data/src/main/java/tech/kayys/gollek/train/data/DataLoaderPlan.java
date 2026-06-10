@@ -22,13 +22,11 @@ public record DataLoaderPlan(
 
     public DataLoaderPlan {
         kind = normalizeKind(kind);
-        requireNonNegative(datasetSize, "datasetSize");
-        requireNonNegative(sampleCount, "sampleCount");
-        if (batchSize <= 0) {
-            throw new IllegalArgumentException("batchSize must be positive, got: " + batchSize);
-        }
-        requireNonNegative(batchCount, "batchCount");
-        requireNonNegative(initialEpoch, "initialEpoch");
+        DataLoaderCounts.requireDatasetSize(datasetSize);
+        DataLoaderCounts.requireSampleCount(sampleCount);
+        DataLoaderBatchSizes.requirePositive(batchSize);
+        DataLoaderCounts.requireBatchCount(batchCount);
+        DataLoaderEpochs.requireInitialEpoch(initialEpoch);
     }
 
     public boolean hasShuffleSeed() {
@@ -103,15 +101,4 @@ public record DataLoaderPlan(
         return normalized;
     }
 
-    private static void requireNonNegative(int value, String fieldName) {
-        if (value < 0) {
-            throw new IllegalArgumentException(fieldName + " must be non-negative, got: " + value);
-        }
-    }
-
-    private static void requireNonNegative(long value, String fieldName) {
-        if (value < 0L) {
-            throw new IllegalArgumentException(fieldName + " must be non-negative, got: " + value);
-        }
-    }
 }

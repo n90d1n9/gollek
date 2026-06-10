@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-text-processor",
     "families": ["video_llava", "video-llava", "vipllava", "vip_llava"]
   }
 }

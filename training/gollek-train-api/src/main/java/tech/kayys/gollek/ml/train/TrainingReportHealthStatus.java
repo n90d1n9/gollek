@@ -160,7 +160,7 @@ public record TrainingReportHealthStatus(
         if (map == null || map.isEmpty()) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(map);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
         return snapshot instanceof Map<?, ?> snapshotMap
                 ? (Map<String, Object>) snapshotMap
                 : Map.of();

@@ -26,14 +26,8 @@ public record DiscreteTokenDatasetFingerprint(
     public static final int DEFAULT_SHORT_LENGTH = 12;
 
     public DiscreteTokenDatasetFingerprint {
-        algorithm = Objects.requireNonNull(algorithm, "algorithm must not be null");
-        if (algorithm.isBlank()) {
-            throw new IllegalArgumentException("algorithm must not be blank");
-        }
-        value = Objects.requireNonNull(value, "value must not be null").toLowerCase();
-        if (value.isBlank()) {
-            throw new IllegalArgumentException("value must not be blank");
-        }
+        algorithm = DiscreteTokenDatasetMetadataSupport.requireText(algorithm, "algorithm");
+        value = DiscreteTokenDatasetMetadataSupport.requireText(value, "value").toLowerCase();
         if (exampleCount < 0) {
             throw new IllegalArgumentException("exampleCount must be >= 0 but was " + exampleCount);
         }
@@ -65,9 +59,9 @@ public record DiscreteTokenDatasetFingerprint(
     public static DiscreteTokenDatasetFingerprint fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetFingerprint(
-                requiredString(metadata, "algorithm"),
-                requiredString(metadata, "value"),
-                requiredInt(metadata, "exampleCount"));
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "algorithm"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "value"),
+                DiscreteTokenDatasetMetadataSupport.requiredInt(metadata, "exampleCount"));
     }
 
     public static DiscreteTokenDatasetFingerprint fromMetadataSection(Map<?, ?> metadata) {
@@ -80,7 +74,7 @@ public record DiscreteTokenDatasetFingerprint(
         if (key.isBlank()) {
             throw new IllegalArgumentException("key must not be blank");
         }
-        Object value = required(metadata, key);
+        Object value = DiscreteTokenDatasetMetadataSupport.required(metadata, key);
         if (value instanceof Map<?, ?> fingerprintMetadata) {
             return fromMetadata(fingerprintMetadata);
         }
@@ -105,44 +99,6 @@ public record DiscreteTokenDatasetFingerprint(
         metadata.put("shortValue", shortValue());
         metadata.put("exampleCount", exampleCount);
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
-    }
-
-    private static String requiredString(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof CharSequence text) {
-            return text.toString();
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static int requiredInt(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < 0.0d
-                    || numericValue > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be a non-negative integer");
-            }
-            return number.intValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Integer.parseInt(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
-                        "metadata field '" + key + "' must be a non-negative integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a non-negative integer");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
     }
 
     private static void updateConfig(MessageDigest digest, DiscreteTokenDatasetPlanConfig config) {

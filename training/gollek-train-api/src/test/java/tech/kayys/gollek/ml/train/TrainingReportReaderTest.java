@@ -28,6 +28,9 @@ class TrainingReportReaderTest {
         Path reportFile = tempDir.resolve("canonical-report.json");
         Map<String, Object> metadata = Map.of(
                 "device", "metal",
+                "parameterUpdateDiagnosticsEnabled", true,
+                "parameterUpdateDiagnosticsSampled", true,
+                "parameterUpdateDiagnosticsIntervalSteps", 4,
                 "epochHistory", List.of(
                         Map.ofEntries(
                                 Map.entry("epoch", 0),
@@ -293,6 +296,15 @@ class TrainingReportReaderTest {
         assertEquals(0.3, typedOptimization.latest().gradientL2Norm().orElseThrow(), 1e-12);
         assertEquals(0.03, typedOptimization.latest().parameterUpdateToParameterL2Ratio().orElseThrow(), 1e-12);
 
+        TrainingReportParameterUpdateDiagnosticsPolicy policy =
+                TrainingReportReader.parameterUpdateDiagnosticsPolicyView(report);
+        assertTrue(policy.enabled());
+        assertTrue(policy.sampled());
+        assertEquals(4, policy.intervalSteps());
+        assertEquals(
+                Map.of("enabled", true, "sampled", true, "intervalSteps", 4),
+                TrainingReportReader.parameterUpdateDiagnosticsPolicy(report));
+
         assertEquals(0, TrainingReportReader.diagnosticsSummary(report).get("total"));
         assertEquals("NONE", TrainingReportReader.diagnosticsSummary(report).get("highestSeverity"));
         assertEquals("metal", TrainingReportReader.metadata(report).get("device"));
@@ -431,6 +443,12 @@ class TrainingReportReaderTest {
         assertEquals(false, report.optimization().available());
         assertEquals(0, report.optimization().count());
         assertTrue(report.optimization().latest().gradientL2Norm().isEmpty());
+        assertEquals(false, report.parameterUpdateDiagnosticsPolicy().enabled());
+        assertEquals(false, report.parameterUpdateDiagnosticsPolicy().sampled());
+        assertEquals(1, report.parameterUpdateDiagnosticsPolicy().intervalSteps());
+        assertEquals(
+                Map.of("enabled", false, "sampled", false, "intervalSteps", 1),
+                report.parameterUpdateDiagnosticsPolicyMap());
         assertTrue(report.latestGradientL2Norm().isEmpty());
         assertTrue(report.latestParameterUpdateToParameterL2Ratio().isEmpty());
         assertEquals("2026-05-18T12:13:14Z", report.generatedAt().orElseThrow().toString());
@@ -678,9 +696,70 @@ class TrainingReportReaderTest {
         assertEquals(1, health.issueCount());
         assertEquals(List.of("data-distribution-class-imbalance"), health.issueCodes());
         assertEquals("warning", TrainingReport.of(report).dataHealth().distribution().status());
+        assertEquals(
+                "data-distribution-class-imbalance",
+                TrainingReportReader.dataHealthIssueSummaries(report).get(0).get("code"));
+        assertEquals(
+                TrainingReportReader.dataHealthIssueSummaries(report),
+                TrainingReport.of(report).dataHealthIssueSummaries());
         assertTrue(TrainingReportReader.diagnosticFindings(report).stream()
                 .anyMatch(finding -> "data_health.issue_detected".equals(finding.code())));
         assertEquals("BACKFILLED", TrainingReportReader.diagnosticProvenance(report).status());
+    }
+
+    @Test
+    void exposesDataHealthIssueSummariesFromPersistedReports() {
+        Map<String, Object> issue = Map.of(
+                "code", "data-loader-train-prefetch-buffer-too-small",
+                "severity", "warning",
+                "artifact", "train",
+                "blocking", false,
+                "message", "train loader prefetch buffer can hold only 1 item(s)",
+                "action", "increase the prefetch buffer",
+                "evidence", Map.of(
+                        "trainLoaderPlan.prefetch.maxBufferedItems", 1,
+                        "trainLoaderPlan.prefetch.enabled", true));
+        Map<String, Object> report = Map.of(
+                "schema", TrainingReportReader.CANONICAL_SCHEMA,
+                "dataHealth", Map.of(
+                        "loaderPlan",
+                        Map.ofEntries(
+                                Map.entry("available", true),
+                                Map.entry("status", "warning"),
+                                Map.entry("healthy", false),
+                                Map.entry("gatePassed", true),
+                                Map.entry("issueDetected", true),
+                                Map.entry("issueCount", 1),
+                                Map.entry("warningCount", 1),
+                                Map.entry("errorCount", 0),
+                                Map.entry("issueCodes", List.of("data-loader-train-prefetch-buffer-too-small")),
+                                Map.entry("issueSeverities", List.of("warning")),
+                                Map.entry("recommendedActions", List.of("increase the prefetch buffer")),
+                                Map.entry("issues", List.of(issue))),
+                        "distribution",
+                        Map.ofEntries(
+                                Map.entry("available", true),
+                                Map.entry("status", "healthy"),
+                                Map.entry("healthy", true),
+                                Map.entry("gatePassed", true),
+                                Map.entry("issueDetected", false),
+                                Map.entry("issueCount", 0),
+                                Map.entry("warningCount", 0),
+                                Map.entry("errorCount", 0),
+                                Map.entry("issues", List.of()))));
+
+        List<Map<String, Object>> summaries = TrainingReportReader.dataHealthIssueSummaries(report);
+
+        assertEquals(1, summaries.size());
+        assertEquals("data-loader-train-prefetch-buffer-too-small", summaries.get(0).get("code"));
+        assertEquals("warning", summaries.get(0).get("severity"));
+        assertEquals("train", summaries.get(0).get("artifact"));
+        assertEquals(Boolean.FALSE, summaries.get(0).get("blocking"));
+        assertEquals(
+                "trainLoaderPlan.prefetch.enabled=true, trainLoaderPlan.prefetch.maxBufferedItems=1",
+                summaries.get(0).get("evidenceSummary"));
+        assertEquals(summaries, TrainingReport.of(report).dataHealthIssueSummaries());
+        assertThrows(UnsupportedOperationException.class, () -> summaries.add(Map.of()));
     }
 
     @Test

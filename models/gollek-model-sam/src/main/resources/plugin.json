@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-processor",
     "families": ["sam", "sam_hq", "sam2", "segment_anything"]
   }
 }

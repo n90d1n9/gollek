@@ -16,6 +16,7 @@ import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,6 +48,23 @@ class ModelConfigTraitsTest {
         ModelConfigTraits traits = ModelConfigTraits.create(config, architecture);
 
         assertTrue(traits.gemma4StylePerLayerInputs());
+    }
+
+    @Test
+    void vocabOnlyPerLayerMetadataDoesNotClaimGemma4StylePerLayerInputs() {
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "gemma4_unified",
+                "gemma4_unified.vocab_size_per_layer_input", 262144));
+        ModelArchitecture architecture = architectureReturning(ModelRuntimeTraits.builder()
+                .gemma4Text()
+                .build());
+
+        ModelConfigTraits traits = ModelConfigTraits.create(config, architecture);
+
+        assertTrue(traits.gemma4Text());
+        assertEquals(0, traits.hiddenSizePerLayerInput());
+        assertEquals(262144, traits.vocabSizePerLayerInput());
+        assertFalse(traits.gemma4StylePerLayerInputs());
     }
 
     private static ModelArchitecture architectureReturning(ModelRuntimeTraits traits) {

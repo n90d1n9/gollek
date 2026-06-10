@@ -153,6 +153,10 @@ public record DiscreteTokenDatasetCheckpointLineageGraph(
         return DiscreteTokenDatasetCheckpointLineageHealth.healthMetadata(this);
     }
 
+    public DiscreteTokenDatasetCheckpointLineageHealthSnapshot healthSnapshot() {
+        return DiscreteTokenDatasetCheckpointLineageHealthSnapshot.fromGraph(this);
+    }
+
     public String status() {
         return DiscreteTokenDatasetCheckpointLineageHealth.status(this);
     }
@@ -282,7 +286,7 @@ public record DiscreteTokenDatasetCheckpointLineageGraph(
     }
 
     public LineageChain chainForRunId(String runId) {
-        runId = requireText(runId, "runId");
+        runId = DiscreteTokenDatasetMetadataSupport.requireText(runId, "runId");
         List<Node> matches = nodesByRunId().getOrDefault(runId, List.of());
         if (matches.isEmpty()) {
             return LineageChain.missingTarget(runId, null);
@@ -487,16 +491,8 @@ public record DiscreteTokenDatasetCheckpointLineageGraph(
             return List.of();
         }
         return values.stream()
-                .map(value -> requireText(value, name))
+                .map(value -> DiscreteTokenDatasetMetadataSupport.requireText(value, name))
                 .toList();
-    }
-
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 
     private record DraftNode(
@@ -573,15 +569,17 @@ public record DiscreteTokenDatasetCheckpointLineageGraph(
 
         public Node {
             checkpointDir = Objects.requireNonNull(checkpointDir, "checkpointDir must not be null");
-            runId = requireText(runId, "runId");
-            parentRunId = parentRunId == null ? null : requireText(parentRunId, "parentRunId");
+            runId = DiscreteTokenDatasetMetadataSupport.requireText(runId, "runId");
+            parentRunId = parentRunId == null
+                    ? null
+                    : DiscreteTokenDatasetMetadataSupport.requireText(parentRunId, "parentRunId");
             if (checkpointStep < 0L) {
                 throw new IllegalArgumentException("checkpointStep must be >= 0 but was " + checkpointStep);
             }
             if (createdAtEpochMillis < 0L) {
                 throw new IllegalArgumentException("createdAtEpochMillis must be >= 0 but was " + createdAtEpochMillis);
             }
-            status = requireText(status, "status");
+            status = DiscreteTokenDatasetMetadataSupport.requireText(status, "status");
             lineage = Objects.requireNonNull(lineage, "lineage must not be null");
             parentMismatchReasons = immutableTexts(parentMismatchReasons, "parentMismatchReason");
             childRunIds = immutableTexts(childRunIds, "childRunId");
@@ -652,13 +650,13 @@ public record DiscreteTokenDatasetCheckpointLineageGraph(
             List<Node> nodes) {
 
         public LineageChain {
-            targetRunId = requireText(targetRunId, "targetRunId");
+            targetRunId = DiscreteTokenDatasetMetadataSupport.requireText(targetRunId, "targetRunId");
             missingParentRunId = missingParentRunId == null
                     ? null
-                    : requireText(missingParentRunId, "missingParentRunId");
+                    : DiscreteTokenDatasetMetadataSupport.requireText(missingParentRunId, "missingParentRunId");
             ambiguousParentRunId = ambiguousParentRunId == null
                     ? null
-                    : requireText(ambiguousParentRunId, "ambiguousParentRunId");
+                    : DiscreteTokenDatasetMetadataSupport.requireText(ambiguousParentRunId, "ambiguousParentRunId");
             parentMismatchRunIds = immutableTexts(parentMismatchRunIds, "parentMismatchRunId");
             nodes = immutableNodes(nodes);
             if (!targetPresent && !nodes.isEmpty()) {

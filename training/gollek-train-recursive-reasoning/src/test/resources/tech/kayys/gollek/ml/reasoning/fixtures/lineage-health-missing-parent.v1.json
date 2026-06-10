@@ -1,0 +1,204 @@
+{
+  "alertLevel": "critical",
+  "ambiguousParentRunIds": [],
+  "blockingIssueCount": 1,
+  "checkSummary": {
+    "alertLevel": "critical",
+    "allPassed": false,
+    "dominantSeverity": "critical",
+    "failed": 1,
+    "failingCodes": [
+      "GOLLEK_LINEAGE_MISSING_PARENT"
+    ],
+    "failingNames": [
+      "parentExists"
+    ],
+    "failingSeverityCounts": {
+      "critical": 1,
+      "info": 0,
+      "warning": 0
+    },
+    "failureRate": 1.0,
+    "hasCriticalFailures": true,
+    "hasInfoFailures": false,
+    "hasWarningFailures": false,
+    "issueCodes": [
+      "GOLLEK_LINEAGE_MISSING_PARENT"
+    ],
+    "passRate": 0.0,
+    "passed": 0,
+    "primaryFailingAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "primaryFailingCheck": {
+      "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+      "affectedRunIds": [
+        "run-child"
+      ],
+      "blocking": true,
+      "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+      "count": 1,
+      "detail": "One or more non-root checkpoints reference a missing parent run id.",
+      "label": "Parent exists",
+      "name": "parentExists",
+      "passed": false,
+      "runIds": [
+        "run-parent"
+      ],
+      "severity": "critical",
+      "status": "fail",
+      "type": "missing-parent"
+    },
+    "primaryFailingCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "primaryFailingMessage": "One or more non-root checkpoints reference a missing parent run id.",
+    "primaryFailingName": "parentExists",
+    "primaryFailingSeverity": "critical",
+    "primaryFailingType": "missing-parent",
+    "primaryIssueCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "recommendedAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "severityCounts": {
+      "critical": 1,
+      "info": 0,
+      "warning": 0
+    },
+    "status": "unhealthy",
+    "summaryMessage": "Lineage health checks reported 1 failure(s).",
+    "total": 1
+  },
+  "checks": [
+    {
+      "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+      "affectedRunIds": [
+        "run-child"
+      ],
+      "blocking": true,
+      "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+      "count": 1,
+      "detail": "One or more non-root checkpoints reference a missing parent run id.",
+      "label": "Parent exists",
+      "name": "parentExists",
+      "passed": false,
+      "runIds": [
+        "run-parent"
+      ],
+      "severity": "critical",
+      "status": "fail",
+      "type": "missing-parent"
+    }
+  ],
+  "cycleRunIds": [],
+  "duplicateRunIds": [],
+  "failingCheckCount": 1,
+  "failingChecks": [
+    {
+      "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+      "affectedRunIds": [
+        "run-child"
+      ],
+      "blocking": true,
+      "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+      "count": 1,
+      "detail": "One or more non-root checkpoints reference a missing parent run id.",
+      "label": "Parent exists",
+      "name": "parentExists",
+      "passed": false,
+      "runIds": [
+        "run-parent"
+      ],
+      "severity": "critical",
+      "status": "fail",
+      "type": "missing-parent"
+    }
+  ],
+  "healthBadge": {
+    "alertLevel": "critical",
+    "checkStatus": "fail",
+    "label": "Unhealthy",
+    "primaryCheckAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "primaryCheckCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "primaryCheckSeverity": "critical",
+    "primaryCheckType": "missing-parent",
+    "primaryIssueCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "recommendedAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "score": 0.0,
+    "status": "unhealthy",
+    "token": "lineage-health-unhealthy",
+    "tooltip": "checkpoint lineage graph unhealthy: missing-parent",
+    "variant": "danger"
+  },
+  "healthScore": 0.0,
+  "healthy": false,
+  "issueCodes": [
+    "GOLLEK_LINEAGE_MISSING_PARENT"
+  ],
+  "issueCount": 1,
+  "issueDetailCount": 1,
+  "issueDetails": [
+    {
+      "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+      "blocking": true,
+      "checkpointDir": "/tmp/gollek-lineage-missing-parent/child",
+      "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+      "detail": "parent run id was not found under checkpoint root",
+      "parentRunId": "run-parent",
+      "runId": "run-child",
+      "severity": "error",
+      "type": "missing-parent"
+    }
+  ],
+  "issueTypes": [
+    "missing-parent"
+  ],
+  "kind": "checkpoint-lineage-health",
+  "missingParentRunIds": [
+    "run-parent"
+  ],
+  "parentMismatchRunIds": [],
+  "passingCheckCount": 0,
+  "primaryFailingCheck": {
+    "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "affectedRunIds": [
+      "run-child"
+    ],
+    "blocking": true,
+    "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "count": 1,
+    "detail": "One or more non-root checkpoints reference a missing parent run id.",
+    "label": "Parent exists",
+    "name": "parentExists",
+    "passed": false,
+    "runIds": [
+      "run-parent"
+    ],
+    "severity": "critical",
+    "status": "fail",
+    "type": "missing-parent"
+  },
+  "primaryFailingCheckAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+  "primaryFailingCheckCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+  "primaryFailingCheckMessage": "One or more non-root checkpoints reference a missing parent run id.",
+  "primaryFailingCheckName": "parentExists",
+  "primaryFailingCheckSeverity": "critical",
+  "primaryFailingCheckType": "missing-parent",
+  "primaryIssue": {
+    "action": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+    "blocking": true,
+    "checkpointDir": "/tmp/gollek-lineage-missing-parent/child",
+    "code": "GOLLEK_LINEAGE_MISSING_PARENT",
+    "detail": "parent run id was not found under checkpoint root",
+    "parentRunId": "run-parent",
+    "runId": "run-child",
+    "severity": "error",
+    "type": "missing-parent"
+  },
+  "primaryIssueAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+  "primaryIssueCode": "GOLLEK_LINEAGE_MISSING_PARENT",
+  "primaryIssueType": "missing-parent",
+  "recommendedAction": "Restore the parent checkpoint into the same root or select a checkpoint whose ancestry is complete.",
+  "rootDir": "/tmp/gollek-lineage-missing-parent",
+  "schemaVersion": "gollek.checkpoint-lineage-health.v1",
+  "status": "unhealthy",
+  "summary": "checkpoint lineage graph unhealthy: missing-parent",
+  "summaryMessage": "checkpoint lineage graph unhealthy: missing-parent",
+  "unresolvedRunIds": [
+    "run-child"
+  ]
+}

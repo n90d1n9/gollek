@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "vision-text-processor",
     "families": ["pix2struct", "pix2struct_text_model", "pix2struct_vision_model"]
   }
 }

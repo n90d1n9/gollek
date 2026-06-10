@@ -24,10 +24,7 @@ abstract class TensorDataLoaderBuilderSupport<B extends TensorDataLoaderBuilderS
     protected abstract B self();
 
     public B batchSize(int batchSize) {
-        if (batchSize <= 0) {
-            throw new IllegalArgumentException("batchSize must be positive, got: " + batchSize);
-        }
-        this.batchSize = batchSize;
+        this.batchSize = DataLoaderBatchSizes.requirePositive(batchSize);
         return self();
     }
 
@@ -80,9 +77,7 @@ abstract class TensorDataLoaderBuilderSupport<B extends TensorDataLoaderBuilderS
     }
 
     public B initialEpoch(long initialEpoch) {
-        if (initialEpoch < 0L) {
-            throw new IllegalArgumentException("initialEpoch must be non-negative, got: " + initialEpoch);
-        }
+        DataLoaderEpochs.requireInitialEpoch(initialEpoch);
         this.initialEpoch = initialEpoch;
         return self();
     }
@@ -92,13 +87,13 @@ abstract class TensorDataLoaderBuilderSupport<B extends TensorDataLoaderBuilderS
     }
 
     public B sampler(IndexSampler sampler) {
-        this.samplerPlan = TensorSamplerPlan.explicit(sampler);
+        this.samplerPlan = TensorSamplerPlan.explicit(DataLoaderSamplerSelection.requireSampler(sampler));
         this.batchSampler = null;
         return self();
     }
 
     public B batchSampler(BatchSampler batchSampler) {
-        this.batchSampler = Objects.requireNonNull(batchSampler, "batchSampler must not be null");
+        this.batchSampler = DataLoaderSamplerSelection.requireBatchSampler(batchSampler);
         this.samplerPlan = TensorSamplerPlan.none();
         return self();
     }

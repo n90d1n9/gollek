@@ -14,6 +14,9 @@ mkdir -p "$PASS_DIR/compare"
   printf 'key\tvalue\n'
   printf 'bundle\t%s\n' "$PASS_DIR/bundle.tsv"
   printf 'currentNoise\t%s\n' "$PASS_DIR/current-noise.tsv"
+  printf 'currentDiagnosis\t%s\n' "$PASS_DIR/current-diagnosis.tsv"
+  printf 'baselineDiagnosis\t%s\n' "$PASS_DIR/baseline-diagnosis.tsv"
+  printf 'diagnosisDiffSummary\t%s\n' "$PASS_DIR/diagnosis-diff-summary.tsv"
 } > "$PASS_DIR/config.tsv"
 {
   printf 'stage\tstatus\texitCode\tartifact\tstdout\tstderr\treason\n'
@@ -39,6 +42,43 @@ mkdir -p "$PASS_DIR/compare"
   printf 'comparison\t%s/compare/comparison.tsv\trequired\tpresent\tComparison artifact\n' "$PASS_DIR"
   printf 'optionalMissing\t%s/optional-missing.tsv\toptional\tmissing\tOptional missing artifact\n' "$PASS_DIR"
 } > "$PASS_DIR/bundle.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'status\tpass\n'
+  printf 'primaryStage\tdecodeRun\n'
+  printf 'primaryMetric\tonnxDecodeRunMs\n'
+  printf 'primaryValueMs\t36.500\n'
+  printf 'primaryShareOfOrtPercent\t51.408\n'
+  printf 'primaryShareOfDurationPercent\t3.259\n'
+  printf 'recommendation\tFocus current decode path.\n'
+} > "$PASS_DIR/current-diagnosis.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'status\tpass\n'
+  printf 'primaryStage\tprefillRun\n'
+  printf 'primaryMetric\tonnxPrefillRunMs\n'
+  printf 'primaryValueMs\t42.000\n'
+  printf 'primaryShareOfOrtPercent\t60.000\n'
+  printf 'primaryShareOfDurationPercent\t4.000\n'
+  printf 'recommendation\tFocus baseline prefill path.\n'
+} > "$PASS_DIR/baseline-diagnosis.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'comparedStages\t8\n'
+  printf 'fasterStages\t3\n'
+  printf 'slowerStages\t4\n'
+  printf 'sameStages\t1\n'
+  printf 'skippedStages\t0\n'
+  printf 'primaryStageChanged\ttrue\n'
+  printf 'largestSlowdownStage\tprefillRun\n'
+  printf 'largestSlowdownMetric\tonnxPrefillRunMs\n'
+  printf 'largestSlowdownMs\t12.000\n'
+  printf 'largestSlowdownPercent\t40.000\n'
+  printf 'largestSpeedupStage\tdecodeRun\n'
+  printf 'largestSpeedupMetric\tonnxDecodeRunMs\n'
+  printf 'largestSpeedupMs\t-3.500\n'
+  printf 'largestSpeedupPercent\t-8.750\n'
+} > "$PASS_DIR/diagnosis-diff-summary.tsv"
 
 bash "$ROOT_DIR/scripts/onnx-performance-decision.sh" \
   --config "$PASS_DIR/config.tsv" \
@@ -55,6 +95,21 @@ if ! grep -qx $'key\tvalue' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'lastStage\tcompare' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'regressionFailures\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'regressionCompared\t2' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryMetric\tonnxDecodeRunMs' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'primaryValueMs\t36.500' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'recommendation\tFocus current decode path.' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'currentPrimaryStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'baselinePrimaryStage\tprefillRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisStageChanged\ttrue' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffComparedStages\t8' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffFasterStages\t3' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffSlowerStages\t4' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffPrimaryStageChanged\ttrue' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSlowdownStage\tprefillRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSlowdownMs\t12.000' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSpeedupStage\tdecodeRun' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffLargestSpeedupMs\t-3.500' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'worstRegressionMetric\tdurationMs' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'worstRegressionPercent\t1.500' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'noiseFailures\t0' "$PASS_DIR/decision.tsv" \
@@ -64,8 +119,14 @@ if ! grep -qx $'key\tvalue' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundleMissing\t1' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundleRequiredMissing\t0' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'bundle\t'"$PASS_DIR"'/bundle.tsv' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosis\t'"$PASS_DIR"'/current-diagnosis.tsv' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'currentDiagnosis\t'"$PASS_DIR"'/current-diagnosis.tsv' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'baselineDiagnosis\t'"$PASS_DIR"'/baseline-diagnosis.tsv' "$PASS_DIR/decision.tsv" \
+    || ! grep -qx $'diagnosisDiffSummary\t'"$PASS_DIR"'/diagnosis-diff-summary.tsv' "$PASS_DIR/decision.tsv" \
     || ! grep -qx $'json\t'"$PASS_DIR"'/decision.json' "$PASS_DIR/decision.tsv" \
     || ! grep -q '"status": "pass"' "$PASS_DIR/decision.json" \
+    || ! grep -q '"primaryStage": "decodeRun"' "$PASS_DIR/decision.json" \
+    || ! grep -q '"diagnosisDiffLargestSpeedupStage": "decodeRun"' "$PASS_DIR/decision.json" \
     || ! grep -q '"worstRegressionMetric": "durationMs"' "$PASS_DIR/decision.json"; then
   echo "Expected passing decision summary" >&2
   cat "$PASS_DIR/decision.tsv" >&2

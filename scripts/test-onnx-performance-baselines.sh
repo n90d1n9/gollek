@@ -13,7 +13,7 @@ BASELINE_ROOT="${TMP_DIR}/baselines"
 
 bash "$BASELINES_SCRIPT" list "$BASELINE_ROOT" >"${TMP_DIR}/empty.tsv"
 if [[ "$(wc -l < "${TMP_DIR}/empty.tsv" | tr -d ' ')" != "1" ]] \
-    || ! grep -qx $'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tupdatedUtc' "${TMP_DIR}/empty.tsv"; then
+    || ! grep -qx $'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tprimaryStage\tprimaryMetric\tprimaryValueMs\tprimaryShareOfOrtPercent\tupdatedUtc' "${TMP_DIR}/empty.tsv"; then
   echo "Expected empty baseline list header" >&2
   cat "${TMP_DIR}/empty.tsv" >&2
   exit 1
@@ -36,7 +36,23 @@ mkdir -p "$BASELINE_ROOT/webworld" "$BASELINE_ROOT/fast" "$BASELINE_ROOT/no-mani
   printf 'onnxBackend\tCoreML\n'
   printf 'expectBackend\tCoreML\n'
   printf 'aggregateLabel\tmeasured\n'
+  printf 'decision\t%s\n' "$BASELINE_ROOT/webworld/decision.tsv"
+  printf 'diagnosis\t%s\n' "$BASELINE_ROOT/webworld/diagnosis.tsv"
 } > "$BASELINE_ROOT/webworld/latest-manifest.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'primaryStage\tdecodeRun\n'
+  printf 'primaryMetric\tonnxDecodeRunMs\n'
+  printf 'primaryValueMs\t37.500\n'
+  printf 'primaryShareOfOrtPercent\t53.571\n'
+} > "$BASELINE_ROOT/webworld/decision.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'primaryStage\tprefillRun\n'
+  printf 'primaryMetric\tonnxPrefillRunMs\n'
+  printf 'primaryValueMs\t22.500\n'
+  printf 'primaryShareOfOrtPercent\t32.143\n'
+} > "$BASELINE_ROOT/webworld/diagnosis.tsv"
 {
   printf 'case\tstatus\texitCode\tdurationMs\tpromptEvalTps\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxBackend\tonnxTokenizeMs\tonnxInputPrepMs\tonxUnusedMs\tonnxPrefillRunMs\tonnxDecodeRunMs\tonnxOrtRunMs\tonnxLogitsSelectMs\tonnxSamplingMs\tonnxSteps\tcombinedLog\tstderrLog\n'
   printf 'measured-mean\tpass\t\t900.000\t21.000\t11.000\t8.500\t180.000\t45.000\tCPU\t2.000\t3.000\t\t18.000\t28.000\t58.000\t4.000\t5.000\t2.000\t/tmp/summary-fast.tsv\t\n'
@@ -53,7 +69,15 @@ mkdir -p "$BASELINE_ROOT/webworld" "$BASELINE_ROOT/fast" "$BASELINE_ROOT/no-mani
   printf 'onnxBackend\tCPU\n'
   printf 'expectBackend\tCPU\n'
   printf 'aggregateLabel\tmeasured\n'
+  printf 'diagnosis\tdiagnosis.tsv\n'
 } > "$BASELINE_ROOT/fast/latest-manifest.tsv"
+{
+  printf 'key\tvalue\n'
+  printf 'primaryStage\tprefillRun\n'
+  printf 'primaryMetric\tonnxPrefillRunMs\n'
+  printf 'primaryValueMs\t18.000\n'
+  printf 'primaryShareOfOrtPercent\t31.034\n'
+} > "$BASELINE_ROOT/fast/diagnosis.tsv"
 printf 'aggregate\n' > "$BASELINE_ROOT/no-manifest/latest.tsv"
 {
   printf 'key\tvalue\n'
@@ -89,7 +113,11 @@ if ! awk -F '\t' -v root="$BASELINE_ROOT" '
     if ($column["tokenLatencyMs"] != "55.000") exit 17
     if ($column["onnxOrtRunMs"] != "70.000") exit 18
     if ($column["onnxDecodeRunMs"] != "37.500") exit 19
-    if ($column["updatedUtc"] == "") exit 20
+    if ($column["primaryStage"] != "decodeRun") exit 20
+    if ($column["primaryMetric"] != "onnxDecodeRunMs") exit 21
+    if ($column["primaryValueMs"] != "37.500") exit 22
+    if ($column["primaryShareOfOrtPercent"] != "53.571") exit 23
+    if ($column["updatedUtc"] == "") exit 24
   }
   END { exit found ? 0 : 1 }
 ' "${TMP_DIR}/list.tsv"; then
@@ -109,6 +137,7 @@ if ! awk -F '\t' '
     found = 1
     if ($column["status"] != "missing-manifest") exit 2
     if ($column["model"] != "") exit 3
+    if ($column["primaryStage"] != "") exit 9
     if ($column["aggregateLabel"] != "measured") exit 6
     if ($column["durationMs"] != "") exit 7
   }
@@ -116,6 +145,7 @@ if ! awk -F '\t' '
     foundMissingLatest = 1
     if ($column["status"] != "missing-latest") exit 4
     if ($column["model"] != "missing-latest-model") exit 5
+    if ($column["primaryStage"] != "") exit 10
     if ($column["durationMs"] != "") exit 8
   }
   END { exit found && foundMissingLatest ? 0 : 1 }
@@ -154,9 +184,23 @@ if ! awk -F '\t' 'NR == 1 { next } NR == 2 { exit $1 == "webworld" ? 0 : 1 }' "$
   exit 1
 fi
 
+bash "$BASELINES_SCRIPT" list --root "$BASELINE_ROOT" --sort primaryValueMs >"${TMP_DIR}/sort-primary-value.tsv"
+if ! awk -F '\t' 'NR == 1 { next } NR == 2 { exit $1 == "fast" ? 0 : 1 }' "${TMP_DIR}/sort-primary-value.tsv"; then
+  echo "Expected primaryValueMs sort to put smallest diagnosed stage first" >&2
+  cat "${TMP_DIR}/sort-primary-value.tsv" >&2
+  exit 1
+fi
+
+bash "$BASELINES_SCRIPT" list --root "$BASELINE_ROOT" --sort=-primaryShareOfOrtPercent >"${TMP_DIR}/sort-primary-share.tsv"
+if ! awk -F '\t' 'NR == 1 { next } NR == 2 { exit $1 == "webworld" ? 0 : 1 }' "${TMP_DIR}/sort-primary-share.tsv"; then
+  echo "Expected primaryShareOfOrtPercent sort to put largest diagnosed share first" >&2
+  cat "${TMP_DIR}/sort-primary-share.tsv" >&2
+  exit 1
+fi
+
 bash "$BASELINES_SCRIPT" list --root "$BASELINE_ROOT" --format table --sort durationMs >"${TMP_DIR}/table.txt"
 if ! grep -q '^name' "${TMP_DIR}/table.txt" \
-    || ! grep -q '^fast[[:space:]][[:space:]]*ready[[:space:]][[:space:]]*CPU[[:space:]][[:space:]]*900.000[[:space:]][[:space:]]*11.000[[:space:]][[:space:]]*58.000' "${TMP_DIR}/table.txt"; then
+    || ! grep -q '^fast[[:space:]][[:space:]]*ready[[:space:]][[:space:]]*CPU[[:space:]][[:space:]]*prefillRun[[:space:]][[:space:]]*900.000[[:space:]][[:space:]]*11.000[[:space:]][[:space:]]*58.000' "${TMP_DIR}/table.txt"; then
   echo "Expected human-readable table output" >&2
   cat "${TMP_DIR}/table.txt" >&2
   exit 1

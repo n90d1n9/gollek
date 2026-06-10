@@ -10,14 +10,28 @@ playbooks. It tracks the Gradle-first module vision (`ml/*`, `trainer/*`,
    - `brew install jbang/tap/jbang`
 2. Prepare local artifacts from `gollek/` project root:
    - `./run-install-local-macos.sh`
+   - `./gradlew publishJbangTrainerExamplesToMavenLocal`
+   - `./gradlew smokeJbangTrainerRuntimeProfileBudgetGate`
+   - `./gradlew verifyJbangTrainerRuntimeProfileBudgetGateOutput`
+   - `./gradlew smokeJbangTrainerQualityProfileCiGateEvidence`
+   - `./gradlew verifyJbangTrainerQualityProfileCiGateEvidenceOutput`
+   - `./gradlew smokeJbangTrainerExamples`
+   - `./gradlew smokeJbangAgentBridgeExamples -Pgollek.jbang.agentBridge.offline=false`
+   - The Gradle smoke lane uses `build/jbang/.jbang` plus offline JBang
+     resolution after the local artifacts are published. Add
+     `-Pgollek.jbang.trainer.offline=false` only to refresh remote JBang
+     dependencies intentionally.
 3. Run examples from `gollek/examples/jbang`:
    - `jbang trainer/trainer_runtime_bootstrap.java`
+   - `jbang trainer/trainer_runtime_profile_budget_gate.java`
+   - `jbang trainer/trainer_quality_profile_ci_gate_evidence.java`
    - `jbang sdk/gollek-quickstart.java`
    - `jbang sdk/gollek-sdk-core-example.java`
    - `jbang sdk/gollek-sdk-train-example.java 2`
    - `jbang sdk/gollek-sdk-vision-example.java`
    - `jbang sdk/gollek-sdk-export-example.java`
    - `jbang sdk/gollek-sdk-augment-example.java`
+   - `jbang run --no-integrations integration/wayang_gollek_serving_bridge.java --mock`
 
 ## Recommended Paths
 
@@ -27,6 +41,19 @@ playbooks. It tracks the Gradle-first module vision (`ml/*`, `trainer/*`,
   - Uses `gollek-trainer` + `gollek-trainer-api`
   - Prints runtime mode (`legacy-bridge` vs `canonical-fallback`)
   - Shows listener lifecycle and training summary
+- `trainer/trainer_runtime_profile_budget_gate.java`
+  - Uses `gollek-ml-api`
+  - Builds a tiny canonical runtime-profile report, evaluates strict trainer
+    runtime budgets, writes JSON/Markdown/JUnit evidence, and verifies the
+    persisted artifact bundle
+  - Supports `--out`, named policies, threshold overrides, and `--fail-on-gate`
+- `trainer/trainer_quality_profile_ci_gate_evidence.java`
+  - Uses `gollek-ml-api` to train tiny baseline/candidate reports
+  - Runs a quality-profile CI gate, writes the manifest, writes
+    JSON/Markdown/JUnit verification evidence, and verifies the persisted
+    evidence bundle
+  - Supports `--out`, `--device`, `--profile`, epoch controls, and
+    `--fail-on-gate`
 - `trainer/trainer_diffusion_opd_ddim.java`
   - Uses `gollek-ml-api` + `gollek-ml-diffusion-opd` + `gollek-diffusion`
   - Demonstrates Java-first DiffusionOPD wiring with DDIM-style scheduler flow
@@ -214,6 +241,28 @@ playbooks. It tracks the Gradle-first module vision (`ml/*`, `trainer/*`,
 These are compatibility entrypoints with legacy file names, but they now run
 against the current local artifact set.
 
+### Agent Serving Bridge
+
+- `integration/wayang_gollek_serving_bridge.java`
+  - Uses the lightweight `gollek-sdk-agent` module directly
+  - The full `gollek-sdk-remote` client still exposes the same agent client
+    through `client.agent()`
+  - Demonstrates Gollek as the serving/inference engine for Wayang-Gollek
+  - Shows capability and contract discovery, MCP tool schema discovery,
+    request validation, embeddings, caller-owned RAG retrieval, streamed chat
+    deltas, streamed tool-call previews, tool-call handoff, and Wayang-owned
+    memory
+  - Runs with `--mock` by default so the flow can be inspected without a live
+    server; use `jbang run --no-integrations ...` because this plain Java
+    bridge does not need JBang's Quarkus post-build integration
+  - CI/local smoke: `./gradlew smokeJbangAgentBridgeExamples
+    -Pgollek.jbang.agentBridge.offline=false`
+  - Smoke output is written to
+    `build/jbang/integration/wayang-gollek-serving-bridge.out`
+  - Use `--live --base-url http://localhost:8080 --api-key community` against
+    a running Gollek endpoint after publishing
+    `:sdk:gollek-sdk-agent:publishToMavenLocal`
+
 ### Experimental v0.2/v0.3 Scripts
 
 - `sdk/tensor_operations_v02.java`
@@ -245,7 +294,7 @@ extra local publishing beyond the quickstart path.
 | `multimodal/` | Vision/audio/text demos | Mixed quality, evolving APIs |
 | `edge/` | LiteRT and edge paths | Device-oriented scenarios |
 | `quantizer/` | Quantization experiments | AWQ/GPTQ/TurboQuant samples |
-| `integration/` | 3rd-party integrations | DL4J, Smile, Tribuo, OpenNLP |
+| `integration/` | 3rd-party integrations and agent bridges | Wayang-Gollek, DL4J, Smile, Tribuo, OpenNLP |
 | `common/` | Baseline utilities | Legacy starter scripts |
 
 ## Compatibility Notes

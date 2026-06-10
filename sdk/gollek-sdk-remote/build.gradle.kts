@@ -17,17 +17,22 @@ repositories {
     mavenLocal()
 }
 
+val jacksonVersion = "2.16.1"
+val mutinyVersion = "2.5.5"
+val jakartaValidationVersion = "3.0.2"
+
 dependencies {
+    api(project(":sdk:gollek-sdk-agent"))
     api(project(":sdk:gollek-sdk-core"))
     api(project(":spi:gollek-spi"))
     api(project(":spi:gollek-spi-inference"))
     api(project(":spi:gollek-spi-model"))
     api(project(":spi:gollek-spi-multimodal"))
     api(project(":spi:gollek-spi-provider"))
-    implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
-    implementation(group = "io.smallrye.reactive", name = "mutiny")
+    implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind", version = jacksonVersion)
+    implementation(group = "io.smallrye.reactive", name = "mutiny", version = mutinyVersion)
     implementation(group = "io.reactivex.rxjava3", name = "rxjava", version = "3.1.8")
-    implementation(group = "jakarta.validation", name = "jakarta.validation-api")
+    implementation(group = "jakarta.validation", name = "jakarta.validation-api", version = jakartaValidationVersion)
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testImplementation(group = "org.mockito", name = "mockito-core")
     testImplementation(group = "org.mockito", name = "mockito-junit-jupiter")

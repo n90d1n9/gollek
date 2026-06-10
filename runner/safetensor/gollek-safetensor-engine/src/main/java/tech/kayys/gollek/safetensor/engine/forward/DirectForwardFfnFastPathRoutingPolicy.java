@@ -103,6 +103,17 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         return Boolean.TRUE.equals(enableMetalGateUpMatvecFfnExplicit());
     }
 
+    boolean shouldUseMetalMatvecFfnPrefillRows(ModelConfigTraits traits, long rows) {
+        if (options.disableMetalMatvecFfn() || !isGemma4FfnPolicyTarget(traits)) {
+            return false;
+        }
+        if (!Boolean.TRUE.equals(enableMetalMatvecFfnPrefillRowsExplicit())) {
+            return false;
+        }
+        long maxRows = Math.max(0L, (long) metalMatvecFfnPrefillMaxRows());
+        return rows > 1L && rows <= maxRows;
+    }
+
     boolean shouldValidateMetalMatvecFfn(boolean traceFfnFastPath) {
         return options.validateMetalMatvecFfn() || traceFfnFastPath;
     }
@@ -137,6 +148,12 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
                 options.enableMetalGateUpMatvecFfn());
     }
 
+    private Boolean enableMetalMatvecFfnPrefillRowsExplicit() {
+        return runtimeOptionalBooleanProperty(
+                DirectForwardFfnFastPathOptions.ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY,
+                options.enableMetalMatvecFfnPrefillRows());
+    }
+
     private int gemma4FusedFfnPrefillMinRows() {
         String runtimeValue = System.getProperty(
                 DirectForwardFfnFastPathOptions.GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY);
@@ -147,6 +164,19 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
             return Integer.parseInt(runtimeValue.trim());
         } catch (NumberFormatException ignored) {
             return options.gemma4FusedFfnPrefillMinRows();
+        }
+    }
+
+    private int metalMatvecFfnPrefillMaxRows() {
+        String runtimeValue = System.getProperty(
+                DirectForwardFfnFastPathOptions.METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY);
+        if (runtimeValue == null || runtimeValue.isBlank()) {
+            return options.metalMatvecFfnPrefillMaxRows();
+        }
+        try {
+            return Integer.parseInt(runtimeValue.trim());
+        } catch (NumberFormatException ignored) {
+            return options.metalMatvecFfnPrefillMaxRows();
         }
     }
 

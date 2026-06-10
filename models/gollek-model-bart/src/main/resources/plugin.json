@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["bart"]
+    "families": ["bart"],
+    "tokenizerKind": "hf-bpe"
   }
 }

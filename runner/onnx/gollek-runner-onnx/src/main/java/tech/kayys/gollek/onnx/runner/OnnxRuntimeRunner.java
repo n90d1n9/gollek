@@ -13,7 +13,6 @@ import tech.kayys.gollek.runner.RunnerConfiguration;
 import tech.kayys.gollek.extension.AbstractGollekRunner;
 import tech.kayys.gollek.kvcache.PagedKVCacheManager;
 import tech.kayys.gollek.onnx.binding.OnnxRuntimeBinding;
-import tech.kayys.gollek.onnx.binding.OnnxRuntimeCpuFallback;
 import tech.kayys.gollek.error.ErrorCode;
 import tech.kayys.gollek.exception.RunnerInitializationException;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
@@ -28,17 +27,13 @@ import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
 import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
-import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * ONNX Runtime ModelRunner for Gollek.
@@ -152,6 +147,7 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
 
     public static final String RUNNER_NAME = "onnxruntime";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final OnnxStopTokens DEFAULT_EOS_TOKEN_IDS = OnnxStopTokens.of(2);
 
     @ConfigProperty(name = "gollek.runners.onnx.enabled", defaultValue = "true")
     boolean enabled;
@@ -180,6 +176,12 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     @ConfigProperty(name = "gollek.runners.onnx.vocab-size", defaultValue = "32000")
     int vocabSize;
 
+    @ConfigProperty(name = "gollek.runners.onnx.text-workspace-pool-size", defaultValue = "1")
+    int textWorkspacePoolSize;
+
+    @ConfigProperty(name = "gollek.runners.onnx.input-tensor-cache-entries", defaultValue = "32")
+    int inputTensorCacheEntries;
+
     @Inject
     PagedKVCacheManager kvCacheManager;
 
@@ -202,9 +204,10 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     private int kvHeads = 2;
     private int kvHeadSize = 128;
     private int kvElementType = OnnxRuntimeBinding.ONNX_TENSOR_FLOAT16;
-    private Set<Integer> eosTokenIds = Set.of(2);
+    private OnnxStopTokens eosTokenIds = DEFAULT_EOS_TOKEN_IDS;
     private Path optimizedModelPath;
     private String optimizedModelCacheState = "disabled";
+    private final ThreadLocal<long[]> singleTokenDecodeScratch = ThreadLocal.withInitial(() -> new long[1]);
     private boolean genAiConfigLoaded;
     private String inputIdsName = "input_ids";
     private String attentionMaskName = "attention_mask";
@@ -214,6 +217,8 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     private String pastValueNameTemplate = "past_key_values.%d.value";
     private String presentKeyNameTemplate = "present.%d.key";
     private String presentValueNameTemplate = "present.%d.value";
+    private OnnxTextSessionResources textSessionResources = OnnxTextSessionResources.empty();
+    private OnnxTextWorkspacePool textWorkspacePool;
 
     // ── ModelRunner identity ──────────────────────────────────────────────────
 
@@ -240,6 +245,7 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
                 Map.of("execution_provider", executionProvider,
                         "graph_opt_level", String.valueOf(graphOptLevel),
                         "past_kv_cache", String.valueOf(usePastKvCache),
+                        "input_tensor_cache_entries", String.valueOf(inputTensorCacheEntries),
                         "project",
                         "https://github.com/microsoft/onnxruntime"));
     }
@@ -274,6 +280,12 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         deviceId = config.getIntParameter("device_id", deviceId);
         intraOpThreads = config.getIntParameter("intra_op_threads", intraOpThreads);
         vocabSize = config.getIntParameter("vocab_size", vocabSize);
+        textWorkspacePoolSize = config.getIntParameter("text_workspace_pool_size",
+                config.getIntParameter("workspace_pool_size", textWorkspacePoolSize));
+        textWorkspacePoolSize = Math.max(0, textWorkspacePoolSize);
+        inputTensorCacheEntries = config.getIntParameter("input_tensor_cache_entries",
+                config.getIntParameter("input_cache_entries", inputTensorCacheEntries));
+        inputTensorCacheEntries = Math.max(0, inputTensorCacheEntries);
 
         // Load the ORT shared library via FFM
         Path resolvedLibraryPath = resolveLibraryPath(libraryPath);
@@ -363,9 +375,27 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
             inputNames[i] = ort.getInputName(ortSession, i);
         for (int i = 0; i < numOutputs; i++)
             outputNames[i] = ort.getOutputName(ortSession, i);
-
+        OnnxTextSessionContract textSessionContract = buildTextRuntimePlan();
+        OnnxTextSessionResources newTextSessionResources = OnnxTextSessionResources.create(
+                ort,
+                textSessionContract,
+                vocabSize,
+                kvHeads,
+                kvHeadSize,
+                kvElementType);
         // Pre-create CPU memory info (reused for all tensor allocations)
         memInfo = ort.createCpuMemoryInfo();
+        OnnxTextWorkspacePool newTextWorkspacePool = OnnxTextWorkspacePool.create(
+                ort,
+                ortSession,
+                memInfo,
+                newTextSessionResources,
+                textWorkspacePoolSize,
+                inputTensorCacheEntries);
+        closeTextWorkspacePool();
+        closeTextSessionResources();
+        textSessionResources = newTextSessionResources;
+        textWorkspacePool = newTextWorkspacePool;
 
         this.manifest = modelManifest;
         this.initialized = true;
@@ -391,179 +421,168 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
      */
     @Override
     public InferenceResponse infer(InferenceRequest request) throws InferenceException {
+        OnnxTextGenerationResult generation = generateText(request, OnnxGeneratedTokenObserver.NOOP, () -> false, null);
+
+        InferenceResponse.Builder response = InferenceResponse.builder()
+                .requestId(generation.requestId())
+                .content(generation.content())
+                .model(manifest.modelId())
+                .inputTokens(generation.inputTokens())
+                .outputTokens(generation.outputTokens())
+                .durationMs(generation.durationMs())
+                .finishReason(generation.finishReason().responseReason())
+                .metadata("runner", RUNNER_NAME)
+                .metadata("finish_reason", generation.finishReason().wireValue());
+
+        if (generation.fallback()) {
+            return response
+                    .metadata("fallback", true)
+                    .metadata(generation.profile().metadata(
+                            "fallback",
+                            generation.inputTokens(),
+                            generation.outputTokens(),
+                            generation.durationMs()))
+                    .build();
+        }
+
+        OnnxTextSessionContract contract = textSessionResources.contract();
+        return response
+                .metadata("ep", resolvedEp)
+                .metadata("past_kv", usePastKvCache)
+                .metadata("onnx_genai_config", genAiConfigLoaded)
+                .metadata("onnx_logits_name", contract.logitsName())
+                .metadata("onnx_kv_layers", contract.kvLayerCount())
+                .metadata("onnx_optimized_model_cache_state", optimizedModelCacheState)
+                .metadata("onnx_optimized_model_cache_path",
+                        optimizedModelPath == null ? null : optimizedModelPath.toString())
+                .metadata("prompt_len", generation.inputTokens())
+                .metadata("output_len", generation.content().length())
+                .metadata(generation.profile().metadata(
+                        resolvedEp,
+                        generation.inputTokens(),
+                        generation.outputTokens(),
+                        generation.durationMs()))
+                .build();
+    }
+
+    private OnnxTextGenerationResult generateText(
+            InferenceRequest request,
+            OnnxGeneratedTokenObserver tokenObserver,
+            BooleanSupplier cancelled,
+            Supplier<String> finalContentSupplier) throws InferenceException {
         if (!initialized)
             throw new InferenceException(
                     ErrorCode.RUNTIME_INVALID_STATE, "ONNX Runtime runner not initialized");
 
         long t0 = System.currentTimeMillis();
-        String reqId = request.getRequestId();
-        int maxTok = getMaxTokens(request);
-        int[] prompt = tokenize(request);
+        OnnxInferenceProfile profile = OnnxInferenceProfile.start(request);
+        OnnxTextGenerationSetup setup = OnnxTextGenerationSetup.prepare(
+                request,
+                tokenObserver,
+                cancelled,
+                profile,
+                this::getMaxTokens,
+                this::tokenize,
+                () -> OnnxStreamingTokenDecoder.create(tokenizer, this::detokenize),
+                finalContentSupplier);
         totalRequests.incrementAndGet();
 
-        if (!ort.isNativeAvailable()) {
-            // CPU fallback: return dummy response
-            float[] logits = OnnxRuntimeCpuFallback.run(MemorySegment.NULL, vocabSize);
-            return InferenceResponse.builder()
-                    .requestId(reqId)
-                    .content(detokenize(sampleGreedy(logits)))
-                    .model(manifest.modelId())
-                    .durationMs(System.currentTimeMillis() - t0)
-                    .metadata("runner", RUNNER_NAME)
-                    .metadata("fallback", true)
-                    .build();
+        if (setup.maxTokens() == 0) {
+            OnnxTextGenerationResult result = OnnxTextZeroTokenGeneration.finish(setup, t0);
+            totalLatencyMs.addAndGet(result.durationMs());
+            return result;
         }
 
-        try (Arena arena = Arena.ofAuto()) {
-            StringBuilder sb = new StringBuilder();
-            List<Integer> tokenIds = new ArrayList<>();
-            for (int t : prompt)
-                tokenIds.add(t);
+        if (!ort.isNativeAvailable()) {
+            return OnnxTextCpuFallbackGeneration.create(vocabSize, this::sampleGreedy, this::detokenize)
+                    .generate(setup, t0);
+        }
 
-            // Past KV cache tensors from previous steps (null on first step)
-            MemorySegment[] pastKv = null;
-            String[] pastKvNames = buildPastKvInputNames();
-            String[] presentNames = buildPresentKvOutputNames();
-            boolean hasKvInputs = usePastKvCache
-                    && pastKvNames.length > 0
-                    && hasAnyInputName(pastKvNames);
-            boolean hasPositionIds = hasInputName(positionIdsName);
-            long consumedTokens = 0;
+        try {
+            int[] prompt = setup.prompt();
+            int maxTok = setup.maxTokens();
+            String content;
+            int outputTokenCount;
+            OnnxTextGenerationProgress progress;
 
-            for (int step = 0; step < maxTok; step++) {
-                boolean isPrefill = hasKvInputs && pastKv == null;
-
-                // Build input_ids tensor — shape [1, seqLen]
-                int[] inputIds;
-                if (isPrefill) {
-                    inputIds = prompt;
-                } else if (hasKvInputs) {
-                    inputIds = new int[] { tokenIds.get(tokenIds.size() - 1) };
-                } else {
-                    inputIds = tokenIds.stream().mapToInt(Integer::intValue).toArray();
-                }
-                long seqLen = inputIds.length;
-
-                // Convert to int64 (ONNX expects int64 for token ids)
-                MemorySegment ids64 = arena.allocate((long) inputIds.length * 8L, 8);
-                for (int i = 0; i < inputIds.length; i++)
-                    ids64.setAtIndex(ValueLayout.JAVA_LONG, i, inputIds[i]);
-
-                MemorySegment idsValue = ort.createTensorWithData(
-                        memInfo, ids64,
-                        new long[] { 1, seqLen },
-                        OnnxRuntimeBinding.ONNX_TENSOR_INT64);
-
-                long attentionLength = hasKvInputs ? consumedTokens + seqLen : seqLen;
-
-                // Attention mask tensor — shape [1, attentionLength], all ones
-                MemorySegment maskSeg = arena.allocate(attentionLength * 8L, 8);
-                for (long i = 0; i < attentionLength; i++)
-                    maskSeg.setAtIndex(ValueLayout.JAVA_LONG, i, 1L);
-                MemorySegment maskValue = ort.createTensorWithData(
-                        memInfo, maskSeg,
-                        new long[] { 1, attentionLength },
-                        OnnxRuntimeBinding.ONNX_TENSOR_INT64);
-
-                MemorySegment positionValue = MemorySegment.NULL;
-
-                // Assemble full input list (ids + mask + optional position ids / past KV)
-                List<String> allInputNames = new ArrayList<>(List.of(inputIdsName, attentionMaskName));
-                List<MemorySegment> allInputVals = new ArrayList<>(List.of(idsValue, maskValue));
-                List<MemorySegment> releaseAfterRun = new ArrayList<>(List.of(idsValue, maskValue));
-
-                if (hasPositionIds) {
-                    MemorySegment positionSeg = arena.allocate(seqLen * 8L, 8);
-                    for (long i = 0; i < seqLen; i++) {
-                        positionSeg.setAtIndex(ValueLayout.JAVA_LONG, i, consumedTokens + i);
+            OnnxTextWorkspacePool.Lease lease = textWorkspacePool.acquire(prompt.length, maxTok);
+            try (lease) {
+                OnnxTextRunWorkspace workspace = lease.workspace();
+                OnnxTokenHistory tokenIds = workspace.resetTokenHistory(prompt, maxTok);
+                OnnxGeneratedTokens generatedTokenIds = workspace.resetGeneratedTokens(maxTok);
+                OnnxTextTokenAcceptor tokenAcceptor = OnnxTextTokenAcceptor.create(
+                        generatedTokenIds,
+                        tokenIds,
+                        setup.observer(),
+                        setup.stopStringDecoder(),
+                        setup.stopStrings(),
+                        this::isEos);
+                progress = new OnnxTextGenerationProgress();
+                for (int step = 0; step < maxTok; step++) {
+                    if (setup.cancellation().getAsBoolean()) {
+                        progress.cancel();
+                        break;
                     }
-                    positionValue = ort.createTensorWithData(
-                            memInfo,
-                            positionSeg,
-                            new long[] { 1, seqLen },
-                            OnnxRuntimeBinding.ONNX_TENSOR_INT64);
-                    allInputNames.add(positionIdsName);
-                    allInputVals.add(positionValue);
-                    releaseAfterRun.add(positionValue);
-                }
+                    OnnxTextDecodeStep decodeStep = workspace.planDecodeStep(
+                            prompt.length,
+                            tokenIds.size(),
+                            progress.consumedTokens());
 
-                if (hasKvInputs && pastKv != null) {
-                    for (int k = 0; k < pastKvNames.length; k++) {
-                        allInputNames.add(pastKvNames[k]);
-                        allInputVals.add(pastKv[k]);
+                    long prepareStart = profile.mark();
+                    long seqLen = decodeStep.sequenceLength();
+                    OnnxRunInputValues inputValues = workspace.assembleInputs(
+                            tokenIds,
+                            prompt.length,
+                            decodeStep);
+
+                    int next;
+                    try {
+                        workspace.execute(inputValues, profile, prepareStart, decodeStep.prefill());
+
+                        // Select from last-token logits without materializing the full
+                        // vocabulary row as a Java float array.
+                        long logitsStart = profile.mark();
+                        next = workspace.selectNextToken(seqLen);
+                        profile.recordLogitsSelect(logitsStart);
+                    } finally {
+                        workspace.releaseOwnedInputs(inputValues);
                     }
-                } else if (hasKvInputs) {
-                    for (String pastKvName : pastKvNames) {
-                        MemorySegment empty = createEmptyPastKvTensor();
-                        allInputNames.add(pastKvName);
-                        allInputVals.add(empty);
-                        releaseAfterRun.add(empty);
-                    }
+
+                    workspace.capturePresentAndReleaseLogits();
+                    progress.advance(seqLen);
+
+                    long samplingStart = profile.mark();
+                    profile.markFirstToken();
+                    OnnxTextTokenDecision tokenDecision = tokenAcceptor.accept(next);
+                    boolean finished = progress.apply(tokenDecision);
+                    profile.recordSampling(samplingStart);
+                    if (finished)
+                        break;
                 }
-
-                // Resolve output names: logits + present KV cache
-                String[] runOutputNames = hasKvInputs && presentNames.length > 0
-                        ? concatArrays(new String[] { logitsName }, presentNames)
-                        : new String[] { logitsName };
-
-                // Run inference
-                MemorySegment[] outputs = ort.run(
-                        ortSession, MemorySegment.NULL,
-                        allInputNames.toArray(String[]::new),
-                        allInputVals.toArray(MemorySegment[]::new),
-                        runOutputNames);
-
-                // Extract logits from output[0] — shape [1, seqLen, vocabSize]
-                // For decode, only the last token's logits matter
-                float[] logits = ort.getTensorDataFloatLast(outputs[0], vocabSize);
-
-                for (MemorySegment value : releaseAfterRun) {
-                    ort.releaseValue(value);
-                }
-
-                // Save present KV cache for next step
-                if (hasKvInputs && outputs.length > 1) {
-                    if (pastKv != null)
-                        for (MemorySegment v : pastKv)
-                            ort.releaseValue(v);
-                    pastKv = new MemorySegment[outputs.length - 1];
-                    System.arraycopy(outputs, 1, pastKv, 0, pastKv.length);
-                }
-                ort.releaseValue(outputs[0]);
-                consumedTokens += seqLen;
-
-                int next = sampleGreedy(logits);
-                if (isEos(next))
-                    break;
-                sb.append(detokenize(next));
-                tokenIds.add(next);
+                profile.recordInputTensorCache(workspace.inputTensorCacheStats());
+                long finalDecodeStart = profile.mark();
+                content = finalContent(setup, generatedTokenIds);
+                profile.recordFinalDecode(finalDecodeStart);
+                outputTokenCount = generatedTokenIds.size();
             }
-
-            // Release remaining past KV tensors
-            if (pastKv != null)
-                for (MemorySegment v : pastKv)
-                    ort.releaseValue(v);
+            profile.recordWorkspaceLease(
+                    lease.reused(),
+                    lease.evicted(),
+                    lease.requestedCapacity(),
+                    lease.workspaceCapacity());
 
             long dur = System.currentTimeMillis() - t0;
             totalLatencyMs.addAndGet(dur);
 
-            return InferenceResponse.builder()
-                    .requestId(reqId)
-                    .content(sb.toString())
-                    .model(manifest.modelId())
-                    .durationMs(dur)
-                    .metadata("runner", RUNNER_NAME)
-                    .metadata("ep", resolvedEp)
-                    .metadata("past_kv", usePastKvCache)
-                    .metadata("onnx_genai_config", genAiConfigLoaded)
-                    .metadata("onnx_logits_name", logitsName)
-                    .metadata("onnx_kv_layers", pastKvNames.length / 2)
-                    .metadata("onnx_optimized_model_cache_state", optimizedModelCacheState)
-                    .metadata("onnx_optimized_model_cache_path",
-                            optimizedModelPath == null ? null : optimizedModelPath.toString())
-                    .metadata("prompt_len", prompt.length)
-                    .metadata("output_len", sb.length())
-                    .build();
+            return new OnnxTextGenerationResult(
+                    setup.requestId(),
+                    content,
+                    setup.promptLength(),
+                    outputTokenCount,
+                    dur,
+                    profile,
+                    false,
+                    progress.finishReason());
 
         } catch (Exception e) {
             totalFailures.incrementAndGet();
@@ -576,21 +595,34 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     public Multi<StreamingInferenceChunk> stream(InferenceRequest request) {
         return Multi.createFrom().emitter(emitter -> {
             try {
-                InferenceResponse r = infer(request);
-                emitter.emit(new StreamingInferenceChunk(
+                OnnxStreamingTextChunks chunks = OnnxStreamingTextChunks.create(
                         request.getRequestId(),
-                        0,
-                        tech.kayys.gollek.spi.model.ModalityType.TEXT,
-                        RUNNER_NAME,
-                        r.getContent(),
-                        true,
-                        "stop",
-                        null,
-                        java.time.Instant.now(),
-                        null));
-                emitter.complete();
+                        OnnxStreamingTokenDecoder.create(tokenizer, this::detokenize),
+                        emitter::emit,
+                        emitter::isCancelled);
+                OnnxGeneratedTokenObserver observer = new OnnxGeneratedTokenObserver() {
+                    @Override
+                    public String onToken(int tokenId, int tokenIndex) {
+                        return onToken(tokenId, tokenIndex, true);
+                    }
+
+                    @Override
+                    public String onToken(int tokenId, int tokenIndex, boolean currentTextNeeded) {
+                        chunks.emitToken(tokenId);
+                        return currentTextNeeded ? chunks.currentText() : null;
+                    }
+                };
+                OnnxTextGenerationResult generation = generateText(request,
+                        observer,
+                        emitter::isCancelled,
+                        chunks::currentText);
+                if (chunks.emitFinal(generation)) {
+                    emitter.complete();
+                }
             } catch (Exception e) {
-                emitter.fail(e);
+                if (!emitter.isCancelled()) {
+                    emitter.fail(e);
+                }
             }
         });
     }
@@ -624,14 +656,32 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         if (tokenizer == null) {
             return super.detokenize(tokenId);
         }
-        return tokenizer.decode(new long[] { tokenId }, DecodeOptions.defaultOptions());
+        long[] scratch = singleTokenDecodeScratch.get();
+        scratch[0] = tokenId;
+        return tokenizer.decode(scratch, 0, 1, DecodeOptions.defaultOptions());
+    }
+
+    private String decodeGenerated(OnnxGeneratedTokens generatedTokens) {
+        if (generatedTokens == null || generatedTokens.isEmpty()) {
+            return "";
+        }
+        if (tokenizer == null) {
+            return generatedTokens.decodeEach(this::detokenize);
+        }
+        return generatedTokens.decodeWith(tokenizer, DecodeOptions.defaultOptions());
+    }
+
+    private String finalContent(OnnxTextGenerationSetup setup, OnnxGeneratedTokens generatedTokens) {
+        String observed = setup.finalContentOrNull();
+        if (observed != null) {
+            return observed;
+        }
+        return decodeGenerated(generatedTokens);
     }
 
     @Override
     protected boolean isEos(int tokenId) {
-        return eosTokenIds.contains(tokenId)
-                || (tokenizer != null && Arrays.stream(tokenizer.allStopTokenIds()).anyMatch(id -> id == tokenId))
-                || super.isEos(tokenId);
+        return eosTokenIds.contains(tokenId);
     }
 
     private void applyStandaloneDefaults(RunnerConfiguration config) {
@@ -714,16 +764,18 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
             logitsName = text(decoderOutputs.path("logits"), logitsName);
             presentKeyNameTemplate = text(decoderOutputs.path("present_key_names"), presentKeyNameTemplate);
             presentValueNameTemplate = text(decoderOutputs.path("present_value_names"), presentValueNameTemplate);
-            Set<Integer> stops = new LinkedHashSet<>();
+            OnnxStopTokens.Builder stops = defaultStopTokenBuilder();
             collectInts(model.path("eos_token_id"), stops);
             collectInts(model.path("pad_token_id"), stops);
-            if (!stops.isEmpty()) {
-                eosTokenIds = Set.copyOf(stops);
-            }
+            eosTokenIds = stops.build();
             genAiConfigLoaded = true;
         } catch (Exception e) {
             log.debugf(e, "[ONNX] Failed to read genai_config.json from %s", configPath);
         }
+    }
+
+    private static OnnxStopTokens.Builder defaultStopTokenBuilder() {
+        return OnnxStopTokens.builder(DEFAULT_EOS_TOKEN_IDS);
     }
 
     private void loadTokenizer(Path dir) {
@@ -735,17 +787,15 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
             if (tokenizer.vocabSize() > 0) {
                 vocabSize = tokenizer.vocabSize();
             }
-            Set<Integer> stops = new LinkedHashSet<>(eosTokenIds);
+            OnnxStopTokens.Builder stops = OnnxStopTokens.builder(eosTokenIds);
             if (tokenizer.eosTokenId() >= 0) {
                 stops.add(tokenizer.eosTokenId());
             }
             if (tokenizer.padTokenId() >= 0) {
                 stops.add(tokenizer.padTokenId());
             }
-            for (int stop : tokenizer.allStopTokenIds()) {
-                stops.add(stop);
-            }
-            eosTokenIds = Set.copyOf(stops);
+            stops.addAll(tokenizer.allStopTokenIds());
+            eosTokenIds = stops.build();
             log.infof("[ONNX] Loaded tokenizer from %s (vocab=%d)", dir, tokenizer.vocabSize());
         } catch (Exception e) {
             tokenizer = null;
@@ -769,7 +819,7 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 
-    private static void collectInts(JsonNode node, Set<Integer> target) {
+    private static void collectInts(JsonNode node, OnnxStopTokens.Builder target) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return;
         }
@@ -782,34 +832,21 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         }
     }
 
-    private boolean hasInputName(String expected) {
-        for (String inputName : inputNames) {
-            if (expected.equals(inputName)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean hasAnyInputName(String[] expectedNames) {
-        if (expectedNames == null || expectedNames.length == 0) {
-            return false;
-        }
-        Set<String> available = stringSet(inputNames);
-        for (String expectedName : expectedNames) {
-            if (available.contains(expectedName)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private MemorySegment createEmptyPastKvTensor() {
-        return ort.createTensorWithData(
-                memInfo,
-                MemorySegment.NULL,
-                new long[] { 1, kvHeads, 0, kvHeadSize },
-                kvElementType);
+    private OnnxTextSessionContract buildTextRuntimePlan() {
+        return OnnxTextSessionContract.create(
+                inputNames,
+                outputNames,
+                new OnnxTextSessionContract.TensorNames(
+                        inputIdsName,
+                        attentionMaskName,
+                        positionIdsName,
+                        logitsName,
+                        pastKeyNameTemplate,
+                        pastValueNameTemplate,
+                        presentKeyNameTemplate,
+                        presentValueNameTemplate),
+                usePastKvCache,
+                kvLayers);
     }
 
     // ── EP resolution ─────────────────────────────────────────────────────────
@@ -970,98 +1007,6 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
         return DeviceType.CPU;
     }
 
-    // ── KV cache tensor naming ────────────────────────────────────────────────
-
-    /**
-     * Build the standard past_key_values input names used by HuggingFace
-     * ONNX exports: {@code past_key_values.0.key}, {@code past_key_values.0.value},
-     * …
-     * for 32 layers.
-     */
-    private String[] buildPastKvInputNames() {
-        int layers = detectedKvLayerCount(inputNames, pastKeyNameTemplate, "past_key_values.", ".key");
-        if (layers == 0) layers = Math.max(1, kvLayers);
-        String[] names = new String[layers * 2];
-        for (int l = 0; l < layers; l++) {
-            names[l * 2] = indexedName(pastKeyNameTemplate, l, "past_key_values.%d.key");
-            names[l * 2 + 1] = indexedName(pastValueNameTemplate, l, "past_key_values.%d.value");
-        }
-        return names;
-    }
-
-    private String[] buildPresentKvOutputNames() {
-        int layers = detectedKvLayerCount(outputNames, presentKeyNameTemplate, "present.", ".key");
-        if (layers == 0) layers = detectedKvLayerCount(inputNames, pastKeyNameTemplate, "past_key_values.", ".key");
-        if (layers == 0) layers = Math.max(1, kvLayers);
-        String[] names = new String[layers * 2];
-        for (int l = 0; l < layers; l++) {
-            names[l * 2] = indexedName(presentKeyNameTemplate, l, "present.%d.key");
-            names[l * 2 + 1] = indexedName(presentValueNameTemplate, l, "present.%d.value");
-        }
-        return names;
-    }
-
-    private int detectedKvLayerCount(String[] names, String template, String legacyPrefix, String legacySuffix) {
-        if (names == null || names.length == 0) {
-            return 0;
-        }
-        Set<String> available = stringSet(names);
-        int max = Math.max(64, kvLayers + 8);
-        int detected = 0;
-        for (int layer = 0; layer < max; layer++) {
-            if (available.contains(indexedName(template, layer, legacyPrefix + "%d" + legacySuffix))) {
-                detected = layer + 1;
-            }
-        }
-        if (detected > 0) {
-            return detected;
-        }
-        for (String name : names) {
-            if (name != null && name.startsWith(legacyPrefix) && name.endsWith(legacySuffix)) {
-                detected++;
-            }
-        }
-        return detected;
-    }
-
-    private static String indexedName(String template, int index, String fallbackTemplate) {
-        String pattern = template == null || template.isBlank() ? fallbackTemplate : template;
-        if (pattern.contains("%d")) {
-            try {
-                return String.format(java.util.Locale.ROOT, pattern, index);
-            } catch (Exception ignored) {
-                return String.format(java.util.Locale.ROOT, fallbackTemplate, index);
-            }
-        }
-        if (pattern.contains("{}")) {
-            return pattern.replace("{}", Integer.toString(index));
-        }
-        if (pattern.contains("{layer}")) {
-            return pattern.replace("{layer}", Integer.toString(index));
-        }
-        return index == 0 ? pattern : pattern + index;
-    }
-
-    private static Set<String> stringSet(String[] values) {
-        Set<String> result = new LinkedHashSet<>();
-        if (values == null) {
-            return result;
-        }
-        for (String value : values) {
-            if (value != null) {
-                result.add(value);
-            }
-        }
-        return result;
-    }
-
-    private String[] concatArrays(String[] a, String[] b) {
-        String[] result = new String[a.length + b.length];
-        System.arraycopy(a, 0, result, 0, a.length);
-        System.arraycopy(b, 0, result, a.length, b.length);
-        return result;
-    }
-
     // ── Health & close ────────────────────────────────────────────────────────
 
     @Override
@@ -1072,6 +1017,8 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
     @Override
     public void close() {
         initialized = false;
+        closeTextWorkspacePool();
+        closeTextSessionResources();
         if (ort != null && ort.isNativeAvailable()) {
             if (!memInfo.equals(MemorySegment.NULL))
                 ort.releaseMemoryInfo(memInfo);
@@ -1081,5 +1028,21 @@ public class OnnxRuntimeRunner extends AbstractGollekRunner {
                 ort.releaseEnv(ortEnv);
         }
         log.info("[ONNX] Closed");
+    }
+
+    private void closeTextWorkspacePool() {
+        if (textWorkspacePool == null) {
+            return;
+        }
+        textWorkspacePool.close();
+        textWorkspacePool = null;
+    }
+
+    private void closeTextSessionResources() {
+        if (textSessionResources == null) {
+            return;
+        }
+        textSessionResources.close();
+        textSessionResources = OnnxTextSessionResources.empty();
     }
 }

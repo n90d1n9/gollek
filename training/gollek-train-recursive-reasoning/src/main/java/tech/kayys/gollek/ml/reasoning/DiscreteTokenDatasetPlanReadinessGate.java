@@ -37,8 +37,9 @@ public record DiscreteTokenDatasetPlanReadinessGate(
     public static DiscreteTokenDatasetPlanReadinessGate fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetPlanReadinessGate(
-                DiscreteTokenDatasetPlanDiagnosticsPolicy.fromMetadata(requiredMap(metadata, "diagnosticsPolicy")),
-                requiredBoolean(metadata, "failOnWarnings"));
+                DiscreteTokenDatasetPlanDiagnosticsPolicy.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "diagnosticsPolicy")),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "failOnWarnings"));
     }
 
     public DiscreteTokenDatasetPlanReadinessReport evaluate(DiscreteTokenDatasetPlan plan) {
@@ -62,35 +63,4 @@ public record DiscreteTokenDatasetPlanReadinessGate(
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     }
 
-    private static Map<?, ?> requiredMap(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Map<?, ?> map) {
-            return map;
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
-    private static boolean requiredBoolean(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Boolean flag) {
-            return flag;
-        }
-        if (value instanceof CharSequence text) {
-            String normalized = text.toString().trim().toLowerCase();
-            if ("true".equals(normalized)) {
-                return true;
-            }
-            if ("false".equals(normalized)) {
-                return false;
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a boolean");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
-    }
 }

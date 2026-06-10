@@ -33,6 +33,7 @@ Options:
   --noise-script PATH           Override noise stability checker
   --env-script PATH             Override environment fingerprint helper
   --bundle-script PATH          Override artifact bundle helper
+  --diagnose-script PATH        Override profile diagnosis helper
   --decision-script PATH        Override decision summary helper
   --help                        Show this help
 
@@ -65,6 +66,7 @@ SUMMARIZE_SCRIPT="${ROOT_DIR}/scripts/summarize-onnx-profile-summary.sh"
 NOISE_SCRIPT="${ROOT_DIR}/scripts/check-onnx-profile-noise.sh"
 ENV_SCRIPT="${ROOT_DIR}/scripts/onnx-profile-env.sh"
 BUNDLE_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-bundle.sh"
+DIAGNOSE_SCRIPT="${ROOT_DIR}/scripts/diagnose-onnx-profile-summary.sh"
 DECISION_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-decision.sh"
 
 while [[ $# -gt 0 ]]; do
@@ -110,6 +112,8 @@ while [[ $# -gt 0 ]]; do
     --env-script=*) ENV_SCRIPT="${1#*=}"; shift ;;
     --bundle-script) BUNDLE_SCRIPT="$2"; shift 2 ;;
     --bundle-script=*) BUNDLE_SCRIPT="${1#*=}"; shift ;;
+    --diagnose-script) DIAGNOSE_SCRIPT="$2"; shift 2 ;;
+    --diagnose-script=*) DIAGNOSE_SCRIPT="${1#*=}"; shift ;;
     --decision-script) DECISION_SCRIPT="$2"; shift 2 ;;
     --decision-script=*) DECISION_SCRIPT="${1#*=}"; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -138,6 +142,10 @@ if [[ ! -f "$ENV_SCRIPT" ]]; then
 fi
 if [[ ! -f "$BUNDLE_SCRIPT" ]]; then
   echo "Required artifact bundle helper not found: $BUNDLE_SCRIPT" >&2
+  exit 2
+fi
+if [[ ! -x "$DIAGNOSE_SCRIPT" ]]; then
+  echo "Required profile diagnosis helper not found or not executable: $DIAGNOSE_SCRIPT" >&2
   exit 2
 fi
 if [[ ! -x "$DECISION_SCRIPT" ]]; then
@@ -208,12 +216,18 @@ MANIFEST="${BASELINE_DIR}/manifest.tsv"
 ENVIRONMENT="${BASELINE_DIR}/environment.tsv"
 BUNDLE="${BASELINE_DIR}/bundle.tsv"
 BUNDLE_JSON="${BASELINE_DIR}/bundle.json"
+DIAGNOSIS_DIR="${BASELINE_DIR}/diagnosis"
+DIAGNOSIS="${DIAGNOSIS_DIR}/diagnosis.tsv"
+DIAGNOSIS_STAGES="${DIAGNOSIS_DIR}/stages.tsv"
+DIAGNOSIS_REPORT="${DIAGNOSIS_DIR}/report.txt"
 DECISION="${BASELINE_DIR}/decision.tsv"
 REPORT="${BASELINE_DIR}/report.txt"
 BENCH_STDOUT="${BASELINE_DIR}/bench.stdout.log"
 BENCH_STDERR="${BASELINE_DIR}/bench.stderr.log"
 SUMMARY_STDOUT="${BASELINE_DIR}/summary.stdout.log"
 SUMMARY_STDERR="${BASELINE_DIR}/summary.stderr.log"
+DIAGNOSIS_STDOUT="${BASELINE_DIR}/diagnosis.stdout.log"
+DIAGNOSIS_STDERR="${BASELINE_DIR}/diagnosis.stderr.log"
 NOISE="${BASELINE_DIR}/noise.tsv"
 NOISE_STAGE_DIR="${BASELINE_DIR}/noise"
 NOISE_STDOUT="${BASELINE_DIR}/noise.stdout.log"
@@ -303,6 +317,9 @@ config_row latestEnvironment "$LATEST_ENVIRONMENT"
 config_row environment "$ENVIRONMENT"
 config_row bundle "$BUNDLE"
 config_row bundleJson "$BUNDLE_JSON"
+config_row diagnosis "$DIAGNOSIS"
+config_row diagnosisStages "$DIAGNOSIS_STAGES"
+config_row diagnosisReport "$DIAGNOSIS_REPORT"
 config_row decision "$DECISION"
 config_row aggregateLabel "$AGGREGATE_LABEL"
 config_row includeWarmupAggregate "$INCLUDE_WARMUP_AGGREGATE"
@@ -317,6 +334,7 @@ config_row summarizeScript "$SUMMARIZE_SCRIPT"
 config_row noiseScript "$NOISE_SCRIPT"
 config_row envScript "$ENV_SCRIPT"
 config_row bundleScript "$BUNDLE_SCRIPT"
+config_row diagnoseScript "$DIAGNOSE_SCRIPT"
 config_row decisionScript "$DECISION_SCRIPT"
 
 printf 'stage\tstatus\texitCode\tartifact\tstdout\tstderr\treason\n' > "$RESULTS"
@@ -332,10 +350,15 @@ write_capture_bundle() {
   gollek_onnx_performance_bundle_add "$BUNDLE" environment "$ENVIRONMENT" required "Runtime and build fingerprint"
   gollek_onnx_performance_bundle_add "$BUNDLE" rawSummary "$RAW_SUMMARY" required "Raw benchmark summary"
   gollek_onnx_performance_bundle_add "$BUNDLE" aggregate "$AGGREGATE" required "Aggregated baseline summary"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosis "$DIAGNOSIS" optional "Aggregate performance diagnosis"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisStages "$DIAGNOSIS_STAGES" optional "Diagnosed stage ranking"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisReport "$DIAGNOSIS_REPORT" optional "Human-readable diagnosis report"
   gollek_onnx_performance_bundle_add "$BUNDLE" benchStdout "$BENCH_STDOUT" optional "Benchmark stdout"
   gollek_onnx_performance_bundle_add "$BUNDLE" benchStderr "$BENCH_STDERR" optional "Benchmark stderr"
   gollek_onnx_performance_bundle_add "$BUNDLE" summaryStdout "$SUMMARY_STDOUT" optional "Aggregator stdout"
   gollek_onnx_performance_bundle_add "$BUNDLE" summaryStderr "$SUMMARY_STDERR" optional "Aggregator stderr"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisStdout "$DIAGNOSIS_STDOUT" optional "Diagnosis stdout"
+  gollek_onnx_performance_bundle_add "$BUNDLE" diagnosisStderr "$DIAGNOSIS_STDERR" optional "Diagnosis stderr"
   gollek_onnx_performance_bundle_add "$BUNDLE" noise "$NOISE" optional "Noise stability summary"
   gollek_onnx_performance_bundle_add "$BUNDLE" noiseStdout "$NOISE_STDOUT" optional "Noise checker stdout"
   gollek_onnx_performance_bundle_add "$BUNDLE" noiseStderr "$NOISE_STDERR" optional "Noise checker stderr"
@@ -358,6 +381,30 @@ write_capture_artifacts() {
   write_capture_decision
   write_capture_bundle
   write_capture_decision
+}
+
+run_capture_diagnosis() {
+  declare -a diagnosis_args=(
+    "$DIAGNOSE_SCRIPT"
+    "--summary" "$AGGREGATE"
+    "--summary-dir" "$DIAGNOSIS_DIR"
+    "--out" "$DIAGNOSIS"
+    "--stages-out" "$DIAGNOSIS_STAGES"
+    "--case" "${AGGREGATE_LABEL}-mean"
+  )
+  if [[ "$INCLUDE_WARMUP_AGGREGATE" -eq 1 ]]; then
+    diagnosis_args+=("--include-warmup")
+  fi
+
+  set +e
+  "${diagnosis_args[@]}" >"$DIAGNOSIS_STDOUT" 2>"$DIAGNOSIS_STDERR"
+  local diagnosis_exit=$?
+  set -e
+  if [[ "$diagnosis_exit" -ne 0 || ! -f "$DIAGNOSIS" ]]; then
+    record_result diagnosis skip "$diagnosis_exit" "$DIAGNOSIS" "$DIAGNOSIS_STDOUT" "$DIAGNOSIS_STDERR" diagnosis-unavailable
+    return 0
+  fi
+  record_result diagnosis pass 0 "$DIAGNOSIS" "$DIAGNOSIS_STDOUT" "$DIAGNOSIS_STDERR"
 }
 
 declare -a BENCH_ARGS=(
@@ -426,6 +473,7 @@ if [[ "$SUMMARY_EXIT" -ne 0 || ! -f "$AGGREGATE" ]]; then
   exit "$([[ "$SUMMARY_EXIT" -eq 0 ]] && printf 3 || printf '%s' "$SUMMARY_EXIT")"
 fi
 record_result aggregate pass 0 "$AGGREGATE" "$SUMMARY_STDOUT" "$SUMMARY_STDERR"
+run_capture_diagnosis
 BASELINE_BACKEND="$(summary_value "$AGGREGATE" "${AGGREGATE_LABEL}-mean" onnxBackend)"
 if [[ "$ALLOW_MIXED_BACKEND" -ne 1 && ( -z "$BASELINE_BACKEND" || "$BASELINE_BACKEND" == "mixed" ) ]]; then
   record_result baseline-backend fail 46 "$AGGREGATE" "$SUMMARY_STDOUT" "$SUMMARY_STDERR" mixed-or-missing-backend
@@ -513,6 +561,11 @@ fi
   printf 'baselineDir\t%s\n' "$(safe_tsv_field "$BASELINE_DIR")"
   printf 'rawSummary\t%s\n' "$(safe_tsv_field "$RAW_SUMMARY")"
   printf 'aggregate\t%s\n' "$(safe_tsv_field "$AGGREGATE")"
+  if [[ -f "$DIAGNOSIS" ]]; then
+    printf 'diagnosis\t%s\n' "$(safe_tsv_field "$DIAGNOSIS")"
+    printf 'diagnosisStages\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_STAGES")"
+    printf 'diagnosisReport\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_REPORT")"
+  fi
   printf 'environment\t%s\n' "$(safe_tsv_field "$ENVIRONMENT")"
   printf 'gollekVersion\t%s\n' "$(safe_tsv_field "$(environment_value "$ENVIRONMENT" gollekVersion || true)")"
   printf 'gitCommit\t%s\n' "$(safe_tsv_field "$(environment_value "$ENVIRONMENT" gitCommit || true)")"
@@ -555,6 +608,11 @@ write_capture_artifacts
   echo "artifacts.decision=$DECISION"
   echo "artifacts.rawSummary=$RAW_SUMMARY"
   echo "artifacts.aggregate=$AGGREGATE"
+  if [[ -f "$DIAGNOSIS" ]]; then
+    echo "artifacts.diagnosis=$DIAGNOSIS"
+    echo "artifacts.diagnosisStages=$DIAGNOSIS_STAGES"
+    echo "artifacts.diagnosisReport=$DIAGNOSIS_REPORT"
+  fi
   if [[ -f "$NOISE" ]]; then
     echo "artifacts.noise=$NOISE"
   fi

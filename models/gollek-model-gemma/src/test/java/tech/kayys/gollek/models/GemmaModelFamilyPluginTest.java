@@ -3,15 +3,20 @@ package tech.kayys.gollek.models;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
 import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
+import tech.kayys.gollek.spi.model.ModelFamilyPluginRegistry;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GemmaModelFamilyPluginTest {
@@ -49,7 +54,45 @@ class GemmaModelFamilyPluginTest {
                 .toList());
         assertTrue(plugin.architectureAdapters().get(0) instanceof GemmaFamily);
         assertTrue(plugin.descriptor().modelTypes().contains("gemma"));
+        assertFalse(plugin.descriptor().modelTypes().contains("gemma4"));
+        assertFalse(plugin.descriptor().modelTypes().contains("gemma4_text"));
+        assertFalse(plugin.descriptor().modelTypes().contains("gemma4_unified"));
+        assertFalse(plugin.descriptor().modelTypes().contains("gemma4_unified_text"));
         assertTrue(plugin.descriptor().architectureClassNames().contains("GemmaForCausalLM"));
+        assertFalse(plugin.descriptor().architectureClassNames().contains("Gemma4ForCausalLM"));
+        assertFalse(plugin.descriptor().architectureClassNames().contains("Gemma4ForConditionalGeneration"));
+        assertFalse(plugin.descriptor().architectureClassNames().contains("Gemma4UnifiedForConditionalGeneration"));
+        assertEquals("ready", plugin.descriptor().metadata().get("direct_safetensor"));
+        assertFalse(plugin.descriptor().metadata().containsKey("unified_model_type"));
+        assertTrue(plugin.unifiedRuntimeRequirements().isEmpty());
+    }
+
+    @Test
+    void gemma4ConditionalGenerationIsOwnedByDedicatedGemma4Family() {
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(new GemmaModelFamilyPlugin());
+
+        assertTrue(registry.resolve("gemma4", "Gemma4ForConditionalGeneration").notFound());
+        assertEquals(List.of(), registry.architectureAdaptersFor(
+                        "gemma4",
+                        "Gemma4ForConditionalGeneration")
+                .stream()
+                .map(ModelArchitecture::id)
+                .toList());
+    }
+
+    @Test
+    void gemma4UnifiedConditionalGenerationIsOwnedByDedicatedGemma4Family() {
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(new GemmaModelFamilyPlugin());
+
+        assertTrue(registry.resolve("gemma4_unified", "Gemma4UnifiedForConditionalGeneration").notFound());
+        assertEquals(List.of(), registry.architectureAdaptersFor(
+                        "gemma4_unified",
+                        "Gemma4UnifiedForConditionalGeneration")
+                .stream()
+                .map(ModelArchitecture::id)
+                .toList());
     }
 
     @Test
@@ -87,6 +130,7 @@ class GemmaModelFamilyPluginTest {
     @Test
     void gemmaRuntimeTraitsUseGeluNeoxRopeAndScaledEmbeddings() {
         GemmaFamily architecture = new GemmaFamily();
+        ModelRuntimeTraits traits = architecture.runtimeTraits(null);
 
         assertEquals(FFNActivationType.GELU, architecture.activationType());
         assertTrue(architecture.usesNeoxRope());
@@ -94,6 +138,33 @@ class GemmaModelFamilyPluginTest {
         assertEquals(64.0f, architecture.embeddingScaleFactor(4096));
         assertEquals(0.0f, architecture.defaultAttnSoftCap());
         assertEquals(0.0f, architecture.defaultFinalSoftCap());
+        assertFalse(traits.gemma4Text());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE, traits.promptBosPolicy());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE,
+                GemmaRuntimeProfile.prompt(null).promptBosPolicy());
+        assertTrue(traits.allowedControlTokenTexts().isEmpty());
+        assertFalse(traits.skipDefaultSystemPromptInjection());
+    }
+
+    @Test
+    void gemmaRuntimeProfilePreservesGemma4CompatibilityPath() {
+        GemmaFamily architecture = new GemmaFamily();
+        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+                "general.architecture", "gemma4_text",
+                "gemma4_text.embedding_length_per_layer_input", 4096));
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertTrue(traits.gemma4Text());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.NEVER, traits.promptBosPolicy());
+        assertTrue(traits.skipDefaultSystemPromptInjection());
+        assertTrue(traits.validateContinuationTokensByDecode());
+        assertTrue(traits.rejectEmptyDecodedTokens());
+        assertTrue(traits.allowedControlTokenTexts().contains("<|channel>"));
+        assertTrue(traits.perLayerInputPath());
+        assertTrue(traits.attention().splitHalfRope());
+        assertTrue(traits.attention().preferNativeMetalBf16Linear());
+        assertTrue(traits.attention().restrictLegacyMetalAttentionBridge());
     }
 
     private static Path fixture(String familyId) throws Exception {

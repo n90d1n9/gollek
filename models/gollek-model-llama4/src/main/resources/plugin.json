@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["tiktoken", "vision-text-processor"],
     "families": ["llama4"]
   }
 }

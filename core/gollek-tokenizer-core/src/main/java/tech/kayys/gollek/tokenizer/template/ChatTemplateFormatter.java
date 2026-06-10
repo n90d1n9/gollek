@@ -10,24 +10,30 @@ package tech.kayys.gollek.models.core;
 import java.util.List;
 import java.util.Locale;
 import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 public final class ChatTemplateFormatter {
 
     private ChatTemplateFormatter() {}
 
+    public static boolean supportsModelType(String modelType) {
+        return templateKind(modelType) != TemplateKind.CHATML;
+    }
+
     public static String format(List<Message> messages, String modelType) {
-        if (modelType == null) modelType = "";
-        return switch (normalise(modelType)) {
-            case "llama3", "llama3.1", "llama3.2", "llama-3" -> formatLlama3(messages);
-            case "mistral", "mixtral"                          -> formatMistral(messages);
-            case "phi3", "phi-3", "phi3_5", "phi3.5", "phi"  -> formatPhi3(messages);
-            case "gemma4", "gemma4_text"
-                                                                -> formatGemma4(messages);
-            case "gemma", "gemma2", "gemma3", "gemma3_text"
-                                                                -> formatGemma(messages);
-            case "qwen2", "qwen2.5", "qwen"                   -> formatQwen(messages);
-            default                                            -> formatChatML(messages);
+        return switch (templateKind(modelType)) {
+            case LLAMA3 -> formatLlama3(messages);
+            case MISTRAL -> formatMistral(messages);
+            case PHI3 -> formatPhi3(messages);
+            case GEMMA4 -> formatGemma4(messages);
+            case GEMMA -> formatGemma(messages);
+            case QWEN -> formatQwen(messages);
+            case CHATML -> formatChatML(messages);
         };
+    }
+
+    public static String format(List<Message> messages, String modelType, ModelRuntimeTraits runtimeTraits) {
+        return format(messages, effectiveTemplateModelType(modelType, runtimeTraits));
     }
 
     private static String formatLlama3(List<Message> messages) {
@@ -149,7 +155,48 @@ public final class ChatTemplateFormatter {
         return null;
     }
 
+    private static TemplateKind templateKind(String modelType) {
+        return switch (normalise(modelType)) {
+            case "llama3", "llama3.1", "llama3.2", "llama-3" -> TemplateKind.LLAMA3;
+            case "mistral", "mixtral" -> TemplateKind.MISTRAL;
+            case "phi3", "phi-3", "phi3_5", "phi3.5", "phi" -> TemplateKind.PHI3;
+            case "gemma4", "gemma4_text" -> TemplateKind.GEMMA4;
+            case "gemma", "gemma2", "gemma3", "gemma3_text" -> TemplateKind.GEMMA;
+            case "qwen2", "qwen2.5", "qwen" -> TemplateKind.QWEN;
+            default -> TemplateKind.CHATML;
+        };
+    }
+
+    private static String effectiveTemplateModelType(String modelType, ModelRuntimeTraits runtimeTraits) {
+        if (runtimeTraits == null) {
+            return modelType;
+        }
+        if (runtimeTraits.gemma4Text()) {
+            return "gemma4_text";
+        }
+        if (runtimeTraits.gemma3Text()) {
+            return "gemma3";
+        }
+        if (runtimeTraits.qwenText()) {
+            return "qwen";
+        }
+        if (isRuntimeTraitManagedModelType(modelType)) {
+            return "";
+        }
+        return modelType;
+    }
+
+    private static boolean isRuntimeTraitManagedModelType(String modelType) {
+        String normalized = normalise(modelType);
+        return normalized.startsWith("gemma3")
+                || normalized.startsWith("gemma4")
+                || normalized.contains("qwen");
+    }
+
     private static String normalise(String s) {
+        if (s == null) {
+            return "";
+        }
         String normalized = s.trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty()) {
             return normalized;
@@ -162,5 +209,15 @@ public final class ChatTemplateFormatter {
             return normalized.contains("text") ? "gemma3_text" : "gemma3";
         }
         return normalized;
+    }
+
+    private enum TemplateKind {
+        LLAMA3,
+        MISTRAL,
+        PHI3,
+        GEMMA4,
+        GEMMA,
+        QWEN,
+        CHATML
     }
 }

@@ -37,10 +37,8 @@ final class DirectForwardFfnStage {
         AccelTensor mlpOut = ctx.config().isMoeLayer(ctx.layerIdx())
                 ? moeForwardPass.computeAccel(mlpIn, weights, ctx.config(), ctx.arch(), ctx.layerIdx())
                 : ctx.operators().swigluFfn(mlpIn, ctx.arch(), ctx.config(),
-                        layerWeights.ffnGateWeight(), layerWeights.ffnGateBias(),
-                        layerWeights.ffnUpWeight(), layerWeights.ffnUpBias(),
-                        layerWeights.ffnDownWeight(), layerWeights.ffnDownBias(), ctx.workspace(),
-                        mlpOutputBuffer);
+                        DirectForwardGatedFfnWeights.fromLayer(layerWeights),
+                        ctx.workspace(), mlpOutputBuffer);
         DirectInferenceProfiler.recordFfnNanos(System.nanoTime() - tFfn0);
         if (ctx.verboseLayers()) {
             logTensorStats(mlpOut, "layer " + ctx.layerIdx() + " mlpOut");

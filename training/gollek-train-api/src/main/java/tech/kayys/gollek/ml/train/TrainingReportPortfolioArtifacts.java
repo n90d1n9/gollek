@@ -371,6 +371,14 @@ public final class TrainingReportPortfolioArtifacts {
         TrainerCheckpointIO.writeStringAtomically(leaderboardCsvFile, resolvedExport.leaderboardCsv());
         TrainerCheckpointIO.writeStringAtomically(comparisonMetricsCsvFile, resolvedExport.comparisonMetricsCsv());
         TrainerCheckpointIO.writeStringAtomically(comparisonFindingsCsvFile, resolvedExport.comparisonFindingsCsv());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint leaderboardCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(leaderboardCsvFile);
+        TrainingReportArtifactFingerprint comparisonMetricsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(comparisonMetricsCsvFile);
+        TrainingReportArtifactFingerprint comparisonFindingsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(comparisonFindingsCsvFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
@@ -379,11 +387,11 @@ public final class TrainingReportPortfolioArtifacts {
                 leaderboardCsvFile,
                 comparisonMetricsCsvFile,
                 comparisonFindingsCsvFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(leaderboardCsvFile),
-                TrainerCheckpointIO.sha256Hex(comparisonMetricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(comparisonFindingsCsvFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                leaderboardCsvFingerprint.sha256(),
+                comparisonMetricsCsvFingerprint.sha256(),
+                comparisonFindingsCsvFingerprint.sha256(),
                 resolvedExport);
     }
 
@@ -407,6 +415,14 @@ public final class TrainingReportPortfolioArtifacts {
         TrainerCheckpointIO.writeStringAtomically(leaderboardCsvFile, export.leaderboardCsv());
         TrainerCheckpointIO.writeStringAtomically(comparisonMetricsCsvFile, export.comparisonMetricsCsv());
         TrainerCheckpointIO.writeStringAtomically(comparisonFindingsCsvFile, export.comparisonFindingsCsv());
+        TrainingReportArtifactFingerprint jsonFingerprint = TrainingReportArtifactFingerprint.of(jsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint = TrainingReportArtifactFingerprint.of(markdownFile);
+        TrainingReportArtifactFingerprint leaderboardCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(leaderboardCsvFile);
+        TrainingReportArtifactFingerprint comparisonMetricsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(comparisonMetricsCsvFile);
+        TrainingReportArtifactFingerprint comparisonFindingsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(comparisonFindingsCsvFile);
 
         return new ArtifactBundle(
                 resolvedDirectory,
@@ -415,11 +431,11 @@ public final class TrainingReportPortfolioArtifacts {
                 leaderboardCsvFile,
                 comparisonMetricsCsvFile,
                 comparisonFindingsCsvFile,
-                TrainerCheckpointIO.sha256Hex(jsonFile),
-                TrainerCheckpointIO.sha256Hex(markdownFile),
-                TrainerCheckpointIO.sha256Hex(leaderboardCsvFile),
-                TrainerCheckpointIO.sha256Hex(comparisonMetricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(comparisonFindingsCsvFile),
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                leaderboardCsvFingerprint.sha256(),
+                comparisonMetricsCsvFingerprint.sha256(),
+                comparisonFindingsCsvFingerprint.sha256(),
                 export);
     }
 
@@ -539,6 +555,16 @@ public final class TrainingReportPortfolioArtifacts {
         if (!(parsed instanceof Map<?, ?> map)) {
             throw new IOException("Portfolio export JSON must be an object: " + resolvedJsonFile);
         }
+        TrainingReportArtifactFingerprint jsonFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedJsonFile);
+        TrainingReportArtifactFingerprint markdownFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedMarkdownFile);
+        TrainingReportArtifactFingerprint leaderboardCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedLeaderboardCsvFile);
+        TrainingReportArtifactFingerprint comparisonMetricsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedComparisonMetricsCsvFile);
+        TrainingReportArtifactFingerprint comparisonFindingsCsvFingerprint =
+                TrainingReportArtifactFingerprint.of(resolvedComparisonFindingsCsvFile);
         return new ArtifactInspection(
                 commonDirectory(
                         resolvedJsonFile,
@@ -556,11 +582,11 @@ public final class TrainingReportPortfolioArtifacts {
                 leaderboardCsv,
                 comparisonMetricsCsv,
                 comparisonFindingsCsv,
-                TrainerCheckpointIO.sha256Hex(resolvedJsonFile),
-                TrainerCheckpointIO.sha256Hex(resolvedMarkdownFile),
-                TrainerCheckpointIO.sha256Hex(resolvedLeaderboardCsvFile),
-                TrainerCheckpointIO.sha256Hex(resolvedComparisonMetricsCsvFile),
-                TrainerCheckpointIO.sha256Hex(resolvedComparisonFindingsCsvFile));
+                jsonFingerprint.sha256(),
+                markdownFingerprint.sha256(),
+                leaderboardCsvFingerprint.sha256(),
+                comparisonMetricsCsvFingerprint.sha256(),
+                comparisonFindingsCsvFingerprint.sha256());
     }
 
     public static ArtifactVerification verify(ArtifactBundle bundle) throws IOException {
@@ -747,7 +773,7 @@ public final class TrainingReportPortfolioArtifacts {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> immutableStringKeyMap(Map<?, ?> source) {
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(source);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(source);
         if (snapshot instanceof Map<?, ?> snapshotMap) {
             return (Map<String, Object>) snapshotMap;
         }

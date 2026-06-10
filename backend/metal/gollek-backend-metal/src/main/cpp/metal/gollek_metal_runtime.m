@@ -10,8 +10,10 @@
 #import "gollek_metal_pipelines.h"
 #import "gollek_metal_support.h"
 
+#import <Accelerate/Accelerate.h>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -92,18 +94,16 @@ static inline BOOL gollek_metal_argmax_rejected(int id,
             || id == reject4 || id == reject5 || id == reject6 || id == reject7;
 }
 
-int gollek_metal_argmax_f32(const void* logits,
-                            int n,
-                            int reject0,
-                            int reject1,
-                            int reject2,
-                            int reject3,
-                            int reject4,
-                            int reject5,
-                            int reject6,
-                            int reject7) {
-    if (logits == NULL || n <= 0) return -1;
-    const float* values = (const float*)logits;
+static int gollek_metal_argmax_scalar_f32(const float* values,
+                                          int n,
+                                          int reject0,
+                                          int reject1,
+                                          int reject2,
+                                          int reject3,
+                                          int reject4,
+                                          int reject5,
+                                          int reject6,
+                                          int reject7) {
     int best = -1;
     float best_val = -INFINITY;
     for (int i = 0; i < n; i++) {
@@ -120,6 +120,117 @@ int gollek_metal_argmax_f32(const void* logits,
         }
     }
     return best;
+}
+
+static int gollek_metal_argmax_collect_rejections(int n,
+                                                  int out[8],
+                                                  int reject0,
+                                                  int reject1,
+                                                  int reject2,
+                                                  int reject3,
+                                                  int reject4,
+                                                  int reject5,
+                                                  int reject6,
+                                                  int reject7) {
+    int raw[8] = { reject0, reject1, reject2, reject3, reject4, reject5, reject6, reject7 };
+    int count = 0;
+    for (int i = 0; i < 8; i++) {
+        int id = raw[i];
+        if (id < 0 || id >= n) {
+            continue;
+        }
+        BOOL duplicate = NO;
+        for (int j = 0; j < count; j++) {
+            if (out[j] == id) {
+                duplicate = YES;
+                break;
+            }
+        }
+        if (!duplicate) {
+            out[count++] = id;
+        }
+    }
+    for (int i = 1; i < count; i++) {
+        int value = out[i];
+        int j = i - 1;
+        while (j >= 0 && out[j] > value) {
+            out[j + 1] = out[j];
+            j--;
+        }
+        out[j + 1] = value;
+    }
+    return count;
+}
+
+static int gollek_metal_argmax_vdsp_range_f32(const float* values,
+                                              int start,
+                                              int end,
+                                              float* best_value,
+                                              int* best_index) {
+    int length = end - start;
+    if (length <= 0) {
+        return 0;
+    }
+    float max_value = -INFINITY;
+    vDSP_Length max_index = 0;
+    vDSP_maxvi(values + start, 1, &max_value, &max_index, (vDSP_Length)length);
+    if (isnan(max_value)) {
+        return -1;
+    }
+    if (*best_index < 0 || max_value > *best_value) {
+        *best_value = max_value;
+        *best_index = start + (int)max_index;
+    }
+    return 0;
+}
+
+static int gollek_metal_argmax_vdsp_f32(const float* values,
+                                        int n,
+                                        int reject0,
+                                        int reject1,
+                                        int reject2,
+                                        int reject3,
+                                        int reject4,
+                                        int reject5,
+                                        int reject6,
+                                        int reject7) {
+    int rejections[8] = { 0 };
+    int rejection_count = gollek_metal_argmax_collect_rejections(n, rejections,
+            reject0, reject1, reject2, reject3, reject4, reject5, reject6, reject7);
+    float best_value = -INFINITY;
+    int best_index = -1;
+    int start = 0;
+    for (int i = 0; i < rejection_count; i++) {
+        if (gollek_metal_argmax_vdsp_range_f32(values, start, rejections[i], &best_value, &best_index) < 0) {
+            return INT_MIN;
+        }
+        start = rejections[i] + 1;
+    }
+    if (gollek_metal_argmax_vdsp_range_f32(values, start, n, &best_value, &best_index) < 0) {
+        return INT_MIN;
+    }
+    return best_index;
+}
+
+int gollek_metal_argmax_f32(const void* logits,
+                            int n,
+                            int reject0,
+                            int reject1,
+                            int reject2,
+                            int reject3,
+                            int reject4,
+                            int reject5,
+                            int reject6,
+                            int reject7) {
+    if (logits == NULL || n <= 0) return -1;
+    const float* values = (const float*)logits;
+    int vdsp_best = gollek_metal_argmax_vdsp_f32(values, n, reject0, reject1, reject2, reject3,
+            reject4, reject5, reject6, reject7);
+    if (vdsp_best != INT_MIN) {
+        return vdsp_best;
+    }
+    return gollek_metal_argmax_scalar_f32(values, n, reject0, reject1, reject2, reject3,
+            reject4, reject5, reject6, reject7);
 }
 
 int gollek_metal_device_name(char* buf, int bufSz) {

@@ -27,12 +27,15 @@ public record ModelFamilyBundleManifest(
         int schemaVersion,
         String bundleFingerprint,
         boolean detached,
+        Integer declaredFamilyCount,
         List<String> selectors,
         List<String> families,
         List<String> profiles,
         List<String> availableFamilies,
         List<String> availableProfiles,
         List<String> availableSelectors,
+        List<String> tokenizerMetadataPendingFamilies,
+        Map<String, String> tokenizerMetadataPendingReasons,
         String selectorSource,
         List<String> explicitSelectors,
         List<String> presetSelectors,
@@ -47,6 +50,13 @@ public record ModelFamilyBundleManifest(
         List<String> explicitRequiredAliases,
         List<String> explicitForbiddenAliases,
         String bundlePreset,
+        boolean requiresDirectSafetensorRuntime,
+        Boolean productionReadinessPassed,
+        Integer declaredProductionReadinessPendingCount,
+        List<String> productionReadinessPendingFamilies,
+        Boolean directSafetensorReadinessPassed,
+        Integer declaredDirectSafetensorPendingCount,
+        List<String> directSafetensorPendingFamilies,
         BundlePolicy bundlePolicy,
         FixtureStatus fixtureStatus,
         List<BundlePreset> bundlePresets,
@@ -63,12 +73,15 @@ public record ModelFamilyBundleManifest(
         bundleFingerprint = bundleFingerprint == null || bundleFingerprint.isBlank()
                 ? "-"
                 : bundleFingerprint.trim();
+        declaredFamilyCount = nonNegativeOrNull(declaredFamilyCount);
         selectors = List.copyOf(selectors == null ? List.of() : selectors);
         families = List.copyOf(families == null ? List.of() : families);
         profiles = List.copyOf(profiles == null ? List.of() : profiles);
         availableFamilies = List.copyOf(availableFamilies == null ? List.of() : availableFamilies);
         availableProfiles = List.copyOf(availableProfiles == null ? List.of() : availableProfiles);
         availableSelectors = List.copyOf(availableSelectors == null ? List.of() : availableSelectors);
+        tokenizerMetadataPendingFamilies = normalizeFamilyIds(tokenizerMetadataPendingFamilies);
+        tokenizerMetadataPendingReasons = normalizeFamilyStringMap(tokenizerMetadataPendingReasons);
         selectorSource = normalizeSelectorSource(selectorSource);
         explicitSelectors = normalizeFamilyIds(explicitSelectors);
         presetSelectors = normalizeFamilyIds(presetSelectors);
@@ -83,6 +96,17 @@ public record ModelFamilyBundleManifest(
         explicitRequiredAliases = normalizeFamilyIds(explicitRequiredAliases);
         explicitForbiddenAliases = normalizeFamilyIds(explicitForbiddenAliases);
         bundlePreset = normalizeFamilyId(bundlePreset);
+        declaredProductionReadinessPendingCount = nonNegativeOrNull(declaredProductionReadinessPendingCount);
+        productionReadinessPendingFamilies = normalizeFamilyIds(productionReadinessPendingFamilies);
+        declaredDirectSafetensorPendingCount = nonNegativeOrNull(declaredDirectSafetensorPendingCount);
+        directSafetensorPendingFamilies = normalizeFamilyIds(directSafetensorPendingFamilies);
+        requiresDirectSafetensorRuntime = requiresDirectSafetensorRuntime
+                || "prod_llm".equals(bundlePreset)
+                || (selectors.contains("direct")
+                        && (presetRequiredAliases.contains("direct")
+                                || explicitRequiredAliases.contains("direct")
+                                || (bundlePolicy != null
+                                        && bundlePolicy.requiredAliases().contains("direct"))));
         bundlePolicy = bundlePolicy == null ? BundlePolicy.empty() : bundlePolicy;
         fixtureStatus = fixtureStatus == null ? FixtureStatus.empty() : fixtureStatus;
         bundlePresets = List.copyOf(bundlePresets == null ? List.of() : bundlePresets);
@@ -101,6 +125,17 @@ public record ModelFamilyBundleManifest(
             List<String> requiredAliases,
             List<String> forbiddenAliases,
             List<String> selectedFamilies,
+            Integer declaredSelectedCount,
+            Integer declaredMissingRequiredCount,
+            Integer declaredSelectedForbiddenCount,
+            Integer declaredMissingRequiredAliasCount,
+            Integer declaredSelectedForbiddenAliasCount,
+            Boolean productionTokenizerMetadataRequired,
+            Boolean productionTokenizerMetadataReady,
+            Boolean productionSafetyPassed,
+            Integer declaredProductionSafetyViolationCount,
+            List<String> pendingTokenizerFamilies,
+            Map<String, String> pendingTokenizerReasons,
             Boolean policyPassed,
             int policyViolationCount,
             BundlePolicyViolations policyViolations) {
@@ -114,12 +149,38 @@ public record ModelFamilyBundleManifest(
             requiredAliases = normalizeFamilyIds(requiredAliases);
             forbiddenAliases = normalizeFamilyIds(forbiddenAliases);
             selectedFamilies = normalizeFamilyIds(selectedFamilies);
+            declaredSelectedCount = nonNegativeOrNull(declaredSelectedCount);
+            declaredMissingRequiredCount = nonNegativeOrNull(declaredMissingRequiredCount);
+            declaredSelectedForbiddenCount = nonNegativeOrNull(declaredSelectedForbiddenCount);
+            declaredMissingRequiredAliasCount = nonNegativeOrNull(declaredMissingRequiredAliasCount);
+            declaredSelectedForbiddenAliasCount = nonNegativeOrNull(declaredSelectedForbiddenAliasCount);
+            declaredProductionSafetyViolationCount = nonNegativeOrNull(declaredProductionSafetyViolationCount);
+            pendingTokenizerFamilies = normalizeFamilyIds(pendingTokenizerFamilies);
+            pendingTokenizerReasons = normalizeFamilyStringMap(pendingTokenizerReasons);
             policyViolationCount = Math.max(0, policyViolationCount);
             policyViolations = policyViolations == null ? BundlePolicyViolations.empty() : policyViolations;
         }
 
         public int selectedCount() {
             return selectedFamilies.size();
+        }
+
+        public List<String> countConsistencyProblems() {
+            List<String> problems = new ArrayList<>();
+            addCountProblem(problems, id, "selectedCount", declaredSelectedCount, selectedFamilies.size());
+            addCountProblem(problems, id, "policyViolationCount", policyViolationCount,
+                    policyViolations.violationCount());
+            addCountProblem(problems, id, "missingRequiredCount", declaredMissingRequiredCount,
+                    policyViolations.missingRequiredFamilies().size());
+            addCountProblem(problems, id, "selectedForbiddenCount", declaredSelectedForbiddenCount,
+                    policyViolations.selectedForbiddenFamilies().size());
+            addCountProblem(problems, id, "missingRequiredAliasCount", declaredMissingRequiredAliasCount,
+                    policyViolations.missingRequiredAliases().size());
+            addCountProblem(problems, id, "selectedForbiddenAliasCount", declaredSelectedForbiddenAliasCount,
+                    policyViolations.selectedForbiddenAliases().size());
+            addCountProblem(problems, id, "productionSafetyViolationCount",
+                    declaredProductionSafetyViolationCount, expectedProductionSafetyViolationCount());
+            return List.copyOf(problems);
         }
 
         public boolean policyStatusKnown() {
@@ -133,12 +194,55 @@ public record ModelFamilyBundleManifest(
             return Boolean.TRUE.equals(policyPassed) ? "passed" : "failed";
         }
 
+        public boolean productionSafetyStatusKnown() {
+            return productionSafetyPassed != null;
+        }
+
+        public String productionSafetyStatusLabel() {
+            if (!productionSafetyStatusKnown()) {
+                return "unknown";
+            }
+            return Boolean.TRUE.equals(productionSafetyPassed) ? "passed" : "failed";
+        }
+
+        public int productionSafetyViolationCount() {
+            return declaredProductionSafetyViolationCount == null
+                    ? expectedProductionSafetyViolationCount()
+                    : declaredProductionSafetyViolationCount;
+        }
+
+        public String productionSafetyCompactStatus() {
+            String requirement = productionTokenizerMetadataRequiredForPreset()
+                    ? "required"
+                    : "not_required";
+            return "%s (%s, %d production safety violation(s), %d pending tokenizer family(s))".formatted(
+                    productionSafetyStatusLabel(),
+                    requirement,
+                    productionSafetyViolationCount(),
+                    pendingTokenizerFamilies.size());
+        }
+
+        private boolean productionTokenizerMetadataRequiredForPreset() {
+            if (productionTokenizerMetadataRequired != null) {
+                return Boolean.TRUE.equals(productionTokenizerMetadataRequired);
+            }
+            return id.startsWith("prod_");
+        }
+
+        private int expectedProductionSafetyViolationCount() {
+            return productionTokenizerMetadataRequiredForPreset()
+                    ? pendingTokenizerFamilies.size()
+                    : 0;
+        }
+
         public String compactSummary() {
-            return "%s(selectors=%s, selected=%d, policy=%s, requiredAliases=%s, forbiddenAliases=%s)".formatted(
+            return "%s(selectors=%s, selected=%d, policy=%s, production=%s, requiredAliases=%s, forbiddenAliases=%s)"
+                    .formatted(
                     id,
                     joinOrDash(selectors),
                     selectedCount(),
                     policyStatusLabel(),
+                    productionSafetyStatusLabel(),
                     joinOrDash(requiredAliases),
                     joinOrDash(forbiddenAliases));
         }
@@ -180,6 +284,12 @@ public record ModelFamilyBundleManifest(
         public String compactStatus() {
             return "%s (%d violation(s))".formatted(statusLabel(), violationCount);
         }
+
+        public List<String> countConsistencyProblems() {
+            List<String> problems = new ArrayList<>();
+            addCountProblem(problems, "policy", "violationCount", violationCount, violations.violationCount());
+            return List.copyOf(problems);
+        }
     }
 
     public static record BundlePolicyViolations(
@@ -197,6 +307,13 @@ public record ModelFamilyBundleManifest(
 
         public static BundlePolicyViolations empty() {
             return new BundlePolicyViolations(List.of(), List.of(), Map.of(), Map.of());
+        }
+
+        public int violationCount() {
+            return missingRequiredFamilies.size()
+                    + selectedForbiddenFamilies.size()
+                    + missingRequiredAliases.size()
+                    + selectedForbiddenAliases.size();
         }
     }
 
@@ -256,6 +373,15 @@ public record ModelFamilyBundleManifest(
                     requiredFamilyCount,
                     missingRequiredCount,
                     problemFamilyCount);
+        }
+
+        public List<String> countConsistencyProblems() {
+            List<String> problems = new ArrayList<>();
+            addCountProblem(problems, "fixture", "requiredFamilyCount", requiredFamilyCount, requiredFamilies.size());
+            addCountProblem(problems, "fixture", "missingRequiredCount",
+                    missingRequiredCount, missingRequiredFamilies.size());
+            addCountProblem(problems, "fixture", "problemFamilyCount", problemFamilyCount, problemFamilies.size());
+            return List.copyOf(problems);
         }
     }
 
@@ -370,7 +496,7 @@ public record ModelFamilyBundleManifest(
         }
     }
 
-    public static record BundleAlias(String id, String description, List<String> families) {
+    public static record BundleAlias(String id, String description, List<String> families, Integer declaredFamilyCount) {
 
         public BundleAlias {
             id = normalizeFamilyId(id);
@@ -383,10 +509,17 @@ public record ModelFamilyBundleManifest(
                             .distinct()
                             .toList();
             families = List.copyOf(normalizedFamilies);
+            declaredFamilyCount = nonNegativeOrNull(declaredFamilyCount);
         }
 
         public String compactSummary() {
             return "%s(%d families)".formatted(id, families.size());
+        }
+
+        public List<String> countConsistencyProblems() {
+            List<String> problems = new ArrayList<>();
+            addCountProblem(problems, id, "familyCount", declaredFamilyCount, families.size());
+            return List.copyOf(problems);
         }
     }
 
@@ -465,12 +598,15 @@ public record ModelFamilyBundleManifest(
                 schemaVersion(properties),
                 properties.getProperty("bundleFingerprint", ""),
                 detached(properties, selectors, families),
+                nullableIntProperty(properties, "familyCount"),
                 selectors,
                 families,
                 profiles,
                 availableFamilies,
                 availableProfiles,
                 availableSelectors,
+                csvProperty(properties, "tokenizerMetadataPendingFamilies"),
+                prefixedFamilyMap(properties, ".tokenizerMetadataPendingReason"),
                 properties.getProperty("selectorSource", ""),
                 csvProperty(properties, "explicitSelectors"),
                 csvProperty(properties, "presetSelectors"),
@@ -485,6 +621,13 @@ public record ModelFamilyBundleManifest(
                 csvProperty(properties, "explicitRequiredAliases"),
                 csvProperty(properties, "explicitForbiddenAliases"),
                 properties.getProperty("bundlePreset", ""),
+                Boolean.TRUE.equals(nullableBooleanProperty(properties, "requiresDirectSafetensorRuntime")),
+                nullableBooleanProperty(properties, "productionReadinessPassed"),
+                nullableIntProperty(properties, "productionReadinessPendingCount"),
+                csvProperty(properties, "productionReadinessPendingFamilies"),
+                nullableBooleanProperty(properties, "directSafetensorReadinessPassed"),
+                nullableIntProperty(properties, "directSafetensorPendingCount"),
+                csvProperty(properties, "directSafetensorPendingFamilies"),
                 bundlePolicy(properties),
                 fixtureStatus(properties),
                 bundlePresets,
@@ -500,12 +643,15 @@ public record ModelFamilyBundleManifest(
                 0,
                 "-",
                 false,
+                null,
                 List.of(),
                 List.of(),
                 List.of(),
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
+                Map.of(),
                 "",
                 List.of(),
                 List.of(),
@@ -520,6 +666,13 @@ public record ModelFamilyBundleManifest(
                 List.of(),
                 List.of(),
                 "",
+                false,
+                null,
+                null,
+                List.of(),
+                null,
+                null,
+                List.of(),
                 BundlePolicy.empty(),
                 FixtureStatus.empty(),
                 List.of(),
@@ -730,6 +883,116 @@ public record ModelFamilyBundleManifest(
                 .orElse("unknown (preset metadata missing)");
     }
 
+    public boolean productionReadinessStatusKnown() {
+        return productionReadinessPassed != null;
+    }
+
+    public String productionReadinessStatusLabel() {
+        if (!productionReadinessStatusKnown()) {
+            return "unknown";
+        }
+        return Boolean.TRUE.equals(productionReadinessPassed) ? "passed" : "failed";
+    }
+
+    public int productionReadinessPendingCount() {
+        return declaredProductionReadinessPendingCount == null
+                ? productionReadinessPendingFamilies.size()
+                : declaredProductionReadinessPendingCount;
+    }
+
+    public boolean directSafetensorReadinessStatusKnown() {
+        return directSafetensorReadinessPassed != null;
+    }
+
+    public String directSafetensorReadinessStatusLabel() {
+        if (!directSafetensorReadinessStatusKnown()) {
+            return "unknown";
+        }
+        return Boolean.TRUE.equals(directSafetensorReadinessPassed) ? "passed" : "failed";
+    }
+
+    public int directSafetensorPendingCount() {
+        return declaredDirectSafetensorPendingCount == null
+                ? directSafetensorPendingFamilies.size()
+                : declaredDirectSafetensorPendingCount;
+    }
+
+    public boolean catalogReadinessPassed() {
+        return catalogReadinessStatusKnown()
+                && Boolean.TRUE.equals(productionReadinessPassed)
+                && Boolean.TRUE.equals(directSafetensorReadinessPassed);
+    }
+
+    public boolean catalogReadinessStatusKnown() {
+        return productionReadinessStatusKnown() && directSafetensorReadinessStatusKnown();
+    }
+
+    public String catalogReadinessStatusLabel() {
+        if (!catalogReadinessStatusKnown()) {
+            return "unknown";
+        }
+        return catalogReadinessPassed() ? "passed" : "failed";
+    }
+
+    public String displayCatalogReadinessStatus() {
+        if (!catalogReadinessStatusKnown()) {
+            return "unknown";
+        }
+        return "%s (%d production pending, %d direct SafeTensor pending)".formatted(
+                catalogReadinessStatusLabel(),
+                productionReadinessPendingCount(),
+                directSafetensorPendingCount());
+    }
+
+    public boolean productionTokenizerMetadataRequired() {
+        return hasBundlePreset() && bundlePreset.startsWith("prod_");
+    }
+
+    public List<String> selectedTokenizerMetadataPendingFamilies() {
+        Set<String> pending = new LinkedHashSet<>(tokenizerMetadataPendingFamilies);
+        return families.stream()
+                .map(ModelFamilyBundleManifest::normalizeFamilyId)
+                .filter(family -> !family.isBlank() && pending.contains(family))
+                .distinct()
+                .toList();
+    }
+
+    public Map<String, String> selectedTokenizerMetadataPendingReasons() {
+        Map<String, String> reasons = new LinkedHashMap<>();
+        for (String familyId : selectedTokenizerMetadataPendingFamilies()) {
+            String reason = tokenizerMetadataPendingReasons.get(familyId);
+            if (reason != null && !reason.isBlank()) {
+                reasons.put(familyId, reason);
+            }
+        }
+        return Map.copyOf(reasons);
+    }
+
+    public boolean productionTokenizerMetadataReady() {
+        return selectedTokenizerMetadataPendingFamilies().isEmpty();
+    }
+
+    public boolean productionSafetyPassed() {
+        return !productionTokenizerMetadataRequired() || productionTokenizerMetadataReady();
+    }
+
+    public String productionSafetyStatusLabel() {
+        return productionSafetyPassed() ? "passed" : "failed";
+    }
+
+    public String displayProductionSafetyStatus() {
+        if (!productionTokenizerMetadataRequired()) {
+            return "not required";
+        }
+        List<String> pending = selectedTokenizerMetadataPendingFamilies();
+        if (pending.isEmpty()) {
+            return "passed (tokenizer metadata ready)";
+        }
+        return "failed (%d pending tokenizer family(s): %s)".formatted(
+                pending.size(),
+                String.join(", ", pending));
+    }
+
     public BundlePresetConformance activeBundlePresetConformance() {
         if (!hasBundlePreset()) {
             return BundlePresetConformance.none();
@@ -796,6 +1059,24 @@ public record ModelFamilyBundleManifest(
 
     public String displayFixtureStatus() {
         return fixtureStatus.compactStatus();
+    }
+
+    public List<String> countConsistencyProblems() {
+        List<String> problems = new ArrayList<>();
+        addCountProblem(problems, "bundle", "familyCount", declaredFamilyCount, families.size());
+        addCountProblem(problems, "bundle", "productionReadinessPendingCount",
+                declaredProductionReadinessPendingCount, productionReadinessPendingFamilies.size());
+        addCountProblem(problems, "bundle", "directSafetensorPendingCount",
+                declaredDirectSafetensorPendingCount, directSafetensorPendingFamilies.size());
+        problems.addAll(bundlePolicy.countConsistencyProblems());
+        problems.addAll(fixtureStatus.countConsistencyProblems());
+        bundlePresets.forEach(preset -> preset.countConsistencyProblems().stream()
+                .map(problem -> "bundlePreset." + problem)
+                .forEach(problems::add));
+        bundleAliases.forEach(alias -> alias.countConsistencyProblems().stream()
+                .map(problem -> "bundleAlias." + problem)
+                .forEach(problems::add));
+        return List.copyOf(problems);
     }
 
     public List<String> availableBundlePresets() {
@@ -881,7 +1162,8 @@ public record ModelFamilyBundleManifest(
                 .map(aliasId -> new BundleAlias(
                         aliasId,
                         properties.getProperty("bundleAlias." + aliasId + ".description", ""),
-                        csvProperty(properties, "bundleAlias." + aliasId + ".families")))
+                        csvProperty(properties, "bundleAlias." + aliasId + ".families"),
+                        nullableIntProperty(properties, "bundleAlias." + aliasId + ".familyCount")))
                 .toList();
     }
 
@@ -935,6 +1217,23 @@ public record ModelFamilyBundleManifest(
                         csvProperty(properties, "bundlePreset." + presetId + ".requiredAliases"),
                         csvProperty(properties, "bundlePreset." + presetId + ".forbiddenAliases"),
                         csvProperty(properties, "bundlePreset." + presetId + ".selectedFamilies"),
+                        nullableIntProperty(properties, "bundlePreset." + presetId + ".selectedCount"),
+                        nullableIntProperty(properties, "bundlePreset." + presetId + ".missingRequiredCount"),
+                        nullableIntProperty(properties, "bundlePreset." + presetId + ".selectedForbiddenCount"),
+                        nullableIntProperty(properties, "bundlePreset." + presetId + ".missingRequiredAliasCount"),
+                        nullableIntProperty(properties, "bundlePreset." + presetId + ".selectedForbiddenAliasCount"),
+                        nullableBooleanProperty(properties,
+                                "bundlePreset." + presetId + ".productionTokenizerMetadataRequired"),
+                        nullableBooleanProperty(properties,
+                                "bundlePreset." + presetId + ".productionTokenizerMetadataReady"),
+                        nullableBooleanProperty(properties,
+                                "bundlePreset." + presetId + ".productionSafetyPassed"),
+                        nullableIntProperty(properties,
+                                "bundlePreset." + presetId + ".productionSafetyViolationCount"),
+                        csvProperty(properties, "bundlePreset." + presetId + ".pendingTokenizerFamilies"),
+                        prefixedFamilyValueMap(properties,
+                                "bundlePreset." + presetId + ".pendingTokenizerFamily.",
+                                ".reason"),
                         nullableBooleanProperty(properties, "bundlePreset." + presetId + ".policyPassed"),
                         intProperty(properties, "bundlePreset." + presetId + ".policyViolationCount"),
                         new BundlePolicyViolations(
@@ -974,6 +1273,24 @@ public record ModelFamilyBundleManifest(
         return Map.copyOf(values);
     }
 
+    private static Map<String, String> prefixedFamilyValueMap(
+            Properties properties,
+            String prefix,
+            String suffix) {
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String key : properties.stringPropertyNames().stream().sorted().toList()) {
+            if (!key.startsWith(prefix) || !key.endsWith(suffix)) {
+                continue;
+            }
+            String familyId = normalizeFamilyId(key.substring(prefix.length(), key.length() - suffix.length()));
+            String value = Objects.toString(properties.getProperty(key), "").trim();
+            if (!familyId.isBlank() && !value.isBlank()) {
+                values.put(familyId, value);
+            }
+        }
+        return Map.copyOf(values);
+    }
+
     private static List<String> csvProperty(Properties properties, String key) {
         String value = properties.getProperty(key, "");
         if (value.isBlank()) {
@@ -991,6 +1308,18 @@ public record ModelFamilyBundleManifest(
             return null;
         }
         return Boolean.parseBoolean(value.trim());
+    }
+
+    private static Integer nullableIntProperty(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private static int intProperty(Properties properties, String key) {
@@ -1027,6 +1356,24 @@ public record ModelFamilyBundleManifest(
             return Boolean.parseBoolean(explicit.trim());
         }
         return selectors.stream().anyMatch("none"::equalsIgnoreCase) && families.isEmpty();
+    }
+
+    private static Integer nonNegativeOrNull(Integer value) {
+        if (value == null) {
+            return null;
+        }
+        return Math.max(0, value);
+    }
+
+    private static void addCountProblem(
+            List<String> problems,
+            String scope,
+            String field,
+            Integer declared,
+            int actual) {
+        if (declared != null && declared != actual) {
+            problems.add("%s.%s=%d, expected %d".formatted(scope, field, declared, actual));
+        }
     }
 
     private static int schemaVersion(Properties properties) {
@@ -1137,6 +1484,23 @@ public record ModelFamilyBundleManifest(
 
     private static Set<String> normalizedSet(List<String> values) {
         return new LinkedHashSet<>(normalizeFamilyIds(values));
+    }
+
+    private static Map<String, String> normalizeFamilyStringMap(Map<String, String> values) {
+        if (values == null || values.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> normalized = new LinkedHashMap<>();
+        values.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> {
+                    String familyId = normalizeFamilyId(entry.getKey());
+                    String value = Objects.toString(entry.getValue(), "").trim();
+                    if (!familyId.isBlank() && !value.isBlank()) {
+                        normalized.put(familyId, value);
+                    }
+                });
+        return Map.copyOf(normalized);
     }
 
     private static Map<String, List<String>> normalizeAliasFamilyMap(Map<String, List<String>> values) {

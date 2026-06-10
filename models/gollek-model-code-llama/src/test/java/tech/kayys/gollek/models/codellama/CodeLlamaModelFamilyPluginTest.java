@@ -4,9 +4,12 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +26,18 @@ class CodeLlamaModelFamilyPluginTest {
                         .map(ModelFamilyContractViolation::summary)
                         .toList(),
                 "code llama model-family plugin should satisfy the shared plugin contract");
+    }
+
+    @Test
+    void codeLlamaFixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new CodeLlamaModelFamilyPlugin(),
+                fixture("code_llama"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "code llama fixture should match descriptor, tokenizer, and direct adapter claims");
     }
 
     @Test
@@ -60,5 +75,10 @@ class CodeLlamaModelFamilyPluginTest {
         assertEquals("model.layers.10.mlp.gate_proj.weight", architecture.layerFfnGateWeight(10));
         assertEquals("model.layers.10.mlp.up_proj.weight", architecture.layerFfnUpWeight(10));
         assertEquals("model.layers.10.mlp.down_proj.weight", architecture.layerFfnDownWeight(10));
+    }
+
+    private static Path fixture(String familyId) throws Exception {
+        return Path.of(Objects.requireNonNull(
+                CodeLlamaModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
     }
 }

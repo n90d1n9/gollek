@@ -51,6 +51,22 @@ public record TrainingReportRecommendation(
         return priority == Priority.BLOCKER;
     }
 
+    public static TrainingReportRecommendation fromMap(Map<String, ?> map) {
+        Objects.requireNonNull(map, "map must not be null");
+        return new TrainingReportRecommendation(
+                enumValue(Priority.class, map.get("priority"), Priority.MEDIUM),
+                enumValue(Category.class, map.get("category"), Category.REPORTING),
+                enumValue(
+                        TrainingReportDiagnostics.Severity.class,
+                        map.get("diagnosticSeverity"),
+                        TrainingReportDiagnostics.Severity.INFO),
+                TrainingReportValues.stringValue(map.get("diagnosticCode"), "unknown"),
+                TrainingReportValues.stringValue(map.get("title"), "Review diagnostic"),
+                TrainingReportValues.stringValue(map.get("rationale"), "No rationale available."),
+                stringList(map.get("actions")),
+                evidenceMap(map.get("evidence")));
+    }
+
     public Map<String, Object> toMap() {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("priority", priority.name());
@@ -240,6 +256,42 @@ public record TrainingReportRecommendation(
         return value.trim();
     }
 
+    private static <T extends Enum<T>> T enumValue(Class<T> type, Object value, T fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Enum.valueOf(type, String.valueOf(value).trim());
+        } catch (IllegalArgumentException error) {
+            return fallback;
+        }
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof Iterable<?> iterable)) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>();
+        for (Object item : iterable) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                items.add(String.valueOf(item).trim());
+            }
+        }
+        return List.copyOf(items);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> evidenceMap(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return Map.of();
+        }
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(map);
+        if (snapshot instanceof Map<?, ?> snapshotMap) {
+            return (Map<String, Object>) snapshotMap;
+        }
+        return Map.of();
+    }
+
     private static List<String> immutableActions(List<String> actions) {
         if (actions == null || actions.isEmpty()) {
             return List.of();
@@ -258,7 +310,7 @@ public record TrainingReportRecommendation(
         if (evidence == null || evidence.isEmpty()) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(evidence);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(evidence);
         if (snapshot instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }

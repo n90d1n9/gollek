@@ -5,9 +5,12 @@ import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,6 +27,18 @@ class Gemma2ModelFamilyPluginTest {
                         .map(ModelFamilyContractViolation::summary)
                         .toList(),
                 "gemma2 model-family plugin should satisfy the shared plugin contract");
+    }
+
+    @Test
+    void gemma2FixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new Gemma2ModelFamilyPlugin(),
+                fixture("gemma2"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "gemma2 fixture should match descriptor, tokenizer, and direct adapter claims");
     }
 
     @Test
@@ -74,5 +89,10 @@ class Gemma2ModelFamilyPluginTest {
         assertEquals(64.0f, architecture.embeddingScaleFactor(4096));
         assertEquals(50.0f, architecture.defaultAttnSoftCap());
         assertEquals(30.0f, architecture.defaultFinalSoftCap());
+    }
+
+    private static Path fixture(String familyId) throws Exception {
+        return Path.of(Objects.requireNonNull(
+                Gemma2ModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
     }
 }

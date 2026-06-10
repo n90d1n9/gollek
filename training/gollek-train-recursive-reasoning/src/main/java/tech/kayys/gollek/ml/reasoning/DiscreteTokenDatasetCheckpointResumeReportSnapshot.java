@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Read-side view of a persisted checkpoint resume report sidecar.
@@ -22,6 +23,7 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
         DiscreteTokenDatasetCheckpointResumeCompatibilityMode compatibilityMode,
         boolean forceAccepted,
         List<String> compatibilityWarnings,
+        List<DiscreteTokenDatasetCheckpointResumeGate> gates,
         boolean policyTracked,
         String runId,
         long checkpointStep,
@@ -35,21 +37,29 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
         DiscreteTokenDatasetCheckpointManifestSnapshot checkpoint) {
 
     public DiscreteTokenDatasetCheckpointResumeReportSnapshot {
-        status = requireText(status, "status");
-        currentPlanGateStatus = requireText(currentPlanGateStatus, "currentPlanGateStatus");
-        runId = requireText(runId, "runId");
+        status = DiscreteTokenDatasetMetadataSupport.requireText(status, "status");
+        currentPlanGateStatus =
+                DiscreteTokenDatasetMetadataSupport.requireText(currentPlanGateStatus, "currentPlanGateStatus");
+        runId = DiscreteTokenDatasetMetadataSupport.requireText(runId, "runId");
         if (checkpointStep < 0L) {
             throw new IllegalArgumentException("checkpointStep must be >= 0 but was " + checkpointStep);
         }
-        schemaVersion = requireText(schemaVersion, "schemaVersion");
-        datasetGateStatus = requireText(datasetGateStatus, "datasetGateStatus");
-        rejectionReasons = immutableStringList(rejectionReasons, "rejectionReasons");
+        schemaVersion = DiscreteTokenDatasetMetadataSupport.requireText(schemaVersion, "schemaVersion");
+        datasetGateStatus = DiscreteTokenDatasetMetadataSupport.requireText(datasetGateStatus, "datasetGateStatus");
+        rejectionReasons = DiscreteTokenDatasetMetadataSupport.optionalTextList(
+                rejectionReasons,
+                "rejectionReasons");
         compatibilityMode = Objects.requireNonNull(compatibilityMode, "compatibilityMode must not be null");
-        compatibilityWarnings = immutableStringList(compatibilityWarnings, "compatibilityWarnings");
+        compatibilityWarnings = DiscreteTokenDatasetMetadataSupport.optionalTextList(
+                compatibilityWarnings,
+                "compatibilityWarnings");
+        gates = immutableGates(gates);
         expectation = Objects.requireNonNull(expectation, "expectation must not be null");
         fingerprintMatch = Objects.requireNonNull(fingerprintMatch, "fingerprintMatch must not be null");
-        policyMetadata = immutableMetadataMap(policyMetadata, "policyMetadata");
-        currentPlanReportMetadata = immutableMetadataMap(currentPlanReportMetadata, "currentPlanReportMetadata");
+        policyMetadata = DiscreteTokenDatasetMetadataSupport.immutableMetadataMap(policyMetadata, "policyMetadata");
+        currentPlanReportMetadata = DiscreteTokenDatasetMetadataSupport.immutableMetadataMap(
+                currentPlanReportMetadata,
+                "currentPlanReportMetadata");
         checkpoint = Objects.requireNonNull(checkpoint, "checkpoint must not be null");
         verifyConsistency(
                 status,
@@ -64,6 +74,7 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
                 compatibilityMode,
                 forceAccepted,
                 compatibilityWarnings,
+                gates,
                 policyTracked,
                 runId,
                 checkpointStep,
@@ -85,30 +96,37 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
 
     public static DiscreteTokenDatasetCheckpointResumeReportSnapshot fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
+        List<DiscreteTokenDatasetCheckpointResumeGate> gates = gatesFromMetadata(metadata);
+        verifyOptionalGateSummary(metadata, gates);
+        verifyOptionalActionArtifacts(metadata, gates);
         return new DiscreteTokenDatasetCheckpointResumeReportSnapshot(
-                requiredString(metadata, "status"),
-                requiredBoolean(metadata, "ready"),
-                requiredBoolean(metadata, "schemaAccepted"),
-                requiredBoolean(metadata, "datasetAccepted"),
-                requiredBoolean(metadata, "fingerprintMatched"),
-                requiredBoolean(metadata, "expectationAccepted"),
-                requiredBoolean(metadata, "currentPlanChecked"),
-                requiredBoolean(metadata, "currentPlanAccepted"),
-                requiredString(metadata, "currentPlanGateStatus"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "status"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "ready"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "schemaAccepted"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "datasetAccepted"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "fingerprintMatched"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "expectationAccepted"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "currentPlanChecked"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "currentPlanAccepted"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "currentPlanGateStatus"),
                 compatibilityModeFromMetadata(metadata),
-                optionalBoolean(metadata, "forceAccepted", false),
-                optionalStringList(metadata, "compatibilityWarnings"),
-                requiredBoolean(metadata, "policyTracked"),
-                requiredString(metadata, "runId"),
-                requiredLong(metadata, "checkpointStep"),
-                requiredString(metadata, "schemaVersion"),
-                requiredString(metadata, "datasetGateStatus"),
-                requiredStringList(metadata, "rejectionReasons"),
-                DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(requiredMap(metadata, "expectation")),
-                DiscreteTokenDatasetFingerprintMatch.fromMetadata(requiredMap(metadata, "fingerprintMatch")),
-                optionalMap(metadata, "policy"),
-                optionalMap(metadata, "currentPlanReport"),
-                DiscreteTokenDatasetCheckpointManifestSnapshot.fromMetadata(requiredMap(metadata, "checkpoint")));
+                DiscreteTokenDatasetMetadataSupport.optionalBoolean(metadata, "forceAccepted", false),
+                DiscreteTokenDatasetMetadataSupport.optionalStringList(metadata, "compatibilityWarnings"),
+                gates,
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "policyTracked"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "runId"),
+                DiscreteTokenDatasetMetadataSupport.requiredLong(metadata, "checkpointStep"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "schemaVersion"),
+                DiscreteTokenDatasetMetadataSupport.requiredString(metadata, "datasetGateStatus"),
+                DiscreteTokenDatasetMetadataSupport.requiredStringList(metadata, "rejectionReasons"),
+                DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "expectation")),
+                DiscreteTokenDatasetFingerprintMatch.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "fingerprintMatch")),
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "policy"),
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "currentPlanReport"),
+                DiscreteTokenDatasetCheckpointManifestSnapshot.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "checkpoint")));
     }
 
     public String summary() {
@@ -132,6 +150,96 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
         }
     }
 
+    public DiscreteTokenDatasetCheckpointResumeGateSummary gateSummary() {
+        return DiscreteTokenDatasetCheckpointResumeGateSummary.fromGates(gates);
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeActionPlan actionPlan() {
+        return gateSummary().actionPlan();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeReadinessBadge readinessBadge() {
+        return gateSummary().readinessBadge();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> nextActions() {
+        return gateSummary().nextActions();
+    }
+
+    public Optional<DiscreteTokenDatasetCheckpointResumeAction> primaryAction() {
+        return gateSummary().primaryAction();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> requiredActions() {
+        return gateSummary().requiredActions();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeAction> warningActions() {
+        return gateSummary().warningActions();
+    }
+
+    public List<String> actionCodes() {
+        return gateSummary().actionCodes();
+    }
+
+    public List<String> requiredActionCodes() {
+        return gateSummary().requiredActionCodes();
+    }
+
+    public List<String> warningActionCodes() {
+        return gateSummary().warningActionCodes();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeReportSnapshot requireAllGatesAccepted() {
+        gateSummary().requireAllAccepted();
+        return this;
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeReportSnapshot requireNoRequiredActions() {
+        actionPlan().requireNoRequiredActions();
+        return this;
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeGate> blockedGates() {
+        return gates.stream()
+                .filter(DiscreteTokenDatasetCheckpointResumeGate::blocked)
+                .toList();
+    }
+
+    public List<DiscreteTokenDatasetCheckpointResumeGate> warningGates() {
+        return gates.stream()
+                .filter(DiscreteTokenDatasetCheckpointResumeGate::warning)
+                .toList();
+    }
+
+    public Map<String, DiscreteTokenDatasetCheckpointResumeGate> gatesById() {
+        Map<String, DiscreteTokenDatasetCheckpointResumeGate> index = new LinkedHashMap<>();
+        for (DiscreteTokenDatasetCheckpointResumeGate gate : gates) {
+            if (index.put(gate.id(), gate) != null) {
+                throw new IllegalStateException("duplicate resume gate id: " + gate.id());
+            }
+        }
+        return Collections.unmodifiableMap(index);
+    }
+
+    public Optional<DiscreteTokenDatasetCheckpointResumeGate> gate(String id) {
+        return Optional.ofNullable(gatesById().get(DiscreteTokenDatasetMetadataSupport.requireText(id, "id")));
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeGate requireGate(String id) {
+        return gate(id)
+                .orElseThrow(() -> new IllegalArgumentException("unknown checkpoint resume gate: " + id));
+    }
+
+    public boolean gateAccepted(String id) {
+        return requireGate(id).accepted();
+    }
+
+    public DiscreteTokenDatasetCheckpointResumeReportSnapshot requireGateAccepted(String id) {
+        requireGate(id).requireAccepted();
+        return this;
+    }
+
     public Map<String, Object> toMetadata() {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("status", status);
@@ -146,6 +254,12 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
         metadata.put("compatibilityMode", compatibilityMode.id());
         metadata.put("forceAccepted", forceAccepted);
         metadata.put("compatibilityWarnings", compatibilityWarnings);
+        metadata.put("gateSummary", gateSummary().toMetadata());
+        metadata.put("actionPlan", actionPlan().toMetadata());
+        metadata.put("readinessBadge", readinessBadge().toMetadata());
+        metadata.put("gates", gates.stream()
+                .map(DiscreteTokenDatasetCheckpointResumeGate::toMetadata)
+                .toList());
         metadata.put("policyTracked", policyTracked);
         metadata.put("runId", runId);
         metadata.put("checkpointStep", checkpointStep);
@@ -177,6 +291,7 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
             DiscreteTokenDatasetCheckpointResumeCompatibilityMode compatibilityMode,
             boolean forceAccepted,
             List<String> compatibilityWarnings,
+            List<DiscreteTokenDatasetCheckpointResumeGate> gates,
             boolean policyTracked,
             String runId,
             long checkpointStep,
@@ -241,6 +356,59 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
         if (ready != computedReady) {
             throw new IllegalArgumentException("ready must match resume report acceptance fields");
         }
+        verifyGateConsistency(
+                schemaAccepted,
+                datasetAccepted,
+                fingerprintMatched,
+                expectationAccepted,
+                currentPlanAccepted,
+                currentPlanGateStatus,
+                compatibilityMode,
+                ready,
+                gates);
+    }
+
+    private static void verifyGateConsistency(
+            boolean schemaAccepted,
+            boolean datasetAccepted,
+            boolean fingerprintMatched,
+            boolean expectationAccepted,
+            boolean currentPlanAccepted,
+            String currentPlanGateStatus,
+            DiscreteTokenDatasetCheckpointResumeCompatibilityMode compatibilityMode,
+            boolean ready,
+            List<DiscreteTokenDatasetCheckpointResumeGate> gates) {
+        Map<String, Boolean> expected = new LinkedHashMap<>();
+        expected.put(DiscreteTokenDatasetCheckpointResumeGate.CHECKPOINT_SCHEMA, schemaAccepted);
+        expected.put(
+                DiscreteTokenDatasetCheckpointResumeGate.CHECKPOINT_DATASET,
+                datasetAccepted || compatibilityMode.allowRejectedCheckpointDataset());
+        expected.put(
+                DiscreteTokenDatasetCheckpointResumeGate.DATASET_FINGERPRINT,
+                fingerprintMatched || compatibilityMode.allowFingerprintMismatch());
+        expected.put(DiscreteTokenDatasetCheckpointResumeGate.RESUME_EXPECTATION, expectationAccepted);
+        expected.put(
+                DiscreteTokenDatasetCheckpointResumeGate.CURRENT_PLAN,
+                currentPlanAccepted || compatibilityMode.allowCurrentPlanGateStatus(currentPlanGateStatus));
+
+        Map<String, DiscreteTokenDatasetCheckpointResumeGate> actual = new LinkedHashMap<>();
+        for (DiscreteTokenDatasetCheckpointResumeGate gate : gates) {
+            if (actual.put(gate.id(), gate) != null) {
+                throw new IllegalArgumentException("duplicate resume gate id: " + gate.id());
+            }
+        }
+        for (Map.Entry<String, Boolean> entry : expected.entrySet()) {
+            DiscreteTokenDatasetCheckpointResumeGate gate = actual.get(entry.getKey());
+            if (gate == null) {
+                throw new IllegalArgumentException("resume gate is missing: " + entry.getKey());
+            }
+            if (gate.accepted() != entry.getValue()) {
+                throw new IllegalArgumentException("resume gate acceptance does not match field: " + entry.getKey());
+            }
+        }
+        if (ready != gates.stream().allMatch(DiscreteTokenDatasetCheckpointResumeGate::accepted)) {
+            throw new IllegalArgumentException("ready must match resume gate acceptance");
+        }
     }
 
     private static void verifyCurrentPlanReportConsistency(
@@ -260,144 +428,98 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
             return;
         }
 
-        boolean reportAccepted = requiredBoolean(currentPlanReportMetadata, "accepted");
+        boolean reportAccepted = DiscreteTokenDatasetMetadataSupport.requiredBoolean(
+                currentPlanReportMetadata,
+                "accepted");
         if (currentPlanAccepted != reportAccepted) {
             throw new IllegalArgumentException("currentPlanAccepted must match currentPlanReport accepted");
         }
-        String reportGateStatus = requiredString(currentPlanReportMetadata, "gateStatus");
+        String reportGateStatus = DiscreteTokenDatasetMetadataSupport.requiredString(
+                currentPlanReportMetadata,
+                "gateStatus");
         if (!currentPlanGateStatus.equals(reportGateStatus)) {
             throw new IllegalArgumentException("currentPlanGateStatus must match currentPlanReport gateStatus");
         }
     }
 
-    private static Map<String, Object> requiredMap(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Map<?, ?> map) {
-            return immutableMetadataMap(map, key);
+    private static List<DiscreteTokenDatasetCheckpointResumeGate> gatesFromMetadata(Map<?, ?> metadata) {
+        if (metadata.containsKey("gates") && metadata.get("gates") != null) {
+            Object value = metadata.get("gates");
+            if (value instanceof List<?> list) {
+                return immutableGates(list.stream()
+                        .map(entry -> {
+                            if (entry instanceof Map<?, ?> map) {
+                                return DiscreteTokenDatasetCheckpointResumeGate.fromMetadata(map);
+                            }
+                            throw new IllegalArgumentException("gates entries must be maps");
+                        })
+                        .toList());
+            }
+            throw new IllegalArgumentException("metadata field 'gates' must be a list");
         }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
+
+        Map<String, Object> currentPlanReportMetadata =
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "currentPlanReport");
+        DiscreteTokenDatasetPlanReport currentPlanReport = currentPlanReportMetadata.isEmpty()
+                ? null
+                : DiscreteTokenDatasetPlanReport.fromMetadata(currentPlanReportMetadata);
+        DiscreteTokenDatasetCheckpointResumeReport report = new DiscreteTokenDatasetCheckpointResumeReport(
+                DiscreteTokenDatasetCheckpointManifestSnapshot.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "checkpoint")),
+                DiscreteTokenDatasetFingerprintMatch.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "fingerprintMatch")),
+                DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "expectation")),
+                currentPlanReport,
+                compatibilityModeFromMetadata(metadata),
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "policy"));
+        return report.gates();
     }
 
-    private static Map<String, Object> optionalMap(Map<?, ?> metadata, String key) {
+    private static void verifyOptionalGateSummary(
+            Map<?, ?> metadata,
+            List<DiscreteTokenDatasetCheckpointResumeGate> gates) {
+        if (!metadata.containsKey("gateSummary")) {
+            return;
+        }
+        DiscreteTokenDatasetCheckpointResumeGateSummary.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, "gateSummary"),
+                gates);
+    }
+
+    private static void verifyOptionalActionArtifacts(
+            Map<?, ?> metadata,
+            List<DiscreteTokenDatasetCheckpointResumeGate> gates) {
+        DiscreteTokenDatasetCheckpointResumeGateSummary summary =
+                DiscreteTokenDatasetCheckpointResumeGateSummary.fromGates(gates);
+        verifyOptionalMetadata(metadata, "actionPlan", summary.actionPlan().toMetadata());
+        verifyOptionalMetadata(metadata, "readinessBadge", summary.readinessBadge().toMetadata());
+    }
+
+    private static void verifyOptionalMetadata(Map<?, ?> metadata, String key, Map<String, Object> expected) {
         if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            return Map.of();
+            return;
         }
-        Object value = metadata.get(key);
-        if (value instanceof Map<?, ?> map) {
-            return immutableMetadataMap(map, key);
+        if (!DiscreteTokenDatasetMetadataSupport.metadataValueMatches(
+                expected,
+                DiscreteTokenDatasetMetadataSupport.requiredMetadataMap(metadata, key),
+                true)) {
+            throw new IllegalArgumentException("metadata field '" + key + "' does not match resume gates");
         }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
     }
 
-    private static List<String> requiredStringList(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof List<?> list) {
-            return immutableStringList(list, key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a list");
-    }
-
-    private static List<String> optionalStringList(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            return List.of();
-        }
-        Object value = metadata.get(key);
-        if (value instanceof List<?> list) {
-            return immutableStringList(list, key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a list");
-    }
-
-    private static List<String> immutableStringList(List<?> values, String name) {
+    private static List<DiscreteTokenDatasetCheckpointResumeGate> immutableGates(List<?> values) {
         if (values == null || values.isEmpty()) {
-            return List.of();
+            throw new IllegalArgumentException("gates must not be empty");
         }
         return values.stream()
                 .map(value -> {
-                    if (value instanceof CharSequence text) {
-                        return text.toString();
+                    if (value instanceof DiscreteTokenDatasetCheckpointResumeGate gate) {
+                        return gate;
                     }
-                    throw new IllegalArgumentException(name + " entries must be strings");
+                    throw new IllegalArgumentException("gates entries must be checkpoint resume gates");
                 })
                 .toList();
-    }
-
-    private static Map<String, Object> immutableMetadataMap(Map<?, ?> values, String name) {
-        if (values == null || values.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Object> copy = new LinkedHashMap<>();
-        for (Map.Entry<?, ?> entry : values.entrySet()) {
-            String key = mapKey(entry.getKey(), name);
-            Object value = Objects.requireNonNull(entry.getValue(), name + " field '" + key + "' must not be null");
-            copy.put(key, value);
-        }
-        return Collections.unmodifiableMap(copy);
-    }
-
-    private static String mapKey(Object key, String mapName) {
-        if (key instanceof CharSequence text) {
-            return requireText(text.toString(), mapName + " key");
-        }
-        throw new IllegalArgumentException(mapName + " keys must be strings");
-    }
-
-    private static String requiredString(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof CharSequence text) {
-            return requireText(text.toString(), key);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static long requiredLong(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < Long.MIN_VALUE
-                    || numericValue > Long.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-            }
-            return number.longValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Long.parseLong(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-    }
-
-    private static boolean requiredBoolean(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        return booleanValue(value, key);
-    }
-
-    private static boolean optionalBoolean(Map<?, ?> metadata, String key, boolean defaultValue) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            return defaultValue;
-        }
-        return booleanValue(metadata.get(key), key);
-    }
-
-    private static boolean booleanValue(Object value, String key) {
-        if (value instanceof Boolean flag) {
-            return flag;
-        }
-        if (value instanceof CharSequence text) {
-            String normalized = text.toString().trim().toLowerCase();
-            if ("true".equals(normalized)) {
-                return true;
-            }
-            if ("false".equals(normalized)) {
-                return false;
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a boolean");
     }
 
     private static DiscreteTokenDatasetCheckpointResumeCompatibilityMode compatibilityModeFromMetadata(
@@ -406,20 +528,5 @@ public record DiscreteTokenDatasetCheckpointResumeReportSnapshot(
                 ? metadata.get("compatibilityMode")
                 : metadata.get("mode");
         return DiscreteTokenDatasetCheckpointResumeCompatibilityMode.fromMetadataValue(value);
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
-    }
-
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

@@ -63,10 +63,55 @@ class ModelConfigGemma4TextMergeTest {
         assertEquals("Gemma4ForCausalLM", ggufPrimaryArchitecture("gemma4_text"));
         assertEquals("Gemma4VisionModel", ggufPrimaryArchitecture("gemma4_vision"));
         assertEquals("Gemma4AudioModel", ggufPrimaryArchitecture("gemma4_audio"));
+        assertEquals("Gemma4ForMultimodalLM", ggufPrimaryArchitecture("gemma4_unified"));
         assertEquals("YiForCausalLM", ggufPrimaryArchitecture("yi"));
         assertEquals("Cohere2ForCausalLM", ggufPrimaryArchitecture("cohere2"));
         assertEquals("DeepseekV3ForCausalLM", ggufPrimaryArchitecture("deepseek_v3"));
         assertEquals("KimiForCausalLM", ggufPrimaryArchitecture("kimi"));
+    }
+
+    @Test
+    void mergesGemma4UnifiedTextConfigWithoutLosingWrapperIdentity() throws IOException {
+        String json = """
+                {
+                  "model_type": "gemma4_unified",
+                  "architectures": ["Gemma4ForMultimodalLM"],
+                  "processor_class": "Gemma4Processor",
+                  "text_config": {
+                    "model_type": "gemma4_text",
+                    "architectures": ["Gemma4ForCausalLM"],
+                    "hidden_size": 5120,
+                    "num_hidden_layers": 48,
+                    "num_attention_heads": 32,
+                    "num_key_value_heads": 16,
+                    "intermediate_size": 20480,
+                    "vocab_size": 262144,
+                    "sliding_window": 1024,
+                    "max_position_embeddings": 262144,
+                    "layer_types": ["sliding_attention", "full_attention"]
+                  },
+                  "vision_config": {"model_type": "gemma4_vision"},
+                  "audio_config": {"model_type": "gemma4_audio"}
+                }
+                """;
+        Path dir = Files.createTempDirectory("gollek-modelconfig-unified-test");
+        Path cfgPath = dir.resolve("config.json");
+        Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
+        try {
+            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
+            assertEquals("gemma4_unified", cfg.modelType());
+            assertEquals("Gemma4ForMultimodalLM", cfg.primaryArchitecture());
+            assertEquals(5120, cfg.hiddenSize());
+            assertEquals(48, cfg.numHiddenLayers());
+            assertEquals(32, cfg.numAttentionHeads());
+            assertEquals(16, cfg.numKeyValueHeads());
+            assertEquals(1024, cfg.slidingWindowSize());
+            assertEquals(262144, cfg.maxPositionEmbeddings());
+            assertTrue(ModelRuntimeTraits.fallbackFromConfig(cfg).gemma4Text());
+        } finally {
+            Files.deleteIfExists(cfgPath);
+            Files.deleteIfExists(dir);
+        }
     }
 
     @Test

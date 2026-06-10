@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "hf-bpe",
     "families": ["x_clip", "xclip", "xclip_text_model", "xclip_vision_model"]
   }
 }

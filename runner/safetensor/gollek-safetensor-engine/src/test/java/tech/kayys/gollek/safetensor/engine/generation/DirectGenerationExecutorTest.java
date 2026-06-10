@@ -133,6 +133,6 @@ class DirectGenerationExecutorTest {
     private static DirectGenerationStepSampler.SamplingState sampling(Set<Integer> stops) {
         return new DirectGenerationStepSampler.SamplingState(
                 DirectGenerationStepSampler.SamplingMode.RAW_PRETOKENIZED,
-                false, null, null, stops, null);
+                false, null, null, null, null, stops, null, null);
     }
 }

@@ -409,6 +409,9 @@ final class AgenticApiMapper {
     }
 
     static String apiKey(jakarta.ws.rs.core.HttpHeaders headers) {
+        if (headers == null) {
+            return null;
+        }
         String key = headers.getHeaderString("X-API-Key");
         if (!isBlank(key)) {
             return key.trim();

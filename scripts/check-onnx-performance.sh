@@ -11,10 +11,11 @@ Run the appropriate ONNX performance workflow from one entrypoint:
   - capture mode:    --capture-baseline
   - compare mode:    --compare-baselines BASELINE_A BASELINE_B
   - bundle mode:     --verify-bundle BUNDLE
+  - diagnose mode:   --diagnose-summary SUMMARY
 
 This script is intentionally a thin facade. It delegates to the focused
-benchmark gate, regression verifier, baseline capture, or artifact verifier so those
-building blocks stay reusable in CI and local profiling.
+benchmark gate, regression verifier, baseline capture, artifact verifier, or
+diagnosis analyzer so those building blocks stay reusable in CI and local profiling.
 
 Mode selection:
   --model ID                    Model id or local alias (required)
@@ -24,6 +25,7 @@ Mode selection:
   --capture-baseline            Capture/update a reusable baseline
   --compare-baselines A B       Compare two stored baselines without running a model
   --verify-bundle PATH          Validate a bundle.tsv without running a model
+  --diagnose-summary PATH       Analyze summary.tsv/aggregate.tsv without running a model
 
 Common forwarded options:
   --prompt TEXT
@@ -57,6 +59,13 @@ Compare forwarded options:
 Bundle verification forwarded options:
   --bundle-summary-out PATH     Write bundle verification summary TSV
 
+Diagnosis forwarded options:
+  --diagnosis-summary-dir DIR   Directory for diagnosis artifacts
+  --diagnosis-out PATH          Write diagnosis key/value TSV
+  --diagnosis-stages-out PATH   Write stage ranking TSV
+  --diagnosis-case NAME         Diagnose a specific case row
+  --diagnosis-include-warmup    Include warmup-* rows when averaging raw summaries
+
 Capture forwarded options:
   --run-label NAME
   --no-update-latest
@@ -88,6 +97,7 @@ Script overrides:
   --capture-script PATH         Override capture-onnx-profile-baseline.sh
   --compare-script PATH         Override compare-onnx-profile-summary.sh
   --bundle-verify-script PATH   Override verify-onnx-performance-bundle.sh
+  --diagnose-script PATH        Override diagnose-onnx-profile-summary.sh
   --preset-script PATH          Override preset registry helper
   --baseline-script PATH        Override baseline registry helper
   --bundle-script PATH          Override artifact bundle helper for all workflow modes
@@ -104,6 +114,7 @@ Examples:
   ./scripts/check-onnx-performance.sh --model 6b6e13 --use-latest-baseline --name webworld --preset coreml-stable
   ./scripts/check-onnx-performance.sh --compare-baselines webworld webworld-after --baseline-root ops/benchmarks/onnx/baselines
   ./scripts/check-onnx-performance.sh --verify-bundle ops/benchmarks/onnx/current/bundle.tsv
+  ./scripts/check-onnx-performance.sh --diagnose-summary ops/benchmarks/onnx/current/aggregate.tsv
 USAGE
 }
 
@@ -114,6 +125,13 @@ COMPARE_BASELINE=""
 COMPARE_CURRENT=""
 VERIFY_BUNDLE=""
 BUNDLE_SUMMARY_OUT=""
+DIAGNOSE_SUMMARY=""
+DIAGNOSIS_SUMMARY_DIR=""
+DIAGNOSIS_OUT=""
+DIAGNOSIS_STAGES_OUT=""
+DIAGNOSIS_CASE=""
+DIAGNOSIS_INCLUDE_WARMUP=0
+DIAGNOSE_SCRIPT_OVERRIDDEN=0
 CAPTURE_BASELINE=0
 USE_LATEST_BASELINE=0
 BASELINE_ROOT="ops/benchmarks/onnx/baselines"
@@ -130,6 +148,7 @@ REGRESSION_SCRIPT="${ROOT_DIR}/scripts/verify-onnx-profile-regression.sh"
 CAPTURE_SCRIPT="${ROOT_DIR}/scripts/capture-onnx-profile-baseline.sh"
 COMPARE_SCRIPT="${ROOT_DIR}/scripts/compare-onnx-profile-summary.sh"
 BUNDLE_VERIFY_SCRIPT="${ROOT_DIR}/scripts/verify-onnx-performance-bundle.sh"
+DIAGNOSE_SCRIPT="${ROOT_DIR}/scripts/diagnose-onnx-profile-summary.sh"
 PRESET_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-presets.sh"
 BASELINE_SCRIPT="${ROOT_DIR}/scripts/onnx-performance-baselines.sh"
 declare -a FORWARDED_ARGS=()
@@ -198,6 +217,50 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bundle-summary-out=*)
       BUNDLE_SUMMARY_OUT="${1#*=}"
+      shift
+      ;;
+    --diagnose-summary)
+      DIAGNOSE_SUMMARY="$2"
+      shift 2
+      ;;
+    --diagnose-summary=*)
+      DIAGNOSE_SUMMARY="${1#*=}"
+      shift
+      ;;
+    --diagnosis-summary-dir)
+      DIAGNOSIS_SUMMARY_DIR="$2"
+      shift 2
+      ;;
+    --diagnosis-summary-dir=*)
+      DIAGNOSIS_SUMMARY_DIR="${1#*=}"
+      shift
+      ;;
+    --diagnosis-out)
+      DIAGNOSIS_OUT="$2"
+      shift 2
+      ;;
+    --diagnosis-out=*)
+      DIAGNOSIS_OUT="${1#*=}"
+      shift
+      ;;
+    --diagnosis-stages-out)
+      DIAGNOSIS_STAGES_OUT="$2"
+      shift 2
+      ;;
+    --diagnosis-stages-out=*)
+      DIAGNOSIS_STAGES_OUT="${1#*=}"
+      shift
+      ;;
+    --diagnosis-case)
+      DIAGNOSIS_CASE="$2"
+      shift 2
+      ;;
+    --diagnosis-case=*)
+      DIAGNOSIS_CASE="${1#*=}"
+      shift
+      ;;
+    --diagnosis-include-warmup)
+      DIAGNOSIS_INCLUDE_WARMUP=1
       shift
       ;;
     --baseline-root)
@@ -304,6 +367,16 @@ while [[ $# -gt 0 ]]; do
       BUNDLE_VERIFY_SCRIPT="${1#*=}"
       shift
       ;;
+    --diagnose-script)
+      DIAGNOSE_SCRIPT="$2"
+      DIAGNOSE_SCRIPT_OVERRIDDEN=1
+      shift 2
+      ;;
+    --diagnose-script=*)
+      DIAGNOSE_SCRIPT="${1#*=}"
+      DIAGNOSE_SCRIPT_OVERRIDDEN=1
+      shift
+      ;;
     --preset-script)
       PRESET_SCRIPT="$2"
       shift 2
@@ -381,12 +454,17 @@ if [[ "$LIST_BASELINES" -eq 1 ]]; then
   exit 0
 fi
 
-if [[ -n "$VERIFY_BUNDLE" && ( -n "$MODEL_ID" || -n "$BASELINE" || "$USE_LATEST_BASELINE" -eq 1 || "$CAPTURE_BASELINE" -eq 1 || -n "$COMPARE_BASELINE" ) ]]; then
-  echo "--verify-bundle is mutually exclusive with model, baseline, capture, and compare modes" >&2
+if [[ -n "$VERIFY_BUNDLE" && ( -n "$MODEL_ID" || -n "$BASELINE" || "$USE_LATEST_BASELINE" -eq 1 || "$CAPTURE_BASELINE" -eq 1 || -n "$COMPARE_BASELINE" || -n "$DIAGNOSE_SUMMARY" ) ]]; then
+  echo "--verify-bundle is mutually exclusive with model, baseline, capture, compare, and diagnose modes" >&2
   usage
   exit 2
 fi
-if [[ -z "$MODEL_ID" && -z "$COMPARE_BASELINE" && -z "$VERIFY_BUNDLE" ]]; then
+if [[ -n "$DIAGNOSE_SUMMARY" && ( -n "$MODEL_ID" || -n "$BASELINE" || "$USE_LATEST_BASELINE" -eq 1 || "$CAPTURE_BASELINE" -eq 1 || -n "$COMPARE_BASELINE" || -n "$VERIFY_BUNDLE" ) ]]; then
+  echo "--diagnose-summary is mutually exclusive with model, baseline, capture, compare, and bundle modes" >&2
+  usage
+  exit 2
+fi
+if [[ -z "$MODEL_ID" && -z "$COMPARE_BASELINE" && -z "$VERIFY_BUNDLE" && -z "$DIAGNOSE_SUMMARY" ]]; then
   echo "--model is required" >&2
   usage
   exit 2
@@ -401,6 +479,14 @@ if [[ -n "$PLAN_OUT" && "$PLAN_OUT" == */ ]]; then
 fi
 if [[ -n "$BUNDLE_SUMMARY_OUT" && "$BUNDLE_SUMMARY_OUT" == */ ]]; then
   echo "--bundle-summary-out must be a file path, not a directory: $BUNDLE_SUMMARY_OUT" >&2
+  exit 2
+fi
+if [[ -n "$DIAGNOSIS_OUT" && "$DIAGNOSIS_OUT" == */ ]]; then
+  echo "--diagnosis-out must be a file path, not a directory: $DIAGNOSIS_OUT" >&2
+  exit 2
+fi
+if [[ -n "$DIAGNOSIS_STAGES_OUT" && "$DIAGNOSIS_STAGES_OUT" == */ ]]; then
+  echo "--diagnosis-stages-out must be a file path, not a directory: $DIAGNOSIS_STAGES_OUT" >&2
   exit 2
 fi
 if ! gollek_onnx_performance_preset_validate "$PRESET"; then
@@ -485,6 +571,13 @@ write_plan() {
     printf 'config\tcompareCurrent\t%s\n' "$(safe_tsv_field "$COMPARE_CURRENT")"
     printf 'config\tverifyBundle\t%s\n' "$(safe_tsv_field "$VERIFY_BUNDLE")"
     printf 'config\tbundleSummaryOut\t%s\n' "$(safe_tsv_field "$BUNDLE_SUMMARY_OUT")"
+    printf 'config\tdiagnoseSummary\t%s\n' "$(safe_tsv_field "$DIAGNOSE_SUMMARY")"
+    printf 'config\tdiagnoseScript\t%s\n' "$(safe_tsv_field "$DIAGNOSE_SCRIPT")"
+    printf 'config\tdiagnosisSummaryDir\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_SUMMARY_DIR")"
+    printf 'config\tdiagnosisOut\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_OUT")"
+    printf 'config\tdiagnosisStagesOut\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_STAGES_OUT")"
+    printf 'config\tdiagnosisCase\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_CASE")"
+    printf 'config\tdiagnosisIncludeWarmup\t%s\n' "$(safe_tsv_field "$DIAGNOSIS_INCLUDE_WARMUP")"
     printf 'config\tbaselineRoot\t%s\n' "$(safe_tsv_field "$BASELINE_ROOT")"
     printf 'config\tbaselineName\t%s\n' "$(safe_tsv_field "$BASELINE_NAME")"
     printf 'config\tbaselineScript\t%s\n' "$(safe_tsv_field "$BASELINE_SCRIPT")"
@@ -502,7 +595,10 @@ write_plan() {
 
 MODE="gate"
 SCRIPT="$GATE_SCRIPT"
-if [[ -n "$VERIFY_BUNDLE" ]]; then
+if [[ -n "$DIAGNOSE_SUMMARY" ]]; then
+  MODE="diagnose"
+  SCRIPT="$DIAGNOSE_SCRIPT"
+elif [[ -n "$VERIFY_BUNDLE" ]]; then
   MODE="verify-bundle"
   SCRIPT="$BUNDLE_VERIFY_SCRIPT"
 elif [[ -n "$COMPARE_BASELINE" ]]; then
@@ -541,8 +637,20 @@ if [[ -n "$BUNDLE_SUMMARY_OUT" && "$MODE" != "verify-bundle" ]]; then
   echo "--bundle-summary-out is only supported with --verify-bundle" >&2
   exit 2
 fi
+if [[ ( -n "$DIAGNOSIS_SUMMARY_DIR" || -n "$DIAGNOSIS_OUT" || -n "$DIAGNOSIS_STAGES_OUT" || -n "$DIAGNOSIS_CASE" || "$DIAGNOSIS_INCLUDE_WARMUP" -eq 1 ) && "$MODE" != "diagnose" ]]; then
+  echo "--diagnosis-* options are only supported with --diagnose-summary" >&2
+  exit 2
+fi
+if [[ "$DIAGNOSE_SCRIPT_OVERRIDDEN" -eq 1 && "$MODE" != "diagnose" && "$MODE" != "capture" && "$MODE" != "regression" ]]; then
+  echo "--diagnose-script is only supported with --diagnose-summary, --capture-baseline, or regression modes" >&2
+  exit 2
+fi
 
 declare -a PRESET_ARGS=()
+if [[ "$MODE" == "diagnose" && -n "$PRESET" ]]; then
+  echo "--preset is not supported with --diagnose-summary" >&2
+  exit 2
+fi
 if [[ "$MODE" == "compare-baselines" && -n "$PRESET" ]]; then
   echo "--preset is not supported with --compare-baselines" >&2
   exit 2
@@ -564,6 +672,9 @@ fi
 if [[ "${#FORWARDED_ARGS[@]}" -gt 0 ]]; then
   DELEGATED_ARGS+=("${FORWARDED_ARGS[@]}")
 fi
+if [[ "$DIAGNOSE_SCRIPT_OVERRIDDEN" -eq 1 && ( "$MODE" == "capture" || "$MODE" == "regression" ) ]]; then
+  DELEGATED_ARGS+=("--diagnose-script" "$DIAGNOSE_SCRIPT")
+fi
 if [[ "$CAPTURE_BASELINE" -eq 1 ]]; then
   DELEGATED_ARGS+=("--baseline-root" "$BASELINE_ROOT")
   if [[ -n "$BASELINE_NAME" ]]; then
@@ -577,6 +688,23 @@ elif [[ "$MODE" == "verify-bundle" ]]; then
   DELEGATED_ARGS+=("--bundle" "$VERIFY_BUNDLE")
   if [[ -n "$BUNDLE_SUMMARY_OUT" ]]; then
     DELEGATED_ARGS+=("--summary-out" "$BUNDLE_SUMMARY_OUT")
+  fi
+elif [[ "$MODE" == "diagnose" ]]; then
+  DELEGATED_ARGS+=("--summary" "$DIAGNOSE_SUMMARY")
+  if [[ -n "$DIAGNOSIS_SUMMARY_DIR" ]]; then
+    DELEGATED_ARGS+=("--summary-dir" "$DIAGNOSIS_SUMMARY_DIR")
+  fi
+  if [[ -n "$DIAGNOSIS_OUT" ]]; then
+    DELEGATED_ARGS+=("--out" "$DIAGNOSIS_OUT")
+  fi
+  if [[ -n "$DIAGNOSIS_STAGES_OUT" ]]; then
+    DELEGATED_ARGS+=("--stages-out" "$DIAGNOSIS_STAGES_OUT")
+  fi
+  if [[ -n "$DIAGNOSIS_CASE" ]]; then
+    DELEGATED_ARGS+=("--case" "$DIAGNOSIS_CASE")
+  fi
+  if [[ "$DIAGNOSIS_INCLUDE_WARMUP" -eq 1 ]]; then
+    DELEGATED_ARGS+=("--include-warmup")
   fi
 fi
 
@@ -606,6 +734,15 @@ if [[ "$MODE" == "verify-bundle" ]]; then
   echo "bundle=$VERIFY_BUNDLE"
   if [[ -n "$BUNDLE_SUMMARY_OUT" ]]; then
     echo "bundleSummary=$BUNDLE_SUMMARY_OUT"
+  fi
+fi
+if [[ "$MODE" == "diagnose" ]]; then
+  echo "summary=$DIAGNOSE_SUMMARY"
+  if [[ -n "$DIAGNOSIS_OUT" ]]; then
+    echo "diagnosis=$DIAGNOSIS_OUT"
+  fi
+  if [[ -n "$DIAGNOSIS_STAGES_OUT" ]]; then
+    echo "stages=$DIAGNOSIS_STAGES_OUT"
   fi
 fi
 if [[ -n "$PLAN_OUT" ]]; then

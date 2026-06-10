@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["wordpiece", "hf-bpe"],
     "families": ["blip_2", "blip-2", "blip2"]
   }
 }

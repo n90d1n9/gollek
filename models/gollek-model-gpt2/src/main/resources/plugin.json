@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["gpt2"]
+    "families": ["gpt2"],
+    "tokenizerKind": "hf-bpe"
   }
 }

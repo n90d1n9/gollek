@@ -10,6 +10,8 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["ibert"]
+    "families": ["ibert"],
+    "tokenizerKind": "hf-bpe",
+    "tokenizerKinds": ["hf-bpe", "wordpiece"]
   }
 }

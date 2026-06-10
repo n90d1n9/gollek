@@ -25,6 +25,7 @@ public class CohereModelFamilyPlugin implements ModelFamilyPlugin {
                         ModelFamilyCapability.GGUF),
                 Map.of(
                         "bundle_profile", "optional",
+                        "direct_safetensor_scope", "cohere2_text_adapter_only",
                         "origin", "3rdparty/transformers/src/transformers/models/cohere*",
                         "version", "0.1.0-SNAPSHOT"));
     }

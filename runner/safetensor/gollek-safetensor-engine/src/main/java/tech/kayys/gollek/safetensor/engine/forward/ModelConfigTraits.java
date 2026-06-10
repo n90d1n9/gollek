@@ -40,7 +40,7 @@ record ModelConfigTraits(
                 runtimeTraits.gemma4Text(),
                 runtimeTraits.gemma3Text(),
                 runtimeTraits.qwenText(),
-                runtimeTraits.perLayerInputPath() || hiddenSizePerLayerInput > 0 || vocabSizePerLayerInput > 0);
+                runtimeTraits.perLayerInputPath() || hiddenSizePerLayerInput > 0);
     }
 
     boolean matches(ModelConfig config) {

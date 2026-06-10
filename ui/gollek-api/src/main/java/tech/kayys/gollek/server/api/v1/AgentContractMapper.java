@@ -1,5 +1,7 @@
 package tech.kayys.gollek.server.api.v1;
 
+import tech.kayys.gollek.client.agent.AgentServingFeatureCatalog;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,15 +13,21 @@ final class AgentContractMapper {
 
     static Map<String, Object> contract() {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("object", "gollek.agent_contract");
-        payload.put("version", "v1");
-        payload.put("service_role", "inference_serving_engine");
+        payload.put("object", AgentServingFeatureCatalog.CONTRACT_OBJECT);
+        payload.put("version", AgentServingFeatureCatalog.CONTRACT_VERSION);
+        payload.put("contract_version", AgentServingFeatureCatalog.CONTRACT_VERSION);
+        payload.put("supported_contract_versions", AgentServingFeatureCatalog.SUPPORTED_CONTRACT_VERSIONS);
+        payload.put("service_role", AgentServingFeatureCatalog.SERVICE_ROLE_INFERENCE_SERVING_ENGINE);
+        payload.put("compatibility", AgentServingFeatureCatalog.compatibilityFeatures());
+        payload.put("feature_negotiation", AgentServingFeatureCatalog.featureNegotiation());
         payload.put("boundary", boundary());
         payload.put("auth", auth());
         payload.put("traceability", traceability());
         payload.put("streaming", streaming());
         payload.put("endpoints", endpoints());
         payload.put("schemas", schemas());
+        payload.put("readiness_issue_catalog", AgentReadinessIssueCatalogMapper.entries());
+        payload.put("readiness_issue_catalog_by_code", AgentReadinessIssueCatalogMapper.byCode());
         return payload;
     }
 
@@ -112,6 +120,9 @@ final class AgentContractMapper {
         endpoints.put("mcp_tools", endpoint("GET", "/v1/mcp/tools?compat=openai", "openai_tool_definition"));
         endpoints.put("agent_capabilities", endpoint("GET", "/v1/agent/capabilities", null));
         endpoints.put("agent_contract", endpoint("GET", "/v1/agent/contract", null));
+        endpoints.put("agent_readiness_issues", endpoint("GET", "/v1/agent/readiness/issues",
+                "agent_readiness_issue_catalog_response"));
+        endpoints.put("agent_preflight", endpoint("POST", "/v1/agent/preflight", "agent_preflight_request"));
         endpoints.put("agent_validation", endpoint("POST", "/v1/agent/validate?surface={surface}", "agent_validation_request"));
         endpoints.put("agent_tool_validation", endpoint("POST", "/v1/agent/tools/validate", "tool_contract_validation_request"));
         return endpoints;
@@ -140,6 +151,11 @@ final class AgentContractMapper {
         schemas.put("error_response", errorResponse());
         schemas.put("agent_validation_request", agentValidationRequest());
         schemas.put("agent_validation_response", agentValidationResponse());
+        schemas.put("agent_readiness_issue_catalog_entry", agentReadinessIssueCatalogEntry());
+        schemas.put("agent_readiness_issue_catalog_response", agentReadinessIssueCatalogResponse());
+        schemas.put("agent_preflight_request", agentPreflightRequest());
+        schemas.put("agent_preflight_check_result", agentPreflightCheckResult());
+        schemas.put("agent_preflight_response", agentPreflightResponse());
         schemas.put("tool_contract_validation_request", toolContractValidationRequest());
         schemas.put("tool_contract_validation_response", toolContractValidationResponse());
         return schemas;
@@ -336,6 +352,379 @@ final class AgentContractMapper {
                 Map.entry("normalized", normalized),
                 Map.entry("boundary", boundary)));
         return schema;
+    }
+
+    private static Map<String, Object> agentPreflightRequest() {
+        Map<String, Object> schema = objectSchema();
+        schema.put("description", "Preflight a model and optional agent request without invoking inference.");
+        schema.put("properties", Map.ofEntries(
+                Map.entry("model", string("Model id or alias to preflight.")),
+                Map.entry("surface", enumSchema(List.of("chat", "responses", "embeddings"))),
+                Map.entry("request", objectSchema()),
+                Map.entry("discover_mcp_tools", booleanSchema("Discover MCP tools before validation.")),
+                Map.entry("mcp_discovery_required", booleanSchema("Block readiness when MCP discovery is unavailable.")),
+                Map.entry("validate_tools", booleanSchema("Validate explicit or discovered tool definitions.")),
+                Map.entry("tool_validation_required", booleanSchema("Block readiness when tool validation is skipped.")),
+                Map.entry("validate_request", booleanSchema("Validate the nested request payload.")),
+                Map.entry("request_validation_required", booleanSchema("Block readiness when request validation is skipped.")),
+                Map.entry("openai_tool_compatibility", booleanSchema("Discover MCP tools as OpenAI function definitions.")),
+                Map.entry("enabled_only", booleanSchema("Discover tools only from enabled MCP servers.")),
+                Map.entry("feature_profile",
+                        string("Named serving feature profile. Defaults to agent_serving.")),
+                Map.entry("required_contract_version",
+                        string("Required Gollek agent-serving contract version. Defaults to v1.")),
+                Map.entry("required_features",
+                        arrayOf(string("Agent-serving feature flag required by the orchestrator."))),
+                Map.entry("optional_features",
+                        arrayOf(string("Agent-serving feature flag preferred by the orchestrator.")))));
+        schema.put("boundary", Map.of(
+                "validation_only", true,
+                "model_invoked", false,
+                "tool_execution", false,
+                "retrieval_execution", false));
+        schema.put("additionalProperties", true);
+        return schema;
+    }
+
+    private static Map<String, Object> agentReadinessIssueCatalogEntry() {
+        Map<String, Object> schema = objectSchema();
+        schema.put("required", List.of("code", "area", "default_severity", "summary", "remediation"));
+        schema.put("properties", Map.ofEntries(
+                Map.entry("code", string("Stable machine-readable readiness issue code.")),
+                Map.entry("area", string("Readiness area that can emit the issue.")),
+                Map.entry("default_severity", enumSchema(List.of("blocking", "warning", "unknown"))),
+                Map.entry("summary", string("Short dashboard-friendly issue summary.")),
+                Map.entry("remediation", string("Suggested remediation for operators."))));
+        return schema;
+    }
+
+    private static Map<String, Object> agentReadinessIssueCatalogResponse() {
+        Map<String, Object> boundary = objectSchema();
+        boundary.put("properties", Map.ofEntries(
+                Map.entry("validation_only", booleanSchema("Always true for this endpoint.")),
+                Map.entry("model_invoked", booleanSchema("Always false for catalog discovery.")),
+                Map.entry("tool_execution", booleanSchema("Always false for catalog discovery.")),
+                Map.entry("retrieval_execution", booleanSchema("Always false for catalog discovery.")),
+                Map.entry("tool_authorization", booleanSchema("Always false for catalog discovery."))));
+
+        Map<String, Object> schema = objectSchema();
+        schema.put("required", List.of(
+                "object",
+                "version",
+                "service_role",
+                "boundary",
+                "count",
+                "items",
+                "by_code",
+                "by_area"));
+        schema.put("properties", Map.ofEntries(
+                Map.entry("object", string("gollek.agent_readiness_issue_catalog")),
+                Map.entry("version", string("v1")),
+                Map.entry("service_role", string("inference_serving_engine")),
+                Map.entry("boundary", boundary),
+                Map.entry("count", integer("Number of catalog entries.")),
+                Map.entry("items", arrayOf(ref("agent_readiness_issue_catalog_entry"))),
+                Map.entry("by_code", objectSchema()),
+                Map.entry("by_area", objectSchema())));
+        return schema;
+    }
+
+    private static Map<String, Object> agentPreflightResponse() {
+        Map<String, Object> boundary = objectSchema();
+        boundary.put("properties", Map.ofEntries(
+                Map.entry("validation_only", booleanSchema("Always true for this endpoint.")),
+                Map.entry("model_invoked", booleanSchema("Always false for this endpoint.")),
+                Map.entry("tool_execution", booleanSchema("Always false for this endpoint.")),
+                Map.entry("retrieval_execution", booleanSchema("Always false for this endpoint.")),
+                Map.entry("tool_authorization", booleanSchema("Always false for this endpoint."))));
+
+        Map<String, Object> issue = agentReadinessIssue();
+        Map<String, Object> issueHint = agentReadinessIssueHint();
+        Map<String, Object> remediation = agentReadinessRemediation();
+
+        Map<String, Object> checkResults = objectSchema();
+        checkResults.put("description", "Readiness checks keyed by area name.");
+        checkResults.put("additionalProperties", ref("agent_preflight_check_result"));
+
+        Map<String, Object> readinessReport = objectSchema();
+        readinessReport.put("required", List.of(
+                "object",
+                "contract_version",
+                "supported_contract_versions",
+                "feature_negotiation",
+                "status",
+                "ready",
+                "surface",
+                "model",
+                "feature_profile",
+                "trace",
+                "boundary",
+                "checks",
+                "checked_areas",
+                "blocking_issue_count",
+                "warning_count",
+                "ready_check_count",
+                "blocked_check_count",
+                "skipped_check_count",
+                "issues",
+                "issue_hints",
+                "issue_hints_by_area",
+                "issue_hints_by_code",
+                "remediation_plan",
+                "blocking_remediation_plan",
+                "warning_remediation_plan",
+                "remediation_plan_by_area",
+                "remediation_plan_by_code",
+                "issues_by_area",
+                "issue_codes_by_area",
+                "blocking_messages",
+                "warning_messages",
+                "blocking_codes",
+                "warning_codes"));
+        readinessReport.put("properties", Map.ofEntries(
+                Map.entry("object", string("gollek.agent_readiness_report")),
+                Map.entry("contract_version", string("Agent serving contract version checked by this report.")),
+                Map.entry("supported_contract_versions", arrayOf(string("Supported agent-serving contract version."))),
+                Map.entry("feature_negotiation", objectSchema()),
+                Map.entry("status", enumSchema(List.of("ready", "blocked"))),
+                Map.entry("ready", booleanSchema("Whether all readiness checks have no blocking issues.")),
+                Map.entry("surface", enumSchema(List.of("chat", "responses", "embeddings"))),
+                Map.entry("model", string("Model id selected for the readiness report.")),
+                Map.entry("feature_profile", string("Named serving feature profile evaluated by this report.")),
+                Map.entry("trace", objectSchema()),
+                Map.entry("boundary", boundary),
+                Map.entry("checks", checkResults),
+                Map.entry("checked_areas", arrayOf(string("Readiness areas evaluated by this report."))),
+                Map.entry("blocking_issue_count", integer("Number of blocking issues.")),
+                Map.entry("warning_count", integer("Number of warnings.")),
+                Map.entry("ready_check_count", integer("Number of ready checks.")),
+                Map.entry("blocked_check_count", integer("Number of blocked checks.")),
+                Map.entry("skipped_check_count", integer("Number of skipped checks.")),
+                Map.entry("issues", arrayOf(issue)),
+                Map.entry("issue_hints", arrayOf(issueHint)),
+                Map.entry("issue_hints_by_area", objectSchema()),
+                Map.entry("issue_hints_by_code", objectSchema()),
+                Map.entry("remediation_plan", arrayOf(remediation)),
+                Map.entry("blocking_remediation_plan", arrayOf(remediation)),
+                Map.entry("warning_remediation_plan", arrayOf(remediation)),
+                Map.entry("remediation_plan_by_area", objectSchema()),
+                Map.entry("remediation_plan_by_code", objectSchema()),
+                Map.entry("issues_by_area", objectSchema()),
+                Map.entry("issue_codes_by_area", objectSchema()),
+                Map.entry("blocking_messages", arrayOf(string(null))),
+                Map.entry("warning_messages", arrayOf(string(null))),
+                Map.entry("blocking_codes", arrayOf(string("Stable machine-readable blocking issue code."))),
+                Map.entry("warning_codes", arrayOf(string("Stable machine-readable warning issue code.")))));
+
+        Map<String, Object> schema = objectSchema();
+        schema.put("required", List.of(
+                "object",
+                "contract_version",
+                "supported_contract_versions",
+                "feature_negotiation",
+                "status",
+                "ready",
+                "surface",
+                "model",
+                "feature_profile",
+                "trace",
+                "boundary",
+                "blocking_issue_count",
+                "warning_count",
+                "ready_check_count",
+                "blocked_check_count",
+                "skipped_check_count",
+                "checks",
+                "check_results",
+                "checked_areas",
+                "readiness_report",
+                "issues",
+                "issue_hints",
+                "issue_hints_by_area",
+                "issue_hints_by_code",
+                "remediation_plan",
+                "blocking_remediation_plan",
+                "warning_remediation_plan",
+                "remediation_plan_by_area",
+                "remediation_plan_by_code",
+                "issues_by_area",
+                "issue_codes_by_area",
+                "blocking_messages",
+                "warning_messages",
+                "blocking_codes",
+                "warning_codes"));
+        schema.put("properties", Map.ofEntries(
+                Map.entry("object", string("gollek.agent_preflight")),
+                Map.entry("contract_version", string("Agent serving contract version checked by this preflight.")),
+                Map.entry("supported_contract_versions", arrayOf(string("Supported agent-serving contract version."))),
+                Map.entry("feature_negotiation", objectSchema()),
+                Map.entry("status", enumSchema(List.of("ready", "blocked"))),
+                Map.entry("ready", booleanSchema("Whether the preflight has no blocking issues.")),
+                Map.entry("surface", enumSchema(List.of("chat", "responses", "embeddings"))),
+                Map.entry("model", string("Model id selected for the preflight.")),
+                Map.entry("feature_profile", string("Named serving feature profile evaluated by this preflight.")),
+                Map.entry("trace", objectSchema()),
+                Map.entry("boundary", boundary),
+                Map.entry("blocking_issue_count", integer("Number of blocking issues.")),
+                Map.entry("warning_count", integer("Number of warnings.")),
+                Map.entry("ready_check_count", integer("Number of ready checks.")),
+                Map.entry("blocked_check_count", integer("Number of blocked checks.")),
+                Map.entry("skipped_check_count", integer("Number of skipped checks.")),
+                Map.entry("checks", objectSchema()),
+                Map.entry("check_results", checkResults),
+                Map.entry("checked_areas", arrayOf(string("Readiness areas evaluated by this preflight."))),
+                Map.entry("readiness_report", readinessReport),
+                Map.entry("issues", arrayOf(issue)),
+                Map.entry("issue_hints", arrayOf(issueHint)),
+                Map.entry("issue_hints_by_area", objectSchema()),
+                Map.entry("issue_hints_by_code", objectSchema()),
+                Map.entry("remediation_plan", arrayOf(remediation)),
+                Map.entry("blocking_remediation_plan", arrayOf(remediation)),
+                Map.entry("warning_remediation_plan", arrayOf(remediation)),
+                Map.entry("remediation_plan_by_area", objectSchema()),
+                Map.entry("remediation_plan_by_code", objectSchema()),
+                Map.entry("issues_by_area", objectSchema()),
+                Map.entry("issue_codes_by_area", objectSchema()),
+                Map.entry("blocking_messages", arrayOf(string(null))),
+                Map.entry("warning_messages", arrayOf(string(null))),
+                Map.entry("blocking_codes", arrayOf(string("Stable machine-readable blocking issue code."))),
+                Map.entry("warning_codes", arrayOf(string("Stable machine-readable warning issue code.")))));
+        schema.put("additionalProperties", true);
+        return schema;
+    }
+
+    private static Map<String, Object> agentPreflightCheckResult() {
+        Map<String, Object> boundary = objectSchema();
+        boundary.put("properties", Map.ofEntries(
+                Map.entry("validation_only", booleanSchema("True when validation did not perform serving work.")),
+                Map.entry("model_invoked", booleanSchema("False for validation-only checks.")),
+                Map.entry("tool_execution", booleanSchema("False when Gollek did not execute tools.")),
+                Map.entry("retrieval_execution", booleanSchema("False when Gollek did not run retrieval."))));
+
+        Map<String, Object> embeddingRag = objectSchema();
+        embeddingRag.put("properties", Map.ofEntries(
+                Map.entry("embedding_generation", booleanSchema("True when the request asks Gollek to generate embeddings.")),
+                Map.entry("retrieval_execution", booleanSchema("False when retrieval remains outside Gollek.")),
+                Map.entry("retrieval_policy_owned_by", string("Owner of retrieval policy decisions.")),
+                Map.entry("vector_store_owned_by", string("Owner of vector-store state.")),
+                Map.entry("storage_owned_by_orchestrator", booleanSchema("True when retrieval policy and vector store stay caller-owned."))));
+
+        Map<String, Object> embedding = objectSchema();
+        embedding.put("properties", Map.ofEntries(
+                Map.entry("input_count", integer("Number of embedding inputs.")),
+                Map.entry("input_lengths", arrayOf(integer("Length of each embedding input."))),
+                Map.entry("requested_dimensions", integer("Requested embedding dimensions when supplied.")),
+                Map.entry("encoding_format", string("Requested embedding encoding format.")),
+                Map.entry("parameter_keys", arrayOf(string(null))),
+                Map.entry("metadata_keys", arrayOf(string(null))),
+                Map.entry("rag", embeddingRag)));
+
+        Map<String, Object> requestRag = objectSchema();
+        requestRag.put("properties", Map.ofEntries(
+                Map.entry("injected", booleanSchema("Whether caller-owned RAG context was injected.")),
+                Map.entry("items", integer("Number of injected RAG context items.")),
+                Map.entry("alias", string("Request field used for RAG context."))));
+
+        Map<String, Object> request = objectSchema();
+        request.put("properties", Map.ofEntries(
+                Map.entry("streaming", booleanSchema("Whether the request asked for streaming.")),
+                Map.entry("message_count", integer("Number of normalized messages.")),
+                Map.entry("input_count", integer("Number of normalized response inputs.")),
+                Map.entry("tool_count", integer("Number of supplied tools.")),
+                Map.entry("parameter_keys", arrayOf(string(null))),
+                Map.entry("rag", requestRag),
+                Map.entry("tool_contract", objectSchema())));
+
+        Map<String, Object> details = objectSchema();
+        details.put("description", "Optional typed check-specific details for dashboards and CI.");
+        details.put("properties", Map.ofEntries(
+                Map.entry("surface", enumSchema(List.of("chat", "responses", "embeddings"))),
+                Map.entry("model", string("Model id selected for this check.")),
+                Map.entry("boundary", boundary),
+                Map.entry("request", request),
+                Map.entry("embedding", embedding)));
+
+        Map<String, Object> check = objectSchema();
+        check.put("required", List.of(
+                "status",
+                "ready",
+                "requested",
+                "blocking_messages",
+                "warning_messages",
+                "blocking_codes",
+                "warning_codes",
+                "issue_hints",
+                "remediation_plan",
+                "blocking_remediation_plan",
+                "warning_remediation_plan",
+                "remediation_plan_by_code"));
+        check.put("properties", Map.ofEntries(
+                Map.entry("status", enumSchema(List.of("ready", "blocked", "skipped"))),
+                Map.entry("ready", booleanSchema("True when this check has no blocking issue.")),
+                Map.entry("requested", booleanSchema("Whether this check was requested for the preflight.")),
+                Map.entry("blocking_messages", arrayOf(string(null))),
+                Map.entry("warning_messages", arrayOf(string(null))),
+                Map.entry("blocking_codes", arrayOf(string("Stable machine-readable blocking issue code."))),
+                Map.entry("warning_codes", arrayOf(string("Stable machine-readable warning issue code."))),
+                Map.entry("issue_hints", arrayOf(agentReadinessIssueHint())),
+                Map.entry("remediation_plan", arrayOf(agentReadinessRemediation())),
+                Map.entry("blocking_remediation_plan", arrayOf(agentReadinessRemediation())),
+                Map.entry("warning_remediation_plan", arrayOf(agentReadinessRemediation())),
+                Map.entry("remediation_plan_by_code", objectSchema()),
+                Map.entry("details", details)));
+        check.put("additionalProperties", true);
+        return check;
+    }
+
+    private static Map<String, Object> agentReadinessIssue() {
+        Map<String, Object> issue = objectSchema();
+        issue.put("required", List.of("area", "severity", "code", "message"));
+        issue.put("properties", Map.ofEntries(
+                Map.entry("area", string("Readiness area that emitted the issue.")),
+                Map.entry("severity", enumSchema(List.of("blocking", "warning"))),
+                Map.entry("code", string("Stable machine-readable readiness issue code.")),
+                Map.entry("message", string("Human-readable readiness issue."))));
+        return issue;
+    }
+
+    private static Map<String, Object> agentReadinessIssueHint() {
+        Map<String, Object> issueHint = objectSchema();
+        issueHint.put("required", List.of(
+                "area",
+                "severity",
+                "code",
+                "message",
+                "default_severity",
+                "summary",
+                "remediation"));
+        issueHint.put("properties", Map.ofEntries(
+                Map.entry("area", string("Readiness area that emitted the issue.")),
+                Map.entry("severity", enumSchema(List.of("blocking", "warning"))),
+                Map.entry("code", string("Stable machine-readable readiness issue code.")),
+                Map.entry("message", string("Human-readable readiness issue.")),
+                Map.entry("default_severity", enumSchema(List.of("blocking", "warning", "unknown"))),
+                Map.entry("summary", string("Short dashboard-friendly issue summary.")),
+                Map.entry("remediation", string("Suggested remediation for operators."))));
+        return issueHint;
+    }
+
+    private static Map<String, Object> agentReadinessRemediation() {
+        Map<String, Object> remediation = objectSchema();
+        remediation.put("required", List.of(
+                "area",
+                "code",
+                "severity",
+                "summary",
+                "remediation",
+                "messages"));
+        remediation.put("properties", Map.ofEntries(
+                Map.entry("area", string("Readiness area for this remediation step.")),
+                Map.entry("code", string("Stable machine-readable readiness issue code.")),
+                Map.entry("severity", enumSchema(List.of("blocking", "warning"))),
+                Map.entry("summary", string("Short dashboard-friendly issue summary.")),
+                Map.entry("remediation", string("Suggested remediation for operators.")),
+                Map.entry("messages", arrayOf(string("Source readiness messages collapsed into this step.")))));
+        return remediation;
     }
 
     private static Map<String, Object> toolContractValidationRequest() {

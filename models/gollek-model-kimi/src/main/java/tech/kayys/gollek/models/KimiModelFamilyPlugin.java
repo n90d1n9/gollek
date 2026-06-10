@@ -25,6 +25,8 @@ public class KimiModelFamilyPlugin implements ModelFamilyPlugin {
                         "origin", "3rdparty/transformers/src/transformers/models/kimi*",
                         "direct_safetensor", "pending_architecture_adapter",
                         "tokenizer", "pending",
+                        "tokenizer_metadata_status", "pending",
+                        "tokenizer_metadata_pending_reason", "tokenizer adapter pending descriptor stabilization",
                         "version", "0.1.0-SNAPSHOT"));
     }
 }

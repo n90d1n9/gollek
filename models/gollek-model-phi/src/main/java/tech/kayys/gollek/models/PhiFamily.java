@@ -2,11 +2,13 @@ package tech.kayys.gollek.models;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import java.util.List;
 
 /**
- * Phi-3 family (Microsoft).
- * Uses fused QKV and a different FFN structure.
+ * Phi family (Microsoft).
+ * Uses fused QKV and fused gate/up projection layouts.
  */
 @ApplicationScoped
 public class PhiFamily implements ModelArchitecture {
@@ -17,12 +19,12 @@ public class PhiFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedArchClassNames() {
-        return List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM");
+        return List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM", "Phi4ForCausalLM");
     }
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("phi", "phi3");
+        return List.of("phi", "phi3", "phi4");
     }
 
     @Override
@@ -103,5 +105,10 @@ public class PhiFamily implements ModelArchitecture {
     @Override
     public boolean usesRmsNorm() {
         return true;
+    }
+
+    @Override
+    public ModelRuntimeTraits runtimeTraits(ModelConfig config) {
+        return PhiRuntimeProfile.text(config);
     }
 }

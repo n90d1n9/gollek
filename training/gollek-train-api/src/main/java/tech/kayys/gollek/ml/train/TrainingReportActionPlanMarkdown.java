@@ -12,14 +12,64 @@ public final class TrainingReportActionPlanMarkdown {
 
     public static String render(TrainingReport report) {
         Objects.requireNonNull(report, "report must not be null");
-        return render(report.actionPlan(), report.dataHealth());
+        return render(
+                report.actionPlan(),
+                report.dataHealth(),
+                report.acceleration(),
+                report.throughput(),
+                report.runtimeProfile(),
+                TrainingReportRuntimeInputProfile.fromMetadata(report.metadata()),
+                report.parameterUpdateDiagnosticsPolicy(),
+                null);
     }
 
     public static String render(TrainingReportActionPlan actionPlan) {
-        return render(actionPlan, null);
+        return render(actionPlan, (TrainingReportDataHealth) null);
+    }
+
+    public static String render(
+            TrainingReportActionPlan actionPlan,
+            TrainingReportRuntimeRegressionSummary runtimeRegressionSummary) {
+        return render(
+                actionPlan,
+                null,
+                null,
+                null,
+                null,
+                TrainingReportRuntimeInputProfile.empty(),
+                null,
+                runtimeRegressionSummary);
     }
 
     private static String render(TrainingReportActionPlan actionPlan, TrainingReportDataHealth dataHealth) {
+        return render(actionPlan, dataHealth, null, null);
+    }
+
+    private static String render(
+            TrainingReportActionPlan actionPlan,
+            TrainingReportDataHealth dataHealth,
+            TrainingReportRuntimeProfile runtimeProfile,
+            TrainingReportParameterUpdateDiagnosticsPolicy parameterUpdateDiagnosticsPolicy) {
+        return render(
+                actionPlan,
+                dataHealth,
+                null,
+                null,
+                runtimeProfile,
+                TrainingReportRuntimeInputProfile.empty(),
+                parameterUpdateDiagnosticsPolicy,
+                null);
+    }
+
+    private static String render(
+            TrainingReportActionPlan actionPlan,
+            TrainingReportDataHealth dataHealth,
+            TrainingReportAcceleration acceleration,
+            TrainingReportThroughput throughput,
+            TrainingReportRuntimeProfile runtimeProfile,
+            TrainingReportRuntimeInputProfile runtimeInputProfile,
+            TrainingReportParameterUpdateDiagnosticsPolicy parameterUpdateDiagnosticsPolicy,
+            TrainingReportRuntimeRegressionSummary runtimeRegressionSummary) {
         Objects.requireNonNull(actionPlan, "actionPlan must not be null");
         StringBuilder markdown = new StringBuilder();
         appendLine(markdown, "# Gollek Training Action Plan");
@@ -31,13 +81,60 @@ public final class TrainingReportActionPlanMarkdown {
                 + actionPlan.blockers().size() + "` blockers.");
         appendLine(markdown, "");
         appendDataHealth(markdown, dataHealth);
+        appendAcceleration(markdown, acceleration);
+        appendThroughput(markdown, throughput);
+        appendRuntimeProfile(markdown, runtimeProfile, runtimeInputProfile);
+        appendRuntimeRegressionSummary(markdown, runtimeRegressionSummary);
+        appendParameterUpdateDiagnosticsPolicy(markdown, parameterUpdateDiagnosticsPolicy);
         appendRecommendations(markdown, actionPlan.recommendations());
         appendActionItems(markdown, actionPlan.actionItems());
         return markdown.toString();
     }
 
+    private static void appendAcceleration(StringBuilder markdown, TrainingReportAcceleration acceleration) {
+        String section = TrainingReportAccelerationMarkdown.render(acceleration);
+        if (!section.isBlank()) {
+            markdown.append(section);
+        }
+    }
+
+    private static void appendThroughput(StringBuilder markdown, TrainingReportThroughput throughput) {
+        String section = TrainingReportThroughputMarkdown.render(throughput);
+        if (!section.isBlank()) {
+            markdown.append(section);
+        }
+    }
+
     private static void appendDataHealth(StringBuilder markdown, TrainingReportDataHealth dataHealth) {
         String section = TrainingReportDataHealthMarkdown.render(dataHealth);
+        if (!section.isBlank()) {
+            markdown.append(section);
+        }
+    }
+
+    private static void appendRuntimeProfile(
+            StringBuilder markdown,
+            TrainingReportRuntimeProfile runtimeProfile,
+            TrainingReportRuntimeInputProfile runtimeInputProfile) {
+        String section = TrainingReportRuntimeProfileMarkdown.render(runtimeProfile, runtimeInputProfile);
+        if (!section.isBlank()) {
+            markdown.append(section);
+        }
+    }
+
+    private static void appendRuntimeRegressionSummary(
+            StringBuilder markdown,
+            TrainingReportRuntimeRegressionSummary runtimeRegressionSummary) {
+        String section = TrainingReportRuntimeRegressionSummaryMarkdown.render(runtimeRegressionSummary);
+        if (!section.isBlank()) {
+            markdown.append(section);
+        }
+    }
+
+    private static void appendParameterUpdateDiagnosticsPolicy(
+            StringBuilder markdown,
+            TrainingReportParameterUpdateDiagnosticsPolicy parameterUpdateDiagnosticsPolicy) {
+        String section = TrainingReportParameterUpdateDiagnosticsPolicyMarkdown.render(parameterUpdateDiagnosticsPolicy);
         if (!section.isBlank()) {
             markdown.append(section);
         }

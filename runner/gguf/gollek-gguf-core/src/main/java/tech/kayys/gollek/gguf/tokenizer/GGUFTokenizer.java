@@ -324,6 +324,9 @@ public final class GGUFTokenizer implements Tokenizer {
 
     @Override public long[] encode(String text, EncodeOptions options) { return delegate.encode(text, options); }
     @Override public String decode(long[] tokens, DecodeOptions options) { return delegate.decode(tokens, options); }
+    @Override public String decode(long[] tokens, int offset, int length, DecodeOptions options) {
+        return delegate.decode(tokens, offset, length, options);
+    }
     @Override public int vocabSize() { return vocabSize; }
     @Override public int bosTokenId() { return bosId; }
     @Override public int eosTokenId() { return eosId; }

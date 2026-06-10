@@ -5,12 +5,16 @@ import tech.kayys.gollek.spi.model.FFNActivationType;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
+import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class Gemma3ModelFamilyPluginTest {
@@ -25,6 +29,18 @@ class Gemma3ModelFamilyPluginTest {
                         .map(ModelFamilyContractViolation::summary)
                         .toList(),
                 "gemma3 model-family plugin should satisfy the shared plugin contract");
+    }
+
+    @Test
+    void gemma3TextFixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new Gemma3ModelFamilyPlugin(),
+                fixture("gemma3_text"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "gemma3 text fixture should match descriptor, tokenizer, and direct adapter claims");
     }
 
     @Test
@@ -80,6 +96,19 @@ class Gemma3ModelFamilyPluginTest {
         assertTrue(architecture.addOneToRmsNormWeight());
         assertEquals(64.0f, architecture.embeddingScaleFactor(4096));
         assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE, traits.promptBosPolicy());
+        assertEquals(ModelRuntimeTraits.DEFAULT_SYSTEM_PROMPT, traits.defaultSystemPrompt());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.GEMMA_TURN_AWARE,
+                Gemma3RuntimeProfile.prompt().promptBosPolicy());
+        assertFalse(traits.gemma4Text());
         assertTrue(traits.gemma3Text());
+        assertFalse(traits.qwenText());
+        assertFalse(traits.skipDefaultSystemPromptInjection());
+        assertTrue(traits.attention().splitHalfRope());
+        assertFalse(traits.attention().packedQkvProjection());
+    }
+
+    private static Path fixture(String familyId) throws Exception {
+        return Path.of(Objects.requireNonNull(
+                Gemma3ModelFamilyPluginTest.class.getResource("/model-family-fixtures/" + familyId)).toURI());
     }
 }

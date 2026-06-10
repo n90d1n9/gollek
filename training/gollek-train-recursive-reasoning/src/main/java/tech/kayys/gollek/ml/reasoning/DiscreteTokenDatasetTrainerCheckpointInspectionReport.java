@@ -27,7 +27,8 @@ public record DiscreteTokenDatasetTrainerCheckpointInspectionReport(
         selectedCheckpoint = Objects.requireNonNullElse(selectedCheckpoint, Optional.empty());
         selectionFailure = selectionFailure == null
                 ? Optional.empty()
-                : selectionFailure.map(DiscreteTokenDatasetTrainerCheckpointInspectionReport::requireText);
+                : selectionFailure.map(failure ->
+                        DiscreteTokenDatasetMetadataSupport.requireText(failure, "selectionFailure"));
         checkpointDecisions = checkpointDecisions == null || checkpointDecisions.isEmpty()
                 ? List.of()
                 : checkpointDecisions.stream()
@@ -197,14 +198,6 @@ public record DiscreteTokenDatasetTrainerCheckpointInspectionReport(
                 + inventory.failures().get(0).summary());
     }
 
-    private static String requireText(String value) {
-        value = Objects.requireNonNull(value, "selectionFailure must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException("selectionFailure must not be blank");
-        }
-        return value;
-    }
-
     public record CheckpointDecision(
             DiscreteTokenDatasetTrainerCheckpointSnapshot checkpoint,
             boolean accepted,
@@ -267,11 +260,7 @@ public record DiscreteTokenDatasetTrainerCheckpointInspectionReport(
         }
 
         private static String requireReason(String reason) {
-            reason = Objects.requireNonNull(reason, "rejection reason must not be null");
-            if (reason.isBlank()) {
-                throw new IllegalArgumentException("rejection reason must not be blank");
-            }
-            return reason;
+            return DiscreteTokenDatasetMetadataSupport.requireText(reason, "rejection reason");
         }
     }
 }

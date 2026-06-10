@@ -7,6 +7,7 @@ import tech.kayys.gollek.metal.binding.MetalBinding;
 
 public final class DirectInferenceProfiler {
     private static final String PROFILE_PROPERTY = "gollek.profile";
+    private static final long PROFILING_INACTIVE_NANOS = -1L;
     private static final ThreadLocal<InferenceProfile> ACTIVE_PROFILE = new ThreadLocal<>();
 
     private DirectInferenceProfiler() {
@@ -47,6 +48,39 @@ public final class DirectInferenceProfiler {
         InferenceProfile profile = ACTIVE_PROFILE.get();
         if (profile != null && profile.detailed) {
             profile.logitsMaterializationNanos += nanos;
+        }
+    }
+
+    public static void recordGreedyArgmaxNanos(long nanos) {
+        InferenceProfile profile = ACTIVE_PROFILE.get();
+        if (profile != null && profile.detailed) {
+            profile.greedyArgmaxNanos += nanos;
+        }
+    }
+
+    public static void recordGreedyArgmaxPath(String path) {
+        if (path == null || path.isBlank()) {
+            return;
+        }
+        InferenceProfile profile = ACTIVE_PROFILE.get();
+        if (profile != null && profile.detailed) {
+            profile.greedyArgmaxPathCounts.merge(path, 1, Integer::sum);
+        }
+    }
+
+    static long startGreedyArgmaxTiming() {
+        InferenceProfile profile = ACTIVE_PROFILE.get();
+        return profile != null && profile.detailed ? System.nanoTime() : PROFILING_INACTIVE_NANOS;
+    }
+
+    static void recordGreedyArgmaxTiming(long startedNanos, String path) {
+        if (startedNanos < 0L || path == null || path.isBlank()) {
+            return;
+        }
+        InferenceProfile profile = ACTIVE_PROFILE.get();
+        if (profile != null && profile.detailed) {
+            profile.greedyArgmaxNanos += System.nanoTime() - startedNanos;
+            profile.greedyArgmaxPathCounts.merge(path, 1, Integer::sum);
         }
     }
 

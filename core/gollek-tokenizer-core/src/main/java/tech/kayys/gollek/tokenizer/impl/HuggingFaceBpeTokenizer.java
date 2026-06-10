@@ -254,8 +254,20 @@ public class HuggingFaceBpeTokenizer implements Tokenizer {
 
     @Override
     public String decode(long[] tokens, DecodeOptions options) {
+        return decode(tokens, 0, tokens == null ? 0 : tokens.length, options);
+    }
+
+    @Override
+    public String decode(long[] tokens, int offset, int length, DecodeOptions options) {
+        Objects.requireNonNull(tokens, "tokens");
+        if (offset < 0 || length < 0 || offset > tokens.length || length > tokens.length - offset) {
+            throw new IndexOutOfBoundsException("Token decode range offset=" + offset
+                    + " length=" + length + " is outside token count " + tokens.length);
+        }
         StringBuilder sb = new StringBuilder();
-        for (long tokenId : tokens) {
+        int end = offset + length;
+        for (int i = offset; i < end; i++) {
+            long tokenId = tokens[i];
             int id = (int) tokenId;
             if (options.skipSpecialTokens && isSpecialToken(id)) {
                 continue;

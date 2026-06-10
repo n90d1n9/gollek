@@ -47,7 +47,7 @@ final class TrainerMetricsMetadata {
         if (source == null || source.isEmpty()) {
             return Map.of();
         }
-        Object snapshot = TrainerMetadataSupport.immutableSnapshot(source);
+        Object snapshot = TrainingReportSnapshots.immutableSnapshot(source);
         if (snapshot instanceof Map<?, ?> snapshotMap) {
             return (Map<String, Object>) snapshotMap;
         }

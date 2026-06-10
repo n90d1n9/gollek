@@ -28,7 +28,7 @@ Jupyter ←──ZMQ──→ KernelLauncher
                   ├── NotebookDocuments (JSON formatting, Markdown conversion, and syntax highlighting helpers)
                   ├── NotebookDocumentRenderer (JSON, Markdown, HTML, config, properties, and env file preview envelopes)
                   ├── NotebookFileMagicOptions (filesystem and archive magic option parsing)
-                  ├── NotebookFiles (filesystem measurement, text preview, and search helpers)
+                  ├── NotebookFiles (filesystem measurement, text preview, stats, hashes, diffs, and search helpers)
                   ├── NotebookFileRenderer (filesystem magic preview envelopes)
                   ├── NotebookArchives (ZIP/TAR listing and extraction bytes)
                   ├── NotebookArchiveRenderer (archive listing, entry, and extraction preview envelopes)

@@ -66,7 +66,8 @@ public record DiscreteTokenDatasetCheckpointResumePolicy(
     public static DiscreteTokenDatasetCheckpointResumePolicy fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetCheckpointResumePolicy(
-                DiscreteTokenDatasetPlanReadinessGate.fromMetadata(requiredMap(metadata, "currentPlanGate")),
+                DiscreteTokenDatasetPlanReadinessGate.fromMetadata(
+                        DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "currentPlanGate")),
                 expectationFromMetadata(metadata),
                 compatibilityModeFromMetadata(metadata));
     }
@@ -179,21 +180,7 @@ public record DiscreteTokenDatasetCheckpointResumePolicy(
         if (!metadata.containsKey("expectation") || metadata.get("expectation") == null) {
             return DiscreteTokenDatasetCheckpointResumeExpectation.none();
         }
-        return DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(requiredMap(metadata, "expectation"));
-    }
-
-    private static Map<?, ?> requiredMap(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Map<?, ?> map) {
-            return map;
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
+        return DiscreteTokenDatasetCheckpointResumeExpectation.fromMetadata(
+                DiscreteTokenDatasetMetadataSupport.requiredMap(metadata, "expectation"));
     }
 }

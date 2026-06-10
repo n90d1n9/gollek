@@ -17,6 +17,8 @@ record DirectForwardMetalCapabilities(
         boolean supportsGegluFfnMatvecHalf,
         boolean supportsSwigluFfnMatvecBf16,
         boolean supportsGegluFfnMatvecBf16,
+        boolean supportsSwigluFfnMatvecRowsBf16,
+        boolean supportsGegluFfnMatvecRowsBf16,
         boolean supportsSwigluGateUpMatvecHalf,
         boolean supportsGegluGateUpMatvecHalf,
         boolean supportsSwigluGateUpMatvecBf16,
@@ -31,7 +33,8 @@ record DirectForwardMetalCapabilities(
 
     static final DirectForwardMetalCapabilities EMPTY = new DirectForwardMetalCapabilities(
             false, false, false, false, false, false, false, false, false, false,
-            false, false, false, false, false, false, false, false, false, false);
+            false, false, false, false, false, false, false, false, false, false,
+            false, false);
 
     static DirectForwardMetalCapabilities detect(MetalBinding binding) {
         if (binding == null) {
@@ -48,6 +51,8 @@ record DirectForwardMetalCapabilities(
                     binding.supportsGegluFfnMatvecHalf(),
                     binding.supportsSwigluFfnMatvecBf16(),
                     binding.supportsGegluFfnMatvecBf16(),
+                    binding.supportsSwigluFfnMatvecRowsBf16(),
+                    binding.supportsGegluFfnMatvecRowsBf16(),
                     binding.supportsSwigluGateUpMatvecHalf(),
                     binding.supportsGegluGateUpMatvecHalf(),
                     binding.supportsSwigluGateUpMatvecBf16(),

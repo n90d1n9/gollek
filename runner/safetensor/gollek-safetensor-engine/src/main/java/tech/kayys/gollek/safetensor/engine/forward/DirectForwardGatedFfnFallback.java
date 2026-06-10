@@ -115,16 +115,13 @@ final class DirectForwardGatedFfnFallback {
 
     private static AccelTensor downProjectAndClose(DirectForwardGatedFfnRequest request,
                                                    AccelTensor combined) {
-        AccelTensor out = DirectForwardLinearProjection.ffnDownLinear(
-                request.runtime(),
-                request.traits(),
-                request.config(),
-                request.decodeLogitsPhase(),
+        AccelTensor out = DirectForwardLinearProjection.ffnDownLinear(linearRequest(
+                request,
                 combined,
                 request.downW(),
                 request.downB(),
                 "ffn_down",
-                request.downOutputBuffer());
+                request.downOutputBuffer()));
         if (request.ws() == null || combined.dataPtr() != request.ws().getCombinedSeg()) {
             combined.close();
         }
@@ -137,11 +134,23 @@ final class DirectForwardGatedFfnFallback {
                                       AccelTensor bias,
                                       String profileKey,
                                       AccelTensor outputBuffer) {
-        return DirectForwardLinearProjection.linear(
-                request.runtime(),
-                request.traits(),
-                request.config(),
-                request.decodeLogitsPhase(),
+        return DirectForwardLinearProjection.linear(linearRequest(
+                request,
+                input,
+                weight,
+                bias,
+                profileKey,
+                outputBuffer));
+    }
+
+    private static DirectForwardLinearRequest linearRequest(DirectForwardGatedFfnRequest request,
+                                                            AccelTensor input,
+                                                            AccelTensor weight,
+                                                            AccelTensor bias,
+                                                            String profileKey,
+                                                            AccelTensor outputBuffer) {
+        return DirectForwardLinearRequest.gatedFfnProjection(
+                request,
                 input,
                 weight,
                 bias,

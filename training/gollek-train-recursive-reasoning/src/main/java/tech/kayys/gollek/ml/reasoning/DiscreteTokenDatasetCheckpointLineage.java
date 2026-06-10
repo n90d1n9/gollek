@@ -21,14 +21,16 @@ public record DiscreteTokenDatasetCheckpointLineage(
     public static final String RESUME_RELATION = "resume";
 
     public DiscreteTokenDatasetCheckpointLineage {
-        originRunId = requireText(originRunId, "originRunId");
-        parentRunId = optionalText(parentRunId, "parentRunId");
-        parentCheckpointStep = optionalNonNegative(parentCheckpointStep, "parentCheckpointStep");
-        parentDatasetFingerprint = optionalText(parentDatasetFingerprint, "parentDatasetFingerprint");
+        originRunId = DiscreteTokenDatasetMetadataSupport.requireText(originRunId, "originRunId");
+        parentRunId = DiscreteTokenDatasetMetadataSupport.optionalText(parentRunId, "parentRunId");
+        parentCheckpointStep =
+                DiscreteTokenDatasetMetadataSupport.optionalNonNegative(parentCheckpointStep, "parentCheckpointStep");
+        parentDatasetFingerprint =
+                DiscreteTokenDatasetMetadataSupport.optionalText(parentDatasetFingerprint, "parentDatasetFingerprint");
         if (generation < 0) {
             throw new IllegalArgumentException("generation must be >= 0 but was " + generation);
         }
-        relation = requireText(relation, "relation");
+        relation = DiscreteTokenDatasetMetadataSupport.requireText(relation, "relation");
         attributes = immutableAttributes(attributes);
         if (ROOT_RELATION.equals(relation)) {
             if (generation != 0 || parentRunId != null || parentCheckpointStep != null || parentDatasetFingerprint != null) {
@@ -78,15 +80,23 @@ public record DiscreteTokenDatasetCheckpointLineage(
             return root(fallbackRunId);
         }
         return new DiscreteTokenDatasetCheckpointLineage(
-                optionalString(metadata, "originRunId", fallbackRunId),
-                optionalString(metadata, "parentRunId", null),
-                optionalLong(metadata, "parentCheckpointStep"),
-                optionalString(metadata, "parentDatasetFingerprint", null),
-                optionalInt(metadata, "generation", optionalString(metadata, "parentRunId", null) == null ? 0 : 1),
-                optionalString(metadata, "relation", optionalString(metadata, "parentRunId", null) == null
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "originRunId", fallbackRunId),
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "parentRunId", null),
+                DiscreteTokenDatasetMetadataSupport.optionalLong(metadata, "parentCheckpointStep"),
+                DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "parentDatasetFingerprint", null),
+                DiscreteTokenDatasetMetadataSupport.optionalInt(
+                        metadata,
+                        "generation",
+                        DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "parentRunId", null) == null
+                                ? 0
+                                : 1),
+                DiscreteTokenDatasetMetadataSupport.optionalString(
+                        metadata,
+                        "relation",
+                        DiscreteTokenDatasetMetadataSupport.optionalString(metadata, "parentRunId", null) == null
                         ? ROOT_RELATION
                         : RESUME_RELATION),
-                optionalMap(metadata, "attributes"));
+                DiscreteTokenDatasetMetadataSupport.optionalMetadataMap(metadata, "attributes"));
     }
 
     public boolean root() {
@@ -130,110 +140,13 @@ public record DiscreteTokenDatasetCheckpointLineage(
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     }
 
-    private static Map<String, Object> optionalMap(Map<?, ?> metadata, String key) {
-        Object value = metadata.get(key);
-        if (value == null) {
-            return Map.of();
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> copy = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                Object rawKey = Objects.requireNonNull(entry.getKey(), key + " key must not be null");
-                if (!(rawKey instanceof CharSequence text)) {
-                    throw new IllegalArgumentException("metadata field '" + key + "' keys must be strings");
-                }
-                String entryKey = requireText(text.toString(), key + " key");
-                copy.put(entryKey, Objects.requireNonNull(entry.getValue(), key + " field '" + entryKey + "' must not be null"));
-            }
-            return Collections.unmodifiableMap(copy);
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a map");
-    }
-
-    private static String optionalString(Map<?, ?> metadata, String key, String defaultValue) {
-        Object value = metadata.get(key);
-        if (value == null) {
-            return defaultValue;
-        }
-        if (value instanceof CharSequence text) {
-            return text.toString();
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a string");
-    }
-
-    private static int optionalInt(Map<?, ?> metadata, String key, int defaultValue) {
-        Object value = metadata.get(key);
-        if (value == null) {
-            return defaultValue;
-        }
-        long parsed = longValue(value, key);
-        if (parsed < Integer.MIN_VALUE || parsed > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("metadata field '" + key + "' must fit an int");
-        }
-        return (int) parsed;
-    }
-
-    private static Long optionalLong(Map<?, ?> metadata, String key) {
-        Object value = metadata.get(key);
-        if (value == null) {
-            return null;
-        }
-        return longValue(value, key);
-    }
-
-    private static long longValue(Object value, String key) {
-        if (value instanceof Number number) {
-            double numericValue = number.doubleValue();
-            if (!Double.isFinite(numericValue)
-                    || Math.rint(numericValue) != numericValue
-                    || numericValue < Long.MIN_VALUE
-                    || numericValue > Long.MAX_VALUE) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-            }
-            return number.longValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Long.parseLong(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be an integer", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be an integer");
-    }
-
-    private static String optionalText(String value, String name) {
-        if (value == null) {
-            return null;
-        }
-        return requireText(value, name);
-    }
-
-    private static Long optionalNonNegative(Long value, String name) {
-        if (value == null) {
-            return null;
-        }
-        if (value < 0L) {
-            throw new IllegalArgumentException(name + " must be >= 0 but was " + value);
-        }
-        return value;
-    }
-
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
-    }
-
     private static Map<String, Object> immutableAttributes(Map<String, Object> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             return Map.of();
         }
         Map<String, Object> copy = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : attributes.entrySet()) {
-            String key = requireText(entry.getKey(), "attribute key");
+            String key = DiscreteTokenDatasetMetadataSupport.requireText(entry.getKey(), "attribute key");
             Object value = Objects.requireNonNull(entry.getValue(), "attribute '" + key + "' must not be null");
             copy.put(key, value);
         }

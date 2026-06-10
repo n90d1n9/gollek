@@ -22,6 +22,10 @@ import java.util.Random;
 import java.util.Set;
 
 final class GenerationTokenPolicy {
+    private static final int GREEDY_RETRY_LIMIT = 8;
+    private static final int GREEDY_REJECTED_CANDIDATE_CAPACITY = 8;
+    private static final int GREEDY_FULL_MASK_RETRY_LIMIT = 8;
+
     private GenerationTokenPolicy() {
     }
 
@@ -53,22 +57,22 @@ final class GenerationTokenPolicy {
         return stops;
     }
 
-    static GreedySamplingMasks greedySamplingMasksFor(GreedySamplingMasks baseMasks, Tokenizer tokenizer,
+    static TokenSamplingMasks tokenSamplingMasksFor(TokenSamplingMasks baseMasks, Tokenizer tokenizer,
             Set<Integer> stops, int vocabSize, GenerationConfig cfg, ModelRuntimeTraits traits) {
         List<Integer> requestStops = cfg.stopTokenIds();
         if (requestStops == null || requestStops.isEmpty()) {
             return baseMasks;
         }
-        return buildGreedySamplingMasks(tokenizer, stops, vocabSize, traits);
+        return buildTokenSamplingMasks(tokenizer, stops, vocabSize, traits);
     }
 
-    static GreedySamplingMasks buildGreedySamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize) {
-        return GenerationTokenValidationPolicy.buildGreedySamplingMasks(tokenizer, stops, vocabSize, null);
+    static TokenSamplingMasks buildTokenSamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize) {
+        return GenerationTokenValidationPolicy.buildTokenSamplingMasks(tokenizer, stops, vocabSize, null);
     }
 
-    static GreedySamplingMasks buildGreedySamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize,
+    static TokenSamplingMasks buildTokenSamplingMasks(Tokenizer tokenizer, Set<Integer> stops, int vocabSize,
             ModelRuntimeTraits traits) {
-        return GenerationTokenValidationPolicy.buildGreedySamplingMasks(tokenizer, stops, vocabSize, traits);
+        return GenerationTokenValidationPolicy.buildTokenSamplingMasks(tokenizer, stops, vocabSize, traits);
     }
 
     static int[] initializePromptFrequencies(ModelConfig config, long[] tokenIds) {
@@ -93,13 +97,24 @@ final class GenerationTokenPolicy {
     static int sampleNextToken(float[] logits, Tokenizer tokenizer, GenerationConfig cfg, ModelConfig config,
             ModelRuntimeTraits traits, int[] freq, Random rng, boolean firstStep, Set<Integer> stops,
             TokenSampler tokenSampler) {
+        return sampleNextToken(logits, tokenizer, cfg, config, traits, freq, rng, firstStep, stops, tokenSampler, null);
+    }
+
+    static int sampleNextToken(float[] logits, Tokenizer tokenizer, GenerationConfig cfg, ModelConfig config,
+            ModelRuntimeTraits traits, int[] freq, Random rng, boolean firstStep, Set<Integer> stops,
+            TokenSampler tokenSampler, GenerationTokenValidationCache validationCache) {
+        return sampleNextToken(logits, tokenizer, cfg, config, traits, freq, rng, firstStep, stops, tokenSampler,
+                validationCache, null);
+    }
+
+    static int sampleNextToken(float[] logits, Tokenizer tokenizer, GenerationConfig cfg, ModelConfig config,
+            ModelRuntimeTraits traits, int[] freq, Random rng, boolean firstStep, Set<Integer> stops,
+            TokenSampler tokenSampler, GenerationTokenValidationCache validationCache, TokenSamplingMasks masks) {
         ModelRuntimeTraits effectiveTraits = effectiveTraits(config, traits);
-        GenerationTokenValidationPolicy.maskDisallowedContinuationTokens(
-                logits, tokenizer, firstStep, stops, effectiveTraits);
+        maskDisallowedContinuationTokens(logits, tokenizer, firstStep, stops, effectiveTraits, masks);
         for (int attempt = 0; attempt < 8; attempt++) {
             int next = tokenSampler.sample(logits, cfg, config, freq, rng);
-            if (!GenerationTokenValidationPolicy.shouldRejectSampledToken(
-                    next, tokenizer, effectiveTraits, firstStep, stops)) {
+            if (!shouldRejectSampledToken(next, tokenizer, effectiveTraits, firstStep, stops, validationCache)) {
                 GenerationTokenDebug.sampleChoice("accept", next, tokenizer, firstStep, attempt);
                 return next;
             }
@@ -127,7 +142,13 @@ final class GenerationTokenPolicy {
     }
 
     static int sampleGreedyFromTensor(AccelTensor logits, ModelConfig config, Tokenizer tokenizer,
-            ModelRuntimeTraits traits, boolean firstStep, Set<Integer> stops, GreedySamplingMasks masks) {
+            ModelRuntimeTraits traits, boolean firstStep, Set<Integer> stops, TokenSamplingMasks masks) {
+        return sampleGreedyFromTensor(logits, config, tokenizer, traits, firstStep, stops, masks, null);
+    }
+
+    static int sampleGreedyFromTensor(AccelTensor logits, ModelConfig config, Tokenizer tokenizer,
+            ModelRuntimeTraits traits, boolean firstStep, Set<Integer> stops, TokenSamplingMasks masks,
+            GenerationTokenValidationCache validationCache) {
         try {
             ModelRuntimeTraits effectiveTraits = effectiveTraits(config, traits);
             MemorySegment seg = logits.dataPtr();
@@ -142,7 +163,7 @@ final class GenerationTokenPolicy {
             int[] rejectedCandidates = null;
             int rejectedCount = 0;
 
-            for (int attempt = 0; attempt < 8; attempt++) {
+            for (int attempt = 0; attempt < GREEDY_RETRY_LIMIT; attempt++) {
                 if (attempt == 0) {
                     GenerationTokenDebug.topGreedyCandidates(seg, vocab, softCap, tokenizer, effectiveTraits,
                             firstStep,
@@ -154,18 +175,22 @@ final class GenerationTokenPolicy {
                 }
                 boolean masked = baseMask != null && baseMask.get(best);
                 if (!masked && (!needsTokenizerValidation
-                        || !GenerationTokenValidationPolicy.shouldRejectSampledToken(
-                                best, tokenizer, effectiveTraits, firstStep, stops))) {
+                        || !shouldRejectSampledToken(best, tokenizer, effectiveTraits, firstStep, stops,
+                                validationCache))) {
                     GenerationTokenDebug.sampleChoice("accept", best, tokenizer, firstStep, attempt);
                     return best;
                 }
                 GenerationTokenDebug.sampleChoice("reject", best, tokenizer, firstStep, attempt);
                 if (rejectedCandidates == null) {
-                    rejectedCandidates = new int[8];
+                    rejectedCandidates = new int[GREEDY_REJECTED_CANDIDATE_CAPACITY];
                 }
-                rejectedCandidates[rejectedCount++] = best;
+                if (rejectedCount < rejectedCandidates.length) {
+                    rejectedCandidates[rejectedCount++] = best;
+                }
             }
-            return -1;
+            return selectWithFullMaskAfterCheapRetries(
+                    seg, vocab, baseMask, rejectedCandidates, rejectedCount, tokenizer, effectiveTraits, firstStep,
+                    stops, validationCache, needsTokenizerValidation);
         } finally {
             logits.close();
         }
@@ -197,6 +222,74 @@ final class GenerationTokenPolicy {
 
     private static ModelRuntimeTraits effectiveTraits(ModelConfig config, ModelRuntimeTraits traits) {
         return ModelRuntimeTraitsResolver.resolve(config, traits);
+    }
+
+    private static boolean hasMaskedCandidates(BitSet mask) {
+        return mask != null && !mask.isEmpty();
+    }
+
+    private static int selectWithFullMaskAfterCheapRetries(
+            MemorySegment seg,
+            long vocab,
+            BitSet baseMask,
+            int[] rejectedCandidates,
+            int rejectedCount,
+            Tokenizer tokenizer,
+            ModelRuntimeTraits traits,
+            boolean firstStep,
+            Set<Integer> stops,
+            GenerationTokenValidationCache validationCache,
+            boolean needsTokenizerValidation) {
+        if (!hasMaskedCandidates(baseMask) && rejectedCount < GREEDY_REJECTED_CANDIDATE_CAPACITY) {
+            return -1;
+        }
+        BitSet fullMask = combinedRejectedMask(baseMask, rejectedCandidates, rejectedCount);
+        for (int offset = 0; offset < GREEDY_FULL_MASK_RETRY_LIMIT; offset++) {
+            int attempt = GREEDY_RETRY_LIMIT + offset;
+            int best = GenerationGreedyArgmax.selectWithMask(seg, vocab, fullMask, null, 0);
+            if (best < 0) {
+                break;
+            }
+            if (!needsTokenizerValidation
+                    || !shouldRejectSampledToken(best, tokenizer, traits, firstStep, stops, validationCache)) {
+                GenerationTokenDebug.sampleChoice("accept", best, tokenizer, firstStep, attempt);
+                return best;
+            }
+            GenerationTokenDebug.sampleChoice("reject", best, tokenizer, firstStep, attempt);
+            fullMask.set(best);
+        }
+        return -1;
+    }
+
+    private static BitSet combinedRejectedMask(BitSet baseMask, int[] rejectedCandidates, int rejectedCount) {
+        BitSet mask = baseMask == null ? new BitSet() : (BitSet) baseMask.clone();
+        if (rejectedCandidates == null) {
+            return mask;
+        }
+        for (int i = 0; i < rejectedCount; i++) {
+            int tokenId = rejectedCandidates[i];
+            if (tokenId >= 0) {
+                mask.set(tokenId);
+            }
+        }
+        return mask;
+    }
+
+    private static void maskDisallowedContinuationTokens(float[] logits, Tokenizer tokenizer, boolean firstStep,
+            Set<Integer> stops, ModelRuntimeTraits traits, TokenSamplingMasks masks) {
+        if (masks != null) {
+            GenerationTokenValidationPolicy.maskDisallowedContinuationTokens(logits, masks.maskFor(firstStep));
+            return;
+        }
+        GenerationTokenValidationPolicy.maskDisallowedContinuationTokens(logits, tokenizer, firstStep, stops, traits);
+    }
+
+    private static boolean shouldRejectSampledToken(int tokenId, Tokenizer tokenizer, ModelRuntimeTraits traits,
+            boolean firstStep, Set<Integer> stops, GenerationTokenValidationCache validationCache) {
+        if (validationCache != null) {
+            return validationCache.shouldRejectSampledToken(tokenId, tokenizer, traits, firstStep, stops);
+        }
+        return GenerationTokenValidationPolicy.shouldRejectSampledToken(tokenId, tokenizer, traits, firstStep, stops);
     }
 
     private static boolean looksLikeGemmaTurnPrompt(String prompt) {

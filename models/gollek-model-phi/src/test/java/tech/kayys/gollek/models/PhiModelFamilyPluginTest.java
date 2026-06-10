@@ -6,12 +6,15 @@ import tech.kayys.gollek.spi.model.ModelFamilyContractValidator;
 import tech.kayys.gollek.spi.model.ModelFamilyContractViolation;
 import tech.kayys.gollek.spi.model.ModelFamilyFixtureValidator;
 import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
+import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +45,18 @@ class PhiModelFamilyPluginTest {
     }
 
     @Test
+    void phi4MiniFixtureMatchesDescriptorTokenizerAndAdapter() throws Exception {
+        List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
+                new PhiModelFamilyPlugin(),
+                fixture("phi4-mini"));
+
+        assertEquals(List.of(), violations.stream()
+                        .map(ModelFamilyContractViolation::summary)
+                        .toList(),
+                "phi4-mini fixture should stay covered by the Phi model-family adapter");
+    }
+
+    @Test
     void publishesPhiDirectArchitectureAdapterAndTokenizers() {
         PhiModelFamilyPlugin plugin = new PhiModelFamilyPlugin();
 
@@ -49,9 +64,10 @@ class PhiModelFamilyPluginTest {
                 .map(ModelArchitecture::id)
                 .toList());
         assertTrue(plugin.architectureAdapters().get(0) instanceof PhiFamily);
-        assertTrue(plugin.descriptor().modelTypes().containsAll(List.of("phi", "phi3")));
+        assertTrue(plugin.descriptor().modelTypes().containsAll(List.of("phi", "phi3", "phi4")));
         assertTrue(plugin.descriptor().architectureClassNames()
-                .containsAll(List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM")));
+                .containsAll(List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM",
+                        "Phi4ForCausalLM")));
         assertEquals(List.of("phi-spm-bpe", "phi-hf-bpe"), plugin.tokenizerDescriptors().stream()
                 .map(ModelTokenizerDescriptor::id)
                 .toList());
@@ -83,10 +99,67 @@ class PhiModelFamilyPluginTest {
     void phiArchitectureClaimsPhiAndPhi3ConfigFamilies() {
         PhiFamily architecture = new PhiFamily();
 
-        assertEquals(List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM"),
+        assertEquals(List.of("PhiForCausalLM", "Phi3ForCausalLM", "Phi3SmallForCausalLM", "Phi4ForCausalLM"),
                 architecture.supportedArchClassNames());
-        assertEquals(List.of("phi", "phi3"), architecture.supportedModelTypes());
+        assertEquals(List.of("phi", "phi3", "phi4"), architecture.supportedModelTypes());
         assertTrue(architecture.usesRmsNorm());
+    }
+
+    @Test
+    void phiRuntimeTraitsAdvertisePackedQkvProjectionForPhiSizedConfig() throws Exception {
+        PhiFamily architecture = new PhiFamily();
+        ModelConfig config = phiSizedConfig();
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertFalse(traits.gemma4Text());
+        assertFalse(traits.gemma3Text());
+        assertFalse(traits.qwenText());
+        assertEquals(ModelRuntimeTraits.PromptBosPolicy.DEFAULT, traits.promptBosPolicy());
+        assertEquals(ModelRuntimeTraits.DEFAULT_SYSTEM_PROMPT, traits.defaultSystemPrompt());
+        assertEquals(ModelRuntimeTraits.DEFAULT_SYSTEM_PROMPT, PhiRuntimeProfile.prompt().defaultSystemPrompt());
+        assertTrue(traits.attention().packedQkvProjection());
+        assertTrue(traits.attention().largeAttentionMatvecCandidate());
+    }
+
+    @Test
+    void phi4MiniRuntimeTraitsPreservePackedGqaQkvLayout() throws Exception {
+        PhiFamily architecture = new PhiFamily();
+        ModelConfig config = phi4MiniSizedConfig();
+
+        ModelRuntimeTraits traits = architecture.runtimeTraits(config);
+
+        assertEquals(3072, config.hiddenSize());
+        assertEquals(24, config.numAttentionHeads());
+        assertEquals(8, config.resolvedNumKvHeads());
+        assertEquals(128, config.resolvedHeadDim());
+        assertEquals(5120, packedQkvProjectionDim(config));
+        assertTrue(traits.attention().packedQkvProjection());
+    }
+
+    private static ModelConfig phiSizedConfig() throws Exception {
+        ModelConfig config = new ModelConfig();
+        config.overrideHiddenSize(3072);
+        config.overrideNumHiddenLayers(32);
+        config.overrideIntermediateSize(8192);
+        config.overrideNumAttentionHeads(32);
+        config.overrideNumKeyValueHeads(32);
+        config.overrideHeadDim(96);
+        return config;
+    }
+
+    private static ModelConfig phi4MiniSizedConfig() {
+        ModelConfig config = new ModelConfig();
+        config.overrideHiddenSize(3072);
+        config.overrideNumHiddenLayers(32);
+        config.overrideIntermediateSize(8192);
+        config.overrideNumAttentionHeads(24);
+        config.overrideNumKeyValueHeads(8);
+        return config;
+    }
+
+    private static int packedQkvProjectionDim(ModelConfig config) {
+        return (config.numAttentionHeads() + 2 * config.resolvedNumKvHeads()) * config.resolvedHeadDim();
     }
 
     private static Path fixture(String familyId) throws Exception {

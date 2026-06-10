@@ -41,6 +41,7 @@ public class ServerApiTest {
                 .body("compatibility", hasItem("openai_models"))
                 .body("compatibility", hasItem("model_capability_matrix"))
                 .body("compatibility", hasItem("agent_contract"))
+                .body("compatibility", hasItem("agent_preflight"))
                 .body("compatibility", hasItem("agent_request_validation"))
                 .body("compatibility", hasItem("agent_tool_contract_validation"))
                 .body("compatibility", hasItem("request_trace_context"))
@@ -57,6 +58,7 @@ public class ServerApiTest {
                 .body("endpoints.openai_models", equalTo("/v1/models?compat=openai"))
                 .body("endpoints.model_capabilities", equalTo("/v1/models/{id}/capabilities"))
                 .body("endpoints.agent_contract", equalTo("/v1/agent/contract"))
+                .body("endpoints.agent_preflight", equalTo("/v1/agent/preflight"))
                 .body("endpoints.agent_validation", equalTo("/v1/agent/validate"))
                 .body("endpoints.agent_tool_validation", equalTo("/v1/agent/tools/validate"))
                 .body("endpoints.mcp_servers", equalTo("/v1/mcp/servers"))
@@ -88,6 +90,7 @@ public class ServerApiTest {
                 .body("endpoints.chat_completions.path", equalTo("/v1/chat/completions"))
                 .body("endpoints.responses.path", equalTo("/v1/responses"))
                 .body("endpoints.mcp_tools.path", equalTo("/v1/mcp/tools?compat=openai"))
+                .body("endpoints.agent_preflight.path", equalTo("/v1/agent/preflight"))
                 .body("endpoints.agent_validation.path", equalTo("/v1/agent/validate?surface={surface}"))
                 .body("endpoints.agent_tool_validation.path", equalTo("/v1/agent/tools/validate"))
                 .body("schemas.chat_completions_request.required", hasItem("model"))
@@ -100,6 +103,12 @@ public class ServerApiTest {
                 .body("schemas.stream_options.properties.include_usage.type", equalTo("boolean"))
                 .body("schemas.agent_validation_response.required", hasItem("normalized"))
                 .body("schemas.agent_validation_response.required", hasItem("trace"))
+                .body("schemas.agent_preflight_response.required", hasItem("issues_by_area"))
+                .body("schemas.agent_preflight_response.required", hasItem("boundary"))
+                .body("schemas.agent_preflight_response.properties.check_results.additionalProperties.'$ref'",
+                        equalTo("#/schemas/agent_preflight_check_result"))
+                .body("schemas.agent_preflight_check_result.properties.details.properties.embedding.properties.rag.properties.vector_store_owned_by.type",
+                        equalTo("string"))
                 .body("schemas.tool_contract_validation_response.required", hasItem("warnings"))
                 .body("schemas.openai_tool_definition.execution", equalTo(false))
                 .body("schemas.openai_tool_definition.validation_endpoint", equalTo("/v1/agent/tools/validate"))
@@ -115,8 +124,10 @@ public class ServerApiTest {
                 .when().get("/q/openapi")
                 .then().statusCode(200)
                 .body(containsString("/v1/agent/contract"))
+                .body(containsString("/v1/agent/preflight"))
                 .body(containsString("agentic-chat"))
                 .body(containsString("agentic-response"))
+                .body(containsString("agent-preflight"))
                 .body(containsString("openai-embedding"))
                 .body(containsString("validate-chat"))
                 .body(containsString("validate-tools"))
@@ -187,6 +198,58 @@ public class ServerApiTest {
                 .body("normalized.stream_options.include_usage", equalTo(false))
                 .body("normalized.stream_options.include_trace", equalTo(true))
                 .body("normalized.stream_options.include_stream_metadata", equalTo(true));
+    }
+
+    @Test
+    public void testAgentPreflightReportsBlockedDryRunInDemoRuntime() {
+        RestAssured.given().header("Authorization", "Bearer community")
+                .header("X-Gollek-Request-Id", "req-preflight-1")
+                .contentType("application/json")
+                .body("""
+                        {
+                          "model": "demo-model",
+                          "surface": "chat",
+                          "request": {
+                            "messages": [
+                              {"role": "system", "content": "Use context."},
+                              {"role": "user", "content": "Preflight this route."}
+                            ],
+                            "tools": [
+                              {
+                                "type": "function",
+                                "function": {
+                                  "name": "lookup_context",
+                                  "parameters": {"type": "object"}
+                                }
+                              }
+                            ],
+                            "rag_context": [
+                              {"source": "docs/agentic", "text": "Validation is dry-run."}
+                            ]
+                          }
+                        }
+                        """)
+                .when().post("/v1/agent/preflight")
+                .then().statusCode(200)
+                .header("X-Gollek-Request-Id", equalTo("req-preflight-1"))
+                .body("object", equalTo("gollek.agent_preflight"))
+                .body("status", equalTo("blocked"))
+                .body("ready", equalTo(false))
+                .body("surface", equalTo("chat"))
+                .body("model", equalTo("demo-model"))
+                .body("boundary.validation_only", equalTo(true))
+                .body("boundary.model_invoked", equalTo(false))
+                .body("boundary.tool_execution", equalTo(false))
+                .body("boundary.retrieval_execution", equalTo(false))
+                .body("model_capabilities.available", equalTo(false))
+                .body("mcp_discovery.available", equalTo(false))
+                .body("tool_validation.valid", equalTo(true))
+                .body("tool_validation.model_invoked", equalTo(false))
+                .body("request_validation.valid", equalTo(true))
+                .body("request_validation.model_invoked", equalTo(false))
+                .body("issues_by_area.model_route", hasItem("model is not available through Gollek serving"))
+                .body("issues_by_area.mcp_discovery", hasItem("MCP discovery is not available"))
+                .body("blocking_messages", hasItem("MCP discovery is not available"));
     }
 
     @Test
@@ -290,7 +353,11 @@ public class ServerApiTest {
                 .body("model_invoked", equalTo(false))
                 .body("normalized.model", equalTo("demo-embed"))
                 .body("normalized.input_count", equalTo(2))
-                .body("normalized.metadata.tenant", equalTo("agent-project"));
+                .body("normalized.encoding_format", equalTo("float"))
+                .body("normalized.metadata.tenant", equalTo("agent-project"))
+                .body("normalized.rag.embedding_generation", equalTo(true))
+                .body("normalized.rag.retrieval_execution", equalTo(false))
+                .body("normalized.rag.vector_store_owned_by", equalTo("agent_orchestrator"));
     }
 
     @Test

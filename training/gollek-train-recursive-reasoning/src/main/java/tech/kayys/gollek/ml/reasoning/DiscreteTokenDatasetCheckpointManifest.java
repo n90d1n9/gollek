@@ -25,17 +25,17 @@ public record DiscreteTokenDatasetCheckpointManifest(
     public static final String DATASET_PLAN_REPORT_METADATA_KEY = "datasetPlanReport";
 
     public DiscreteTokenDatasetCheckpointManifest {
-        schemaVersion = requireText(schemaVersion, "schemaVersion");
-        experimentName = requireText(experimentName, "experimentName");
-        runId = requireText(runId, "runId");
-        modelFamily = requireText(modelFamily, "modelFamily");
+        schemaVersion = DiscreteTokenDatasetMetadataSupport.requireText(schemaVersion, "schemaVersion");
+        experimentName = DiscreteTokenDatasetMetadataSupport.requireText(experimentName, "experimentName");
+        runId = DiscreteTokenDatasetMetadataSupport.requireText(runId, "runId");
+        modelFamily = DiscreteTokenDatasetMetadataSupport.requireText(modelFamily, "modelFamily");
         if (checkpointStep < 0L) {
             throw new IllegalArgumentException("checkpointStep must be >= 0 but was " + checkpointStep);
         }
         if (createdAtEpochMillis < 0L) {
             throw new IllegalArgumentException("createdAtEpochMillis must be >= 0 but was " + createdAtEpochMillis);
         }
-        createdBy = requireText(createdBy, "createdBy");
+        createdBy = DiscreteTokenDatasetMetadataSupport.requireText(createdBy, "createdBy");
         datasetPlanReport = Objects.requireNonNull(datasetPlanReport, "datasetPlanReport must not be null");
         lineage = lineage == null ? DiscreteTokenDatasetCheckpointLineage.root(runId) : lineage;
         attributes = immutableAttributes(attributes);
@@ -124,21 +124,13 @@ public record DiscreteTokenDatasetCheckpointManifest(
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
     }
 
-    private static String requireText(String value, String name) {
-        value = Objects.requireNonNull(value, name + " must not be null");
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
-    }
-
     private static Map<String, Object> immutableAttributes(Map<String, Object> attributes) {
         if (attributes == null || attributes.isEmpty()) {
             return Map.of();
         }
         Map<String, Object> copy = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : attributes.entrySet()) {
-            String key = requireText(entry.getKey(), "attribute key");
+            String key = DiscreteTokenDatasetMetadataSupport.requireText(entry.getKey(), "attribute key");
             Object value = Objects.requireNonNull(entry.getValue(), "attribute '" + key + "' must not be null");
             copy.put(key, value);
         }

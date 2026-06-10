@@ -50,6 +50,11 @@ static BOOL should_compile_bf16_fused_gated_pair_x4_pipeline(void) {
     return gollek_metal_env_truthy("GOLLEK_METAL_ENABLE_BF16_FUSED_GATED_PAIR_X4");
 }
 
+static BOOL should_compile_bf16_matvec_rows_pipelines(void) {
+    return gollek_metal_env_truthy("GOLLEK_METAL_ENABLE_BF16_FFN_MATVEC_ROWS")
+            || should_compile_bf16_fused_gated_pair_pipeline();
+}
+
 static BOOL should_compile_bf16_x8_pipeline(void) {
     return gollek_metal_env_truthy("GOLLEK_METAL_ENABLE_BF16_MATVEC_X8")
             && !gollek_metal_env_truthy("GOLLEK_METAL_DISABLE_BF16_MATVEC_X8");
@@ -105,6 +110,16 @@ void gollek_metal_compile_runtime_pipelines(GollekMetalPipelines* pipelines) {
         }
         if (should_compile_bf16_fused_gated_pair_x4_pipeline()) {
             pipelines->matvec_bf16_gated_pair_x4 = compile_pipeline(matvec256Library, @"gollek_matvec_tb_bf16_gated_pair_x4_kernel");
+        }
+        if (should_compile_bf16_matvec_rows_pipelines()) {
+            pipelines->matvec_bf16_rows_gated_pair = compile_pipeline(
+                    matvec256Library, @"gollek_matvec_rows_tb_bf16_gated_pair_kernel");
+            pipelines->matvec_bf16_rows = compile_pipeline(
+                    matvec256Library, @"gollek_matvec_rows_tb_bf16_kernel");
+            pipelines->matvec_bf16_rows_gated_pair_x4 = compile_pipeline(
+                    matvec256Library, @"gollek_matvec_rows_tb_bf16_gated_pair_x4_kernel");
+            pipelines->matvec_bf16_rows_x4 = compile_pipeline(
+                    matvec256Library, @"gollek_matvec_rows_tb_bf16_x4_kernel");
         }
         pipelines->matvec_bf16_triple_mixed = compile_pipeline(matvec256Library, @"gollek_matvec_tb_bf16_triple_mixed_kernel");
         pipelines->matvec_bf16_triple_mixed_x4 = compile_pipeline(matvec256Library, @"gollek_matvec_tb_bf16_triple_mixed_x4_kernel");

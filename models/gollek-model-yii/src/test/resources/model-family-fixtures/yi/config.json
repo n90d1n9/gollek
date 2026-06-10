@@ -1,0 +1,12 @@
+{
+  "model_type": "yi_1_5",
+  "architectures": ["YiForCausalLM"],
+  "hidden_size": 4096,
+  "num_hidden_layers": 32,
+  "num_attention_heads": 32,
+  "num_key_value_heads": 4,
+  "intermediate_size": 11008,
+  "vocab_size": 64000,
+  "rope_theta": 5000000.0,
+  "torch_dtype": "bfloat16"
+}

@@ -434,7 +434,7 @@ public interface ModelArchitecture {
      * expressible as weight names.</p>
      */
     default ModelRuntimeTraits runtimeTraits(ModelConfig config) {
-        return ModelRuntimeTraits.fromConfig(config);
+        return ModelRuntimeTraits.fallbackFromConfig(config);
     }
 
     /**

@@ -7,7 +7,9 @@ import jakarta.inject.Inject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import tech.kayys.gollek.cli.util.ExternalPluginClasspath;
 import tech.kayys.gollek.spi.feature.FeatureAdapterKinds;
+import tech.kayys.gollek.spi.model.ModelFamilyCapability;
 import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.spi.pipeline.ModelPipeline;
 import tech.kayys.gollek.spi.pipeline.ModelPipelineRegistry;
@@ -35,6 +37,7 @@ import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.regex.Pattern;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -56,14 +59,21 @@ import java.util.zip.ZipFile;
                 FeaturesCommand.FinalizeMigration.class,
                 FeaturesCommand.PruneLegacy.class,
                 FeaturesCommand.Remove.class,
+                FeaturesCommand.Detach.class,
                 FeaturesCommand.Rollback.class,
                 FeaturesCommand.Backups.class
         })
 public class FeaturesCommand implements Runnable {
     private static final String SERVICE_ENTRY = "META-INF/services/tech.kayys.gollek.spi.pipeline.ModelPipeline";
     private static final String ADAPTER_SERVICE_ENTRY = "META-INF/services/tech.kayys.gollek.spi.feature.FeatureAdapter";
+    private static final String MODEL_FAMILY_KIND = "model-family";
+    private static final String MODEL_FAMILY_SERVICE_ENTRY =
+            "META-INF/services/tech.kayys.gollek.spi.model.ModelFamilyPlugin";
+    private static final String GOLLEK_PLUGIN_SERVICE_ENTRY =
+            "META-INF/services/tech.kayys.gollek.spi.plugin.GollekPlugin";
     private static final String MANIFEST_ENTRY = "META-INF/gollek-extension.json";
     private static final String LEGACY_MANIFEST_ENTRY = "META-INF/gollek-feature.json";
+    private static final String PLUGIN_DESCRIPTOR_ENTRY = "plugin.json";
     private static final String PACKAGE_MANIFEST_ENTRY = "gollek-package.json";
     private static final String EXTENSION_PATH_PROPERTY = "gollek.extensions.path";
     private static final String EXTENSION_PATH_ENV = "GOLLEK_EXTENSION_PATH";
@@ -206,7 +216,7 @@ public class FeaturesCommand implements Runnable {
                 }
             }
             System.out.println();
-            System.out.println("Tip: pipeline creates a ModelPipeline service; all other common kinds create a FeatureAdapter service.");
+            System.out.println("Tip: pipeline creates ModelPipeline, model-family creates ModelFamilyPlugin, and the other common kinds create FeatureAdapter.");
             return 0;
         }
     }
@@ -277,7 +287,7 @@ public class FeaturesCommand implements Runnable {
         String featureId;
 
         @Option(names = { "--kind", "--adapter-kind", "--capability-kind" },
-                description = "Capability kind: pipeline, training, optimization, quantization, backend, exporter, dataset, evaluator")
+                description = "Capability kind: pipeline, model-family, training, optimization, quantization, backend, exporter, dataset, evaluator")
         String kind = FeatureAdapterKinds.PIPELINE;
 
         @Option(names = { "--pipeline-id" }, description = "Pipeline id selected by gollek run --pipeline")
@@ -285,6 +295,38 @@ public class FeaturesCommand implements Runnable {
 
         @Option(names = { "--adapter-id", "--capability-id" }, description = "Adapter/capability id for non-pipeline extensions")
         String adapterId;
+
+        @Option(names = { "--model-family-id", "--family-id" },
+                description = "Model-family id for --kind model-family (default: --id or directory name)")
+        String modelFamilyId;
+
+        @Option(names = { "--model-type" }, split = ",",
+                description = "Hugging Face config.model_type values claimed by --kind model-family")
+        List<String> modelTypes = new ArrayList<>();
+
+        @Option(names = { "--architecture", "--architecture-class" }, split = ",",
+                description = "Hugging Face architecture class names claimed by --kind model-family")
+        List<String> architectureClassNames = new ArrayList<>();
+
+        @Option(names = { "--capability" }, split = ",",
+                description = "Model-family capabilities such as causal_lm, tokenizer, gguf, onnx, vision")
+        List<String> modelFamilyCapabilities = new ArrayList<>();
+
+        @Option(names = { "--tokenizer-kind" },
+                description = "Tokenizer descriptor for --kind model-family: hf-bpe, sentencepiece, wordpiece, custom, none")
+        String tokenizerKind;
+
+        @Option(names = { "--tokenizer-metadata-status" },
+                description = "Tokenizer metadata status for --kind model-family: ready or pending")
+        String tokenizerMetadataStatus;
+
+        @Option(names = { "--tokenizer-pending-reason", "--tokenizer-metadata-pending-reason" },
+                description = "Reason used when tokenizer metadata status is pending")
+        String tokenizerMetadataPendingReason;
+
+        @Option(names = { "--bundle-profile" },
+                description = "Model-family bundle profile metadata: core, direct, vlm, embedding, research, optional")
+        String bundleProfile;
 
         @Option(names = { "--name" }, description = "Human-readable feature name")
         String displayName;
@@ -334,8 +376,10 @@ public class FeaturesCommand implements Runnable {
                 Path root = normalize(Path.of(targetDir));
                 String id = normalizeFeatureId(firstNonBlank(featureId, fileStem(root), "gollek-extension"));
                 String normalizedKind = FeatureAdapterKinds.normalize(kind);
-                boolean pipelineScaffold = FeatureAdapterKinds.PIPELINE.equals(normalizedKind);
+                boolean modelFamilyScaffold = MODEL_FAMILY_KIND.equals(normalizedKind);
+                boolean pipelineScaffold = !modelFamilyScaffold && FeatureAdapterKinds.PIPELINE.equals(normalizedKind);
                 String capabilityId = normalizeFeatureId(firstNonBlank(
+                        modelFamilyScaffold ? modelFamilyId : null,
                         pipelineScaffold ? pipelineId : adapterId,
                         adapterId,
                         pipelineId,
@@ -345,9 +389,11 @@ public class FeaturesCommand implements Runnable {
                 String pkg = normalizePackageName(firstNonBlank(packageName, defaultPackageName(id)));
                 String typeName = normalizeClassName(firstNonBlank(
                         className,
-                        pascalCase(capabilityId) + (pipelineScaffold ? "Pipeline" : "Adapter")));
+                        pascalCase(capabilityId)
+                                + (modelFamilyScaffold ? "ModelFamily" : pipelineScaffold ? "Pipeline" : "Adapter")));
                 String normalizedFamily = normalizeFeatureId(firstNonBlank(
                         family,
+                        modelFamilyScaffold ? capabilityId : null,
                         pipelineScaffold ? "custom" : normalizedKind));
                 List<ModalityType> inputs = pipelineScaffold ? parseModalities(inputModalities, "input") : List.of();
                 List<ModalityType> outputs = pipelineScaffold ? parseModalities(outputModalities, "output") : List.of();
@@ -360,6 +406,41 @@ public class FeaturesCommand implements Runnable {
                 List<String> normalizedFormats = normalizeScaffoldTokens(formatHint, List.of());
                 List<String> normalizedTargets = normalizeScaffoldTokens(targets, List.of());
                 List<String> normalizedTags = normalizeTags(tags, normalizedFamily, providerHint, formatHint, normalizedKind);
+                List<String> normalizedModelTypes = normalizeScaffoldTokens(modelTypes, List.of(capabilityId));
+                List<String> normalizedArchitectureClasses = normalizeCaseSensitiveScaffoldTokens(
+                        architectureClassNames,
+                        List.of(pascalCase(capabilityId) + "ForCausalLM"));
+                List<String> normalizedModelFamilyCapabilities =
+                        normalizeModelFamilyCapabilities(modelFamilyCapabilities, modelFamilyScaffold);
+                boolean tokenizerKindNone = tokenizerKindNone(tokenizerKind);
+                String normalizedTokenizerMetadataStatus = modelFamilyScaffold && tokenizerKindNone
+                        && tokenizerMetadataStatus == null
+                                ? "pending"
+                                : normalizeTokenizerMetadataStatus(tokenizerMetadataStatus);
+                if ("ready".equals(normalizedTokenizerMetadataStatus) && tokenizerKindNone) {
+                    throw new IllegalArgumentException(
+                            "Use --tokenizer-metadata-status pending instead of --tokenizer-kind none");
+                }
+                if ("pending".equals(normalizedTokenizerMetadataStatus)
+                        && tokenizerKind != null
+                        && !tokenizerKind.isBlank()
+                        && !tokenizerKindNone) {
+                    throw new IllegalArgumentException(
+                            "--tokenizer-kind cannot be combined with --tokenizer-metadata-status pending");
+                }
+                if ("ready".equals(normalizedTokenizerMetadataStatus)
+                        && tokenizerMetadataPendingReason != null
+                        && !tokenizerMetadataPendingReason.isBlank()) {
+                    throw new IllegalArgumentException(
+                            "--tokenizer-pending-reason requires --tokenizer-metadata-status pending");
+                }
+                String normalizedTokenizerKind = "pending".equals(normalizedTokenizerMetadataStatus)
+                        ? ""
+                        : normalizeTokenizerKind(tokenizerKind);
+                String normalizedTokenizerMetadataPendingReason = "pending".equals(normalizedTokenizerMetadataStatus)
+                        ? firstNonBlank(tokenizerMetadataPendingReason, "tokenizer adapter pending scaffold stabilization")
+                        : "";
+                String normalizedBundleProfile = normalizeFeatureId(firstNonBlank(bundleProfile, "optional"));
                 Path localGollek = gollekPath == null || gollekPath.isBlank()
                         ? null
                         : normalize(Path.of(gollekPath.trim()));
@@ -382,6 +463,13 @@ public class FeaturesCommand implements Runnable {
                         normalizeHint(providerHint),
                         normalizedFormats,
                         normalizedTargets,
+                        normalizedModelTypes,
+                        normalizedArchitectureClasses,
+                        normalizedModelFamilyCapabilities,
+                        normalizedTokenizerKind,
+                        normalizedTokenizerMetadataStatus,
+                        normalizedTokenizerMetadataPendingReason,
+                        normalizedBundleProfile,
                         localGollek);
                 List<Map<String, Object>> files = writeScaffold(scaffold, force, dryRun);
 
@@ -392,6 +480,19 @@ public class FeaturesCommand implements Runnable {
                 result.put("feature_id", id);
                 result.put("kind", normalizedKind);
                 result.put("capability_id", capabilityId);
+                if (modelFamilyScaffold) {
+                    result.put("model_family_id", capabilityId);
+                    result.put("model_types", normalizedModelTypes);
+                    result.put("architecture_classes", normalizedArchitectureClasses);
+                    result.put("model_family_capabilities", normalizedModelFamilyCapabilities);
+                    result.put("tokenizer_metadata_status", normalizedTokenizerMetadataStatus);
+                    if ("ready".equals(normalizedTokenizerMetadataStatus)) {
+                        result.put("tokenizer_kind", normalizedTokenizerKind);
+                        result.put("tokenizer_kinds", List.of(normalizedTokenizerKind));
+                    } else {
+                        result.put("tokenizer_metadata_pending_reason", normalizedTokenizerMetadataPendingReason);
+                    }
+                }
                 if (pipelineScaffold) {
                     result.put("pipeline_id", pipe);
                 }
@@ -404,6 +505,13 @@ public class FeaturesCommand implements Runnable {
                     System.out.printf("extension: %s (%s)%n", id, name);
                     System.out.printf("kind:      %s%n", normalizedKind);
                     System.out.printf("capability: %s%n", capabilityId);
+                    if (modelFamilyScaffold) {
+                        System.out.printf("model family: %s%n", capabilityId);
+                        System.out.printf("model types:  %s%n", String.join(", ", normalizedModelTypes));
+                        System.out.printf("tokenizer:    %s%n", "ready".equals(normalizedTokenizerMetadataStatus)
+                                ? normalizedTokenizerKind
+                                : normalizedTokenizerMetadataStatus + " (" + normalizedTokenizerMetadataPendingReason + ")");
+                    }
                     if (pipelineScaffold) {
                         System.out.printf("pipeline:  %s%n", pipe);
                     }
@@ -414,11 +522,19 @@ public class FeaturesCommand implements Runnable {
                     System.out.println();
                     System.out.println("Next:");
                     System.out.println("  " + scaffoldBuildCommand(scaffold));
-                    System.out.printf("  gollek extensions inspect lib/build/libs/%s-0.1.0-SNAPSHOT.jar --strict%n", id);
-                    System.out.printf("  gollek extensions install lib/build/libs/%s-0.1.0-SNAPSHOT.jar --force%n", id);
-                    System.out.println("  gollek extensions doctor --strict");
+                    if (modelFamilyScaffold) {
+                        System.out.printf("  gollek extensions inspect lib/build/libs/%s-0.1.0-SNAPSHOT.jar --strict%n", id);
+                        System.out.printf("  gollek extensions install lib/build/libs/%s-0.1.0-SNAPSHOT.jar --plugin-dir ~/.gollek/plugins --force%n", id);
+                        System.out.println("  GOLLEK_PLUGIN_DIRS=~/.gollek/plugins gollek modules --doctor");
+                    } else {
+                        System.out.printf("  gollek extensions inspect lib/build/libs/%s-0.1.0-SNAPSHOT.jar --strict%n", id);
+                        System.out.printf("  gollek extensions install lib/build/libs/%s-0.1.0-SNAPSHOT.jar --force%n", id);
+                        System.out.println("  gollek extensions doctor --strict");
+                    }
                     if (pipelineScaffold) {
                         System.out.printf("  gollek run --model <model> --pipeline %s --prompt \"hello\"%n", pipe);
+                    } else if (modelFamilyScaffold) {
+                        System.out.printf("  gollek show <model-or-path> --plugin-dir ~/.gollek/plugins --json%n");
                     } else {
                         System.out.println("  gollek extensions --details --paths");
                     }
@@ -551,14 +667,19 @@ public class FeaturesCommand implements Runnable {
                     }
                     printDoctor(report, strict);
                     printLegacyMigrationStatus(legacyMigration);
-                    System.out.printf("%nSummary: %d root(s), %d jar(s), %d ok, %d warning, %d error, %d collision(s), %d ignored legacy path setting(s)%n",
+                    System.out.printf("%nSummary: %d root(s), %d jar(s), %d ok, %d warning, %d error, %d collision(s), %d ignored legacy path setting(s), %d plugin-ready, %d plugin-not-ready, tokenizer-lock %d ok/%d missing/%d stale%n",
                             summary.roots(),
                             summary.jars(),
                             summary.ok(),
                             summary.warning(),
                             summary.error(),
                             summary.collisions(),
-                            summary.ignoredLegacyPaths());
+                            summary.ignoredLegacyPaths(),
+                            summary.pluginInstallReady(),
+                            summary.pluginInstallNotReady(),
+                            summary.tokenizerLockOk(),
+                            summary.tokenizerLockMissing(),
+                            summary.tokenizerLockStale());
                 }
                 if (repairReport != null && repairReport.hasErrors()) {
                     return 1;
@@ -583,6 +704,10 @@ public class FeaturesCommand implements Runnable {
 
         @Option(names = { "--dir" }, description = "Extension directory to install into (default: ~/.gollek/extensions)")
         String outputDir;
+
+        @Option(names = { "--plugin-dir" },
+                description = "Plugin directory to install model-family plugins into, such as ~/.gollek/plugins")
+        String pluginDir;
 
         @Option(names = { "--as" }, description = "Installed jar filename (default: source filename)")
         String installedName;
@@ -609,24 +734,34 @@ public class FeaturesCommand implements Runnable {
                 if (!Files.isRegularFile(source)) {
                     throw new IllegalArgumentException("Extension artifact not found: " + source);
                 }
+                if (pluginDir != null && !pluginDir.isBlank() && outputDir != null && !outputDir.isBlank()) {
+                    throw new IllegalArgumentException("Use either --dir for extension installs or --plugin-dir for plugin installs, not both");
+                }
                 try (FeatureInstallSource input = resolveExtensionInstallSource(source)) {
                     FeatureJarReport report = inspectJar(input.jarPath()).withPath(input.displayJarPath());
                     if (report.error() != null) {
                         throw new IllegalArgumentException("Extension jar is not readable: " + report.error());
                     }
+                    boolean pluginInstall = pluginInstallRequested(pluginDir, outputDir, report);
                     FeatureJarValidation validation = validateArtifact(report, input.packageReport(), false);
                     List<String> installErrors = new ArrayList<>(validation.errors());
                     if (input.packageReport() != null) {
                         installErrors.addAll(packageJarConsistencyWarnings(input.packageReport(), report));
                     }
                     if (allowNoService) {
-                        installErrors.removeIf(error -> error.contains(SERVICE_ENTRY) || error.contains(ADAPTER_SERVICE_ENTRY));
+                        installErrors.removeIf(error -> error.contains(SERVICE_ENTRY)
+                                || error.contains(ADAPTER_SERVICE_ENTRY)
+                                || error.contains(MODEL_FAMILY_SERVICE_ENTRY)
+                                || error.contains(GOLLEK_PLUGIN_SERVICE_ENTRY));
+                    }
+                    if (pluginInstall && modelFamilyOnly(report)) {
+                        installErrors.addAll(modelFamilyPluginInstallReadinessErrors(report));
                     }
                     if (!installErrors.isEmpty()) {
                         throw new IllegalArgumentException(String.join("; ", installErrors));
                     }
 
-                    Path targetDir = installDirectory(outputDir);
+                    Path targetDir = installTargetDirectory(outputDir, pluginDir, report);
                     String filename = installedName == null || installedName.isBlank()
                             ? input.defaultInstalledName()
                             : installedName.trim();
@@ -647,6 +782,11 @@ public class FeaturesCommand implements Runnable {
 
                     FeatureBackupRecord backup = null;
                     boolean wouldBackup = existed && force && !noBackup;
+                    Map<String, Object> lockEntry = null;
+                    Map<String, Object> plannedLockEntry = null;
+                    if (dryRun) {
+                        plannedLockEntry = installLockEntry(target, input.jarPath(), report, input.packageReport());
+                    }
                     if (!dryRun) {
                         Files.createDirectories(targetDir);
                         if (wouldBackup) {
@@ -657,13 +797,17 @@ public class FeaturesCommand implements Runnable {
                         } else {
                             Files.copy(input.jarPath(), target);
                         }
-                        writeInstallLockEntry(targetDir, target, inspectJar(target), input.packageReport());
+                        lockEntry = writeInstallLockEntry(targetDir, target, inspectJar(target), input.packageReport());
                     }
 
                     Map<String, Object> result = new LinkedHashMap<>();
                     result.put("action", "install");
+                    result.put("install_mode", pluginInstall ? "plugin" : "extension");
                     result.put("source", source.toString());
                     result.put("target", target.toString());
+                    if (pluginInstall) {
+                        result.put("plugin_dir", targetDir.toString());
+                    }
                     result.put("lockfile", installLockPath(targetDir).toString());
                     if (input.packageReport() != null) {
                         result.put("package", input.packageReport().toMap());
@@ -677,6 +821,12 @@ public class FeaturesCommand implements Runnable {
                     if (backup != null) {
                         result.put("backup", backup.toMap());
                     }
+                    if (lockEntry != null) {
+                        result.put("lock_entry", lockEntry);
+                    }
+                    if (plannedLockEntry != null) {
+                        result.put("would_lock_entry", plannedLockEntry);
+                    }
                     result.put("jar", report.toMap());
                     if (json) {
                         printObjectJson(result);
@@ -685,13 +835,27 @@ public class FeaturesCommand implements Runnable {
                             printPackageInspect(input.packageReport());
                             System.out.println();
                         }
-                        System.out.printf("%s extension jar: %s%n", dryRun ? "Would install" : "Installed", target);
+                        System.out.printf("%s %s jar: %s%n",
+                                dryRun ? "Would install" : "Installed",
+                                pluginInstall ? "plugin" : "extension",
+                                target);
                         if (backup != null) {
                             System.out.printf("backup: %s%n", backup.path());
                         } else if (dryRun && wouldBackup) {
                             System.out.println("backup: would create rollback backup before replacing existing jar");
                         }
                         System.out.printf("%s install lock: %s%n", dryRun ? "Would update" : "Updated", installLockPath(targetDir));
+                        Map<String, Object> effectiveLockEntry = lockEntry == null ? plannedLockEntry : lockEntry;
+                        List<String> tokenizerKinds = effectiveLockEntry == null
+                                ? List.of()
+                                : manifestStringList(effectiveLockEntry.get("tokenizer_kinds"));
+                        String tokenizerMetadata = tokenizerMetadataLockSummary(effectiveLockEntry);
+                        if (!tokenizerMetadata.isBlank()) {
+                            System.out.printf("tokenizer metadata: %s%n", tokenizerMetadata);
+                        }
+                        if (!tokenizerKinds.isEmpty()) {
+                            System.out.printf("tokenizer kinds: %s%n", String.join(", ", tokenizerKinds));
+                        }
                         if (report.hasManifest()) {
                             System.out.printf("manifest: %s%n", manifestSummary(report.manifest()));
                         }
@@ -701,8 +865,17 @@ public class FeaturesCommand implements Runnable {
                         for (String provider : report.adapterProviders()) {
                             System.out.printf("adapter provider: %s%n", provider);
                         }
-                        if (!report.hasServiceEntry()) {
+                        for (String provider : report.modelFamilyProviders()) {
+                            System.out.printf("model-family provider: %s%n", provider);
+                        }
+                        if (!report.hasServiceEntry() && !modelFamilyOnly(report)) {
                             System.out.println("warning: no ModelPipeline service entry found");
+                        }
+                        if (pluginInstall) {
+                            System.out.printf("next: GOLLEK_PLUGIN_DIRS=%s gollek modules --doctor%n", targetDir);
+                            System.out.printf("next: gollek show <model-or-path> --plugin-dir %s --json%n", targetDir);
+                        } else if (modelFamilyOnly(report)) {
+                            System.out.println("warning: model-family-only jars are loaded from plugin directories; pass --plugin-dir ~/.gollek/plugins for runtime use");
                         }
                     }
                     return 0;
@@ -852,13 +1025,18 @@ public class FeaturesCommand implements Runnable {
     }
 
     @Command(name = "remove", aliases = { "uninstall" }, mixinStandardHelpOptions = true,
-            description = "Remove an installed runtime extension jar")
+            description = "Remove an installed runtime extension or detachable plugin jar")
     public static class Remove implements Callable<Integer> {
-        @Parameters(index = "0", paramLabel = "<target>", description = "Jar filename, extension id, feature id, pipeline id, or provider class")
+        @Parameters(index = "0", paramLabel = "<target>",
+                description = "Jar filename, extension/model-family id, feature id, pipeline id, or provider class")
         String target;
 
         @Option(names = { "--dir" }, description = "Extension directory to remove from (default: ~/.gollek/extensions)")
         String featureDir;
+
+        @Option(names = { "--plugin-dir" },
+                description = "Plugin directory to remove model-family plugins from, such as ~/.gollek/plugins")
+        String pluginDir;
 
         @Option(names = { "--dry-run" }, description = "Print matched jar without deleting it")
         boolean dryRun;
@@ -872,9 +1050,16 @@ public class FeaturesCommand implements Runnable {
         @Override
         public Integer call() {
             try {
-                Path root = installDirectory(featureDir);
+                boolean explicitPluginDir = pluginDir != null && !pluginDir.isBlank();
+                boolean explicitFeatureDir = featureDir != null && !featureDir.isBlank();
+                if (explicitPluginDir && explicitFeatureDir) {
+                    throw new IllegalArgumentException("Use either --dir for extension removals or --plugin-dir for plugin removals, not both");
+                }
+                boolean pluginRemove = explicitPluginDir || (!explicitFeatureDir && defaultPluginRemove());
+                Path root = pluginRemove ? pluginDirectory(pluginDir) : installDirectory(featureDir);
                 if (!Files.isDirectory(root)) {
-                    throw new IllegalArgumentException("Extension directory does not exist: " + root);
+                    throw new IllegalArgumentException((pluginRemove ? "Plugin" : "Extension")
+                            + " directory does not exist: " + root);
                 }
 
                 List<FeatureJarReport> matches = installedJars(root).stream()
@@ -883,14 +1068,18 @@ public class FeaturesCommand implements Runnable {
                         .toList();
 
                 if (matches.isEmpty()) {
-                    throw new IllegalArgumentException("No installed extension jar matched: " + target);
+                    throw new IllegalArgumentException("No installed "
+                            + (pluginRemove ? "plugin" : "extension")
+                            + " jar matched: " + target);
                 }
                 if (matches.size() > 1) {
                     String candidates = matches.stream()
                             .map(FeatureJarReport::path)
                             .reduce((left, right) -> left + ", " + right)
                             .orElse("");
-                    throw new IllegalArgumentException("Multiple extension jars matched; use an exact filename: " + candidates);
+                    throw new IllegalArgumentException("Multiple "
+                            + (pluginRemove ? "plugin" : "extension")
+                            + " jars matched; use an exact filename: " + candidates);
                 }
 
                 FeatureJarReport match = matches.get(0);
@@ -906,10 +1095,14 @@ public class FeaturesCommand implements Runnable {
                 }
 
                 Map<String, Object> result = new LinkedHashMap<>();
-                result.put("action", "remove");
+                result.put("action", actionName());
+                result.put("remove_mode", pluginRemove ? "plugin" : "extension");
                 result.put("target", target);
                 result.put("removed", !dryRun);
                 result.put("dry_run", dryRun);
+                if (pluginRemove) {
+                    result.put("plugin_dir", root.toString());
+                }
                 result.put("lockfile", installLockPath(root).toString());
                 result.put("backup_created", backup != null);
                 result.put("would_backup", dryRun && !noBackup);
@@ -920,7 +1113,10 @@ public class FeaturesCommand implements Runnable {
                 if (json) {
                     printObjectJson(result);
                 } else {
-                    System.out.printf("%s extension jar: %s%n", dryRun ? "Would remove" : "Removed", jar);
+                    System.out.printf("%s %s jar: %s%n",
+                            dryRun ? "Would remove" : "Removed",
+                            pluginRemove ? "plugin" : "extension",
+                            jar);
                     if (backup != null) {
                         System.out.printf("backup: %s%n", backup.path());
                     } else if (dryRun && !noBackup) {
@@ -933,17 +1129,39 @@ public class FeaturesCommand implements Runnable {
                 return 0;
             } catch (Exception e) {
                 if (json) {
-                    printErrorJson("remove", e.getMessage());
+                    printErrorJson(actionName(), e.getMessage());
                 } else {
-                    System.err.println("Failed to remove extension jar: " + e.getMessage());
+                    System.err.println("Failed to remove extension/plugin jar: " + e.getMessage());
                 }
                 return 1;
             }
         }
+
+        protected boolean defaultPluginRemove() {
+            return false;
+        }
+
+        protected String actionName() {
+            return "remove";
+        }
+    }
+
+    @Command(name = "detach", aliases = { "unplug" }, mixinStandardHelpOptions = true,
+            description = "Detach an installed model-family plugin jar from Gollek's plugin directory")
+    public static class Detach extends Remove {
+        @Override
+        protected boolean defaultPluginRemove() {
+            return true;
+        }
+
+        @Override
+        protected String actionName() {
+            return "detach";
+        }
     }
 
     @Command(name = "rollback", aliases = { "restore" }, mixinStandardHelpOptions = true,
-            description = "Restore an installed extension jar from its latest rollback backup")
+            description = "Restore an installed extension or model-family plugin jar from its latest rollback backup")
     public static class Rollback implements Callable<Integer> {
         @Parameters(index = "0", paramLabel = "<target>",
                 description = "Jar filename, extension id, feature id, pipeline id, provider class, or removed jar filename")
@@ -951,6 +1169,10 @@ public class FeaturesCommand implements Runnable {
 
         @Option(names = { "--dir" }, description = "Extension directory to restore into (default: ~/.gollek/extensions)")
         String featureDir;
+
+        @Option(names = { "--plugin-dir" },
+                description = "Plugin directory to restore model-family plugin jars into, such as ~/.gollek/plugins")
+        String pluginDir;
 
         @Option(names = { "--backup" }, description = "Specific backup jar filename or path to restore (default: latest)")
         String backup;
@@ -964,16 +1186,35 @@ public class FeaturesCommand implements Runnable {
         @Override
         public Integer call() {
             try {
-                Path root = installDirectory(featureDir);
+                boolean explicitPluginDir = pluginDir != null && !pluginDir.isBlank();
+                boolean explicitFeatureDir = featureDir != null && !featureDir.isBlank();
+                if (explicitPluginDir && explicitFeatureDir) {
+                    throw new IllegalArgumentException("Use either --dir for extension rollback or --plugin-dir for plugin rollback, not both");
+                }
+                boolean pluginRollback = explicitPluginDir;
+                Path root = pluginRollback ? pluginDirectory(pluginDir) : installDirectory(featureDir);
                 if (!Files.isDirectory(root)) {
-                    throw new IllegalArgumentException("Extension directory does not exist: " + root);
+                    throw new IllegalArgumentException((pluginRollback ? "Plugin" : "Extension")
+                            + " directory does not exist: " + root);
                 }
 
-                Path targetPath = resolveRollbackTarget(root, target);
-                String filename = targetPath.getFileName() == null ? targetPath.toString() : targetPath.getFileName().toString();
+                Path targetPath;
+                String filename;
                 Path backupPath;
                 try {
-                    backupPath = selectFeatureBackup(root, filename, backup);
+                    targetPath = resolveRollbackTarget(root, target);
+                    filename = targetPath.getFileName() == null ? targetPath.toString() : targetPath.getFileName().toString();
+                    try {
+                        backupPath = selectFeatureBackup(root, filename, backup);
+                    } catch (IllegalArgumentException e) {
+                        FeatureBackupSelection selection = selectFeatureBackupByMetadata(root, target, backup);
+                        if (selection == null) {
+                            throw e;
+                        }
+                        targetPath = selection.targetPath();
+                        filename = targetPath.getFileName() == null ? targetPath.toString() : targetPath.getFileName().toString();
+                        backupPath = selection.backupPath();
+                    }
                 } catch (IllegalArgumentException e) {
                     FeatureBackupSelection selection = selectFeatureBackupByMetadata(root, target, backup);
                     if (selection == null) {
@@ -1010,9 +1251,13 @@ public class FeaturesCommand implements Runnable {
 
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("action", "rollback");
+                result.put("rollback_mode", pluginRollback ? "plugin" : "extension");
                 result.put("target", target);
                 result.put("target_path", targetPath.toString());
                 result.put("source_backup", backupPath.toString());
+                if (pluginRollback) {
+                    result.put("plugin_dir", root.toString());
+                }
                 result.put("lockfile", installLockPath(root).toString());
                 result.put("restored", !dryRun);
                 result.put("dry_run", dryRun);
@@ -1024,7 +1269,10 @@ public class FeaturesCommand implements Runnable {
                 if (json) {
                     printObjectJson(result);
                 } else {
-                    System.out.printf("%s extension jar rollback: %s%n", dryRun ? "Would restore" : "Restored", targetPath);
+                    System.out.printf("%s %s jar rollback: %s%n",
+                            dryRun ? "Would restore" : "Restored",
+                            pluginRollback ? "plugin" : "extension",
+                            targetPath);
                     System.out.printf("source backup: %s%n", backupPath);
                     if (currentBackup != null) {
                         System.out.printf("current backup: %s%n", currentBackup.path());
@@ -1040,7 +1288,7 @@ public class FeaturesCommand implements Runnable {
                 if (json) {
                     printErrorJson("rollback", e.getMessage());
                 } else {
-                    System.err.println("Failed to rollback extension jar: " + e.getMessage());
+                    System.err.println("Failed to rollback extension/plugin jar: " + e.getMessage());
                 }
                 return 1;
             }
@@ -1048,7 +1296,7 @@ public class FeaturesCommand implements Runnable {
     }
 
     @Command(name = "backups", aliases = { "backup", "history" }, mixinStandardHelpOptions = true,
-            description = "List and prune extension rollback backups")
+            description = "List and prune extension or model-family plugin rollback backups")
     public static class Backups implements Callable<Integer> {
         @Parameters(index = "0", arity = "0..1", paramLabel = "<target>",
                 description = "Optional jar filename, extension id, feature id, pipeline id, or provider class to filter backups")
@@ -1056,6 +1304,10 @@ public class FeaturesCommand implements Runnable {
 
         @Option(names = { "--dir" }, description = "Extension directory to inspect (default: ~/.gollek/extensions)")
         String featureDir;
+
+        @Option(names = { "--plugin-dir" },
+                description = "Plugin directory to inspect for model-family plugin backups, such as ~/.gollek/plugins")
+        String pluginDir;
 
         @Option(names = { "--json" }, description = "Print backup report as JSON")
         boolean json;
@@ -1078,7 +1330,13 @@ public class FeaturesCommand implements Runnable {
                 if (keep < 0) {
                     throw new IllegalArgumentException("--keep must be >= 0");
                 }
-                Path root = installDirectory(featureDir);
+                boolean explicitPluginDir = pluginDir != null && !pluginDir.isBlank();
+                boolean explicitFeatureDir = featureDir != null && !featureDir.isBlank();
+                if (explicitPluginDir && explicitFeatureDir) {
+                    throw new IllegalArgumentException("Use either --dir for extension backups or --plugin-dir for plugin backups, not both");
+                }
+                boolean pluginBackups = explicitPluginDir;
+                Path root = pluginBackups ? pluginDirectory(pluginDir) : installDirectory(featureDir);
                 List<FeatureBackupReport> backups = inspectFeatureBackups(root, target);
                 FeatureBackupPruneReport pruneReport = null;
                 if (prune) {
@@ -1092,7 +1350,11 @@ public class FeaturesCommand implements Runnable {
                 if (json) {
                     Map<String, Object> result = new LinkedHashMap<>();
                     result.put("action", "backups");
+                    result.put("backup_mode", pluginBackups ? "plugin" : "extension");
                     result.put("root", root.toString());
+                    if (pluginBackups) {
+                        result.put("plugin_dir", root.toString());
+                    }
                     result.put("target", target == null ? "" : target);
                     result.put("prune_requested", prune);
                     result.put("dry_run", dryRun);
@@ -1131,10 +1393,20 @@ public class FeaturesCommand implements Runnable {
         files.add(new ScaffoldFile("lib/build.gradle.kts", featureBuildGradle(scaffold)));
         files.add(new ScaffoldFile("lib/src/main/java/" + scaffold.packageName().replace('.', '/')
                 + "/" + scaffold.className() + ".java",
-                scaffold.pipeline() ? featurePipelineJava(scaffold) : featureAdapterJava(scaffold)));
+                scaffold.modelFamily()
+                        ? modelFamilyPluginJava(scaffold)
+                        : scaffold.pipeline() ? featurePipelineJava(scaffold) : featureAdapterJava(scaffold)));
         files.add(new ScaffoldFile("lib/src/main/resources/"
-                + (scaffold.pipeline() ? SERVICE_ENTRY : ADAPTER_SERVICE_ENTRY),
+                + serviceEntry(scaffold),
                 scaffold.fqcn() + System.lineSeparator()));
+        if (scaffold.modelFamily()) {
+            files.add(new ScaffoldFile("lib/src/main/resources/"
+                    + GOLLEK_PLUGIN_SERVICE_ENTRY,
+                    scaffold.fqcn() + System.lineSeparator()));
+            files.add(new ScaffoldFile("lib/src/main/resources/"
+                    + PLUGIN_DESCRIPTOR_ENTRY,
+                    modelFamilyPluginDescriptor(scaffold)));
+        }
         files.add(new ScaffoldFile("lib/src/main/resources/" + MANIFEST_ENTRY, featureManifest(scaffold)));
         files.add(new ScaffoldFile("README.md", scaffoldReadme(scaffold)));
 
@@ -1209,6 +1481,7 @@ public class FeaturesCommand implements Runnable {
                     api("tech.kayys.gollek:gollek-spi-provider:0.1.0-SNAPSHOT")
                     api("tech.kayys.gollek:gollek-spi-inference:0.1.0-SNAPSHOT")
                     api("tech.kayys.gollek:gollek-spi-multimodal:0.1.0-SNAPSHOT")
+                    api("tech.kayys.gollek:gollek-spi-model:0.1.0-SNAPSHOT")
                     implementation("io.smallrye.reactive:mutiny:2.5.5")
                     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
 
@@ -1237,6 +1510,44 @@ public class FeaturesCommand implements Runnable {
                     archiveBaseName = "%s"
                 }
                 """.formatted(scaffold.featureId());
+    }
+
+    private static String serviceEntry(FeatureScaffold scaffold) {
+        if (scaffold.modelFamily()) {
+            return MODEL_FAMILY_SERVICE_ENTRY;
+        }
+        return scaffold.pipeline() ? SERVICE_ENTRY : ADAPTER_SERVICE_ENTRY;
+    }
+
+    private static String modelFamilyPluginDescriptor(FeatureScaffold scaffold) {
+        Map<String, Object> descriptor = new LinkedHashMap<>();
+        descriptor.put("id", "model-family/" + scaffold.capabilityId());
+        descriptor.put("name", scaffold.displayName());
+        descriptor.put("version", "0.1.0-SNAPSHOT");
+        descriptor.put("description", "Out-of-core Gollek model-family plugin for " + scaffold.capabilityId());
+        descriptor.put("vendor", "External");
+        descriptor.put("mainClass", scaffold.fqcn());
+        descriptor.put("dependencies", List.of());
+        descriptor.put("optionalDependencies", List.of());
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("extensionPoint", MODEL_FAMILY_KIND);
+        properties.put("bundleProfile", scaffold.bundleProfile());
+        properties.put("families", scaffold.modelTypes());
+        if (scaffold.tokenizerMetadataReady()) {
+            properties.put("tokenizerKind", scaffold.tokenizerKind());
+            properties.put("tokenizerKinds", List.of(scaffold.tokenizerKind()));
+        } else if (scaffold.tokenizerMetadataPending()) {
+            properties.put("tokenizerMetadataStatus", "pending");
+            properties.put("tokenizerMetadataPendingReason", scaffold.tokenizerMetadataPendingReason());
+        }
+        descriptor.put("properties", properties);
+        try {
+            return new ObjectMapper()
+                    .writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(descriptor) + System.lineSeparator();
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to write plugin descriptor JSON", e);
+        }
     }
 
     private static String featurePipelineJava(FeatureScaffold scaffold) {
@@ -1428,6 +1739,54 @@ public class FeaturesCommand implements Runnable {
                 escapeJava(format));
     }
 
+    private static String modelFamilyPluginJava(FeatureScaffold scaffold) {
+        String capabilities = modelFamilyCapabilityJavaList(scaffold.modelFamilyCapabilities());
+        String modelTypes = stringJavaList(scaffold.modelTypes());
+        String architectureClasses = stringJavaList(scaffold.architectureClassNames());
+        String tokenizerDescriptors = modelFamilyTokenizerDescriptorJava(scaffold);
+        String metadata = modelFamilyMetadataJava(scaffold);
+        return """
+                package %s;
+
+                import tech.kayys.gollek.spi.model.ModelFamilyCapability;
+                import tech.kayys.gollek.spi.model.ModelFamilyDescriptor;
+                import tech.kayys.gollek.spi.model.ModelFamilyPlugin;
+                import tech.kayys.gollek.spi.model.ModelTokenizerDescriptor;
+
+                import java.util.List;
+                import java.util.Map;
+
+                public final class %s implements ModelFamilyPlugin {
+                    public static final String FAMILY_ID = "%s";
+
+                    @Override
+                    public ModelFamilyDescriptor descriptor() {
+                        return new ModelFamilyDescriptor(
+                                FAMILY_ID,
+                                "%s",
+                                %s,
+                                %s,
+                                %s,
+                                %s);
+                    }
+
+                    @Override
+                    public List<ModelTokenizerDescriptor> tokenizerDescriptors() {
+                        return %s;
+                    }
+                }
+                """.formatted(
+                scaffold.packageName(),
+                scaffold.className(),
+                scaffold.capabilityId(),
+                escapeJava(scaffold.displayName()),
+                modelTypes,
+                architectureClasses,
+                capabilities,
+                metadata,
+                tokenizerDescriptors);
+    }
+
     private static String featureManifest(FeatureScaffold scaffold) {
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("schema_version", 1);
@@ -1443,7 +1802,24 @@ public class FeaturesCommand implements Runnable {
                 "jvm", "service-loader",
                 "native_image", "ahead-of-time",
                 "native_image_note", "include this extension jar on the native-image build classpath"));
-        if (scaffold.pipeline()) {
+        if (scaffold.modelFamily()) {
+            manifest.put("services", Map.of("model_family_plugins", List.of(scaffold.fqcn())));
+            Map<String, Object> family = new LinkedHashMap<>();
+            family.put("id", scaffold.capabilityId());
+            family.put("class", scaffold.fqcn());
+            family.put("model_types", scaffold.modelTypes());
+            family.put("architecture_classes", scaffold.architectureClassNames());
+            family.put("capabilities", scaffold.modelFamilyCapabilities());
+            family.put("tokenizer_metadata_status", scaffold.tokenizerMetadataStatus());
+            if (scaffold.tokenizerMetadataReady()) {
+                family.put("tokenizer_kind", scaffold.tokenizerKind());
+                family.put("tokenizer_kinds", List.of(scaffold.tokenizerKind()));
+            } else if (scaffold.tokenizerMetadataPending()) {
+                family.put("tokenizer_metadata_pending_reason", scaffold.tokenizerMetadataPendingReason());
+            }
+            family.put("bundle_profile", scaffold.bundleProfile());
+            manifest.put("model_families", List.of(family));
+        } else if (scaffold.pipeline()) {
             manifest.put("services", Map.of("model_pipelines", List.of(scaffold.fqcn())));
             Map<String, Object> pipeline = new LinkedHashMap<>();
             pipeline.put("id", scaffold.pipelineId());
@@ -1488,6 +1864,101 @@ public class FeaturesCommand implements Runnable {
     }
 
     private static String scaffoldReadme(FeatureScaffold scaffold) {
+        if (scaffold.modelFamily()) {
+            return """
+                    # %s
+
+                    Out-of-core Gollek model-family plugin.
+
+                    This plugin implements `%s`, publishes reusable model metadata through `%s`,
+                    and is visible to the core plugin manager through `%s` plus root `%s`:
+
+                    ```text
+                    %s
+                    %s
+                    %s
+                    ```
+
+                    ## Build
+
+                    ```bash
+                    %s
+                    ```
+
+                    ## Attach During Development
+
+                    ```bash
+                    gollek modules --doctor --plugin-dir lib/build/libs
+                    gollek show <model-or-path> --plugin-dir lib/build/libs --json
+                    ```
+
+                    ## Install For Local Reuse
+
+                    ```bash
+                    gollek extensions inspect lib/build/libs/%s-0.1.0-SNAPSHOT.jar --strict
+                    mkdir -p ~/.gollek/plugins
+                    gollek extensions install lib/build/libs/%s-0.1.0-SNAPSHOT.jar --plugin-dir ~/.gollek/plugins --force
+                    GOLLEK_PLUGIN_DIRS=~/.gollek/plugins gollek modules --doctor
+                    ```
+
+                    ## Tokenizer Metadata Checks
+
+                    ```bash
+                    gollek extensions inspect lib/build/libs/%s-0.1.0-SNAPSHOT.jar --strict --json
+                    gollek extensions doctor --plugin-dir lib/build/libs --json
+                    ```
+
+                    Before install, JSON `jar.artifact_tokenizer_metadata.tokenizer_metadata_status`
+                    reports `ready` or `pending`. After install, `install_lock.tokenizer_metadata_status`
+                    and doctor `tokenizer_lock_status` show what production tooling will enforce.
+
+                    Pending tokenizer metadata is valid for development and research scaffolds, but keep
+                    pending-tokenizer plugins out of production inference presets until the tokenizer adapter
+                    is ready.
+
+                    ## Detach
+
+                    ```bash
+                    gollek extensions detach %s --plugin-dir ~/.gollek/plugins
+                    ```
+
+                    ## Family Contract
+
+                    Model-family id: `%s`
+
+                    Model types: `%s`
+
+                    Architecture classes: `%s`
+
+                    Capabilities: `%s`
+
+                    Tokenizer metadata: `%s`
+
+                    %s
+
+                    Start with tokenizer/config metadata only. Add direct SafeTensor architecture adapters later
+                    when the runtime implementation is ready and validated by `gollek modules --doctor`.
+                    """.formatted(
+                    scaffold.displayName(),
+                    scaffold.fqcn(),
+                    MODEL_FAMILY_SERVICE_ENTRY,
+                    GOLLEK_PLUGIN_SERVICE_ENTRY,
+                    PLUGIN_DESCRIPTOR_ENTRY,
+                    MODEL_FAMILY_SERVICE_ENTRY,
+                    GOLLEK_PLUGIN_SERVICE_ENTRY,
+                    PLUGIN_DESCRIPTOR_ENTRY,
+                    scaffoldBuildCommand(scaffold),
+                    scaffold.featureId(),
+                    scaffold.featureId(),
+                    scaffold.featureId(),
+                    scaffold.capabilityId(),
+                    scaffold.capabilityId(),
+                    String.join(", ", scaffold.modelTypes()),
+                    String.join(", ", scaffold.architectureClassNames()),
+                    String.join(", ", scaffold.modelFamilyCapabilities()),
+                    modelFamilyTokenizerMetadataSummary(scaffold),
+                    modelFamilyTokenizerMetadataReadmeNote(scaffold));
+        }
         if (!scaffold.pipeline()) {
             return """
                     # %s
@@ -1637,6 +2108,32 @@ public class FeaturesCommand implements Runnable {
         return List.copyOf(values);
     }
 
+    private static List<String> normalizeCaseSensitiveScaffoldTokens(List<String> configured, List<String> defaults) {
+        Set<String> values = new LinkedHashSet<>();
+        if (configured != null) {
+            for (String raw : configured) {
+                if (raw == null) {
+                    continue;
+                }
+                for (String part : raw.split(",")) {
+                    String normalized = part.trim();
+                    if (!normalized.isBlank()) {
+                        values.add(normalized);
+                    }
+                }
+            }
+        }
+        if (values.isEmpty() && defaults != null) {
+            for (String fallback : defaults) {
+                String normalized = fallback == null ? "" : fallback.trim();
+                if (!normalized.isBlank()) {
+                    values.add(normalized);
+                }
+            }
+        }
+        return List.copyOf(values);
+    }
+
     private static List<String> defaultAdapterInputs(String kind) {
         return switch (FeatureAdapterKinds.normalize(kind)) {
             case FeatureAdapterKinds.TRAINING -> List.of("dataset", "model");
@@ -1658,6 +2155,111 @@ public class FeaturesCommand implements Runnable {
             case FeatureAdapterKinds.RUNNER -> List.of("response");
             case FeatureAdapterKinds.TOOLING, FeatureAdapterKinds.ADAPTER -> List.of("artifact");
             default -> List.of("model");
+        };
+    }
+
+    private static List<String> normalizeModelFamilyCapabilities(List<String> values, boolean modelFamilyScaffold) {
+        if (!modelFamilyScaffold) {
+            return List.of();
+        }
+        List<String> source = values == null || values.isEmpty() ? List.of("tokenizer") : values;
+        List<String> capabilities = new ArrayList<>();
+        for (String value : source) {
+            String normalized = value == null
+                    ? ""
+                    : value.trim().replace('-', '_').replace('.', '_').toUpperCase(Locale.ROOT);
+            if (normalized.isBlank()) {
+                continue;
+            }
+            try {
+                ModelFamilyCapability.valueOf(normalized);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Unknown model-family capability: " + value, e);
+            }
+            if (!capabilities.contains(normalized)) {
+                capabilities.add(normalized);
+            }
+        }
+        return capabilities.isEmpty() ? List.of("TOKENIZER") : List.copyOf(capabilities);
+    }
+
+    private static String normalizeTokenizerKind(String tokenizerKind) {
+        String normalized = normalizeFeatureId(firstNonBlank(tokenizerKind, "hf-bpe"));
+        return switch (normalized) {
+            case "hf", "huggingface", "huggingface-bpe", "bpe", "hf-bpe" -> "hf-bpe";
+            case "spm", "sentence-piece", "sentencepiece", "sentencepiece-bpe" -> "sentencepiece";
+            case "bert", "word-piece", "wordpiece" -> "wordpiece";
+            case "custom", "none" -> normalized;
+            default -> throw new IllegalArgumentException("Unknown tokenizer kind: " + tokenizerKind);
+        };
+    }
+
+    private static String normalizeTokenizerMetadataStatus(String status) {
+        String normalized = normalizeFeatureId(firstNonBlank(status, "ready"));
+        return switch (normalized) {
+            case "ready", "complete" -> "ready";
+            case "pending", "todo", "not-ready", "not_ready" -> "pending";
+            default -> throw new IllegalArgumentException("Unknown tokenizer metadata status: " + status);
+        };
+    }
+
+    private static boolean tokenizerKindNone(String tokenizerKind) {
+        return tokenizerKind != null
+                && !tokenizerKind.isBlank()
+                && "none".equals(normalizeFeatureId(tokenizerKind));
+    }
+
+    private static String modelFamilyCapabilityJavaList(List<String> capabilities) {
+        List<String> normalized = capabilities == null || capabilities.isEmpty() ? List.of("TOKENIZER") : capabilities;
+        return "List.of(" + normalized.stream()
+                .map(capability -> "ModelFamilyCapability." + capability)
+                .collect(Collectors.joining(", ")) + ")";
+    }
+
+    private static String modelFamilyMetadataJava(FeatureScaffold scaffold) {
+        List<String> entries = new ArrayList<>();
+        entries.add("\"bundle_profile\", \"" + escapeJava(scaffold.bundleProfile()) + "\"");
+        entries.add("\"origin\", \"external/model-family\"");
+        if (scaffold.tokenizerMetadataPending()) {
+            entries.add("\"tokenizer_metadata_status\", \"pending\"");
+            entries.add("\"tokenizer_metadata_pending_reason\", \""
+                    + escapeJava(scaffold.tokenizerMetadataPendingReason()) + "\"");
+        } else if (scaffold.tokenizerMetadataReady()) {
+            entries.add("\"tokenizer_metadata_status\", \"ready\"");
+        }
+        entries.add("\"version\", \"0.1.0-SNAPSHOT\"");
+        return "Map.of(" + String.join(", ", entries) + ")";
+    }
+
+    private static String modelFamilyTokenizerMetadataSummary(FeatureScaffold scaffold) {
+        if (scaffold.tokenizerMetadataPending()) {
+            return "pending (" + scaffold.tokenizerMetadataPendingReason() + ")";
+        }
+        return "ready (" + scaffold.tokenizerKind() + ")";
+    }
+
+    private static String modelFamilyTokenizerMetadataReadmeNote(FeatureScaffold scaffold) {
+        if (scaffold.tokenizerMetadataPending()) {
+            return "Pending tokenizer metadata intentionally omits tokenizer descriptors until the adapter contract is implemented.";
+        }
+        return "Ready tokenizer metadata publishes reusable tokenizer descriptors for runtime discovery.";
+    }
+
+    private static String modelFamilyTokenizerDescriptorJava(FeatureScaffold scaffold) {
+        if (scaffold.tokenizerMetadataPending()) {
+            return "List.of()";
+        }
+        return switch (scaffold.tokenizerKind()) {
+            case "hf-bpe" -> "List.of(ModelTokenizerDescriptor.huggingFaceBpe(FAMILY_ID + \"-tokenizer\"))";
+            case "sentencepiece" -> "List.of(ModelTokenizerDescriptor.sentencePieceBpe(FAMILY_ID + \"-tokenizer\"))";
+            case "wordpiece" -> "List.of(ModelTokenizerDescriptor.wordPiece(FAMILY_ID + \"-tokenizer\"))";
+            case "custom" -> "List.of(new ModelTokenizerDescriptor("
+                    + "FAMILY_ID + \"-tokenizer\", "
+                    + "tech.kayys.gollek.spi.model.ModelTokenizerKind.CUSTOM, "
+                    + "List.of(), "
+                    + "Map.of()))";
+            case "none" -> "List.of()";
+            default -> throw new IllegalArgumentException("Unknown tokenizer kind: " + scaffold.tokenizerKind());
         };
     }
 
@@ -1725,7 +2327,15 @@ public class FeaturesCommand implements Runnable {
                         FeatureAdapterKinds.ADAPTER,
                         List.of("custom"),
                         "generic adapter when no common kind fits yet",
-                        "gollek extensions init features/gollek-custom-lab --kind adapter --adapter-id custom-adapter --input model --output artifact"));
+                        "gollek extensions init features/gollek-custom-lab --kind adapter --adapter-id custom-adapter --input model --output artifact"),
+                scaffoldKind(
+                        MODEL_FAMILY_KIND,
+                        "ModelFamilyPlugin",
+                        List.of("config.json", "tokenizer.json"),
+                        List.of("ModelFamilyDescriptor", "ModelTokenizerDescriptor"),
+                        List.of("llm", "production", "optional"),
+                        "detachable model-family metadata, tokenizer descriptors, and optional architecture adapters",
+                        "gollek extensions init features/gollek-model-acme --kind model-family --family-id acme --model-type acme --architecture AcmeForCausalLM --capability causal_lm,tokenizer --tokenizer-metadata-status pending --tokenizer-pending-reason scaffold"));
     }
 
     private static ScaffoldKind adapterScaffoldKind(
@@ -1967,9 +2577,28 @@ public class FeaturesCommand implements Runnable {
             String providerHint,
             List<String> formatHints,
             List<String> targets,
+            List<String> modelTypes,
+            List<String> architectureClassNames,
+            List<String> modelFamilyCapabilities,
+            String tokenizerKind,
+            String tokenizerMetadataStatus,
+            String tokenizerMetadataPendingReason,
+            String bundleProfile,
             Path gollekPath) {
+        boolean modelFamily() {
+            return MODEL_FAMILY_KIND.equals(kind);
+        }
+
         boolean pipeline() {
-            return FeatureAdapterKinds.PIPELINE.equals(kind);
+            return !modelFamily() && FeatureAdapterKinds.PIPELINE.equals(kind);
+        }
+
+        boolean tokenizerMetadataReady() {
+            return "ready".equals(tokenizerMetadataStatus);
+        }
+
+        boolean tokenizerMetadataPending() {
+            return "pending".equals(tokenizerMetadataStatus);
         }
 
         String fqcn() {
@@ -2104,6 +2733,7 @@ public class FeaturesCommand implements Runnable {
         FeatureDoctorSummary summary = report.validationSummary(strict);
         int pipelineProviders = report.jars().stream().mapToInt(jar -> jar.providers().size()).sum();
         int adapterProviders = report.jars().stream().mapToInt(jar -> jar.adapterProviders().size()).sum();
+        int modelFamilyProviders = report.jars().stream().mapToInt(jar -> jar.modelFamilyProviders().size()).sum();
         int capabilities = report.jars().stream()
                 .map(FeatureJarReport::manifest)
                 .mapToInt(manifest -> manifestCapabilities(manifest).size())
@@ -2112,8 +2742,8 @@ public class FeaturesCommand implements Runnable {
         System.out.println("---------------");
         System.out.printf("Indexed: %d root(s), %d jar(s), %d ok, %d warning, %d error%n",
                 summary.roots(), summary.jars(), summary.ok(), summary.warning(), summary.error());
-        System.out.printf("Services: %d ModelPipeline provider(s), %d FeatureAdapter provider(s), %d manifest capability entry(ies)%n",
-                pipelineProviders, adapterProviders, capabilities);
+        System.out.printf("Services: %d ModelPipeline provider(s), %d FeatureAdapter provider(s), %d ModelFamilyPlugin provider(s), %d manifest capability entry(ies)%n",
+                pipelineProviders, adapterProviders, modelFamilyProviders, capabilities);
         if (outputPath != null) {
             System.out.printf("Wrote index: %s%n", outputPath);
         }
@@ -2163,6 +2793,7 @@ public class FeaturesCommand implements Runnable {
                     missingLockedJars(root, seenJars, lockState).forEach(jarReports::add);
                 } catch (Exception e) {
                     jarReports.add(new FeatureJarReport(root.toString(), false, List.of(), false, List.of(),
+                            false, List.of(), false, List.of(), Map.of(), "", null,
                             Map.of(), "", null, Map.of(), Map.of(), List.of(),
                             "Failed to inspect directory: " + e.getMessage()));
                 }
@@ -2182,6 +2813,9 @@ public class FeaturesCommand implements Runnable {
         Map<String, Object> serviceContracts = new LinkedHashMap<>();
         serviceContracts.put("model_pipeline", SERVICE_ENTRY);
         serviceContracts.put("feature_adapter", ADAPTER_SERVICE_ENTRY);
+        serviceContracts.put("model_family_plugin", MODEL_FAMILY_SERVICE_ENTRY);
+        serviceContracts.put("gollek_plugin", GOLLEK_PLUGIN_SERVICE_ENTRY);
+        serviceContracts.put("plugin_descriptor", PLUGIN_DESCRIPTOR_ENTRY);
         index.put("service_contracts", serviceContracts);
         index.put("roots", report.roots().stream().map(FeatureRootReport::toMap).toList());
         index.put("summary", report.validationSummary(strict).toMap());
@@ -2198,7 +2832,12 @@ public class FeaturesCommand implements Runnable {
         hints.put("dynamic_runtime_loading", false);
         hints.put("jvm_dynamic_loading", true);
         hints.put("build_time_requirement", "include extension jars on the native-image build classpath");
-        hints.put("service_loader_entries", List.of(SERVICE_ENTRY, ADAPTER_SERVICE_ENTRY));
+        hints.put("service_loader_entries", List.of(
+                SERVICE_ENTRY,
+                ADAPTER_SERVICE_ENTRY,
+                MODEL_FAMILY_SERVICE_ENTRY,
+                GOLLEK_PLUGIN_SERVICE_ENTRY));
+        hints.put("plugin_descriptor_entry", PLUGIN_DESCRIPTOR_ENTRY);
         hints.put("note", "The index is manifest/service metadata only; extension-specific reflection or native libraries remain the extension author's responsibility.");
         return hints;
     }
@@ -2213,9 +2852,13 @@ public class FeaturesCommand implements Runnable {
         Map<String, Object> serviceEntries = new LinkedHashMap<>();
         serviceEntries.put(SERVICE_ENTRY, jar.providers());
         serviceEntries.put(ADAPTER_SERVICE_ENTRY, jar.adapterProviders());
+        serviceEntries.put(MODEL_FAMILY_SERVICE_ENTRY, jar.modelFamilyProviders());
+        serviceEntries.put(GOLLEK_PLUGIN_SERVICE_ENTRY, jar.gollekPluginProviders());
         value.put("service_entries", serviceEntries);
         value.put("providers", jar.providers());
         value.put("adapter_providers", jar.adapterProviders());
+        value.put("model_family_providers", jar.modelFamilyProviders());
+        value.put("gollek_plugin_providers", jar.gollekPluginProviders());
         if (validation.warnings() != null && !validation.warnings().isEmpty()) {
             value.put("warnings", validation.warnings());
         }
@@ -2236,11 +2879,21 @@ public class FeaturesCommand implements Runnable {
             value.put("pipelines", capabilities.stream()
                     .filter(capability -> FeatureAdapterKinds.PIPELINE.equals(manifestValue(capability, "kind")))
                     .toList());
+            value.put("model_families", capabilities.stream()
+                    .filter(capability -> MODEL_FAMILY_KIND.equals(manifestValue(capability, "kind")))
+                    .toList());
             value.put("capabilities", capabilities.stream()
                     .filter(capability -> !FeatureAdapterKinds.PIPELINE.equals(manifestValue(capability, "kind")))
+                    .filter(capability -> !MODEL_FAMILY_KIND.equals(manifestValue(capability, "kind")))
                     .toList());
         } else if (jar.manifestError() != null && !jar.manifestError().isBlank()) {
             value.put("manifest_error", jar.manifestError());
+        }
+        if (jar.hasPluginDescriptor()) {
+            value.put("plugin_descriptor_entry", jar.pluginDescriptorEntryName());
+            value.put("plugin_descriptor", jar.pluginDescriptor());
+        } else if (jar.pluginDescriptorError() != null && !jar.pluginDescriptorError().isBlank()) {
+            value.put("plugin_descriptor_error", jar.pluginDescriptorError());
         }
         if (jar.hasInstallLock()) {
             value.put("install_lock", jar.installLock());
@@ -2285,6 +2938,26 @@ public class FeaturesCommand implements Runnable {
         if (!provider.isBlank()) {
             value.put("provider", provider);
         }
+        if (MODEL_FAMILY_KIND.equals(manifestCapabilityKind(capability))) {
+            value.put("model_types", manifestStringList(capability.get("model_types")));
+            value.put("architecture_classes", manifestStringList(capability.get("architecture_classes")));
+            value.put("model_family_capabilities", manifestStringList(capability.get("capabilities")));
+            String tokenizerKind = manifestValue(capability, "tokenizer_kind");
+            if (!tokenizerKind.isBlank()) {
+                value.put("tokenizer_kind", tokenizerKind);
+            }
+            List<String> tokenizerKinds = manifestStringList(capability.get("tokenizer_kinds"));
+            if (tokenizerKinds.isEmpty() && !tokenizerKind.isBlank()) {
+                tokenizerKinds = List.of(tokenizerKind);
+            }
+            if (!tokenizerKinds.isEmpty()) {
+                value.put("tokenizer_kinds", tokenizerKinds);
+            }
+            String bundleProfile = manifestValue(capability, "bundle_profile");
+            if (!bundleProfile.isBlank()) {
+                value.put("bundle_profile", bundleProfile);
+            }
+        }
         return value;
     }
 
@@ -2305,8 +2978,10 @@ public class FeaturesCommand implements Runnable {
         Map<String, List<FeatureCollisionClaim>> featureIds = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> pipelineIds = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> adapterIds = new LinkedHashMap<>();
+        Map<String, List<FeatureCollisionClaim>> modelFamilyIds = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> providerClasses = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> adapterProviderClasses = new LinkedHashMap<>();
+        Map<String, List<FeatureCollisionClaim>> modelFamilyProviderClasses = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> implementationClasses = new LinkedHashMap<>();
         Map<String, List<FeatureCollisionClaim>> providerIds = new LinkedHashMap<>();
 
@@ -2323,6 +2998,9 @@ public class FeaturesCommand implements Runnable {
             for (String provider : jar.adapterProviders()) {
                 addCollisionClaim(adapterProviderClasses, provider, path, ADAPTER_SERVICE_ENTRY);
             }
+            for (String provider : jar.modelFamilyProviders()) {
+                addCollisionClaim(modelFamilyProviderClasses, provider, path, MODEL_FAMILY_SERVICE_ENTRY);
+            }
             int index = 0;
             for (Map<String, Object> capability : manifestCapabilities(manifest)) {
                 String source = firstNonBlank(manifestValue(capability, "_manifest_source"), "capabilities");
@@ -2334,6 +3012,8 @@ public class FeaturesCommand implements Runnable {
                     addCollisionClaim(pipelineIds, id, path, claimSource);
                 } else if (FeatureAdapterKinds.ADAPTER.equals(kind)) {
                     addCollisionClaim(adapterIds, id, path, claimSource);
+                } else if (MODEL_FAMILY_KIND.equals(kind)) {
+                    addCollisionClaim(modelFamilyIds, id, path, claimSource);
                 }
                 addCollisionClaim(implementationClasses, manifestValue(capability, "class"), path, claimSource + ".class");
                 addCollisionClaim(providerIds, manifestValue(capability, "provider"), path, claimSource + ".provider");
@@ -2346,8 +3026,10 @@ public class FeaturesCommand implements Runnable {
         items.addAll(collisionItems("feature_id", featureIds));
         items.addAll(collisionItems("pipeline_id", pipelineIds));
         items.addAll(collisionItems("adapter_id", adapterIds));
+        items.addAll(collisionItems("model_family_id", modelFamilyIds));
         items.addAll(collisionItems("provider_class", providerClasses));
         items.addAll(collisionItems("adapter_provider_class", adapterProviderClasses));
+        items.addAll(collisionItems("model_family_provider_class", modelFamilyProviderClasses));
         items.addAll(collisionItems("implementation_class", implementationClasses));
         items.addAll(collisionItems("provider_id", providerIds));
         items.sort((left, right) -> {
@@ -2479,12 +3161,15 @@ public class FeaturesCommand implements Runnable {
                 Map<String, Object> next = repairedInstallLockEntry(jar, previous, current);
                 repaired.put(filename, next);
                 changed = true;
+                boolean tokenizerOnly = sameInstallLockEntryExceptTokenizerMetadata(previous, current);
                 operations.add(new FeatureRepairOperation(
                         plan.root.toString(),
                         jar.toString(),
-                        "lock_refresh",
+                        tokenizerOnly ? "lock_refresh_tokenizer_metadata" : "lock_refresh",
                         dryRun ? "would_change" : "changed",
-                        "Extension jar metadata differs from install lock"));
+                        tokenizerOnly
+                                ? "Extension jar tokenizer metadata was missing or stale in install lock"
+                                : "Extension jar metadata differs from install lock"));
             } else {
                 Map<String, Object> next = repairedInstallLockEntry(jar, previous, previous);
                 if (!previous.equals(next)) {
@@ -2680,10 +3365,54 @@ public class FeaturesCommand implements Runnable {
                 && stringValue(previous.get("path")).equals(stringValue(current.get("path")))
                 && manifestStringList(previous.get("providers")).equals(manifestStringList(current.get("providers")))
                 && manifestStringList(previous.get("adapter_providers")).equals(manifestStringList(current.get("adapter_providers")))
+                && manifestStringList(previous.get("model_family_providers")).equals(manifestStringList(current.get("model_family_providers")))
+                && manifestStringList(previous.get("gollek_plugin_providers")).equals(manifestStringList(current.get("gollek_plugin_providers")))
+                && stringValue(previous.get("plugin_id")).equals(stringValue(current.get("plugin_id")))
+                && stringValue(previous.get("plugin_name")).equals(stringValue(current.get("plugin_name")))
+                && stringValue(previous.get("plugin_version")).equals(stringValue(current.get("plugin_version")))
+                && stringValue(previous.get("plugin_main_class")).equals(stringValue(current.get("plugin_main_class")))
+                && stringValue(previous.get("plugin_tokenizer_kind")).equals(stringValue(current.get("plugin_tokenizer_kind")))
+                && manifestStringList(previous.get("plugin_tokenizer_kinds")).equals(manifestStringList(current.get("plugin_tokenizer_kinds")))
+                && stringValue(previous.get("plugin_tokenizer_metadata_status")).equals(stringValue(current.get("plugin_tokenizer_metadata_status")))
+                && stringValue(previous.get("plugin_tokenizer_metadata_pending_reason")).equals(stringValue(current.get("plugin_tokenizer_metadata_pending_reason")))
                 && stringValue(previous.get("feature_id")).equals(stringValue(current.get("feature_id")))
                 && stringValue(previous.get("feature_name")).equals(stringValue(current.get("feature_name")))
                 && stringValue(previous.get("feature_version")).equals(stringValue(current.get("feature_version")))
                 && manifestStringList(previous.get("pipelines")).equals(manifestStringList(current.get("pipelines")))
+                && manifestStringList(previous.get("model_family_ids")).equals(manifestStringList(current.get("model_family_ids")))
+                && manifestStringList(previous.get("model_family_tokenizer_kinds")).equals(manifestStringList(current.get("model_family_tokenizer_kinds")))
+                && manifestStringList(previous.get("model_family_tokenizer_metadata_statuses")).equals(manifestStringList(current.get("model_family_tokenizer_metadata_statuses")))
+                && objectMap(previous.get("model_family_tokenizer_metadata_pending_reasons")).equals(objectMap(current.get("model_family_tokenizer_metadata_pending_reasons")))
+                && stringValue(previous.get("tokenizer_kind")).equals(stringValue(current.get("tokenizer_kind")))
+                && manifestStringList(previous.get("tokenizer_kinds")).equals(manifestStringList(current.get("tokenizer_kinds")))
+                && stringValue(previous.get("tokenizer_metadata_status")).equals(stringValue(current.get("tokenizer_metadata_status")))
+                && stringValue(previous.get("tokenizer_metadata_pending_reason")).equals(stringValue(current.get("tokenizer_metadata_pending_reason")))
+                && manifestStringList(previous.get("capabilities")).equals(manifestStringList(current.get("capabilities")))
+                && manifestStringList(previous.get("capability_kinds")).equals(manifestStringList(current.get("capability_kinds")));
+    }
+
+    private static boolean sameInstallLockEntryExceptTokenizerMetadata(
+            Map<String, Object> previous,
+            Map<String, Object> current) {
+        if (previous == null || current == null) {
+            return false;
+        }
+        return stringValue(previous.get("sha256")).equalsIgnoreCase(stringValue(current.get("sha256")))
+                && longValue(previous.get("size_bytes"), -1L) == longValue(current.get("size_bytes"), -2L)
+                && stringValue(previous.get("path")).equals(stringValue(current.get("path")))
+                && manifestStringList(previous.get("providers")).equals(manifestStringList(current.get("providers")))
+                && manifestStringList(previous.get("adapter_providers")).equals(manifestStringList(current.get("adapter_providers")))
+                && manifestStringList(previous.get("model_family_providers")).equals(manifestStringList(current.get("model_family_providers")))
+                && manifestStringList(previous.get("gollek_plugin_providers")).equals(manifestStringList(current.get("gollek_plugin_providers")))
+                && stringValue(previous.get("plugin_id")).equals(stringValue(current.get("plugin_id")))
+                && stringValue(previous.get("plugin_name")).equals(stringValue(current.get("plugin_name")))
+                && stringValue(previous.get("plugin_version")).equals(stringValue(current.get("plugin_version")))
+                && stringValue(previous.get("plugin_main_class")).equals(stringValue(current.get("plugin_main_class")))
+                && stringValue(previous.get("feature_id")).equals(stringValue(current.get("feature_id")))
+                && stringValue(previous.get("feature_name")).equals(stringValue(current.get("feature_name")))
+                && stringValue(previous.get("feature_version")).equals(stringValue(current.get("feature_version")))
+                && manifestStringList(previous.get("pipelines")).equals(manifestStringList(current.get("pipelines")))
+                && manifestStringList(previous.get("model_family_ids")).equals(manifestStringList(current.get("model_family_ids")))
                 && manifestStringList(previous.get("capabilities")).equals(manifestStringList(current.get("capabilities")))
                 && manifestStringList(previous.get("capability_kinds")).equals(manifestStringList(current.get("capability_kinds")));
     }
@@ -2887,18 +3616,31 @@ public class FeaturesCommand implements Runnable {
         try (JarFile jar = new JarFile(jarPath.toFile())) {
             ServiceEntry serviceEntry = readServiceEntry(jar, SERVICE_ENTRY);
             ServiceEntry adapterServiceEntry = readServiceEntry(jar, ADAPTER_SERVICE_ENTRY);
+            ServiceEntry modelFamilyServiceEntry = readServiceEntry(jar, MODEL_FAMILY_SERVICE_ENTRY);
+            ServiceEntry gollekPluginServiceEntry = readServiceEntry(jar, GOLLEK_PLUGIN_SERVICE_ENTRY);
             ManifestEntry manifestEntry = readManifestEntry(jar);
+            ManifestEntry pluginDescriptorEntry = readManifestEntry(jar, PLUGIN_DESCRIPTOR_ENTRY);
             Map<String, Boolean> classPresence = classPresence(
                     jar,
                     serviceEntry.providers(),
                     adapterServiceEntry.providers(),
-                    manifestEntry.manifest());
+                    modelFamilyServiceEntry.providers(),
+                    gollekPluginServiceEntry.providers(),
+                    manifestEntry.manifest(),
+                    pluginDescriptorEntry.manifest());
             return new FeatureJarReport(
                     jarPath.toString(),
                     serviceEntry.present(),
                     serviceEntry.providers(),
                     adapterServiceEntry.present(),
                     adapterServiceEntry.providers(),
+                    modelFamilyServiceEntry.present(),
+                    modelFamilyServiceEntry.providers(),
+                    gollekPluginServiceEntry.present(),
+                    gollekPluginServiceEntry.providers(),
+                    pluginDescriptorEntry.manifest(),
+                    pluginDescriptorEntry.entryName(),
+                    pluginDescriptorEntry.error(),
                     manifestEntry.manifest(),
                     manifestEntry.entryName(),
                     manifestEntry.error(),
@@ -2907,8 +3649,9 @@ public class FeaturesCommand implements Runnable {
                     List.of(),
                     null);
         } catch (Exception e) {
-            return new FeatureJarReport(jarPath.toString(), false, List.of(), false, List.of(), Map.of(), "", null, Map.of(),
-                    Map.of(), List.of(), e.getMessage());
+            return new FeatureJarReport(jarPath.toString(), false, List.of(), false, List.of(), false, List.of(),
+                    false, List.of(), Map.of(), "", null, Map.of(), "", null,
+                    Map.of(), Map.of(), List.of(), e.getMessage());
         }
     }
 
@@ -3021,7 +3764,67 @@ public class FeaturesCommand implements Runnable {
             }
         }
         appendSourcePackageWarnings(entry, warnings);
+        appendTokenizerInstallLockWarnings(entry, installLockEntry(jarPath, report), warnings);
         return report.withInstallLock(entry, warnings);
+    }
+
+    private static void appendTokenizerInstallLockWarnings(
+            Map<String, Object> lockEntry,
+            Map<String, Object> currentEntry,
+            List<String> warnings) {
+        if (!hasTokenizerMetadata(currentEntry)) {
+            return;
+        }
+        if (!hasTokenizerMetadata(lockEntry)) {
+            warnings.add("Extension install lock is missing tokenizer metadata; run gollek extensions doctor --repair");
+            return;
+        }
+        if (!tokenizerMetadataMatches(lockEntry, currentEntry)) {
+            warnings.add("Extension install lock tokenizer metadata differs from jar metadata; run gollek extensions doctor --repair");
+        }
+    }
+
+    private static boolean hasTokenizerMetadata(Map<String, Object> entry) {
+        return entry != null
+                && (!stringValue(entry.get("plugin_tokenizer_kind")).isBlank()
+                || !manifestStringList(entry.get("plugin_tokenizer_kinds")).isEmpty()
+                || !stringValue(entry.get("plugin_tokenizer_metadata_status")).isBlank()
+                || !stringValue(entry.get("plugin_tokenizer_metadata_pending_reason")).isBlank()
+                || !manifestStringList(entry.get("model_family_tokenizer_kinds")).isEmpty()
+                || !manifestStringList(entry.get("model_family_tokenizer_metadata_statuses")).isEmpty()
+                || !objectMap(entry.get("model_family_tokenizer_metadata_pending_reasons")).isEmpty()
+                || !stringValue(entry.get("tokenizer_kind")).isBlank()
+                || !manifestStringList(entry.get("tokenizer_kinds")).isEmpty()
+                || !stringValue(entry.get("tokenizer_metadata_status")).isBlank()
+                || !stringValue(entry.get("tokenizer_metadata_pending_reason")).isBlank());
+    }
+
+    private static boolean tokenizerMetadataMatches(Map<String, Object> left, Map<String, Object> right) {
+        return stringValue(left.get("plugin_tokenizer_kind")).equals(stringValue(right.get("plugin_tokenizer_kind")))
+                && manifestStringList(left.get("plugin_tokenizer_kinds")).equals(manifestStringList(right.get("plugin_tokenizer_kinds")))
+                && stringValue(left.get("plugin_tokenizer_metadata_status")).equals(stringValue(right.get("plugin_tokenizer_metadata_status")))
+                && stringValue(left.get("plugin_tokenizer_metadata_pending_reason")).equals(stringValue(right.get("plugin_tokenizer_metadata_pending_reason")))
+                && manifestStringList(left.get("model_family_tokenizer_kinds")).equals(manifestStringList(right.get("model_family_tokenizer_kinds")))
+                && manifestStringList(left.get("model_family_tokenizer_metadata_statuses")).equals(manifestStringList(right.get("model_family_tokenizer_metadata_statuses")))
+                && objectMap(left.get("model_family_tokenizer_metadata_pending_reasons")).equals(objectMap(right.get("model_family_tokenizer_metadata_pending_reasons")))
+                && stringValue(left.get("tokenizer_kind")).equals(stringValue(right.get("tokenizer_kind")))
+                && manifestStringList(left.get("tokenizer_kinds")).equals(manifestStringList(right.get("tokenizer_kinds")))
+                && stringValue(left.get("tokenizer_metadata_status")).equals(stringValue(right.get("tokenizer_metadata_status")))
+                && stringValue(left.get("tokenizer_metadata_pending_reason")).equals(stringValue(right.get("tokenizer_metadata_pending_reason")));
+    }
+
+    private static String tokenizerInstallLockStatus(FeatureJarReport jar) {
+        if (jar == null || !jar.hasInstallLock()) {
+            return "not_applicable";
+        }
+        Map<String, Object> currentEntry = installLockEntry(normalize(Path.of(jar.path())), jar);
+        if (!hasTokenizerMetadata(currentEntry)) {
+            return "not_applicable";
+        }
+        if (!hasTokenizerMetadata(jar.installLock())) {
+            return "missing";
+        }
+        return tokenizerMetadataMatches(jar.installLock(), currentEntry) ? "ok" : "stale";
     }
 
     private static void appendSourcePackageWarnings(Map<String, Object> lockEntry, List<String> warnings) {
@@ -3258,6 +4061,13 @@ public class FeaturesCommand implements Runnable {
                     List.of(),
                     false,
                     List.of(),
+                    false,
+                    List.of(),
+                    false,
+                    List.of(),
+                    Map.of(),
+                    "",
+                    null,
                     Map.of(),
                     "",
                     null,
@@ -3269,11 +4079,14 @@ public class FeaturesCommand implements Runnable {
         return missing;
     }
 
-    private static void writeInstallLockEntry(Path featureDir, Path jarPath, FeatureJarReport report) throws java.io.IOException {
-        writeInstallLockEntry(featureDir, jarPath, report, null);
+    private static Map<String, Object> writeInstallLockEntry(
+            Path featureDir,
+            Path jarPath,
+            FeatureJarReport report) throws java.io.IOException {
+        return writeInstallLockEntry(featureDir, jarPath, report, null);
     }
 
-    private static void writeInstallLockEntry(
+    private static Map<String, Object> writeInstallLockEntry(
             Path featureDir,
             Path jarPath,
             FeatureJarReport report,
@@ -3284,8 +4097,10 @@ public class FeaturesCommand implements Runnable {
         FeatureInstallLockState state = readInstallLock(rootDir);
         Map<String, Map<String, Object>> features = new LinkedHashMap<>(state.features());
         String filename = target.getFileName() == null ? target.toString() : target.getFileName().toString();
-        features.put(filename, installLockEntry(target, report, packageReport));
+        Map<String, Object> entry = installLockEntry(target, report, packageReport);
+        features.put(filename, entry);
         writeInstallLock(rootDir, features);
+        return entry;
     }
 
     private static void removeInstallLockEntry(Path featureDir, Path jarPath) throws java.io.IOException {
@@ -4158,23 +4973,38 @@ public class FeaturesCommand implements Runnable {
             Path jarPath,
             FeatureJarReport report,
             FeaturePackageReport packageReport) {
+        return installLockEntry(jarPath, jarPath, report, packageReport);
+    }
+
+    private static Map<String, Object> installLockEntry(
+            Path jarPath,
+            Path digestPath,
+            FeatureJarReport report,
+            FeaturePackageReport packageReport) {
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("filename", jarPath.getFileName() == null ? "" : jarPath.getFileName().toString());
         entry.put("path", jarPath.toString());
         entry.put("installed_at", Instant.now().toString());
         entry.put("runtime", runtimeCompatibilityContext().toMap());
         try {
-            entry.put("sha256", sha256(jarPath));
+            entry.put("sha256", sha256(digestPath));
         } catch (Exception e) {
             entry.put("sha256_error", e.getMessage());
         }
         try {
-            entry.put("size_bytes", Files.size(jarPath));
+            entry.put("size_bytes", Files.size(digestPath));
         } catch (Exception e) {
             entry.put("size_error", e.getMessage());
         }
         entry.put("providers", report == null ? List.of() : report.providers());
         entry.put("adapter_providers", report == null ? List.of() : report.adapterProviders());
+        entry.put("model_family_providers", report == null ? List.of() : report.modelFamilyProviders());
+        entry.put("gollek_plugin_providers", report == null ? List.of() : report.gollekPluginProviders());
+        Map<String, Object> pluginDescriptor = report == null ? Map.of() : report.pluginDescriptor();
+        entry.put("plugin_id", manifestValue(pluginDescriptor, "id"));
+        entry.put("plugin_name", manifestValue(pluginDescriptor, "name"));
+        entry.put("plugin_version", manifestValue(pluginDescriptor, "version"));
+        entry.put("plugin_main_class", manifestValue(pluginDescriptor, "mainClass"));
         Map<String, Object> manifest = report == null ? Map.of() : report.manifest();
         entry.put("feature_id", manifestValue(manifest, "id"));
         entry.put("feature_name", manifestValue(manifest, "name"));
@@ -4182,10 +5012,189 @@ public class FeaturesCommand implements Runnable {
         entry.put("pipelines", manifestPipelineIds(manifest));
         entry.put("capabilities", manifestCapabilityIds(manifest));
         entry.put("capability_kinds", manifestCapabilityKinds(manifest));
+        entry.put("model_family_ids", manifestModelFamilyIds(manifest));
+        entry.putAll(tokenizerArtifactMetadata(pluginDescriptor, manifest));
         if (packageReport != null) {
             entry.put("source_package", packageReport.toLockMap());
         }
         return entry;
+    }
+
+    private static Map<String, Object> tokenizerArtifactMetadata(
+            Map<String, Object> pluginDescriptor,
+            Map<String, Object> manifest) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        String pluginTokenizerKind = pluginDescriptorTokenizerKind(pluginDescriptor);
+        List<String> pluginTokenizerKinds = pluginDescriptorTokenizerKinds(pluginDescriptor);
+        String pluginTokenizerMetadataStatus = pluginDescriptorTokenizerMetadataStatus(pluginDescriptor);
+        String pluginTokenizerMetadataPendingReason = pluginDescriptorTokenizerMetadataPendingReason(pluginDescriptor);
+        metadata.put("plugin_tokenizer_kind", pluginTokenizerKind);
+        metadata.put("plugin_tokenizer_kinds", pluginTokenizerKinds);
+        metadata.put("plugin_tokenizer_metadata_status", pluginTokenizerMetadataStatus);
+        metadata.put("plugin_tokenizer_metadata_pending_reason", pluginTokenizerMetadataPendingReason);
+        List<String> modelFamilyTokenizerKinds = manifestModelFamilyTokenizerKinds(manifest);
+        List<String> modelFamilyTokenizerMetadataStatuses = manifestModelFamilyTokenizerMetadataStatuses(manifest);
+        Map<String, Object> modelFamilyTokenizerMetadataPendingReasons =
+                manifestModelFamilyTokenizerMetadataPendingReasons(manifest);
+        List<String> tokenizerKinds = orderedDistinctStrings(mergeLists(pluginTokenizerKinds, modelFamilyTokenizerKinds));
+        metadata.put("model_family_tokenizer_kinds", modelFamilyTokenizerKinds);
+        metadata.put("model_family_tokenizer_metadata_statuses", modelFamilyTokenizerMetadataStatuses);
+        metadata.put("model_family_tokenizer_metadata_pending_reasons", modelFamilyTokenizerMetadataPendingReasons);
+        metadata.put("tokenizer_kind", tokenizerKinds.isEmpty() ? "" : tokenizerKinds.get(0));
+        metadata.put("tokenizer_kinds", tokenizerKinds);
+        metadata.put("tokenizer_metadata_status", tokenizerMetadataStatus(
+                pluginTokenizerMetadataStatus,
+                modelFamilyTokenizerMetadataStatuses,
+                tokenizerKinds));
+        metadata.put("tokenizer_metadata_pending_reason", tokenizerMetadataPendingReason(
+                pluginTokenizerMetadataPendingReason,
+                modelFamilyTokenizerMetadataPendingReasons));
+        return metadata;
+    }
+
+    private static String pluginDescriptorTokenizerKind(Map<String, Object> pluginDescriptor) {
+        Map<String, Object> properties = objectMap(pluginDescriptor == null ? null : pluginDescriptor.get("properties"));
+        String tokenizerKind = manifestValue(properties, "tokenizerKind");
+        if (!tokenizerKind.isBlank()) {
+            return tokenizerKind;
+        }
+        List<String> tokenizerKinds = manifestStringList(properties.get("tokenizerKinds"));
+        return tokenizerKinds.isEmpty() ? "" : tokenizerKinds.get(0);
+    }
+
+    private static List<String> pluginDescriptorTokenizerKinds(Map<String, Object> pluginDescriptor) {
+        Map<String, Object> properties = objectMap(pluginDescriptor == null ? null : pluginDescriptor.get("properties"));
+        List<String> tokenizerKinds = new ArrayList<>();
+        String tokenizerKind = manifestValue(properties, "tokenizerKind");
+        if (!tokenizerKind.isBlank()) {
+            tokenizerKinds.add(tokenizerKind);
+        }
+        tokenizerKinds.addAll(manifestStringList(properties.get("tokenizerKinds")));
+        return orderedDistinctStrings(tokenizerKinds);
+    }
+
+    private static String pluginDescriptorTokenizerMetadataStatus(Map<String, Object> pluginDescriptor) {
+        Map<String, Object> properties = objectMap(pluginDescriptor == null ? null : pluginDescriptor.get("properties"));
+        String status = normalizeTokenizerMetadataStatusToken(manifestValue(properties, "tokenizerMetadataStatus"));
+        if (!status.isBlank()) {
+            return status;
+        }
+        return pluginDescriptorTokenizerKinds(pluginDescriptor).isEmpty() ? "" : "ready";
+    }
+
+    private static String pluginDescriptorTokenizerMetadataPendingReason(Map<String, Object> pluginDescriptor) {
+        Map<String, Object> properties = objectMap(pluginDescriptor == null ? null : pluginDescriptor.get("properties"));
+        return manifestValue(properties, "tokenizerMetadataPendingReason");
+    }
+
+    private static List<String> manifestModelFamilyTokenizerKinds(Map<String, Object> manifest) {
+        List<String> tokenizerKinds = new ArrayList<>();
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            String tokenizerKind = manifestValue(family, "tokenizer_kind");
+            if (!tokenizerKind.isBlank()) {
+                tokenizerKinds.add(tokenizerKind);
+            }
+            tokenizerKinds.addAll(manifestStringList(family.get("tokenizer_kinds")));
+        }
+        return orderedDistinctStrings(tokenizerKinds);
+    }
+
+    private static List<String> manifestModelFamilyTokenizerMetadataStatuses(Map<String, Object> manifest) {
+        List<String> statuses = new ArrayList<>();
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            String status = normalizeTokenizerMetadataStatusToken(manifestValue(family, "tokenizer_metadata_status"));
+            if (status.isBlank()
+                    && (!manifestValue(family, "tokenizer_kind").isBlank()
+                    || !manifestStringList(family.get("tokenizer_kinds")).isEmpty())) {
+                status = "ready";
+            }
+            if (!status.isBlank()) {
+                statuses.add(status);
+            }
+        }
+        return orderedDistinctStrings(statuses);
+    }
+
+    private static Map<String, Object> manifestModelFamilyTokenizerMetadataPendingReasons(Map<String, Object> manifest) {
+        Map<String, Object> reasons = new LinkedHashMap<>();
+        int index = 0;
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            String reason = manifestValue(family, "tokenizer_metadata_pending_reason");
+            if (!reason.isBlank()) {
+                String familyId = firstNonBlank(
+                        manifestValue(family, "id"),
+                        manifestValue(family, "class"),
+                        "family_" + index);
+                reasons.put(familyId, reason);
+            }
+            index++;
+        }
+        return Map.copyOf(reasons);
+    }
+
+    private static String tokenizerMetadataStatus(
+            String pluginStatus,
+            List<String> modelFamilyStatuses,
+            List<String> tokenizerKinds) {
+        if (!pluginStatus.isBlank()) {
+            return pluginStatus;
+        }
+        if (modelFamilyStatuses != null && modelFamilyStatuses.contains("pending")) {
+            return "pending";
+        }
+        if (modelFamilyStatuses != null && modelFamilyStatuses.contains("ready")) {
+            return "ready";
+        }
+        return tokenizerKinds == null || tokenizerKinds.isEmpty() ? "" : "ready";
+    }
+
+    private static String tokenizerMetadataPendingReason(
+            String pluginReason,
+            Map<String, Object> modelFamilyReasons) {
+        if (!pluginReason.isBlank()) {
+            return pluginReason;
+        }
+        if (modelFamilyReasons != null) {
+            for (Object reason : modelFamilyReasons.values()) {
+                String text = stringValue(reason);
+                if (!text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
+    }
+
+    private static String normalizeTokenizerMetadataStatusToken(String status) {
+        String normalized = normalizeFeatureId(status);
+        return switch (normalized) {
+            case "ready", "pending" -> normalized;
+            default -> "";
+        };
+    }
+
+    private static List<String> mergeLists(List<String> first, List<String> second) {
+        List<String> merged = new ArrayList<>();
+        if (first != null) {
+            merged.addAll(first);
+        }
+        if (second != null) {
+            merged.addAll(second);
+        }
+        return merged;
+    }
+
+    private static List<String> orderedDistinctStrings(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> distinct = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                distinct.add(value.trim());
+            }
+        }
+        return List.copyOf(distinct);
     }
 
     private static String sha256(Path path) throws java.io.IOException {
@@ -4333,6 +5342,7 @@ public class FeaturesCommand implements Runnable {
             errors.add("Extension jar is not readable: " + report.error());
         }
         boolean hasManifestPipelines = report.hasManifest() && !manifestPipelines(report.manifest()).isEmpty();
+        boolean hasManifestModelFamilies = report.hasManifest() && !manifestModelFamilies(report.manifest()).isEmpty();
         List<Map<String, Object>> manifestCapabilities = report.hasManifest()
                 ? manifestCapabilities(report.manifest())
                 : List.of();
@@ -4343,14 +5353,20 @@ public class FeaturesCommand implements Runnable {
         if (!report.hasServiceEntry()) {
             if (hasManifestPipelines) {
                 errors.add("Extension jar declares pipelines but has no " + SERVICE_ENTRY);
-            } else if (report.hasAdapterServiceEntry()) {
-                // Adapter-only extensions are valid without a ModelPipeline service entry.
+            } else if (report.hasAdapterServiceEntry() || report.hasModelFamilyServiceEntry()) {
+                // Adapter-only and model-family-only extensions are valid without a ModelPipeline service entry.
             } else if (hasNonPipelineManifestCapabilities || hasManifestCapabilities) {
+                String loadingHint = hasManifestModelFamilies
+                        ? "; model-family manifests need " + MODEL_FAMILY_SERVICE_ENTRY + " to load at runtime"
+                        : "; manifest-only adapters need a domain registry to load them";
                 warnings.add("Extension jar has no " + SERVICE_ENTRY
-                        + " or " + ADAPTER_SERVICE_ENTRY
-                        + "; manifest-only adapters need a domain registry to load them");
+                        + ", " + ADAPTER_SERVICE_ENTRY
+                        + ", or " + MODEL_FAMILY_SERVICE_ENTRY
+                        + loadingHint);
             } else {
-                errors.add("Extension jar has no " + SERVICE_ENTRY + " or " + ADAPTER_SERVICE_ENTRY);
+                errors.add("Extension jar has no " + SERVICE_ENTRY
+                        + ", " + ADAPTER_SERVICE_ENTRY
+                        + ", or " + MODEL_FAMILY_SERVICE_ENTRY);
             }
         } else if (report.providers().isEmpty()) {
             errors.add("Extension jar service entry has no providers");
@@ -4366,6 +5382,33 @@ public class FeaturesCommand implements Runnable {
                         "Extension adapter provider", warnings, errors);
             }
         }
+        if (report.hasModelFamilyServiceEntry()) {
+            if (report.modelFamilyProviders().isEmpty()) {
+                errors.add("Extension model-family service entry has no providers");
+            } else {
+                validateServiceProviders(report.modelFamilyProviders(), report.classPresence(),
+                        "Extension model-family provider", warnings, errors);
+            }
+        }
+        if (report.hasGollekPluginServiceEntry()) {
+            if (report.gollekPluginProviders().isEmpty()) {
+                errors.add("Extension GollekPlugin service entry has no providers");
+            } else {
+                validateServiceProviders(report.gollekPluginProviders(), report.classPresence(),
+                        "Extension GollekPlugin provider", warnings, errors);
+            }
+        }
+        if (hasManifestModelFamilies) {
+            if (!report.hasGollekPluginServiceEntry()) {
+                warnings.add("Model-family plugin jar has no " + GOLLEK_PLUGIN_SERVICE_ENTRY
+                        + "; plugin-core cannot discover it as a detachable GollekPlugin");
+            }
+            if (!report.hasPluginDescriptor()) {
+                warnings.add("Model-family plugin jar has no " + PLUGIN_DESCRIPTOR_ENTRY
+                        + "; plugin-core JarPluginLoader needs a descriptor for plugin-dir installs");
+            }
+        }
+        validatePluginDescriptor(report, warnings, errors);
         if (report.manifestError() != null && !report.manifestError().isBlank()) {
             errors.add("Extension manifest is not valid JSON: " + report.manifestError());
         } else if (!report.hasManifest()) {
@@ -4383,6 +5426,37 @@ public class FeaturesCommand implements Runnable {
                 ? warnings.isEmpty() ? "ok" : "warning"
                 : "error";
         return new FeatureJarValidation(errors.isEmpty(), status, warnings, errors);
+    }
+
+    private static void validatePluginDescriptor(
+            FeatureJarReport report,
+            List<String> warnings,
+            List<String> errors) {
+        if (report.pluginDescriptorError() != null && !report.pluginDescriptorError().isBlank()) {
+            errors.add("Plugin descriptor is not valid JSON: " + report.pluginDescriptorError());
+            return;
+        }
+        if (!report.hasPluginDescriptor()) {
+            return;
+        }
+        Map<String, Object> descriptor = report.pluginDescriptor();
+        String id = manifestValue(descriptor, "id");
+        if (id.isBlank()) {
+            warnings.add("Plugin descriptor is missing 'id'");
+        }
+        String mainClass = manifestValue(descriptor, "mainClass");
+        if (mainClass.isBlank()) {
+            warnings.add("Plugin descriptor is missing 'mainClass'");
+        } else if (!isJavaClassName(mainClass)) {
+            errors.add("Plugin descriptor mainClass is not a valid Java class name: " + mainClass);
+        } else if (Boolean.FALSE.equals(report.classPresence().get(mainClass))) {
+            errors.add("Plugin descriptor mainClass not found in jar: " + mainClass);
+        }
+        if (!mainClass.isBlank()
+                && report.hasGollekPluginServiceEntry()
+                && !report.gollekPluginProviders().contains(mainClass)) {
+            warnings.add("Plugin descriptor mainClass is not listed in GollekPlugin service providers: " + mainClass);
+        }
     }
 
     private static void validateServiceProviders(
@@ -4421,7 +5495,7 @@ public class FeaturesCommand implements Runnable {
         validateManifestRequires(manifest, warnings, errors);
         List<Map<String, Object>> capabilities = manifestCapabilities(manifest);
         if (capabilities.isEmpty()) {
-            warnings.add("Extension manifest has no pipelines, capabilities, or adapters");
+            warnings.add("Extension manifest has no pipelines, model_families, capabilities, or adapters");
             return;
         }
         validateManifestCapabilities(capabilities, report, warnings);
@@ -4444,6 +5518,36 @@ public class FeaturesCommand implements Runnable {
                 if (!capabilityClasses.contains(provider)) {
                     warnings.add("Adapter service provider is not listed in manifest capabilities/adapters: " + provider);
                 }
+            }
+        }
+        List<String> modelFamilyClasses = manifestModelFamilyClasses(manifest);
+        if (!modelFamilyClasses.isEmpty()) {
+            for (String provider : report.modelFamilyProviders()) {
+                if (!modelFamilyClasses.contains(provider)) {
+                    warnings.add("Model-family service provider is not listed in manifest model_families: " + provider);
+                }
+            }
+            for (String modelFamilyClass : modelFamilyClasses) {
+                if (!report.modelFamilyProviders().contains(modelFamilyClass)) {
+                    warnings.add("Manifest model-family class is not listed in service providers: " + modelFamilyClass);
+                }
+            }
+            for (String provider : report.gollekPluginProviders()) {
+                if (!modelFamilyClasses.contains(provider)) {
+                    warnings.add("GollekPlugin service provider is not listed in manifest model_families: " + provider);
+                }
+            }
+            for (String modelFamilyClass : modelFamilyClasses) {
+                if (report.hasGollekPluginServiceEntry()
+                        && !report.gollekPluginProviders().contains(modelFamilyClass)) {
+                    warnings.add("Manifest model-family class is not listed in GollekPlugin service providers: "
+                            + modelFamilyClass);
+                }
+            }
+            String pluginMainClass = manifestValue(report.pluginDescriptor(), "mainClass");
+            if (!pluginMainClass.isBlank() && !modelFamilyClasses.contains(pluginMainClass)) {
+                warnings.add("Plugin descriptor mainClass is not listed in manifest model_families: "
+                        + pluginMainClass);
             }
         }
     }
@@ -4549,7 +5653,7 @@ public class FeaturesCommand implements Runnable {
             }
             String className = manifestValue(capability, "class");
             if (className.isBlank()) {
-                if (FeatureAdapterKinds.PIPELINE.equals(kind)) {
+                if (FeatureAdapterKinds.PIPELINE.equals(kind) || MODEL_FAMILY_KIND.equals(kind)) {
                     warnings.add(prefix + " is missing 'class'");
                 }
             } else if (!isJavaClassName(className)) {
@@ -4633,7 +5737,10 @@ public class FeaturesCommand implements Runnable {
             JarFile jar,
             List<String> providers,
             List<String> adapterProviders,
-            Map<String, Object> manifest) {
+            List<String> modelFamilyProviders,
+            List<String> gollekPluginProviders,
+            Map<String, Object> manifest,
+            Map<String, Object> pluginDescriptor) {
         Set<String> declared = new LinkedHashSet<>();
         if (providers != null) {
             declared.addAll(providers);
@@ -4641,7 +5748,17 @@ public class FeaturesCommand implements Runnable {
         if (adapterProviders != null) {
             declared.addAll(adapterProviders);
         }
+        if (modelFamilyProviders != null) {
+            declared.addAll(modelFamilyProviders);
+        }
+        if (gollekPluginProviders != null) {
+            declared.addAll(gollekPluginProviders);
+        }
         declared.addAll(manifestCapabilityClasses(manifest));
+        String pluginMainClass = manifestValue(pluginDescriptor, "mainClass");
+        if (!pluginMainClass.isBlank()) {
+            declared.add(pluginMainClass);
+        }
         if (declared.isEmpty()) {
             return Map.of();
         }
@@ -4710,6 +5827,63 @@ public class FeaturesCommand implements Runnable {
             throw new IllegalStateException("Cannot resolve user home for default extension directory");
         }
         return normalize(Path.of(home, ".gollek", "extensions"));
+    }
+
+    private static Path installTargetDirectory(String outputDir, String pluginDir, FeatureJarReport report) {
+        if (pluginDir != null && !pluginDir.isBlank()) {
+            return pluginDirectory(pluginDir);
+        }
+        if ((outputDir == null || outputDir.isBlank()) && modelFamilyOnly(report)) {
+            return pluginDirectory(null);
+        }
+        return installDirectory(outputDir);
+    }
+
+    private static Path pluginDirectory(String configured) {
+        if (configured != null && !configured.isBlank()) {
+            return normalize(Path.of(configured.trim()));
+        }
+        return normalize(ExternalPluginClasspath.defaultPluginDirectory());
+    }
+
+    private static boolean pluginInstallRequested(String pluginDir, String outputDir, FeatureJarReport report) {
+        return pluginDir != null && !pluginDir.isBlank()
+                || ((outputDir == null || outputDir.isBlank()) && modelFamilyOnly(report));
+    }
+
+    private static List<String> modelFamilyPluginInstallReadinessErrors(FeatureJarReport report) {
+        if (report == null) {
+            return List.of();
+        }
+        List<String> errors = new ArrayList<>();
+        if (!report.hasGollekPluginServiceEntry()) {
+            errors.add("Model-family plugin install requires " + GOLLEK_PLUGIN_SERVICE_ENTRY
+                    + " so gollek-plugin-core can discover it");
+        } else if (report.gollekPluginProviders().isEmpty()) {
+            errors.add("Model-family plugin install requires at least one GollekPlugin service provider");
+        }
+        if (!report.hasPluginDescriptor()) {
+            errors.add("Model-family plugin install requires root " + PLUGIN_DESCRIPTOR_ENTRY
+                    + " with mainClass for gollek-plugin-core JarPluginLoader");
+        } else {
+            String mainClass = manifestValue(report.pluginDescriptor(), "mainClass");
+            if (mainClass.isBlank()) {
+                errors.add("Model-family plugin install requires root " + PLUGIN_DESCRIPTOR_ENTRY
+                        + " mainClass for gollek-plugin-core JarPluginLoader");
+            } else if (report.hasGollekPluginServiceEntry()
+                    && !report.gollekPluginProviders().contains(mainClass)) {
+                errors.add("Model-family plugin install requires plugin.json mainClass to be listed in "
+                        + GOLLEK_PLUGIN_SERVICE_ENTRY + ": " + mainClass);
+            }
+        }
+        return List.copyOf(errors);
+    }
+
+    private static boolean modelFamilyOnly(FeatureJarReport report) {
+        return report != null
+                && report.hasModelFamilyServiceEntry()
+                && !report.hasServiceEntry()
+                && !report.hasAdapterServiceEntry();
     }
 
     private static Path legacyInstallDirectory(String configured) {
@@ -4808,12 +5982,26 @@ public class FeaturesCommand implements Runnable {
             if (jar.hasInstallLock()) {
                 String hash = String.valueOf(jar.installLock().getOrDefault("sha256", ""));
                 System.out.printf("    lock: tracked%s%n", hash.isBlank() ? "" : " sha256=" + shortHash(hash));
+                printTokenizerLockMetadata(jar, "    ");
+            } else {
+                printTokenizerArtifactMetadata(jar, "    ");
             }
             for (String provider : jar.providers()) {
                 System.out.printf("    provider: %s%n", provider);
             }
             for (String provider : jar.adapterProviders()) {
                 System.out.printf("    adapter provider: %s%n", provider);
+            }
+            for (String provider : jar.modelFamilyProviders()) {
+                System.out.printf("    model-family provider: %s%n", provider);
+            }
+            if (modelFamilyOnly(jar)) {
+                List<String> pluginInstallErrors = modelFamilyPluginInstallReadinessErrors(jar);
+                System.out.printf("    plugin install: %s%n",
+                        pluginInstallErrors.isEmpty() ? "ready" : "not-ready");
+                for (String error : pluginInstallErrors) {
+                    System.out.printf("    plugin install error: %s%n", error);
+                }
             }
             for (String warning : validation.warnings()) {
                 System.out.printf("    warning: %s%n", warning);
@@ -5078,6 +6266,9 @@ public class FeaturesCommand implements Runnable {
         if (report.hasInstallLock()) {
             String hash = String.valueOf(report.installLock().getOrDefault("sha256", ""));
             System.out.printf("lock: tracked%s%n", hash.isBlank() ? "" : " sha256=" + shortHash(hash));
+            printTokenizerLockMetadata(report, "");
+        } else {
+            printTokenizerArtifactMetadata(report, "");
         }
         if (report.providers().isEmpty()) {
             System.out.println("providers: none");
@@ -5092,6 +6283,29 @@ public class FeaturesCommand implements Runnable {
             for (String provider : report.adapterProviders()) {
                 System.out.printf("adapter provider: %s%n", provider);
             }
+        }
+        if (report.modelFamilyProviders().isEmpty()) {
+            System.out.println("model-family providers: none");
+        } else {
+            for (String provider : report.modelFamilyProviders()) {
+                System.out.printf("model-family provider: %s%n", provider);
+            }
+        }
+        if (report.gollekPluginProviders().isEmpty()) {
+            System.out.println("gollek plugin providers: none");
+        } else {
+            for (String provider : report.gollekPluginProviders()) {
+                System.out.printf("gollek plugin provider: %s%n", provider);
+            }
+        }
+        if (report.hasPluginDescriptor()) {
+            System.out.printf("plugin descriptor: %s%n", report.pluginDescriptorEntryName());
+            String mainClass = manifestValue(report.pluginDescriptor(), "mainClass");
+            if (!mainClass.isBlank()) {
+                System.out.printf("plugin mainClass: %s%n", mainClass);
+            }
+        } else {
+            System.out.println("plugin descriptor: none");
         }
         for (String warning : validation.warnings()) {
             System.out.printf("warning: %s%n", warning);
@@ -5116,6 +6330,62 @@ public class FeaturesCommand implements Runnable {
             parts.add("v" + version);
         }
         return parts.isEmpty() ? "present" : String.join(" ", parts);
+    }
+
+    private static void printTokenizerLockMetadata(FeatureJarReport jar, String indent) {
+        if (jar == null || !jar.hasInstallLock()) {
+            return;
+        }
+        String tokenizerMetadata = tokenizerMetadataLockSummary(jar.installLock());
+        if (!tokenizerMetadata.isBlank()) {
+            System.out.printf("%stokenizer metadata: %s%n", indent, tokenizerMetadata);
+        }
+        String tokenizerLockStatus = tokenizerInstallLockStatus(jar);
+        if (!"not_applicable".equals(tokenizerLockStatus)) {
+            System.out.printf("%stokenizer lock: %s%n", indent, tokenizerLockStatus);
+        }
+    }
+
+    private static void printTokenizerArtifactMetadata(FeatureJarReport jar, String indent) {
+        String tokenizerMetadata = tokenizerMetadataArtifactSummary(jar);
+        if (!tokenizerMetadata.isBlank()) {
+            System.out.printf("%stokenizer metadata: %s%n", indent, tokenizerMetadata);
+        }
+    }
+
+    private static String tokenizerMetadataArtifactSummary(FeatureJarReport jar) {
+        if (jar == null || jar.error() != null) {
+            return "";
+        }
+        try {
+            return tokenizerMetadataLockSummary(installLockEntry(normalize(Path.of(jar.path())), jar));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String tokenizerMetadataLockSummary(Map<String, Object> lockEntry) {
+        if (lockEntry == null || lockEntry.isEmpty()) {
+            return "";
+        }
+        String status = stringValue(lockEntry.get("tokenizer_metadata_status"));
+        String reason = stringValue(lockEntry.get("tokenizer_metadata_pending_reason"));
+        List<String> kinds = manifestStringList(lockEntry.get("tokenizer_kinds"));
+        if (status.isBlank() && !kinds.isEmpty()) {
+            status = "ready";
+        }
+        if (status.isBlank() && kinds.isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>();
+        if (!status.isBlank()) {
+            parts.add(status);
+        }
+        if (!kinds.isEmpty()) {
+            parts.add("kinds=" + String.join(",", kinds));
+        }
+        String summary = String.join(" ", parts);
+        return reason.isBlank() ? summary : summary + " (" + reason + ")";
     }
 
     private static String manifestCapabilitiesSummary(Map<String, Object> manifest) {
@@ -5148,6 +6418,10 @@ public class FeaturesCommand implements Runnable {
         return manifestObjectList(manifest, "pipelines");
     }
 
+    private static List<Map<String, Object>> manifestModelFamilies(Map<String, Object> manifest) {
+        return manifestObjectList(manifest, "model_families");
+    }
+
     private static List<Map<String, Object>> manifestCapabilities(Map<String, Object> manifest) {
         if (manifest == null || manifest.isEmpty()) {
             return List.of();
@@ -5158,6 +6432,12 @@ public class FeaturesCommand implements Runnable {
             capability.putIfAbsent("kind", FeatureAdapterKinds.PIPELINE);
             capability.put("_manifest_source", "pipelines");
             capabilities.add(capability);
+        }
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            Map<String, Object> item = new LinkedHashMap<>(family);
+            item.putIfAbsent("kind", MODEL_FAMILY_KIND);
+            item.put("_manifest_source", "model_families");
+            capabilities.add(item);
         }
         for (Map<String, Object> capability : manifestObjectList(manifest, "capabilities")) {
             Map<String, Object> item = new LinkedHashMap<>(capability);
@@ -5214,6 +6494,8 @@ public class FeaturesCommand implements Runnable {
         String source = manifestValue(capability, "_manifest_source");
         if (kind.isBlank() && "pipelines".equals(source)) {
             kind = FeatureAdapterKinds.PIPELINE;
+        } else if (kind.isBlank() && "model_families".equals(source)) {
+            kind = MODEL_FAMILY_KIND;
         } else if (kind.isBlank() && "adapters".equals(source)) {
             kind = FeatureAdapterKinds.ADAPTER;
         }
@@ -5436,6 +6718,14 @@ public class FeaturesCommand implements Runnable {
         if (target.equals(manifestValue(report.manifest(), "id"))) {
             return true;
         }
+        Map<String, Object> pluginDescriptor = report.pluginDescriptor();
+        if (target.equals(manifestValue(pluginDescriptor, "id"))) {
+            return true;
+        }
+        String pluginMainClass = manifestValue(pluginDescriptor, "mainClass");
+        if (target.equals(pluginMainClass) || target.equals(simpleClassName(pluginMainClass))) {
+            return true;
+        }
         for (String provider : report.providers()) {
             if (target.equals(provider) || target.equals(simpleClassName(provider))) {
                 return true;
@@ -5443,6 +6733,21 @@ public class FeaturesCommand implements Runnable {
         }
         for (String provider : report.adapterProviders()) {
             if (target.equals(provider) || target.equals(simpleClassName(provider))) {
+                return true;
+            }
+        }
+        for (String provider : report.modelFamilyProviders()) {
+            if (target.equals(provider) || target.equals(simpleClassName(provider))) {
+                return true;
+            }
+        }
+        for (String provider : report.gollekPluginProviders()) {
+            if (target.equals(provider) || target.equals(simpleClassName(provider))) {
+                return true;
+            }
+        }
+        for (String familyId : manifestModelFamilyIds(report.manifest())) {
+            if (target.equals(familyId) || target.equals("model-family/" + familyId)) {
                 return true;
             }
         }
@@ -5474,6 +6779,28 @@ public class FeaturesCommand implements Runnable {
             }
         }
         return classes;
+    }
+
+    private static List<String> manifestModelFamilyClasses(Map<String, Object> manifest) {
+        List<String> classes = new ArrayList<>();
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            Object className = family.get("class");
+            if (className != null && !String.valueOf(className).isBlank()) {
+                classes.add(String.valueOf(className).trim());
+            }
+        }
+        return classes;
+    }
+
+    private static List<String> manifestModelFamilyIds(Map<String, Object> manifest) {
+        List<String> ids = new ArrayList<>();
+        for (Map<String, Object> family : manifestModelFamilies(manifest)) {
+            Object id = family.get("id");
+            if (id != null && !String.valueOf(id).isBlank()) {
+                ids.add(String.valueOf(id).trim());
+            }
+        }
+        return List.copyOf(new ArrayList<>(new LinkedHashSet<>(ids)));
     }
 
     private static List<String> manifestCapabilityIds(Map<String, Object> manifest) {
@@ -5671,6 +6998,13 @@ public class FeaturesCommand implements Runnable {
             List<String> providers,
             boolean hasAdapterServiceEntry,
             List<String> adapterProviders,
+            boolean hasModelFamilyServiceEntry,
+            List<String> modelFamilyProviders,
+            boolean hasGollekPluginServiceEntry,
+            List<String> gollekPluginProviders,
+            Map<String, Object> pluginDescriptor,
+            String pluginDescriptorEntryName,
+            String pluginDescriptorError,
             Map<String, Object> manifest,
             String manifestEntryName,
             String manifestError,
@@ -5680,6 +7014,10 @@ public class FeaturesCommand implements Runnable {
             String error) {
         boolean hasManifest() {
             return manifest != null && !manifest.isEmpty();
+        }
+
+        boolean hasPluginDescriptor() {
+            return pluginDescriptor != null && !pluginDescriptor.isEmpty();
         }
 
         boolean hasInstallLock() {
@@ -5693,6 +7031,13 @@ public class FeaturesCommand implements Runnable {
                     providers,
                     hasAdapterServiceEntry,
                     adapterProviders,
+                    hasModelFamilyServiceEntry,
+                    modelFamilyProviders,
+                    hasGollekPluginServiceEntry,
+                    gollekPluginProviders,
+                    pluginDescriptor,
+                    pluginDescriptorEntryName,
+                    pluginDescriptorError,
                     manifest,
                     manifestEntryName,
                     manifestError,
@@ -5709,6 +7054,13 @@ public class FeaturesCommand implements Runnable {
                     providers,
                     hasAdapterServiceEntry,
                     adapterProviders,
+                    hasModelFamilyServiceEntry,
+                    modelFamilyProviders,
+                    hasGollekPluginServiceEntry,
+                    gollekPluginProviders,
+                    pluginDescriptor,
+                    pluginDescriptorEntryName,
+                    pluginDescriptorError,
                     manifest,
                     manifestEntryName,
                     manifestError,
@@ -5725,6 +7077,27 @@ public class FeaturesCommand implements Runnable {
             value.put("providers", providers);
             value.put("has_adapter_service_entry", hasAdapterServiceEntry);
             value.put("adapter_providers", adapterProviders);
+            value.put("has_model_family_service_entry", hasModelFamilyServiceEntry);
+            value.put("model_family_providers", modelFamilyProviders);
+            value.put("has_gollek_plugin_service_entry", hasGollekPluginServiceEntry);
+            value.put("gollek_plugin_providers", gollekPluginProviders);
+            boolean pluginInstallCandidate = modelFamilyOnly(this);
+            value.put("plugin_install_candidate", pluginInstallCandidate);
+            if (pluginInstallCandidate) {
+                List<String> pluginInstallErrors = modelFamilyPluginInstallReadinessErrors(this);
+                value.put("plugin_install_ready", pluginInstallErrors.isEmpty());
+                value.put("plugin_install_errors", pluginInstallErrors);
+            }
+            value.put("has_plugin_descriptor", hasPluginDescriptor());
+            if (pluginDescriptorEntryName != null && !pluginDescriptorEntryName.isBlank()) {
+                value.put("plugin_descriptor_entry", pluginDescriptorEntryName);
+            }
+            if (hasPluginDescriptor()) {
+                value.put("plugin_descriptor", pluginDescriptor);
+            }
+            if (pluginDescriptorError != null && !pluginDescriptorError.isBlank()) {
+                value.put("plugin_descriptor_error", pluginDescriptorError);
+            }
             value.put("has_manifest", hasManifest());
             if (manifestEntryName != null && !manifestEntryName.isBlank()) {
                 value.put("manifest_entry", manifestEntryName);
@@ -5738,8 +7111,16 @@ public class FeaturesCommand implements Runnable {
             if (classPresence != null && !classPresence.isEmpty()) {
                 value.put("class_presence", classPresence);
             }
+            Map<String, Object> artifactTokenizerMetadata = tokenizerArtifactMetadata(pluginDescriptor, manifest);
+            if (hasTokenizerMetadata(artifactTokenizerMetadata)) {
+                value.put("artifact_tokenizer_metadata", artifactTokenizerMetadata);
+            }
             if (hasInstallLock()) {
                 value.put("install_lock", installLock);
+                String tokenizerLockStatus = tokenizerInstallLockStatus(this);
+                if (!"not_applicable".equals(tokenizerLockStatus)) {
+                    value.put("tokenizer_lock_status", tokenizerLockStatus);
+                }
             }
             if (installLockWarnings != null && !installLockWarnings.isEmpty()) {
                 value.put("install_lock_warnings", installLockWarnings);
@@ -5892,6 +7273,12 @@ public class FeaturesCommand implements Runnable {
             int ok = 0;
             int warning = 0;
             int error = 0;
+            int pluginInstallCandidates = 0;
+            int pluginInstallReady = 0;
+            int pluginInstallNotReady = 0;
+            int tokenizerLockOk = 0;
+            int tokenizerLockMissing = 0;
+            int tokenizerLockStale = 0;
             for (FeatureJarReport jar : jars) {
                 String status = validateJar(jar, strict).status();
                 if ("ok".equals(status)) {
@@ -5900,6 +7287,22 @@ public class FeaturesCommand implements Runnable {
                     warning++;
                 } else {
                     error++;
+                }
+                if (modelFamilyOnly(jar)) {
+                    pluginInstallCandidates++;
+                    if (modelFamilyPluginInstallReadinessErrors(jar).isEmpty()) {
+                        pluginInstallReady++;
+                    } else {
+                        pluginInstallNotReady++;
+                    }
+                }
+                String tokenizerLockStatus = tokenizerInstallLockStatus(jar);
+                if ("ok".equals(tokenizerLockStatus)) {
+                    tokenizerLockOk++;
+                } else if ("missing".equals(tokenizerLockStatus)) {
+                    tokenizerLockMissing++;
+                } else if ("stale".equals(tokenizerLockStatus)) {
+                    tokenizerLockStale++;
                 }
             }
             int collisions = collisionReport().items().size();
@@ -5918,7 +7321,20 @@ public class FeaturesCommand implements Runnable {
                     warning += ignoredLegacyPaths;
                 }
             }
-            return new FeatureDoctorSummary(roots.size(), jars.size(), ok, warning, error, collisions, ignoredLegacyPaths);
+            return new FeatureDoctorSummary(
+                    roots.size(),
+                    jars.size(),
+                    ok,
+                    warning,
+                    error,
+                    collisions,
+                    ignoredLegacyPaths,
+                    pluginInstallCandidates,
+                    pluginInstallReady,
+                    pluginInstallNotReady,
+                    tokenizerLockOk,
+                    tokenizerLockMissing,
+                    tokenizerLockStale);
         }
 
         private FeatureCollisionReport collisionReport() {
@@ -6675,7 +8091,13 @@ public class FeaturesCommand implements Runnable {
             int warning,
             int error,
             int collisions,
-            int ignoredLegacyPaths) {
+            int ignoredLegacyPaths,
+            int pluginInstallCandidates,
+            int pluginInstallReady,
+            int pluginInstallNotReady,
+            int tokenizerLockOk,
+            int tokenizerLockMissing,
+            int tokenizerLockStale) {
         int exitCode() {
             return error == 0 ? 0 : 1;
         }
@@ -6689,6 +8111,12 @@ public class FeaturesCommand implements Runnable {
             value.put("error", error);
             value.put("collisions", collisions);
             value.put("ignored_legacy_paths", ignoredLegacyPaths);
+            value.put("plugin_install_candidates", pluginInstallCandidates);
+            value.put("plugin_install_ready", pluginInstallReady);
+            value.put("plugin_install_not_ready", pluginInstallNotReady);
+            value.put("tokenizer_lock_ok", tokenizerLockOk);
+            value.put("tokenizer_lock_missing", tokenizerLockMissing);
+            value.put("tokenizer_lock_stale", tokenizerLockStale);
             return value;
         }
     }

@@ -1,7 +1,6 @@
 package tech.kayys.gollek.ml.train;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,7 +29,25 @@ public record TrainingReportPortfolio(List<Entry> entries) {
             TrainingReportDiagnostics.Severity maxCandidateDiagnosticSeverity,
             TrainingReportDiagnostics.Severity maxComparisonFindingSeverity,
             double minimumValidationImprovement,
-            boolean requireTrackedMetricImprovement) {
+            boolean requireTrackedMetricImprovement,
+            boolean requireCandidateDataHealthAvailable,
+            boolean requireCandidateDataHealthGate,
+            boolean requireCandidateDataHealthClean) {
+        public PromotionPolicy(
+                TrainingReportDiagnostics.Severity maxCandidateDiagnosticSeverity,
+                TrainingReportDiagnostics.Severity maxComparisonFindingSeverity,
+                double minimumValidationImprovement,
+                boolean requireTrackedMetricImprovement) {
+            this(
+                    maxCandidateDiagnosticSeverity,
+                    maxComparisonFindingSeverity,
+                    minimumValidationImprovement,
+                    requireTrackedMetricImprovement,
+                    false,
+                    true,
+                    false);
+        }
+
         public PromotionPolicy {
             maxCandidateDiagnosticSeverity = maxCandidateDiagnosticSeverity == null
                     ? TrainingReportDiagnostics.Severity.INFO
@@ -49,7 +66,10 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     TrainingReportDiagnostics.Severity.INFO,
                     TrainingReportDiagnostics.Severity.INFO,
                     TrainingReportComparison.DEFAULT_OPTIONS.lossRegressionTolerance(),
-                    true);
+                    true,
+                    false,
+                    true,
+                    false);
         }
 
         public PromotionPolicy withMaxCandidateDiagnosticSeverity(
@@ -58,7 +78,10 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     severity,
                     maxComparisonFindingSeverity,
                     minimumValidationImprovement,
-                    requireTrackedMetricImprovement);
+                    requireTrackedMetricImprovement,
+                    requireCandidateDataHealthAvailable,
+                    requireCandidateDataHealthGate,
+                    requireCandidateDataHealthClean);
         }
 
         public PromotionPolicy withMaxComparisonFindingSeverity(
@@ -67,7 +90,10 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     maxCandidateDiagnosticSeverity,
                     severity,
                     minimumValidationImprovement,
-                    requireTrackedMetricImprovement);
+                    requireTrackedMetricImprovement,
+                    requireCandidateDataHealthAvailable,
+                    requireCandidateDataHealthGate,
+                    requireCandidateDataHealthClean);
         }
 
         public PromotionPolicy withMinimumValidationImprovement(double improvement) {
@@ -75,7 +101,10 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     maxCandidateDiagnosticSeverity,
                     maxComparisonFindingSeverity,
                     improvement,
-                    requireTrackedMetricImprovement);
+                    requireTrackedMetricImprovement,
+                    requireCandidateDataHealthAvailable,
+                    requireCandidateDataHealthGate,
+                    requireCandidateDataHealthClean);
         }
 
         public PromotionPolicy withRequireTrackedMetricImprovement(boolean required) {
@@ -83,6 +112,42 @@ public record TrainingReportPortfolio(List<Entry> entries) {
                     maxCandidateDiagnosticSeverity,
                     maxComparisonFindingSeverity,
                     minimumValidationImprovement,
+                    required,
+                    requireCandidateDataHealthAvailable,
+                    requireCandidateDataHealthGate,
+                    requireCandidateDataHealthClean);
+        }
+
+        public PromotionPolicy withRequireCandidateDataHealthAvailable(boolean required) {
+            return new PromotionPolicy(
+                    maxCandidateDiagnosticSeverity,
+                    maxComparisonFindingSeverity,
+                    minimumValidationImprovement,
+                    requireTrackedMetricImprovement,
+                    required,
+                    requireCandidateDataHealthGate,
+                    requireCandidateDataHealthClean);
+        }
+
+        public PromotionPolicy withRequireCandidateDataHealthGate(boolean required) {
+            return new PromotionPolicy(
+                    maxCandidateDiagnosticSeverity,
+                    maxComparisonFindingSeverity,
+                    minimumValidationImprovement,
+                    requireTrackedMetricImprovement,
+                    requireCandidateDataHealthAvailable,
+                    required,
+                    requireCandidateDataHealthClean);
+        }
+
+        public PromotionPolicy withRequireCandidateDataHealthClean(boolean required) {
+            return new PromotionPolicy(
+                    maxCandidateDiagnosticSeverity,
+                    maxComparisonFindingSeverity,
+                    minimumValidationImprovement,
+                    requireTrackedMetricImprovement,
+                    requireCandidateDataHealthAvailable,
+                    requireCandidateDataHealthGate,
                     required);
         }
 
@@ -92,6 +157,9 @@ public record TrainingReportPortfolio(List<Entry> entries) {
             map.put("maxComparisonFindingSeverity", maxComparisonFindingSeverity.name());
             map.put("minimumValidationImprovement", minimumValidationImprovement);
             map.put("requireTrackedMetricImprovement", requireTrackedMetricImprovement);
+            map.put("requireCandidateDataHealthAvailable", requireCandidateDataHealthAvailable);
+            map.put("requireCandidateDataHealthGate", requireCandidateDataHealthGate);
+            map.put("requireCandidateDataHealthClean", requireCandidateDataHealthClean);
             return Map.copyOf(map);
         }
     }
@@ -351,12 +419,13 @@ public record TrainingReportPortfolio(List<Entry> entries) {
             Path reportFile = Objects.requireNonNull(entry.getValue(), "report file path must not be null")
                     .toAbsolutePath()
                     .normalize();
+            TrainingReportArtifactFingerprint fingerprint = TrainingReportArtifactFingerprint.of(reportFile);
             entries.add(new Entry(
                     entry.getKey(),
                     TrainingReportReader.readReport(reportFile),
                     reportFile,
-                    Files.size(reportFile),
-                    TrainerCheckpointIO.sha256Hex(reportFile)));
+                    fingerprint.bytes(),
+                    fingerprint.sha256()));
         }
         return new TrainingReportPortfolio(entries);
     }
@@ -508,7 +577,33 @@ public record TrainingReportPortfolio(List<Entry> entries) {
         if (policy.requireTrackedMetricImprovement() && comparison.improvedMetrics().isEmpty()) {
             reasons.add("Candidate does not improve any tracked metric");
         }
+        reasons.addAll(candidateDataHealthHoldReasons(candidate, policy));
         return List.copyOf(reasons);
+    }
+
+    private static List<String> candidateDataHealthHoldReasons(
+            Entry candidate,
+            PromotionPolicy policy) {
+        TrainingReportDataHealth dataHealth = candidate.report().dataHealth();
+        List<String> reasons = new ArrayList<>();
+        if (policy.requireCandidateDataHealthAvailable() && !dataHealth.available()) {
+            reasons.add("Candidate data health evidence is missing");
+        }
+        if (policy.requireCandidateDataHealthGate()
+                && dataHealth.available()
+                && (!dataHealth.gatePassed() || dataHealth.errorCount() > 0)) {
+            reasons.add("Candidate data health gate did not pass: " + dataHealthReason(dataHealth));
+        }
+        if (policy.requireCandidateDataHealthClean()
+                && dataHealth.available()
+                && dataHealth.issueCount() > 0) {
+            reasons.add("Candidate data health is not clean: " + dataHealthReason(dataHealth));
+        }
+        return reasons;
+    }
+
+    private static String dataHealthReason(TrainingReportDataHealth dataHealth) {
+        return dataHealth.issueSummary("inspect candidate data-health summary");
     }
 
     private static PromotionCandidateReview promotionCandidateReview(

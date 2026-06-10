@@ -12,7 +12,7 @@ import java.util.List;
  * advertises config/tokenizer/weight-layout knowledge; a runner decides whether
  * it can execute that family for a specific artifact format.</p>
  */
-public interface ModelFamilyPlugin extends GollekPlugin {
+public interface ModelFamilyPlugin extends GollekPlugin, ModelFamilyRuntimeAdapter {
 
     ModelFamilyDescriptor descriptor();
 

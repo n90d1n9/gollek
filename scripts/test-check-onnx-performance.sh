@@ -32,12 +32,14 @@ REGRESSION_SCRIPT="${TMP_DIR}/regression.sh"
 CAPTURE_SCRIPT="${TMP_DIR}/capture.sh"
 COMPARE_SCRIPT="${TMP_DIR}/compare.sh"
 BUNDLE_VERIFY_SCRIPT="${TMP_DIR}/bundle-verify.sh"
+DIAGNOSE_SCRIPT="${TMP_DIR}/diagnose.sh"
 DECISION_SCRIPT="${TMP_DIR}/decision.sh"
 write_fake_script "$GATE_SCRIPT" gate
 write_fake_script "$REGRESSION_SCRIPT" regression
 write_fake_script "$CAPTURE_SCRIPT" capture
 write_fake_script "$COMPARE_SCRIPT" compare
 write_fake_script "$BUNDLE_VERIFY_SCRIPT" bundle-verify
+write_fake_script "$DIAGNOSE_SCRIPT" diagnose
 write_fake_script "$DECISION_SCRIPT" decision
 
 bash "$ROOT_DIR/scripts/check-onnx-performance.sh" --list-presets >"${TMP_DIR}/list-presets.tsv"
@@ -123,6 +125,24 @@ if ! grep -qx 'mode=regression' "${TMP_DIR}/decision.out" \
   echo "Expected decision helper override delegation" >&2
   cat "${TMP_DIR}/decision.out" >&2
   cat "$DECISION_ARGV" >&2
+  exit 1
+fi
+
+REGRESSION_DIAGNOSE_ARGV="${TMP_DIR}/regression-diagnose-argv.tsv"
+GOLLEK_FAKE_PERFORMANCE_ARGV="$REGRESSION_DIAGNOSE_ARGV" \
+  bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
+    --model fake-model \
+    --baseline baseline.tsv \
+    --regression-script "$REGRESSION_SCRIPT" \
+    --diagnose-script "$DIAGNOSE_SCRIPT" >"${TMP_DIR}/regression-diagnose.out"
+
+if ! grep -qx 'mode=regression' "${TMP_DIR}/regression-diagnose.out" \
+    || ! grep -qx $'script\tregression' "$REGRESSION_DIAGNOSE_ARGV" \
+    || ! grep -qx $'4\t--diagnose-script' "$REGRESSION_DIAGNOSE_ARGV" \
+    || ! grep -qx $'5\t'"$DIAGNOSE_SCRIPT" "$REGRESSION_DIAGNOSE_ARGV"; then
+  echo "Expected regression diagnosis helper override delegation" >&2
+  cat "${TMP_DIR}/regression-diagnose.out" >&2
+  cat "$REGRESSION_DIAGNOSE_ARGV" >&2
   exit 1
 fi
 
@@ -218,7 +238,7 @@ printf 'latest baseline\n' > "$LATEST_ROOT/webworld/latest.tsv"
 bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
   --list-baselines \
   --baseline-root "$LATEST_ROOT" >"${TMP_DIR}/list-baselines.tsv"
-if ! grep -qx $'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tupdatedUtc' "${TMP_DIR}/list-baselines.tsv" \
+if ! grep -qx $'name\tstatus\tlatest\tmanifest\tmodel\tonnxBackend\texpectBackend\tmaxTokens\truns\twarmupRuns\tprompt\taggregateLabel\tdurationMs\tgenerationTps\tdecodeTps\tttftMs\ttokenLatencyMs\tonnxOrtRunMs\tonnxDecodeRunMs\tprimaryStage\tprimaryMetric\tprimaryValueMs\tprimaryShareOfOrtPercent\tupdatedUtc' "${TMP_DIR}/list-baselines.tsv" \
     || ! grep -q '^webworld	missing-manifest	' "${TMP_DIR}/list-baselines.tsv"; then
   echo "Expected facade baseline list" >&2
   cat "${TMP_DIR}/list-baselines.tsv" >&2
@@ -420,6 +440,72 @@ if ! grep -qx 'mode=verify-bundle' "${TMP_DIR}/bundle-dry.out" \
   exit 1
 fi
 
+DIAGNOSE_SUMMARY="${TMP_DIR}/profile-aggregate.tsv"
+DIAGNOSIS_DIR="${TMP_DIR}/diagnosis"
+DIAGNOSIS_OUT="${DIAGNOSIS_DIR}/diagnosis.tsv"
+DIAGNOSIS_STAGES_OUT="${DIAGNOSIS_DIR}/stages.tsv"
+printf 'case\tstatus\nmeasured-mean\tpass\n' > "$DIAGNOSE_SUMMARY"
+DIAGNOSE_ARGV="${TMP_DIR}/diagnose-argv.tsv"
+GOLLEK_FAKE_PERFORMANCE_ARGV="$DIAGNOSE_ARGV" \
+  bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
+    --diagnose-summary "$DIAGNOSE_SUMMARY" \
+    --diagnosis-summary-dir "$DIAGNOSIS_DIR" \
+    --diagnosis-out "$DIAGNOSIS_OUT" \
+    --diagnosis-stages-out "$DIAGNOSIS_STAGES_OUT" \
+    --diagnosis-case measured-mean \
+    --diagnosis-include-warmup \
+    --diagnose-script "$DIAGNOSE_SCRIPT" >"${TMP_DIR}/diagnose.out"
+
+if ! grep -qx 'mode=diagnose' "${TMP_DIR}/diagnose.out" \
+    || ! grep -qx "summary=$DIAGNOSE_SUMMARY" "${TMP_DIR}/diagnose.out" \
+    || ! grep -qx "diagnosis=$DIAGNOSIS_OUT" "${TMP_DIR}/diagnose.out" \
+    || ! grep -qx "stages=$DIAGNOSIS_STAGES_OUT" "${TMP_DIR}/diagnose.out" \
+    || ! grep -qx $'script\tdiagnose' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'0\t--summary' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'1\t'"$DIAGNOSE_SUMMARY" "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'2\t--summary-dir' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'3\t'"$DIAGNOSIS_DIR" "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'4\t--out' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'5\t'"$DIAGNOSIS_OUT" "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'6\t--stages-out' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'7\t'"$DIAGNOSIS_STAGES_OUT" "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'8\t--case' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'9\tmeasured-mean' "$DIAGNOSE_ARGV" \
+    || ! grep -qx $'10\t--include-warmup' "$DIAGNOSE_ARGV"; then
+  echo "Expected diagnose mode delegation" >&2
+  cat "${TMP_DIR}/diagnose.out" >&2
+  cat "$DIAGNOSE_ARGV" >&2
+  exit 1
+fi
+
+DIAGNOSE_PLAN="${TMP_DIR}/plans/diagnose-plan.tsv"
+bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
+  --diagnose-summary "$DIAGNOSE_SUMMARY" \
+  --diagnosis-out "$DIAGNOSIS_OUT" \
+  --diagnose-script "$DIAGNOSE_SCRIPT" \
+  --dry-run \
+  --plan-out "$DIAGNOSE_PLAN" >"${TMP_DIR}/diagnose-dry.out"
+
+if ! grep -qx 'mode=diagnose' "${TMP_DIR}/diagnose-dry.out" \
+    || ! grep -qx "summary=$DIAGNOSE_SUMMARY" "${TMP_DIR}/diagnose-dry.out" \
+    || ! grep -qx "diagnosis=$DIAGNOSIS_OUT" "${TMP_DIR}/diagnose-dry.out" \
+    || ! grep -qx "plan=$DIAGNOSE_PLAN" "${TMP_DIR}/diagnose-dry.out" \
+    || ! grep -qx 'dryRun=true' "${TMP_DIR}/diagnose-dry.out" \
+    || ! grep -qx $'config\tmode\tdiagnose' "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'config\tscript\t'"$DIAGNOSE_SCRIPT" "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'config\tdiagnoseSummary\t'"$DIAGNOSE_SUMMARY" "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'config\tdiagnoseScript\t'"$DIAGNOSE_SCRIPT" "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'config\tdiagnosisOut\t'"$DIAGNOSIS_OUT" "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'argv\t1\t--summary' "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'argv\t2\t'"$DIAGNOSE_SUMMARY" "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'argv\t3\t--out' "$DIAGNOSE_PLAN" \
+    || ! grep -qx $'argv\t4\t'"$DIAGNOSIS_OUT" "$DIAGNOSE_PLAN"; then
+  echo "Expected diagnose dry-run plan TSV" >&2
+  cat "${TMP_DIR}/diagnose-dry.out" >&2
+  cat "$DIAGNOSE_PLAN" >&2
+  exit 1
+fi
+
 if bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
     --compare-baselines before missing \
     --baseline-root "$COMPARE_ROOT" \
@@ -444,9 +530,40 @@ if bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
   cat "${TMP_DIR}/bundle-mixed.err" >&2
   exit 1
 fi
-if ! grep -q '^--verify-bundle is mutually exclusive with model, baseline, capture, and compare modes$' "${TMP_DIR}/bundle-mixed.err"; then
+if ! grep -q '^--verify-bundle is mutually exclusive with model, baseline, capture, compare, and diagnose modes$' "${TMP_DIR}/bundle-mixed.err"; then
   echo "Expected verify-bundle mixed mode error" >&2
   cat "${TMP_DIR}/bundle-mixed.err" >&2
+  exit 1
+fi
+
+if bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
+    --diagnose-summary "$DIAGNOSE_SUMMARY" \
+    --model fake-model \
+    --diagnose-script "$DIAGNOSE_SCRIPT" >"${TMP_DIR}/diagnose-mixed.out" 2>"${TMP_DIR}/diagnose-mixed.err"; then
+  echo "Expected diagnose mixed mode failure" >&2
+  cat "${TMP_DIR}/diagnose-mixed.out" >&2
+  cat "${TMP_DIR}/diagnose-mixed.err" >&2
+  exit 1
+fi
+if ! grep -q '^--diagnose-summary is mutually exclusive with model, baseline, capture, compare, and bundle modes$' "${TMP_DIR}/diagnose-mixed.err"; then
+  echo "Expected diagnose mixed mode error" >&2
+  cat "${TMP_DIR}/diagnose-mixed.err" >&2
+  exit 1
+fi
+
+if bash "$ROOT_DIR/scripts/check-onnx-performance.sh" \
+    --compare-baselines before after \
+    --baseline-root "$COMPARE_ROOT" \
+    --diagnose-script "$DIAGNOSE_SCRIPT" \
+    --compare-script "$COMPARE_SCRIPT" >"${TMP_DIR}/compare-diagnose-script.out" 2>"${TMP_DIR}/compare-diagnose-script.err"; then
+  echo "Expected compare diagnose-script failure" >&2
+  cat "${TMP_DIR}/compare-diagnose-script.out" >&2
+  cat "${TMP_DIR}/compare-diagnose-script.err" >&2
+  exit 1
+fi
+if ! grep -q '^--diagnose-script is only supported with --diagnose-summary, --capture-baseline, or regression modes$' "${TMP_DIR}/compare-diagnose-script.err"; then
+  echo "Expected compare diagnose-script error" >&2
+  cat "${TMP_DIR}/compare-diagnose-script.err" >&2
   exit 1
 fi
 

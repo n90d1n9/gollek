@@ -41,6 +41,7 @@ final class ModelCapabilityMapper {
         payload.put("inference", inferenceCapabilities(model, candidates));
         payload.put("tooling", toolingCapabilities(model, candidates));
         payload.put("rag", ragCapabilities());
+        payload.put("embeddings", embeddingCapabilities(model, candidates));
         payload.put("modalities", modalityCapabilities(model, candidates));
         payload.put("provider_candidates", providerSummaries(modelId, candidates));
         payload.put("metadata", model.map(ModelInfo::getMetadata).orElse(Map.of()));
@@ -121,6 +122,22 @@ final class ModelCapabilityMapper {
         rag.put("retrieval_policy", false);
         rag.put("vector_store_ownership", false);
         return rag;
+    }
+
+    private static Map<String, Object> embeddingCapabilities(Optional<ModelInfo> model, List<ProviderInfo> providers) {
+        boolean supported = supportsEmbeddings(model, providers);
+        Map<String, Object> embeddings = new LinkedHashMap<>();
+        embeddings.put("generation", supported);
+        embeddings.put("endpoint", "/v1/embeddings");
+        embeddings.put("openai_compatible", supported);
+        embeddings.put("dimensions", model.map(ModelInfo::getEmbeddingSize).orElse(null));
+        embeddings.put("encoding_formats", List.of("float", "base64"));
+        embeddings.put("input_aliases", List.of("input", "inputs"));
+        embeddings.put("batch_inputs", true);
+        embeddings.put("metadata_passthrough", true);
+        embeddings.put("retrieval_policy", false);
+        embeddings.put("vector_store_ownership", false);
+        return embeddings;
     }
 
     private static Map<String, Object> modalityCapabilities(Optional<ModelInfo> model, List<ProviderInfo> providers) {

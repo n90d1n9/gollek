@@ -36,12 +36,32 @@ public final class PrefetchingIterable<T> implements Iterable<T>, AutoCloseable 
         this.bufferSize = bufferSize;
     }
 
+    public PrefetchingIterable(Iterable<? extends T> source) {
+        this(source, DataLoaderPrefetchPlan.DEFAULT_BUFFER_SIZE);
+    }
+
     public static <T> PrefetchingIterable<T> of(Iterable<? extends T> source, int bufferSize) {
         return new PrefetchingIterable<>(source, bufferSize);
     }
 
+    public static <T> PrefetchingIterable<T> of(Iterable<? extends T> source) {
+        return new PrefetchingIterable<>(source);
+    }
+
     public int bufferSize() {
         return bufferSize;
+    }
+
+    public Iterable<? extends T> source() {
+        return source;
+    }
+
+    public DataLoaderPrefetchPlan plan() {
+        return DataLoaderPrefetchPlan.enabled(bufferSize);
+    }
+
+    public static DataLoaderPrefetchPlan disabledPlan() {
+        return DataLoaderPrefetchPlan.disabled();
     }
 
     @Override

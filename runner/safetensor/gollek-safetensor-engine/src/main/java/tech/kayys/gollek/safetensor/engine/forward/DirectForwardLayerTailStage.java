@@ -15,19 +15,7 @@ final class DirectForwardLayerTailStage {
 
     static void run(DirectForwardLayerStageContext ctx, AccelTensor perLayerInput) {
         DirectForwardPerLayerInputs.applyResidual(
-                ctx.hiddenOut(),
-                ctx.hiddenShape(),
-                ctx.seqLen(),
-                ctx.config(),
-                ctx.arch(),
-                ctx.layerWeights(),
-                perLayerInput,
-                ctx.workspace(),
-                ctx.useMetalElementwise(),
-                ctx.useNativeElementwiseAdd(),
-                ctx.addOneRmsNorm(),
-                ctx.runtime(),
-                ctx.operators());
+                DirectForwardPerLayerResidualRequest.fromStage(ctx, perLayerInput));
         applyLayerScalar(ctx);
         if (ctx.verboseLayers() && perLayerInput != null) {
             logSegmentStats(ctx.hiddenOut(), ctx.hiddenShape(), "layer " + ctx.layerIdx() + " postPle");

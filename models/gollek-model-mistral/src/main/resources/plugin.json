@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "core",
-    "families": ["mistral"]
+    "families": ["mistral"],
+    "tokenizerKind": "sentencepiece"
   }
 }

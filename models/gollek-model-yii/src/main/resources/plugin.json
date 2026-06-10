@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "optional",
-    "families": ["yi", "yi_1_5"]
+    "families": ["yi", "yi_1_5"],
+    "tokenizerKind": "sentencepiece"
   }
 }

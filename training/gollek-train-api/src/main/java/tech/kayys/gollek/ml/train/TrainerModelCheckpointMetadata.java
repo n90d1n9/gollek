@@ -60,8 +60,10 @@ final class TrainerModelCheckpointMetadata {
         metadata.setProperty("modelParameterCount", Long.toString(expectedModel.parameterCount()));
         metadata.setProperty("modelParameterSignature", expectedModel.parameterSignature());
         if (checkpointFile != null && Files.isRegularFile(checkpointFile)) {
-            metadata.setProperty("modelCheckpointBytes", Long.toString(Files.size(checkpointFile)));
-            metadata.setProperty("modelCheckpointSha256", TrainerCheckpointIO.sha256Hex(checkpointFile));
+            TrainingReportArtifactFingerprint checkpointFingerprint =
+                    TrainingReportArtifactFingerprint.of(checkpointFile);
+            metadata.setProperty("modelCheckpointBytes", Long.toString(checkpointFingerprint.bytes()));
+            metadata.setProperty("modelCheckpointSha256", checkpointFingerprint.sha256());
         }
         TrainerCheckpointIO.writePropertiesAtomically(
                 metadataFile,

@@ -45,6 +45,18 @@ append_install_prewarm_models() {
     fi
 }
 
+apply_install_verify_m4_smoke_profile() {
+    VERIFY_FAST_PATHS="safetensor"
+    GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE=true
+    GOLLEK_INSTALL_VERIFY_FAST_REQUIRE_METAL=true
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET=m4-smoke
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_PROFILE=true
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL=true
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL_PATHS=true
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_REJECT_FALLBACK_PATHS=true
+    GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_TOKENS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_TOKENS:-3}"
+}
+
 if command -v /usr/libexec/java_home >/dev/null 2>&1; then
     JAVA_25_HOME="$(/usr/libexec/java_home -v 25 2>/dev/null || true)"
     if [ -n "$JAVA_25_HOME" ]; then
@@ -110,6 +122,13 @@ while [[ "$#" -gt 0 ]]; do
             VERIFY_FAST_ONLY=true
             VERIFY_FAST_PATHS="${1#*=}"
             ;;
+        --verify-fast-m4-smoke)
+            apply_install_verify_m4_smoke_profile
+            ;;
+        --verify-fast-m4-smoke-only)
+            VERIFY_FAST_ONLY=true
+            apply_install_verify_m4_smoke_profile
+            ;;
         --no-verify-fast) VERIFY_FAST_PATHS="" ;;
         -h|--help) 
             echo "Usage: $0 [options]"
@@ -132,8 +151,8 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --prewarm-plan [MODEL[,MODEL...]]"
             echo "                  Print resolved prewarm model refs without installing"
             echo "  --no-prewarm     Ignore GOLLEK_INSTALL_PREWARM_MODELS for this install"
-            echo "  --verify-fast[=auto|all|litert|gguf|gguf-compare]"
-            echo "                  Run installed LiteRT/GGUF Metal speed checks after install"
+            echo "  --verify-fast[=auto|all|litert|gguf|gguf-compare|safetensor|gemma4-litert]"
+            echo "                  Run installed LiteRT/GGUF/safetensor/Gemma4 LiteRT speed checks after install"
             echo "                  Can also be set with GOLLEK_INSTALL_VERIFY_FAST_PATHS"
             echo "                  Token counts can be tuned with"
             echo "                  GOLLEK_INSTALL_VERIFY_LITERT_MAX_TOKENS and"
@@ -145,6 +164,24 @@ while [[ "$#" -gt 0 ]]; do
             echo "                  GOLLEK_INSTALL_VERIFY_LITERT_WARM_{ENGINE_INIT,FIRST_CHUNK,TOTAL}_THRESHOLD_MS"
             echo "                  GGUF Java-vs-fallback compare can bound fallback timings with"
             echo "                  GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_FALLBACK_{PREFILL,DECODE}_THRESHOLD_MS"
+            echo "                  Safetensor profiling can be bounded with"
+            echo "                  GOLLEK_INSTALL_VERIFY_SAFETENSOR_{TOP_STAGE,PREFILL,DECODE,TPOT,ATTENTION,FFN,LOGITS}_THRESHOLD_MS"
+            echo "                  Safetensor aggregate regression checks can use"
+            echo "                  GOLLEK_INSTALL_VERIFY_SAFETENSOR_BASELINE_STAGES"
+            echo "                  (use latest with GOLLEK_INSTALL_VERIFY_SAFETENSOR_BASELINE_ROOT/NAME)"
+            echo "                  and GOLLEK_INSTALL_VERIFY_SAFETENSOR_{MAX_REGRESSION_PERCENT,MAX_REGRESSION_MS,MIN_BASELINE_MS}"
+            echo "                  plus GOLLEK_INSTALL_VERIFY_SAFETENSOR_FAIL_PRIMARY_SHIFT=true"
+            echo "                  and GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_PROFILE"
+            echo "                  plus GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL_PATHS"
+            echo "                  plus GOLLEK_INSTALL_VERIFY_SAFETENSOR_REJECT_FALLBACK_PATHS"
+            echo "                  (defaults true on macOS, false elsewhere)"
+            echo "                  Safetensor aggregate presets can be selected with"
+            echo "                  GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET=m4-smoke"
+            echo "                  Safetensor direct verification requires Metal on macOS;"
+            echo "                  set GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL=false"
+            echo "                  or GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL_PATHS=false"
+            echo "                  only for diagnostics. Aggregate Metal policy can be"
+            echo "                  tuned with GOLLEK_INSTALL_VERIFY_FAST_REQUIRE_METAL"
             echo "                  For fast repeated checks, set"
             echo "                  GOLLEK_INSTALL_VERIFY_LITERT_WARM_ONLY=true or"
             echo "                  GOLLEK_INSTALL_VERIFY_GGUF_WARM_ONLY=true"
@@ -161,7 +198,14 @@ while [[ "$#" -gt 0 ]]; do
             echo "                  GGUF verification requires first-repeat prompt-cache hits by"
             echo "                  default; set GOLLEK_INSTALL_VERIFY_GGUF_PROMPT_CACHE=false"
             echo "                  only for diagnostic prompts/models that cannot cache"
-            echo "  --verify-fast-only[=auto|all|litert|gguf|gguf-compare]"
+            echo "  --verify-fast-m4-smoke"
+            echo "                  After install, run strict aggregate safetensor m4-smoke"
+            echo "                  verification with Metal, Metal path proof, and fallback"
+            echo "                  path rejection enabled"
+            echo "  --verify-fast-m4-smoke-only"
+            echo "                  Run the strict installed safetensor m4-smoke verification"
+            echo "                  and exit without building"
+            echo "  --verify-fast-only[=auto|all|litert|gguf|gguf-compare|safetensor|gemma4-litert]"
             echo "                  Verify the already-installed CLI and exit without building"
             echo "  --no-verify-fast Ignore GOLLEK_INSTALL_VERIFY_FAST_PATHS for this install"
             echo "  GOLLEK_ALLOW_METAL_BUILD_FAILURE=true"
@@ -617,6 +661,7 @@ install_verify_should_run() {
             case "$target" in
                 litert) install_verify_model_present "${GOLLEK_INSTALL_VERIFY_LITERT_MODEL:-7c51c9}" ;;
                 gguf) install_verify_model_present "${GOLLEK_INSTALL_VERIFY_GGUF_MODEL:-b71c9d}" ;;
+                safetensor) install_verify_model_present "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MODEL:-6f469a}" ;;
                 *) return 1 ;;
             esac
             ;;
@@ -628,7 +673,7 @@ install_verify_should_run() {
             ;;
         all)
             case "$target" in
-                litert|gguf|gguf-compare) return 0 ;;
+                litert|gguf|gguf-compare|safetensor) return 0 ;;
                 *) return 1 ;;
             esac
             ;;
@@ -653,6 +698,22 @@ install_verify_aggregate_enabled() {
     esac
 }
 
+install_verify_safetensor_require_metal_paths() {
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL_PATHS:-auto}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) return 0 ;;
+        0|false|no|off) return 1 ;;
+        *) [ "$(uname -s)" = "Darwin" ] ;;
+    esac
+}
+
+install_verify_safetensor_require_metal_paths_value() {
+    if install_verify_safetensor_require_metal_paths; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
 verify_installed_fast_paths() {
     if [ -z "$VERIFY_FAST_PATHS" ]; then
         return 0
@@ -670,11 +731,15 @@ verify_installed_fast_paths() {
     local litert_bench="${GOLLEK_INSTALL_VERIFY_LITERT_BENCH:-${PROJECT_ROOT}/scripts/bench-litert-fast-run.sh}"
     local gguf_bench="${GOLLEK_INSTALL_VERIFY_GGUF_BENCH:-${PROJECT_ROOT}/scripts/bench-gguf-fast-run.sh}"
     local gguf_compare_bench="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_BENCH:-${PROJECT_ROOT}/scripts/bench-gguf-engine-compare.sh}"
+    local safetensor_bench="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_BENCH:-${PROJECT_ROOT}/scripts/bench-safetensor-inference.sh}"
+    local safetensor_preset_script="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET_SCRIPT:-${PROJECT_ROOT}/scripts/safetensor-performance-presets.sh}"
+    local gemma4_litert_smoke="${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_SMOKE:-${PROJECT_ROOT}/scripts/smoke-gemma4-litert-warm.sh}"
     if install_verify_aggregate_enabled; then
         local aggregate_bench="${GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE_BENCH:-${PROJECT_ROOT}/scripts/verify-fast-speed-gates.sh}"
         local aggregate_summary_args=()
         local aggregate_keep_daemon_args=()
         local aggregate_slowest_args=()
+        local aggregate_metal_args=()
         if [ -n "${GOLLEK_INSTALL_VERIFY_FAST_SUMMARY_DIR:-}" ]; then
             aggregate_summary_args+=(--summary-dir "${GOLLEK_INSTALL_VERIFY_FAST_SUMMARY_DIR}")
         fi
@@ -684,10 +749,15 @@ verify_installed_fast_paths() {
         if install_verify_keep_daemon; then
             aggregate_keep_daemon_args+=(--keep-daemon)
         fi
+        case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_FAST_REQUIRE_METAL:-auto}" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|on) aggregate_metal_args+=(--require-metal) ;;
+            0|false|no|off) aggregate_metal_args+=(--no-require-metal) ;;
+        esac
         echo -e "${BLUE}>>> Verifying installed fast inference speed with aggregate gate...${NC}"
         GOLLEK_VERIFY_FAST_LITERT_BENCH="$litert_bench" \
         GOLLEK_VERIFY_FAST_GGUF_BENCH="$gguf_bench" \
         GOLLEK_VERIFY_FAST_GGUF_COMPARE_BENCH="$gguf_compare_bench" \
+        GOLLEK_VERIFY_FAST_SAFETENSOR_BENCH="$safetensor_bench" \
         GOLLEK_VERIFY_PROMPT="${GOLLEK_INSTALL_VERIFY_PROMPT:-where is jakarta}" \
         GOLLEK_VERIFY_LITERT_EXPECTED="${GOLLEK_INSTALL_VERIFY_LITERT_EXPECTED:-Jakarta|Indonesia}" \
         GOLLEK_VERIFY_GGUF_EXPECTED="${GOLLEK_INSTALL_VERIFY_GGUF_EXPECTED:-Indonesia|Jakarta}" \
@@ -717,12 +787,34 @@ verify_installed_fast_paths() {
         GOLLEK_VERIFY_GGUF_COMPARE_JAVA_CONFIG_REGEX="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_CONFIG_REGEX:-type=[^,]+, layers=[1-9][0-9]*, hidden=[1-9][0-9]*, heads=[1-9][0-9]*/[1-9][0-9]*, headDim=[1-9][0-9]*, context=[1-9][0-9]*, vocab=[1-9][0-9]*}" \
         GOLLEK_VERIFY_GGUF_COMPARE_JAVA_PROBE_REGEX="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_PROBE_REGEX:-}" \
         GOLLEK_VERIFY_GGUF_COMPARE_JAVA_REFUSAL="${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_REFUSAL:-true}" \
+        GOLLEK_VERIFY_SAFETENSOR_MAX_TOKENS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_TOKENS:-2}" \
+        GOLLEK_VERIFY_SAFETENSOR_PRESET="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_PRESET_SCRIPT="$safetensor_preset_script" \
+        GOLLEK_VERIFY_SAFETENSOR_REQUIRE_PROFILE="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_PROFILE:-true}" \
+        GOLLEK_VERIFY_SAFETENSOR_REQUIRE_METAL_PATHS="$(install_verify_safetensor_require_metal_paths_value)" \
+        GOLLEK_VERIFY_SAFETENSOR_REJECT_FALLBACK_PATHS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REJECT_FALLBACK_PATHS:-false}" \
+        GOLLEK_VERIFY_SAFETENSOR_TOP_STAGE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TOP_STAGE_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_PREFILL_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PREFILL_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_DECODE_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_DECODE_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_TPOT_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TPOT_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_ATTENTION_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_ATTENTION_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_FFN_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_FFN_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_LOGITS_THRESHOLD_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_LOGITS_THRESHOLD_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_BASELINE_STAGES="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_BASELINE_STAGES:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_BASELINE_ROOT="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_BASELINE_ROOT:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_BASELINE_NAME="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_BASELINE_NAME:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_MAX_REGRESSION_PERCENT="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_REGRESSION_PERCENT:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_MAX_REGRESSION_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_REGRESSION_MS:-}" \
+        GOLLEK_VERIFY_SAFETENSOR_MIN_BASELINE_MS="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MIN_BASELINE_MS:-1}" \
+        GOLLEK_VERIFY_SAFETENSOR_FAIL_PRIMARY_SHIFT="${GOLLEK_INSTALL_VERIFY_SAFETENSOR_FAIL_PRIMARY_SHIFT:-false}" \
         GOLLEK_VERIFY_CONTINUE_ON_FAILURE="${GOLLEK_INSTALL_VERIFY_FAST_CONTINUE_ON_FAILURE:-false}" \
             bash "$aggregate_bench" \
                 --only "$VERIFY_FAST_PATHS" \
                 --gollek-bin "$GOLLEK_CLI_BIN" \
                 --litert-model "${GOLLEK_INSTALL_VERIFY_LITERT_MODEL:-7c51c9}" \
                 --gguf-model "${GOLLEK_INSTALL_VERIFY_GGUF_MODEL:-b71c9d}" \
+                --safetensor-model "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MODEL:-6f469a}" \
+                "${aggregate_metal_args[@]}" \
                 "${aggregate_summary_args[@]}" \
                 "${aggregate_slowest_args[@]}" \
                 "${aggregate_keep_daemon_args[@]}"
@@ -737,6 +829,13 @@ verify_installed_fast_paths() {
     local gguf_compare_fallback_threshold_args=()
     local gguf_compare_java_refusal_args=(--verify-java-refusal)
     local gguf_compare_summary_args=()
+    local safetensor_profile_args=(--require-profile)
+    local safetensor_metal_args=()
+    local safetensor_metal_path_args=()
+    local safetensor_fallback_path_args=()
+    local safetensor_threshold_args=()
+    local safetensor_summary_args=()
+    local safetensor_preset_args=()
     if install_verify_keep_daemon; then
         keep_daemon_args=(--keep-daemon)
     fi
@@ -779,6 +878,47 @@ verify_installed_fast_paths() {
     case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_JAVA_REFUSAL:-true}" | tr '[:upper:]' '[:lower:]')" in
         0|false|no|off) gguf_compare_java_refusal_args=(--no-verify-java-refusal) ;;
     esac
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_PROFILE:-true}" | tr '[:upper:]' '[:lower:]')" in
+        0|false|no|off) safetensor_profile_args=() ;;
+    esac
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REQUIRE_METAL:-auto}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) safetensor_metal_args+=(--require-metal) ;;
+        0|false|no|off) ;;
+        *) [ "$(uname -s)" = "Darwin" ] && safetensor_metal_args+=(--require-metal) ;;
+    esac
+    if install_verify_safetensor_require_metal_paths; then
+        safetensor_metal_path_args+=(--require-metal-paths)
+    fi
+    case "$(printf '%s' "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_REJECT_FALLBACK_PATHS:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) safetensor_fallback_path_args+=(--reject-fallback-paths) ;;
+    esac
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TOP_STAGE_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-top-stage-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TOP_STAGE_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PREFILL_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-prefill-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PREFILL_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_DECODE_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-decode-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_DECODE_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TPOT_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-tpot-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_TPOT_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_ATTENTION_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-attention-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_ATTENTION_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_FFN_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-ffn-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_FFN_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_LOGITS_THRESHOLD_MS:-}" ]; then
+        safetensor_threshold_args+=(--max-logits-ms "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_LOGITS_THRESHOLD_MS}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_SUMMARY_FILE:-}" ]; then
+        safetensor_summary_args+=(--summary-file "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_SUMMARY_FILE}")
+    fi
+    if [ -n "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET:-}" ]; then
+        safetensor_preset_args+=(--preset "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_PRESET}")
+    fi
     echo -e "${BLUE}>>> Verifying installed fast inference speed...${NC}"
     if install_verify_should_run "litert"; then
         ran_any=true
@@ -792,6 +932,23 @@ verify_installed_fast_paths() {
             "${litert_profile_threshold_args[@]}" \
             "${litert_warm_only_args[@]}" \
             "${keep_daemon_args[@]}"
+    fi
+    if install_verify_should_run "gemma4-litert"; then
+        ran_any=true
+        local gemma4_litert_keep_daemon_args=()
+        if install_verify_keep_daemon; then
+            gemma4_litert_keep_daemon_args=(--keep-daemon)
+        fi
+        bash "$gemma4_litert_smoke" \
+            --gollek-bin "$GOLLEK_CLI_BIN" \
+            --model "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_MODEL:-0576e9}" \
+            --prompt "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_PROMPT:-${GOLLEK_INSTALL_VERIFY_PROMPT:-what is jakarta}}" \
+            --expected "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_EXPECTED:-Jakarta|Indonesia}" \
+            --max-tokens "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_MAX_TOKENS:-30}" \
+            --warm-threshold-ms "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_WARM_THRESHOLD_MS:-1000}" \
+            --warm-first-chunk-threshold-ms "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_WARM_FIRST_CHUNK_THRESHOLD_MS:-250}" \
+            --warm-profile-total-threshold-ms "${GOLLEK_INSTALL_VERIFY_GEMMA4_LITERT_WARM_TOTAL_THRESHOLD_MS:-1000}" \
+            "${gemma4_litert_keep_daemon_args[@]}"
     fi
     if install_verify_should_run "gguf"; then
         ran_any=true
@@ -820,8 +977,28 @@ verify_installed_fast_paths() {
                 "${gguf_compare_summary_args[@]}" \
                 "${gguf_compare_java_refusal_args[@]}"
     fi
+    if install_verify_should_run "safetensor"; then
+        ran_any=true
+        GOLLEK_BENCH_SAFETENSOR_PRESET_SCRIPT="$safetensor_preset_script" \
+        bash "$safetensor_bench" \
+            --gollek-bin "$GOLLEK_CLI_BIN" \
+            --model "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MODEL:-6f469a}" \
+            --out-dir "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_OUT_DIR:-${HOME}/.gollek/benchmarks/safetensor/install-verify}" \
+            --label "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_LABEL:-install-verify-safetensor}" \
+            --det-prompt "${GOLLEK_INSTALL_VERIFY_PROMPT:-where is jakarta}" \
+            --max-tokens "${GOLLEK_INSTALL_VERIFY_SAFETENSOR_MAX_TOKENS:-2}" \
+            "${safetensor_preset_args[@]}" \
+            --quick \
+            --profile \
+            "${safetensor_summary_args[@]}" \
+            "${safetensor_profile_args[@]}" \
+            "${safetensor_metal_args[@]}" \
+            "${safetensor_metal_path_args[@]}" \
+            "${safetensor_fallback_path_args[@]}" \
+            "${safetensor_threshold_args[@]}"
+    fi
     if [ "$ran_any" != "true" ]; then
-        echo -e "${YELLOW}⚠ No installed LiteRT/GGUF fast models matched --verify-fast=${VERIFY_FAST_PATHS}; skipping verification.${NC}"
+        echo -e "${YELLOW}⚠ No installed LiteRT/GGUF/safetensor/Gemma4 LiteRT fast models matched --verify-fast=${VERIFY_FAST_PATHS}; skipping verification.${NC}"
     fi
 }
 
@@ -1559,13 +1736,9 @@ mkdir -p "\$HOME/.gollek/logs"
 # Keep the official LiteRT-LM engine warm between repeated local run calls.
 # Set GOLLEK_LITERT_FAST_DAEMON=false to force one-shot process behavior.
 : "\${GOLLEK_LITERT_FAST_DAEMON:=true}"
-# LiteRT-LM survives as a long-lived macOS service under launchctl. The nohup
-# path remains available for diagnostics through GOLLEK_LITERT_FAST_DAEMON_LAUNCHER.
-if [ "\$(uname -s)" = "Darwin" ]; then
-    : "\${GOLLEK_LITERT_FAST_DAEMON_LAUNCHER:=launchctl}"
-else
-    : "\${GOLLEK_LITERT_FAST_DAEMON_LAUNCHER:=nohup}"
-fi
+# LiteRT-LM uses auto by default: launchctl on macOS for a truly detached
+# warmed daemon, with nohup fallback when launchctl is unavailable.
+: "\${GOLLEK_LITERT_FAST_DAEMON_LAUNCHER:=auto}"
 # Short prompts should not force a 2048-token LiteRT-LM engine. Dynamic sizing
 # keeps Metal warm latency low while preserving an env override for diagnostics.
 : "\${GOLLEK_LITERT_FAST_DYNAMIC_ENGINE_TOKENS:=true}"
@@ -1669,14 +1842,73 @@ gollek_gguf_model_path() {
     esac
 }
 
-gollek_index_format_for_ref() {
-    local ref index_path
-    ref="\${1:-}"
-    index_path="\$HOME/.gollek/models/index.json"
-    if [ -z "\$ref" ] || [ ! -f "\$index_path" ]; then
+gollek_sha256() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{ print \$1 }'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{ print \$1 }'
+    else
         return 1
     fi
-    awk -v ref="\$ref" '
+}
+
+gollek_normalized_path_for_cache() {
+    local path dir base
+    path="\${1:-}"
+    [ -n "\$path" ] || return 1
+    dir="\$(dirname "\$path" 2>/dev/null || true)"
+    base="\$(basename "\$path" 2>/dev/null || true)"
+    if [ -n "\$dir" ] && [ -n "\$base" ] && [ -d "\$dir" ]; then
+        printf '%s/%s' "\$(cd "\$dir" 2>/dev/null && pwd -P)" "\$base"
+    else
+        printf '%s' "\$path"
+    fi
+}
+
+gollek_gemma4_equivalent_key() {
+    awk '
+        {
+            value = tolower(\$0)
+            gsub(/__/, "/", value)
+            gsub(/\\\\/, "/", value)
+            gsub(/[.](litertlm|litert|tflite|tfl|task|gguf|safetensors?|bin)$/, " ", value)
+            gsub(/qat/, " ", value)
+            gsub(/mobile/, " ", value)
+            gsub(/transformers/, " ", value)
+            gsub(/safetensor/, " ", value)
+            gsub(/safetensors/, " ", value)
+            gsub(/google/, " ", value)
+            gsub(/litert/, " ", value)
+            gsub(/community/, " ", value)
+            gsub(/qualcomm/, " ", value)
+            count = split(value, tokens, /[^a-z0-9]+/)
+            for (i = 1; i <= count; i++) {
+                if (tokens[i] != "") {
+                    printf "%s", tokens[i]
+                }
+            }
+        }
+    '
+}
+
+gollek_gemma4_litert_cache_key() {
+    local requested model_path equivalent
+    requested="\${1:-}"
+    model_path="\${2:-}"
+    [ -n "\$model_path" ] || return 1
+    equivalent="\$(printf '%s %s' "\$requested" "\$model_path" | gollek_gemma4_equivalent_key)"
+    printf '%s\n%s\n%s' "\$requested" "\$model_path" "\$equivalent" | gollek_sha256
+}
+
+gollek_index_field_for_ref() {
+    local ref field index_path
+    ref="\${1:-}"
+    field="\${2:-}"
+    index_path="\$HOME/.gollek/models/index.json"
+    if [ -z "\$ref" ] || [ -z "\$field" ] || [ ! -f "\$index_path" ]; then
+        return 1
+    fi
+    awk -v ref="\$ref" -v field="\$field" '
         function json_value(line, value) {
             value = line
             sub(/^[^:]*:[[:space:]]*"/, "", value)
@@ -1696,7 +1928,7 @@ gollek_index_format_for_ref() {
                     found = 1
                 }
             }
-            if (found && lower ~ /"format"[[:space:]]*:/) {
+            if (found && lower ~ "\"" tolower(field) "\"[[:space:]]*:") {
                 print json_value(\$0)
                 exit 0
             }
@@ -1705,6 +1937,35 @@ gollek_index_format_for_ref() {
             }
         }
     ' "\$index_path"
+}
+
+gollek_index_format_for_ref() {
+    gollek_index_field_for_ref "\${1:-}" "format"
+}
+
+gollek_index_path_for_ref() {
+    gollek_index_field_for_ref "\${1:-}" "path"
+}
+
+gollek_cached_gemma4_litert_route_requested() {
+    local model model_path normalized_model_path route_cache cache_key alt_cache_key
+    model="\$(gollek_model_arg "\$@" 2>/dev/null || true)"
+    [ -n "\$model" ] || return 1
+    model_path="\$(gollek_index_path_for_ref "\$model" 2>/dev/null || true)"
+    [ -n "\$model_path" ] || model_path="\$model"
+    normalized_model_path="\$(gollek_normalized_path_for_cache "\$model_path" 2>/dev/null || true)"
+    route_cache="\$HOME/.gollek/cache/gemma4-mobile-qat-litert-routes.tsv"
+    [ -n "\$normalized_model_path" ] && [ -f "\$route_cache" ] || return 1
+    cache_key="\$(gollek_gemma4_litert_cache_key "\$normalized_model_path" "\$normalized_model_path" 2>/dev/null || true)"
+    alt_cache_key="\$(gollek_gemma4_litert_cache_key "\$model" "\$normalized_model_path" 2>/dev/null || true)"
+    [ -n "\$cache_key" ] || [ -n "\$alt_cache_key" ] || return 1
+    awk -F '\t' -v cache_key="\$cache_key" -v alt_cache_key="\$alt_cache_key" '
+        (\$1 == cache_key || (alt_cache_key != "" && \$1 == alt_cache_key)) && \$2 ~ /[.]litertlm$/ {
+            found = 1
+            exit 0
+        }
+        END { exit found ? 0 : 1 }
+    ' "\$route_cache"
 }
 
 gollek_litert_requested() {
@@ -1721,6 +1982,9 @@ gollek_litert_requested() {
     esac
     model="\$(gollek_model_arg "\$@" 2>/dev/null || true)"
     if [ -n "\$model" ] && gollek_litert_model_path "\$model"; then
+        return 0
+    fi
+    if gollek_cached_gemma4_litert_route_requested "\$@"; then
         return 0
     fi
     normalized="\$(gollek_lower "\$(gollek_index_format_for_ref "\$model" 2>/dev/null || true)")"
@@ -1780,6 +2044,9 @@ gollek_safetensor_requested() {
         gguf|native|llamacpp|llama.cpp|llama-cpp|litert|litertlm|lite-rt|tflite|task) return 1 ;;
     esac
     model="\$(gollek_model_arg "\$@" 2>/dev/null || true)"
+    if gollek_cached_gemma4_litert_route_requested "\$@"; then
+        return 1
+    fi
     if [ -n "\$model" ] && gollek_safetensor_model_path "\$model"; then
         return 0
     fi

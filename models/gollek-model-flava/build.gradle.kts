@@ -21,9 +21,6 @@ dependencies {
     implementation(project(":spi:gollek-spi-model"))
     implementation(group = "jakarta.enterprise", name = "jakarta.enterprise.cdi-api")
     implementation(group = "jakarta.inject", name = "jakarta.inject-api")
-
-    testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
-    testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher", version = "1.10.2")
 }
 
 publishing {
@@ -35,8 +32,4 @@ publishing {
     repositories {
         mavenLocal()
     }
-}
-
-tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
 }

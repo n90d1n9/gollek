@@ -29,6 +29,7 @@ class LiteRTGemmaNativeRunnerHeuristicsTest {
         System.clearProperty(LiteRTLmJvmBridge.BACKEND_PROPERTY);
         System.clearProperty(LiteRTLmJvmBridge.TIMEOUT_SECONDS_PROPERTY);
         System.clearProperty(LiteRTLmJvmBridge.MAX_NUM_TOKENS_PROPERTY);
+        System.clearProperty(LiteRTLmJvmBridge.NORMALIZE_SHORT_QUESTIONS_PROPERTY);
         System.clearProperty(LiteRTLmJvmBridge.ENABLE_SPECULATIVE_DECODING_PROPERTY);
     }
 
@@ -107,6 +108,22 @@ class LiteRTGemmaNativeRunnerHeuristicsTest {
         System.setProperty(LiteRTLmJvmBridge.BACKEND_PROPERTY, "metal");
 
         assertEquals("GPU", LiteRTLmJvmBridge.backendName(false));
+    }
+
+    @Test
+    void officialLiteRtLmJvmBridgeNormalizesBareQuestionsForChatQuality() {
+        assertEquals(
+                "Answer directly and concisely in one or two sentences. Do not ask a clarification question. "
+                        + "If a term is ambiguous, answer the most common meaning first and mention common alternatives briefly.\n"
+                        + "Question: What is jakarta?",
+                LiteRTLmJvmBridge.promptForModel("what is jakarta"));
+    }
+
+    @Test
+    void officialLiteRtLmJvmBridgePromptNormalizationCanBeDisabled() {
+        System.setProperty(LiteRTLmJvmBridge.NORMALIZE_SHORT_QUESTIONS_PROPERTY, "false");
+
+        assertEquals("what is jakarta", LiteRTLmJvmBridge.promptForModel("what is jakarta"));
     }
 
     @Test

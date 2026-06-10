@@ -40,6 +40,13 @@ final class DirectForwardGatedFfnFastPaths {
             DirectInferenceProfiler.recordFfnPath("matvec-gated-ffn:skip:attempt_gate");
         }
 
+        if (traceFfnFastPath || DirectForwardMetalMatvecRowsGatedFfn.shouldAttempt(request)) {
+            AccelTensor metalMatvecRowsFfn = DirectForwardMetalMatvecRowsGatedFfn.tryFfn(request);
+            if (metalMatvecRowsFfn != null) {
+                return metalMatvecRowsFfn;
+            }
+        }
+
         String fusedSkipReason = traceFfnFastPath
                 ? null
                 : DirectForwardMetalFusedGatedFfn.skipReason(

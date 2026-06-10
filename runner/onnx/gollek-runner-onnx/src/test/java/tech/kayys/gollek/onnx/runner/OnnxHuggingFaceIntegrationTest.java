@@ -4,8 +4,8 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.runner.RunnerConfiguration;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.Message;
+import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ArtifactLocation;
-import tech.kayys.gollek.spi.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModelManifest;
 
 import java.lang.reflect.Field;

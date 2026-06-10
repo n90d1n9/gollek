@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["tekken", "hf-bpe"],
     "families": ["ministral3", "ministral_3", "ministral-3"]
   }
 }

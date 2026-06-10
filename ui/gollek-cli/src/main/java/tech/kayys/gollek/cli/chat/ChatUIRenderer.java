@@ -141,7 +141,7 @@ public class ChatUIRenderer {
         }
         if (tpotMs != null)
             System.out.printf(DIM + "  token latency  = %9.2f ms/token" + RESET + "%n", tpotMs);
-        if (Boolean.getBoolean("gollek.profile")) {
+        if (Boolean.getBoolean("gollek.profile") || hasProfileBreakdown(metadata)) {
             printProfileBreakdown(metadata);
         } else {
             printHostProfile(metadata);
@@ -150,6 +150,12 @@ public class ChatUIRenderer {
     }
 
     private void printProfileBreakdown(Map<String, Object> metadata) {
+        if (isOnnxProfile(metadata)) {
+            printOnnxProfileBreakdown(metadata);
+            printHostProfile(metadata);
+            return;
+        }
+
         Double prefillMs = metaDouble(metadata, "profile_prefill_ms");
         Double decodeMs = metaDouble(metadata, "profile_decode_ms");
         Double samplingMs = metaDouble(metadata, "profile_sampling_ms");
@@ -159,6 +165,10 @@ public class ChatUIRenderer {
         Double ffnMs = metaDouble(metadata, "profile_ffn_ms");
         Double logitsMs = metaDouble(metadata, "profile_logits_ms");
         Double logitsCopyMs = metaDouble(metadata, "profile_logits_materialization_ms");
+        String bottleneckStage = metaString(metadata, "profile_bottleneck_stage");
+        Double bottleneckValueMs = metaDouble(metadata, "profile_bottleneck_value_ms");
+        Double bottleneckSharePercent = metaDouble(metadata, "profile_bottleneck_share_percent");
+        String bottleneckAdvice = metaString(metadata, "profile_bottleneck_advice");
 
         boolean hasBreakdown = prefillMs != null || decodeMs != null || samplingMs != null
                 || attentionMs != null || ffnMs != null || logitsMs != null || logitsCopyMs != null;
@@ -189,7 +199,123 @@ public class ChatUIRenderer {
             System.out.printf(DIM + "    logits        = %9.2f ms" + RESET + "%n", logitsMs);
         if (logitsCopyMs != null)
             System.out.printf(DIM + "    logits copy   = %9.2f ms" + RESET + "%n", logitsCopyMs);
+        if (bottleneckStage != null && !bottleneckStage.isBlank() && bottleneckValueMs != null) {
+            if (bottleneckSharePercent != null) {
+                System.out.printf(DIM + "    bottleneck    = %s, %.2f ms (%.1f%%)" + RESET + "%n",
+                        bottleneckStage, bottleneckValueMs, bottleneckSharePercent);
+            } else {
+                System.out.printf(DIM + "    bottleneck    = %s, %.2f ms" + RESET + "%n",
+                        bottleneckStage, bottleneckValueMs);
+            }
+        }
+        if (bottleneckAdvice != null && !bottleneckAdvice.isBlank()) {
+            System.out.println(YELLOW + "    profile advice = " + bottleneckAdvice + RESET);
+        }
         printHostProfile(metadata);
+    }
+
+    private void printOnnxProfileBreakdown(Map<String, Object> metadata) {
+        Double tokenizeMs = metaDouble(metadata, "profile_onnx_tokenize_ms");
+        Double inputPrepareMs = metaDouble(metadata, "profile_onnx_input_prepare_ms");
+        Double prefillRunMs = metaDouble(metadata, "profile_onnx_prefill_run_ms");
+        Double decodeRunMs = metaDouble(metadata, "profile_onnx_decode_run_ms");
+        Double ortRunMs = metaDouble(metadata, "profile_onnx_ort_run_ms");
+        Double logitsSelectMs = metaDouble(metadata, "profile_onnx_logits_select_ms");
+        Double samplingMs = metaDouble(metadata, "profile_onnx_sampling_ms");
+        Double finalDecodeMs = metaDouble(metadata, "profile_onnx_final_decode_ms");
+        Double generationMs = metaDouble(metadata, "profile_onnx_generation_ms");
+        Double profiledMs = metaDouble(metadata, "profile_onnx_profiled_ms");
+        Double unprofiledMs = metaDouble(metadata, "profile_onnx_unprofiled_ms");
+        String primaryStage = metaString(metadata, "profile_onnx_primary_stage");
+        Double primaryValueMs = metaDouble(metadata, "profile_onnx_primary_value_ms");
+        Double primarySharePercent = metaDouble(metadata, "profile_onnx_primary_share_percent");
+        Integer prefillSteps = metaInt(metadata, "profile_onnx_prefill_steps");
+        Integer decodeSteps = metaInt(metadata, "profile_onnx_decode_steps");
+        String backend = metaString(metadata, "profile_backend");
+        String workspace = metaString(metadata, "profile_onnx_workspace");
+        String inputTensorCache = metaString(metadata, "profile_onnx_input_tensor_cache");
+        String scalarTensorCache = metaString(metadata, "profile_onnx_scalar_tensor_cache");
+
+        boolean hasBreakdown = tokenizeMs != null || inputPrepareMs != null || prefillRunMs != null
+                || decodeRunMs != null || ortRunMs != null || logitsSelectMs != null || samplingMs != null
+                || finalDecodeMs != null;
+        if (!hasBreakdown) {
+            return;
+        }
+
+        System.out.println(DIM + "  onnx profile:" + RESET);
+        if (backend != null && !backend.isBlank()) {
+            System.out.printf(DIM + "    backend       = %9s" + RESET + "%n", backend);
+        }
+        if (tokenizeMs != null)
+            System.out.printf(DIM + "    tokenize      = %9.2f ms" + RESET + "%n", tokenizeMs);
+        if (inputPrepareMs != null)
+            System.out.printf(DIM + "    input prep    = %9.2f ms" + RESET + "%n", inputPrepareMs);
+        if (prefillRunMs != null)
+            System.out.printf(DIM + "    prefill run   = %9.2f ms" + RESET + "%n", prefillRunMs);
+        if (decodeRunMs != null)
+            System.out.printf(DIM + "    decode run    = %9.2f ms" + RESET + "%n", decodeRunMs);
+        if (ortRunMs != null)
+            System.out.printf(DIM + "    ort run       = %9.2f ms" + RESET + "%n", ortRunMs);
+        if (logitsSelectMs != null)
+            System.out.printf(DIM + "    logits select = %9.2f ms" + RESET + "%n", logitsSelectMs);
+        if (samplingMs != null)
+            System.out.printf(DIM + "    sampling      = %9.2f ms" + RESET + "%n", samplingMs);
+        if (finalDecodeMs != null)
+            System.out.printf(DIM + "    final decode  = %9.2f ms" + RESET + "%n", finalDecodeMs);
+        if (generationMs != null)
+            System.out.printf(DIM + "    generation    = %9.2f ms" + RESET + "%n", generationMs);
+        if (profiledMs != null)
+            System.out.printf(DIM + "    profiled      = %9.2f ms" + RESET + "%n", profiledMs);
+        if (unprofiledMs != null && unprofiledMs > 0.5d)
+            System.out.printf(DIM + "    unprofiled    = %9.2f ms" + RESET + "%n", unprofiledMs);
+        if (primaryStage != null && !primaryStage.isBlank() && primaryValueMs != null) {
+            if (primarySharePercent != null) {
+                System.out.printf(DIM + "    primary       = %s, %.2f ms (%.1f%%)" + RESET + "%n",
+                        primaryStage, primaryValueMs, primarySharePercent);
+            } else {
+                System.out.printf(DIM + "    primary       = %s, %.2f ms" + RESET + "%n",
+                        primaryStage, primaryValueMs);
+            }
+        }
+        if (prefillSteps != null || decodeSteps != null) {
+            System.out.printf(DIM + "    steps         = %9s" + RESET + "%n",
+                    profileStepSummary(prefillSteps, decodeSteps));
+        }
+        if (workspace != null && !workspace.isBlank()) {
+            System.out.printf(DIM + "    workspace     = %9s" + RESET + "%n", workspace);
+        }
+        if (inputTensorCache != null && !inputTensorCache.isBlank()) {
+            System.out.printf(DIM + "    input cache   = %9s" + RESET + "%n", inputTensorCache);
+        }
+        if (scalarTensorCache != null && !scalarTensorCache.isBlank()) {
+            System.out.printf(DIM + "    scalar cache  = %9s" + RESET + "%n", scalarTensorCache);
+        }
+    }
+
+    private static boolean isOnnxProfile(Map<String, Object> metadata) {
+        return "onnx".equals(metaString(metadata, "profile_mode"))
+                || metadata.containsKey("profile_onnx_ort_run_ms")
+                || metadata.containsKey("profile_onnx_prefill_run_ms")
+                || metadata.containsKey("profile_onnx_decode_run_ms");
+    }
+
+    private static boolean hasProfileBreakdown(Map<String, Object> metadata) {
+        return isOnnxProfile(metadata)
+                || metadata.containsKey("profile_prefill_ms")
+                || metadata.containsKey("profile_decode_ms")
+                || metadata.containsKey("profile_sampling_ms")
+                || metadata.containsKey("profile_attention_ms")
+                || metadata.containsKey("profile_ffn_ms")
+                || metadata.containsKey("profile_logits_ms")
+                || metadata.containsKey("profile_logits_materialization_ms")
+                || metadata.containsKey("profile_bottleneck_stage");
+    }
+
+    private static String profileStepSummary(Integer prefillSteps, Integer decodeSteps) {
+        int prefill = prefillSteps == null ? 0 : Math.max(0, prefillSteps);
+        int decode = decodeSteps == null ? 0 : Math.max(0, decodeSteps);
+        return String.format(java.util.Locale.ROOT, "prefill=%d decode=%d", prefill, decode);
     }
 
     private void printHostProfile(Map<String, Object> metadata) {

@@ -65,6 +65,18 @@ class DataLoaderTest {
     }
 
     @Test
+    void batchRejectsInvalidTensorsAtConstruction() {
+        GradTensor tensor = GradTensor.of(new float[] {1f, 2f}, 2, 1);
+
+        assertThrows(NullPointerException.class, () -> new DataLoader.Batch(null, tensor));
+        assertThrows(NullPointerException.class, () -> new DataLoader.Batch(tensor, null));
+        assertThrows(IllegalArgumentException.class, () -> new DataLoader.Batch(GradTensor.scalar(1f), tensor));
+        assertThrows(IllegalArgumentException.class, () -> new DataLoader.Batch(
+                GradTensor.of(new float[] {1f, 2f, 3f}, 3, 1),
+                tensor));
+    }
+
+    @Test
     void genericDataLoaderSeedMakesShuffleDeterministicAndSurvivesMap() {
         Dataset<Integer> dataset = datasetOf(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9));
         DataLoader<Integer> first = new DataLoader<>(dataset, 3, true, false, 123L);
@@ -287,6 +299,22 @@ class DataLoaderTest {
                 .subsetSampler(6)
                 .build();
         assertThrows(IllegalArgumentException.class, invalidSubset::numBatches);
+
+        IndexSampler invalidSampleCount = new IndexSampler() {
+            @Override
+            public List<Integer> sample(int datasetSize) {
+                return List.of();
+            }
+
+            @Override
+            public int sampleCount(int datasetSize) {
+                return -1;
+            }
+        };
+        DataLoader<Integer> invalidSampler = DataLoader.builder(dataset)
+                .sampler(invalidSampleCount)
+                .build();
+        assertThrows(IllegalArgumentException.class, invalidSampler::numBatches);
     }
 
     @Test
@@ -340,13 +368,42 @@ class DataLoaderTest {
 
         List<List<Integer>> batches = new ArrayList<>();
         try (PrefetchingIterable<List<Integer>> prefetched = loader.prefetch(2)) {
+            DataLoaderPrefetchPlan plan = prefetched.plan();
+            assertTrue(plan.enabled());
+            assertEquals(2, plan.bufferSize());
+            assertEquals(1, plan.workerCount());
+            assertEquals(2, plan.maxBufferedItems());
+            assertTrue(plan.summary().contains("bufferSize=2"));
+            Map<String, Object> metadata = plan.toMetadata("train.loader.prefetch");
+            assertEquals(true, metadata.get("train.loader.prefetch.enabled"));
+            assertEquals(2, metadata.get("train.loader.prefetch.bufferSize"));
+            assertEquals(1, metadata.get("train.loader.prefetch.workerCount"));
             for (List<Integer> batch : prefetched) {
                 batches.add(batch);
             }
         }
 
         assertEquals(List.of(List.of(0, 1), List.of(2, 3), List.of(4)), batches);
+
+        List<List<Integer>> defaultBatches = new ArrayList<>();
+        try (PrefetchingIterable<List<Integer>> prefetched = loader.prefetch()) {
+            DataLoaderPrefetchPlan plan = prefetched.plan();
+            assertEquals(DataLoaderPrefetchPlan.recommended(), plan);
+            assertEquals(DataLoaderPrefetchPlan.DEFAULT_BUFFER_SIZE, prefetched.bufferSize());
+            for (List<Integer> batch : prefetched) {
+                defaultBatches.add(batch);
+            }
+        }
+
+        assertEquals(batches, defaultBatches);
         assertThrows(IllegalArgumentException.class, () -> loader.prefetch(0));
+
+        DataLoaderPrefetchPlan disabled = PrefetchingIterable.disabledPlan();
+        assertFalse(disabled.enabled());
+        assertEquals(0, disabled.bufferSize());
+        assertEquals(0, disabled.workerCount());
+        assertEquals(0, disabled.maxBufferedItems());
+        assertEquals(false, disabled.toMetadata("train.loader.prefetch.").get("train.loader.prefetch.enabled"));
     }
 
     @Test
@@ -356,7 +413,8 @@ class DataLoaderTest {
                 .collate(batch -> batch.stream().mapToInt(Integer::intValue).sum());
 
         List<Integer> collectedSums = new ArrayList<>();
-        try (PrefetchingIterable<Integer> prefetched = sums.prefetch(1)) {
+        try (PrefetchingIterable<Integer> prefetched = sums.prefetch()) {
+            assertEquals(DataLoaderPrefetchPlan.DEFAULT_BUFFER_SIZE, prefetched.bufferSize());
             for (Integer sum : prefetched) {
                 collectedSums.add(sum);
             }
@@ -369,7 +427,8 @@ class DataLoaderTest {
                 3);
 
         List<DataLoader.Batch> tensorBatches = new ArrayList<>();
-        try (PrefetchingIterable<DataLoader.Batch> prefetched = tensorLoader.prefetch(2)) {
+        try (PrefetchingIterable<DataLoader.Batch> prefetched = tensorLoader.prefetch()) {
+            assertEquals(DataLoaderPrefetchPlan.recommended(), prefetched.plan());
             for (DataLoader.Batch batch : prefetched) {
                 tensorBatches.add(batch);
             }
@@ -550,6 +609,37 @@ class DataLoaderTest {
         lengths[0] = 99;
         assertArrayEquals(new int[] {3, 1}, batch.inputLengths());
         assertArrayEquals(batch.inputs().data(), batch.batch().inputs().data(), 1e-6f);
+    }
+
+    @Test
+    void paddedBatchDefensivelyCopiesConstructorLengths() {
+        int[] inputLengths = {3, 1};
+        int[] labelLengths = {2, 3};
+        DataLoader.PaddedBatch batch = new DataLoader.PaddedBatch(
+                GradTensor.ones(2, 3),
+                GradTensor.ones(2, 3),
+                GradTensor.ones(2, 3),
+                GradTensor.ones(2, 3),
+                inputLengths,
+                labelLengths);
+
+        inputLengths[0] = 0;
+        labelLengths[1] = 0;
+        assertArrayEquals(new int[] {3, 1}, batch.inputLengths());
+        assertArrayEquals(new int[] {2, 3}, batch.labelLengths());
+        assertEquals(4, batch.inputPaddingStats().realTokens());
+        assertEquals(5, batch.labelPaddingStats().realTokens());
+    }
+
+    @Test
+    void paddedBatchRejectsMismatchedInputAndLabelBatchSizes() {
+        assertThrows(IllegalArgumentException.class, () -> new DataLoader.PaddedBatch(
+                GradTensor.ones(2, 3),
+                GradTensor.ones(3, 3),
+                GradTensor.ones(2, 3),
+                GradTensor.ones(3, 3),
+                new int[] {3, 1},
+                new int[] {2, 3, 1}));
     }
 
     @Test

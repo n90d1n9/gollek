@@ -231,6 +231,8 @@ class TrainerSummaryAssemblerTest {
         assertEquals("healthy", metadata.get("dataDistributionHealthStatus"));
         assertEquals(Boolean.TRUE, metadata.get("dataDistributionHealthGatePassed"));
         assertEquals(0, metadata.get("dataDistributionHealthIssueCount"));
+        assertEquals(2L, metadata.get("runtimeProfile.train.forward.count"));
+        assertEquals(5.0, (double) metadata.get("runtimeProfile.train.forward.totalMillis"), 1e-12);
         assertEquals(Boolean.TRUE, metadata.get("generalizationGapAvailable"));
         assertEquals(-0.11, (double) metadata.get("latestGeneralizationGap"), 1e-12);
         assertEquals(0.23 / 0.34, (double) metadata.get("latestValidationToTrainLossRatio"), 1e-12);
@@ -288,6 +290,8 @@ class TrainerSummaryAssemblerTest {
         assertEquals(4, metadata.get("gradientAccumulationSteps"));
         assertEquals(2, metadata.get("pendingGradientAccumulationBatches"));
         assertEquals(7, metadata.get("optimizerStepCount"));
+        assertEquals(5, metadata.get("parameterUpdateDiagnosticsIntervalSteps"));
+        assertEquals(Boolean.TRUE, metadata.get("parameterUpdateDiagnosticsSampled"));
         assertEquals(Boolean.TRUE, metadata.get("gradientClipEnabled"));
         assertEquals(Boolean.TRUE, metadata.get("gradientClipNormEnabled"));
         assertEquals(1.5, metadata.get("gradientClipNormThreshold"));
@@ -527,6 +531,7 @@ class TrainerSummaryAssemblerTest {
                         2,
                         7,
                         TrainerGradientClipConfig.of(1.5, 0.75),
+                        5,
                         new TrainerOptimizationMetadata.GradientDiagnostics(
                                 4.0,
                                 1.0,
@@ -564,6 +569,9 @@ class TrainerSummaryAssemblerTest {
                 new TrainerSummaryAssembler.Throughput(
                         new ThroughputSnapshot(2, 10, 20, 5, 2_000_000_000L),
                         new ThroughputSnapshot(1, 4, 8, 2, 1_000_000_000L)),
+                new TrainerSummaryAssembler.RuntimeProfile(Map.of(
+                        "runtimeProfile.train.forward.count", 2L,
+                        "runtimeProfile.train.forward.totalMillis", 5.0)),
                 new TrainerSummaryAssembler.AccelerationInfo(
                         "metal",
                         new Acceleration.BackendStatus("metal", "Apple GPU", true, true, 8L),

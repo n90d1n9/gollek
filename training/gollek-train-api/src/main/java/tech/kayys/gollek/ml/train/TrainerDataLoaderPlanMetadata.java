@@ -6,6 +6,8 @@ import java.util.Map;
 import tech.kayys.gollek.train.data.DataLoader;
 import tech.kayys.gollek.train.data.DataLoader.Batch;
 import tech.kayys.gollek.train.data.DataLoaderPlan;
+import tech.kayys.gollek.train.data.DataLoaderPrefetchPlan;
+import tech.kayys.gollek.train.data.PrefetchingIterable;
 
 /**
  * Captures non-consuming loader plan metadata for trainer reports.
@@ -34,6 +36,21 @@ final class TrainerDataLoaderPlanMetadata {
         }
 
         metadata.put(prefix + ".loaderType", loader.getClass().getName());
+        if (loader instanceof PrefetchingIterable<?> prefetched) {
+            putPrefetchPlan(metadata, prefix, prefetched.plan());
+            Iterable<?> source = prefetched.source();
+            metadata.put(prefix + ".prefetch.sourceLoaderType", source.getClass().getName());
+            putNonPrefetchedLoader(metadata, prefix, castBatchIterable(source));
+            return;
+        }
+        putPrefetchPlan(metadata, prefix, DataLoaderPrefetchPlan.disabled());
+        putNonPrefetchedLoader(metadata, prefix, loader);
+    }
+
+    private static void putNonPrefetchedLoader(
+            Map<String, Object> metadata,
+            String prefix,
+            Iterable<Batch> loader) {
         if (loader instanceof DataLoader.TensorDataLoader tensorLoader) {
             putPlan(metadata, prefix, tensorLoader.plan());
             metadata.put(prefix + ".derivedFromBatchCollection", Boolean.FALSE);
@@ -96,6 +113,13 @@ final class TrainerDataLoaderPlanMetadata {
         metadata.put(prefix + ".summary", plan.summary());
     }
 
+    private static void putPrefetchPlan(
+            Map<String, Object> metadata,
+            String prefix,
+            DataLoaderPrefetchPlan plan) {
+        metadata.putAll(plan.toMetadata(prefix + ".prefetch"));
+    }
+
     private static void markUnavailable(
             Map<String, Object> metadata,
             String prefix,
@@ -114,5 +138,10 @@ final class TrainerDataLoaderPlanMetadata {
             throw new IllegalArgumentException(fieldName + " exceeds int range: " + value);
         }
         return (int) value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Iterable<Batch> castBatchIterable(Iterable<?> iterable) {
+        return (Iterable<Batch>) iterable;
     }
 }

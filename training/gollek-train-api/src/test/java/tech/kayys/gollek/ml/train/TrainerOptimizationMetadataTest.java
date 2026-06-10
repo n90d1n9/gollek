@@ -19,6 +19,7 @@ class TrainerOptimizationMetadataTest {
                 2,
                 11,
                 0.75,
+                3,
                 new TrainerOptimizationMetadata.GradientDiagnostics(
                         8.0,
                         0.7,
@@ -57,6 +58,8 @@ class TrainerOptimizationMetadataTest {
         assertEquals(4, metadata.get("gradientAccumulationSteps"));
         assertEquals(2, metadata.get("pendingGradientAccumulationBatches"));
         assertEquals(11, metadata.get("optimizerStepCount"));
+        assertEquals(3, metadata.get("parameterUpdateDiagnosticsIntervalSteps"));
+        assertEquals(Boolean.TRUE, metadata.get("parameterUpdateDiagnosticsSampled"));
         assertEquals(Boolean.TRUE, metadata.get("gradientClipEnabled"));
         assertEquals(0.75, metadata.get("gradientClipThreshold"));
         assertEquals(Boolean.TRUE, metadata.get("gradientClipNormEnabled"));
@@ -136,6 +139,7 @@ class TrainerOptimizationMetadataTest {
                 0,
                 0,
                 -2.0,
+                0,
                 new TrainerOptimizationMetadata.GradientDiagnostics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 1.0, false),
                 new TrainerOptimizationMetadata.ParameterDiagnostics(0, 0, 0, 0, 0, 0, 0, 0.0),
                 TrainerOptimizationMetadata.UpdateDiagnostics.disabled());
@@ -146,6 +150,8 @@ class TrainerOptimizationMetadataTest {
         assertEquals(0.0, metadata.get("gradientClipNormThreshold"));
         assertEquals(Boolean.FALSE, metadata.get("gradientClipValueEnabled"));
         assertEquals(0.0, metadata.get("gradientClipValueThreshold"));
+        assertEquals(1, metadata.get("parameterUpdateDiagnosticsIntervalSteps"));
+        assertEquals(Boolean.FALSE, metadata.get("parameterUpdateDiagnosticsSampled"));
         assertEquals(Boolean.FALSE, metadata.get("parameterUpdateDiagnosticsEnabled"));
     }
 
@@ -159,6 +165,7 @@ class TrainerOptimizationMetadataTest {
                 0,
                 0,
                 TrainerGradientClipConfig.value(0.25),
+                1,
                 new TrainerOptimizationMetadata.GradientDiagnostics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 1.0, false),
                 new TrainerOptimizationMetadata.ParameterDiagnostics(0, 0, 0, 0, 0, 0, 0, 0.0),
                 TrainerOptimizationMetadata.UpdateDiagnostics.disabled());

@@ -280,7 +280,7 @@ final class TrainerReportHistory {
         for (Map.Entry<?, ?> entry : row.entrySet()) {
             copy.put(
                     String.valueOf(entry.getKey()),
-                    TrainerMetadataSupport.immutableSnapshot(entry.getValue()));
+                    TrainingReportSnapshots.immutableSnapshot(entry.getValue()));
         }
         return Map.copyOf(copy);
     }

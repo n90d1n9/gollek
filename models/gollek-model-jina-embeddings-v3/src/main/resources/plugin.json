@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "sentencepiece",
     "families": ["jina_embeddings_v3"]
   }
 }

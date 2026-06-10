@@ -27,28 +27,19 @@ final class DirectForwardAttentionStage {
                     KVCacheManager.KVCacheSession kvCache,
                     int startPos,
                     Map<Integer, SharedKvState> sharedKvStates) {
+        DirectForwardAttentionWeights attentionWeights = DirectForwardAttentionWeights.fromLayer(ctx.layerWeights());
         MemorySegment normedAttnSeg = ctx.workspace().getNormedAttnSeg();
         DirectForwardNorms.rmsNormRows(normedAttnSeg, ctx.hiddenIn(),
-                ctx.layerWeights().attentionNormWeight(), ctx.hiddenShape(),
+                attentionWeights.attentionNormWeight(), ctx.hiddenShape(),
                 ctx.seqLen(), ctx.config(), ctx.addOneRmsNorm(), ctx.useMetalElementwise(), ctx.runtime());
 
-        AttentionInput attnIn = new AttentionInput(
+        AttentionInput attnIn = DirectForwardAttentionInputs.causalLayerInput(
+                ctx,
+                attentionWeights,
                 AccelTensor.view(normedAttnSeg, ctx.hiddenShape()),
-                ctx.layerWeights().queryWeight(),
-                ctx.layerWeights().keyWeight(),
-                ctx.layerWeights().valueWeight(),
-                ctx.layerWeights().outputWeight(),
-                ctx.layerWeights().queryBias(),
-                ctx.layerWeights().keyBias(),
-                ctx.layerWeights().valueBias(),
-                ctx.layerWeights().outputBias(),
-                ctx.arch(), ctx.config(), kvCache, ctx.layerIdx(), startPos,
-                /* isCausal= */ true,
-                ctx.layerWeights().queryNormWeight(),
-                ctx.layerWeights().keyNormWeight(),
-                ctx.layerWeights().postAttnNormWeight(),
-                sharedKvStates,
-                ctx.workspace().getNormedFfnSeg());
+                kvCache,
+                startPos,
+                sharedKvStates);
 
         if (ctx.verboseLayers()) {
             System.err.printf("[DEBUG] Layer %d Attention start%n", ctx.layerIdx());

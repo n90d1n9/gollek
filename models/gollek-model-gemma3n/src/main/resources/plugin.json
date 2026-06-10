@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "sentencepiece",
     "families": ["gemma3n", "gemma3n_text", "gemma3n_audio", "gemma3n_vision"]
   }
 }

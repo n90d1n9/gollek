@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Optional bridge to Google's official LiteRT-LM JVM engine.
@@ -38,9 +39,17 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
     static final String CACHE_DIR_PROPERTY = "gollek.litert.lm_jvm_bridge.cache_dir";
     static final String TIMEOUT_SECONDS_PROPERTY = "gollek.litert.lm_jvm_bridge.timeout_seconds";
     static final String MAX_NUM_TOKENS_PROPERTY = "gollek.litert.lm_jvm_bridge.max_num_tokens";
+    static final String NORMALIZE_SHORT_QUESTIONS_PROPERTY =
+            "gollek.litert.lm_jvm_bridge.normalize_short_questions";
     static final String ENABLE_SPECULATIVE_DECODING_PROPERTY =
             "gollek.litert.lm_jvm_bridge.enable_speculative_decoding";
     private static final int DEFAULT_GEMMA4_MAX_NUM_TOKENS = 2048;
+    private static final Pattern BARE_QUESTION_PATTERN = Pattern.compile(
+            "(?i)^(who|what|where|when|why|how|which|whom|whose|is|are|was|were|do|does|did|can|could|should|would|will|may|might)\\b.*[^.?!]$");
+    private static final String SHORT_QUESTION_INSTRUCTION =
+            "Answer directly and concisely in one or two sentences. Do not ask a clarification question. "
+                    + "If a term is ambiguous, answer the most common meaning first and mention common alternatives briefly.\n"
+                    + "Question: ";
 
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(LiteRTLmJvmBridge.class);
@@ -94,6 +103,25 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
         }
         String normalized = configured.trim().toUpperCase(Locale.ROOT);
         return normalized.equals("METAL") ? "GPU" : normalized;
+    }
+
+    static String promptForModel(String prompt) {
+        if (prompt == null) {
+            return "";
+        }
+        if (!shortQuestionNormalizationEnabled()) {
+            return prompt;
+        }
+        String stripped = prompt.strip();
+        if (stripped.isEmpty() || !BARE_QUESTION_PATTERN.matcher(stripped).matches()) {
+            return prompt;
+        }
+        return SHORT_QUESTION_INSTRUCTION + Character.toUpperCase(stripped.charAt(0)) + stripped.substring(1) + "?";
+    }
+
+    static boolean shortQuestionNormalizationEnabled() {
+        String configured = System.getProperty(NORMALIZE_SHORT_QUESTIONS_PROPERTY);
+        return configured == null || configured.isBlank() || Boolean.parseBoolean(configured);
     }
 
     static Duration timeout() {
@@ -329,7 +357,7 @@ final class LiteRTLmJvmBridge implements AutoCloseable {
 
         conversation.getClass()
                 .getMethod("sendMessageAsync", String.class, callbackClass, Map.class)
-                .invoke(conversation, prompt == null ? "" : prompt, callback, Map.of());
+                .invoke(conversation, promptForModel(prompt), callback, Map.of());
 
         try {
             boolean finished = done.await(timeout().toMillis(), TimeUnit.MILLISECONDS);

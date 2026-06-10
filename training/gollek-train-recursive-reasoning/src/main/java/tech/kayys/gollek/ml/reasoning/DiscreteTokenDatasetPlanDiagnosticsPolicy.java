@@ -59,16 +59,16 @@ public record DiscreteTokenDatasetPlanDiagnosticsPolicy(
     public static DiscreteTokenDatasetPlanDiagnosticsPolicy fromMetadata(Map<?, ?> metadata) {
         Objects.requireNonNull(metadata, "metadata must not be null");
         return new DiscreteTokenDatasetPlanDiagnosticsPolicy(
-                requiredDouble(metadata, "highPaddingRateThreshold"),
-                requiredBoolean(metadata, "warnOnMissingValidationSplit"),
-                requiredBoolean(metadata, "warnOnMissingTestSplit"),
-                requiredBoolean(metadata, "warnOnDroppedTrainingExamples"),
-                requiredBoolean(metadata, "warnOnMissingKnownSolutionCounts"),
-                requiredBoolean(metadata, "warnOnPartialKnownSolutionCoverage"),
-                requiredBoolean(metadata, "warnOnHighPaddingRate"),
-                requiredBoolean(metadata, "warnOnMissingTaskTrainCoverage"),
-                requiredBoolean(metadata, "warnOnMissingTaskValidationCoverage"),
-                requiredBoolean(metadata, "warnOnMissingTaskTestCoverage"));
+                DiscreteTokenDatasetMetadataSupport.requiredDouble(metadata, "highPaddingRateThreshold"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingValidationSplit"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingTestSplit"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnDroppedTrainingExamples"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingKnownSolutionCounts"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnPartialKnownSolutionCoverage"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnHighPaddingRate"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingTaskTrainCoverage"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingTaskValidationCoverage"),
+                DiscreteTokenDatasetMetadataSupport.requiredBoolean(metadata, "warnOnMissingTaskTestCoverage"));
     }
 
     public DiscreteTokenDatasetPlanDiagnosticsPolicy withHighPaddingRateThreshold(double threshold) {
@@ -154,45 +154,6 @@ public record DiscreteTokenDatasetPlanDiagnosticsPolicy(
         metadata.put("warnOnMissingTaskValidationCoverage", warnOnMissingTaskValidationCoverage);
         metadata.put("warnOnMissingTaskTestCoverage", warnOnMissingTaskTestCoverage);
         return Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
-    }
-
-    private static double requiredDouble(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Number number) {
-            return number.doubleValue();
-        }
-        if (value instanceof CharSequence text) {
-            try {
-                return Double.parseDouble(text.toString());
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("metadata field '" + key + "' must be a number", e);
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a number");
-    }
-
-    private static boolean requiredBoolean(Map<?, ?> metadata, String key) {
-        Object value = required(metadata, key);
-        if (value instanceof Boolean flag) {
-            return flag;
-        }
-        if (value instanceof CharSequence text) {
-            String normalized = text.toString().trim().toLowerCase();
-            if ("true".equals(normalized)) {
-                return true;
-            }
-            if ("false".equals(normalized)) {
-                return false;
-            }
-        }
-        throw new IllegalArgumentException("metadata field '" + key + "' must be a boolean");
-    }
-
-    private static Object required(Map<?, ?> metadata, String key) {
-        if (!metadata.containsKey(key) || metadata.get(key) == null) {
-            throw new IllegalArgumentException("metadata field '" + key + "' is required");
-        }
-        return metadata.get(key);
     }
 
     private static boolean isRate(double value) {

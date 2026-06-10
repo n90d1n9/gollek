@@ -42,9 +42,7 @@ public final class SubsetSampler implements IndexSampler {
     }
 
     private void requireValidFor(int datasetSize) {
-        if (datasetSize < 0) {
-            throw new IllegalArgumentException("datasetSize must be non-negative, got: " + datasetSize);
-        }
+        DataLoaderCounts.requireDatasetSize(datasetSize);
         for (int index : indices) {
             if (index >= datasetSize) {
                 throw new IllegalArgumentException(

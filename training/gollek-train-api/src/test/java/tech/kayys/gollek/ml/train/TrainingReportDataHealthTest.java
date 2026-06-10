@@ -64,7 +64,62 @@ class TrainingReportDataHealthTest {
         assertEquals(Boolean.FALSE, map.get("healthy"));
         assertEquals(1, map.get("issueCount"));
         assertEquals(loaderIssue.get("code"), ((List<Map<String, Object>>) map.get("issues")).get(0).get("code"));
+        assertEquals(loaderIssue.get("code"),
+                ((List<Map<String, Object>>) map.get("issueSummaries")).get(0).get("code"));
+        assertEquals("dropLast discarded 3 training samples",
+                ((List<Map<String, Object>>) map.get("issueSummaries")).get(0).get("message"));
         assertEquals("warning", ((Map<String, Object>) map.get("loaderPlan")).get("status"));
+    }
+
+    @Test
+    void issueSummaryIncludesSeverityCodeAndAction() {
+        TrainingReportDataHealth health = TrainingReportDataHealth.fromMetadata(
+                TrainingReportQualityProfileTestFixtures.warningDataHealthMetadata());
+
+        assertEquals(
+                "warning data-loader-train-drop-last-discarded-samples"
+                        + " - adjust batch size or disable dropLast for small datasets",
+                health.issueSummary("fallback"));
+    }
+
+    @Test
+    void markdownRendersIssueDetailsWithPrefetchEvidence() {
+        Map<String, Object> loaderIssue = Map.of(
+                "code", "data-loader-train-prefetch-buffer-too-small",
+                "severity", "warning",
+                "artifact", "train",
+                "blocking", false,
+                "message", "train loader prefetch buffer can hold only 1 item(s)",
+                "action", "increase the prefetch buffer",
+                "evidence", Map.of(
+                        "trainLoaderPlan.prefetch.enabled", true,
+                        "trainLoaderPlan.prefetch.maxBufferedItems", 1,
+                        "trainLoaderPlan.prefetch.sourceLoaderType", "example.Loader"));
+        TrainingReportDataHealth health = TrainingReportDataHealth.fromMetadata(Map.ofEntries(
+                Map.entry("dataLoaderPlanHealth.available", true),
+                Map.entry("dataLoaderPlanHealthStatus", "warning"),
+                Map.entry("dataLoaderPlanHealthHealthy", false),
+                Map.entry("dataLoaderPlanHealthGatePassed", true),
+                Map.entry("dataLoaderPlanHealthIssueDetected", true),
+                Map.entry("dataLoaderPlanHealthIssueCount", 1),
+                Map.entry("dataLoaderPlanHealthWarningCount", 1),
+                Map.entry("dataLoaderPlanHealthErrorCount", 0),
+                Map.entry("dataLoaderPlanHealthIssueCodes", List.of("data-loader-train-prefetch-buffer-too-small")),
+                Map.entry("dataLoaderPlanHealthIssueSeverities", List.of("warning")),
+                Map.entry("dataLoaderPlanHealthRecommendedActions", List.of("increase the prefetch buffer")),
+                Map.entry("dataLoaderPlanHealthIssues", List.of(loaderIssue))));
+
+        String markdown = TrainingReportDataHealthMarkdown.render(health);
+
+        assertTrue(markdown.contains("### Data Health Issue Details"));
+        assertTrue(markdown.contains("`data-loader-train-prefetch-buffer-too-small`"));
+        assertTrue(markdown.contains("trainLoaderPlan.prefetch.enabled=true, "
+                + "trainLoaderPlan.prefetch.maxBufferedItems=1, "
+                + "trainLoaderPlan.prefetch.sourceLoaderType=example.Loader"));
+        assertTrue(markdown.contains("train loader prefetch buffer can hold only 1 item(s)"));
+        assertTrue(markdown.contains("trainLoaderPlan.prefetch.maxBufferedItems=1"));
+        assertTrue(markdown.contains("trainLoaderPlan.prefetch.sourceLoaderType=example.Loader"));
+        assertTrue(markdown.contains("| `warning` | `train` | `no` | train loader prefetch"));
     }
 
     @Test
@@ -113,6 +168,62 @@ class TrainingReportDataHealthTest {
         assertThrows(UnsupportedOperationException.class, () -> health.issueCodes().add("extra"));
         assertThrows(UnsupportedOperationException.class, () -> health.issues().get(0).put("extra", true));
         assertThrows(UnsupportedOperationException.class, () -> health.toMap().put("extra", true));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void fromMapRoundTripsMachineReadableIssueSummaries() {
+        Map<String, Object> loaderIssue = Map.of(
+                "code", "data-loader-train-prefetch-buffer-too-small",
+                "severity", "warning",
+                "artifact", "train",
+                "blocking", false,
+                "message", "train loader prefetch buffer can hold only 1 item(s)",
+                "action", "increase the prefetch buffer",
+                "evidence", Map.of(
+                        "trainLoaderPlan.prefetch.maxBufferedItems", 1,
+                        "trainLoaderPlan.prefetch.enabled", true));
+        Map<String, Object> dataHealth = Map.of(
+                "loaderPlan",
+                Map.ofEntries(
+                        Map.entry("available", true),
+                        Map.entry("status", "warning"),
+                        Map.entry("healthy", false),
+                        Map.entry("gatePassed", true),
+                        Map.entry("issueDetected", true),
+                        Map.entry("issueCount", 1),
+                        Map.entry("warningCount", 1),
+                        Map.entry("errorCount", 0),
+                        Map.entry("issueCodes", List.of("data-loader-train-prefetch-buffer-too-small")),
+                        Map.entry("issueSeverities", List.of("warning")),
+                        Map.entry("recommendedActions", List.of("increase the prefetch buffer")),
+                        Map.entry("issues", List.of(loaderIssue))),
+                "distribution",
+                Map.ofEntries(
+                        Map.entry("available", true),
+                        Map.entry("status", "healthy"),
+                        Map.entry("healthy", true),
+                        Map.entry("gatePassed", true),
+                        Map.entry("issueDetected", false),
+                        Map.entry("issueCount", 0),
+                        Map.entry("warningCount", 0),
+                        Map.entry("errorCount", 0),
+                        Map.entry("issues", List.of())));
+
+        TrainingReportDataHealth health = TrainingReportDataHealth.fromMap(dataHealth);
+        Map<String, Object> roundTrip = health.toMap();
+        List<Map<String, Object>> summaries = (List<Map<String, Object>>) roundTrip.get("issueSummaries");
+
+        assertEquals(1, summaries.size());
+        assertEquals("data-loader-train-prefetch-buffer-too-small", summaries.get(0).get("code"));
+        assertEquals("warning", summaries.get(0).get("severity"));
+        assertEquals("train", summaries.get(0).get("artifact"));
+        assertEquals(Boolean.FALSE, summaries.get(0).get("blocking"));
+        assertEquals("increase the prefetch buffer", summaries.get(0).get("action"));
+        assertEquals(
+                "trainLoaderPlan.prefetch.enabled=true, trainLoaderPlan.prefetch.maxBufferedItems=1",
+                summaries.get(0).get("evidenceSummary"));
+        assertThrows(UnsupportedOperationException.class, () -> summaries.get(0).put("extra", true));
     }
 
     @Test

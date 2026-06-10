@@ -10,6 +10,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -119,10 +124,123 @@ class OnnxRuntimeRunnerDeviceSelectionTest {
         assertEquals(tech.kayys.gollek.core.tensor.DeviceType.METAL, runner.deviceType());
     }
 
+    @Test
+    void textRuntimePlanPrecomputesKvAndPositionNameSets() throws Exception {
+        OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
+        setField(runner, "usePastKvCache", true);
+        setField(runner, "kvLayers", 2);
+        setField(runner, "inputNames", new String[] {
+                "input_ids",
+                "attention_mask",
+                "position_ids",
+                "past_key_values.0.key",
+                "past_key_values.0.value",
+                "past_key_values.1.key",
+                "past_key_values.1.value"
+        });
+        setField(runner, "outputNames", new String[] {
+                "logits",
+                "present.0.key",
+                "present.0.value",
+                "present.1.key",
+                "present.1.value"
+        });
+
+        Object plan = invokeNoArg(runner, "buildTextRuntimePlan");
+
+        assertTrue((boolean) invokeNoArg(plan, "hasKvInputs"));
+        assertTrue((boolean) invokeNoArg(plan, "hasPositionIds"));
+        assertEquals(2, invokeNoArg(plan, "kvLayerCount"));
+        assertArrayEquals(new String[] {
+                "input_ids",
+                "attention_mask",
+                "position_ids",
+                "past_key_values.0.key",
+                "past_key_values.0.value",
+                "past_key_values.1.key",
+                "past_key_values.1.value"
+        }, (String[]) invokeNoArg(plan, "runInputNames"));
+        assertArrayEquals(new String[] {
+                "logits",
+                "present.0.key",
+                "present.0.value",
+                "present.1.key",
+                "present.1.value"
+        }, (String[]) invokeNoArg(plan, "runOutputNames"));
+    }
+
+    @Test
+    void textRuntimePlanDisablesKvWhenPresentOutputsAreIncomplete() throws Exception {
+        OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
+        setField(runner, "usePastKvCache", true);
+        setField(runner, "kvLayers", 1);
+        setField(runner, "inputNames", new String[] {
+                "input_ids",
+                "attention_mask",
+                "past_key_values.0.key",
+                "past_key_values.0.value"
+        });
+        setField(runner, "outputNames", new String[] { "logits", "present.0.key" });
+
+        Object plan = invokeNoArg(runner, "buildTextRuntimePlan");
+
+        assertFalse((boolean) invokeNoArg(plan, "hasKvInputs"));
+        assertFalse((boolean) invokeNoArg(plan, "hasPositionIds"));
+        assertEquals(0, invokeNoArg(plan, "kvLayerCount"));
+        assertArrayEquals(new String[] { "input_ids", "attention_mask" },
+                (String[]) invokeNoArg(plan, "runInputNames"));
+        assertArrayEquals(new String[] { "logits" },
+                (String[]) invokeNoArg(plan, "runOutputNames"));
+    }
+
+    @Test
+    void eosCheckUsesPrecomputedStopTokenSet() throws Exception {
+        OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
+        setField(runner, "eosTokenIds", OnnxStopTokens.of(42));
+        setField(runner, "tokenizer", new ThrowingStopTokenizer());
+
+        assertTrue(runner.isEos(42));
+        assertFalse(runner.isEos(43));
+    }
+
+    @Test
+    void genAiConfigStopTokensKeepDefaultEosToken() throws Exception {
+        Files.writeString(tempDir.resolve("genai_config.json"), """
+                {
+                  "model": {
+                    "eos_token_id": 42,
+                    "decoder": {
+                      "num_hidden_layers": 1
+                    }
+                  }
+                }
+                """);
+
+        OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
+        invoke(runner, "loadGenAiConfig", Path.class, tempDir);
+
+        assertTrue(runner.isEos(2));
+        assertTrue(runner.isEos(42));
+        assertFalse(runner.isEos(43));
+    }
+
     private boolean invokeMetalAllowed(OnnxRuntimeRunner runner) throws Exception {
         Method method = OnnxRuntimeRunner.class.getDeclaredMethod("metalAllowedByGlobalConfig");
         method.setAccessible(true);
         return (boolean) method.invoke(runner);
+    }
+
+    private static Object invokeNoArg(Object target, String methodName) throws Exception {
+        Method method = target.getClass().getDeclaredMethod(methodName);
+        method.setAccessible(true);
+        return method.invoke(target);
+    }
+
+    private static void invoke(Object target, String methodName, Class<?> parameterType, Object argument)
+            throws Exception {
+        Method method = target.getClass().getDeclaredMethod(methodName, parameterType);
+        method.setAccessible(true);
+        method.invoke(target, argument);
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {
@@ -136,6 +254,44 @@ class OnnxRuntimeRunnerDeviceSelectionTest {
             System.clearProperty(key);
         } else {
             System.setProperty(key, value);
+        }
+    }
+
+    private static final class ThrowingStopTokenizer implements Tokenizer {
+
+        @Override
+        public long[] encode(String text, EncodeOptions options) {
+            return new long[0];
+        }
+
+        @Override
+        public String decode(long[] tokens, DecodeOptions options) {
+            return "";
+        }
+
+        @Override
+        public int vocabSize() {
+            return 0;
+        }
+
+        @Override
+        public int bosTokenId() {
+            return -1;
+        }
+
+        @Override
+        public int eosTokenId() {
+            return -1;
+        }
+
+        @Override
+        public int padTokenId() {
+            return -1;
+        }
+
+        @Override
+        public int[] allStopTokenIds() {
+            throw new AssertionError("isEos should use the precomputed stop-token set");
         }
     }
 }

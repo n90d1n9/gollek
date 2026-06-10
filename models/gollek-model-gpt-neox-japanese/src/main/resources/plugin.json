@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "japanese-segmentation",
     "families": ["gpt_neox_japanese", "gpt-neox-japanese", "gptneox_japanese"]
   }
 }

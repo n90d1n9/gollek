@@ -69,6 +69,56 @@ class TrainerDataLoaderPlanHealthMetadataTest {
     }
 
     @Test
+    void flagsDisabledTrainPrefetchForLongLoaderAsWarning() {
+        Map<String, Object> metadata = healthyPlan();
+        metadata.put("trainLoaderPlan.sampleCount", 64);
+        metadata.put("trainLoaderPlan.batchSize", 8);
+        metadata.put("trainLoaderPlan.batchCount", 8);
+        metadata.put("trainLoaderPlan.prefetch.enabled", Boolean.FALSE);
+        metadata.put("trainLoaderPlan.prefetch.bufferSize", 0);
+        metadata.put("trainLoaderPlan.prefetch.workerCount", 0);
+        metadata.put("trainLoaderPlan.prefetch.maxBufferedItems", 0);
+        metadata.put("trainLoaderPlan.prefetch.summary", "disabled");
+
+        TrainerDataLoaderPlanHealthMetadata.put(metadata);
+
+        assertEquals("warning", metadata.get("dataLoaderPlanHealthStatus"));
+        assertEquals(Boolean.TRUE, metadata.get("dataLoaderPlanHealthGatePassed"));
+        assertEquals(1, metadata.get("dataLoaderPlanHealthIssueCount"));
+        assertEquals(1, metadata.get("dataLoaderPlanHealthWarningCount"));
+        assertEquals(List.of("data-loader-train-prefetch-disabled"), metadata.get("dataLoaderPlanHealthIssueCodes"));
+        Map<String, Object> issue = healthIssues(metadata).get(0);
+        assertFalse((boolean) issue.get("blocking"));
+        assertTrue(((String) issue.get("action")).contains("DataLoader.prefetch"));
+        assertEquals(Boolean.FALSE, issueEvidence(issue).get("trainLoaderPlan.prefetch.enabled"));
+        assertEquals("disabled", issueEvidence(issue).get("trainLoaderPlan.prefetch.summary"));
+    }
+
+    @Test
+    void flagsTinyTrainPrefetchBufferForLongLoaderAsWarning() {
+        Map<String, Object> metadata = healthyPlan();
+        metadata.put("trainLoaderPlan.sampleCount", 64);
+        metadata.put("trainLoaderPlan.batchSize", 8);
+        metadata.put("trainLoaderPlan.batchCount", 8);
+        metadata.put("trainLoaderPlan.prefetch.enabled", Boolean.TRUE);
+        metadata.put("trainLoaderPlan.prefetch.bufferSize", 1);
+        metadata.put("trainLoaderPlan.prefetch.workerCount", 1);
+        metadata.put("trainLoaderPlan.prefetch.maxBufferedItems", 1);
+        metadata.put("trainLoaderPlan.prefetch.sourceLoaderType", "example.Loader");
+
+        TrainerDataLoaderPlanHealthMetadata.put(metadata);
+
+        assertEquals("warning", metadata.get("dataLoaderPlanHealthStatus"));
+        assertEquals(Boolean.TRUE, metadata.get("dataLoaderPlanHealthGatePassed"));
+        assertEquals(List.of("data-loader-train-prefetch-buffer-too-small"),
+                metadata.get("dataLoaderPlanHealthIssueCodes"));
+        Map<String, Object> issue = healthIssues(metadata).get(0);
+        assertFalse((boolean) issue.get("blocking"));
+        assertEquals(1, issueEvidence(issue).get("trainLoaderPlan.prefetch.maxBufferedItems"));
+        assertEquals("example.Loader", issueEvidence(issue).get("trainLoaderPlan.prefetch.sourceLoaderType"));
+    }
+
+    @Test
     void blocksTrainingWhenRequiredTrainPlanIsUnavailable() {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("dataLoaderPlanMetadataCaptured", Boolean.TRUE);
@@ -111,5 +161,10 @@ class TrainerDataLoaderPlanHealthMetadataTest {
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> healthIssues(Map<String, Object> metadata) {
         return (List<Map<String, Object>>) metadata.get("dataLoaderPlanHealthIssues");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> issueEvidence(Map<String, Object> issue) {
+        return (Map<String, Object>) issue.get("evidence");
     }
 }

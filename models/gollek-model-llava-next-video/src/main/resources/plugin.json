@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["hf-bpe", "sentencepiece"],
     "families": ["llava_next_video", "llava-next-video"]
   }
 }

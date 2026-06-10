@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
-    "families": ["roc_bert", "roc-bert"]
+    "families": ["roc_bert", "roc-bert"],
+    "tokenizerKind": "wordpiece"
   }
 }

@@ -35,7 +35,11 @@ dependencies {
     implementation(group = "org.apache.maven.resolver", name = "maven-resolver-transport-http", version = "1.9.25")
     implementation(group = "org.apache.maven", name = "maven-resolver-provider", version = "3.9.9")
     testImplementation(group = "io.quarkus", name = "quarkus-junit")
-    testImplementation(group = "org.assertj", name = "assertj-core")
+    testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 publishing {

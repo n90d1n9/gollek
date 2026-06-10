@@ -17,6 +17,55 @@ record DirectForwardLinearRequest(
         String profileKey,
         AccelTensor outputBuffer) {
 
+    static DirectForwardLinearRequest projection(DirectForwardLinearContext context,
+                                                 AccelTensor input,
+                                                 AccelTensor weight,
+                                                 AccelTensor bias,
+                                                 String profileKey,
+                                                 AccelTensor outputBuffer) {
+        return new DirectForwardLinearRequest(
+                context,
+                false,
+                input,
+                weight,
+                bias,
+                profileKey,
+                outputBuffer);
+    }
+
+    static DirectForwardLinearRequest logitsProjection(DirectForwardLinearContext context,
+                                                       boolean decodeLogitsPhase,
+                                                       AccelTensor input,
+                                                       AccelTensor weight,
+                                                       AccelTensor bias,
+                                                       String profileKey,
+                                                       AccelTensor outputBuffer) {
+        return new DirectForwardLinearRequest(
+                context,
+                decodeLogitsPhase,
+                input,
+                weight,
+                bias,
+                profileKey,
+                outputBuffer);
+    }
+
+    static DirectForwardLinearRequest gatedFfnProjection(DirectForwardGatedFfnRequest request,
+                                                         AccelTensor input,
+                                                         AccelTensor weight,
+                                                         AccelTensor bias,
+                                                         String profileKey,
+                                                         AccelTensor outputBuffer) {
+        return new DirectForwardLinearRequest(
+                request.context().linearContext(),
+                request.decodeLogitsPhase(),
+                input,
+                weight,
+                bias,
+                profileKey,
+                outputBuffer);
+    }
+
     DirectForwardRuntimeContext runtime() {
         return context.runtime();
     }

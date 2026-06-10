@@ -14,6 +14,7 @@ public enum ModelFamilyCapability {
     VISION,
     AUDIO,
     MULTIMODAL,
+    MOE,
     TRAINING,
     DIRECT_SAFETENSOR_INFERENCE,
     GGUF,

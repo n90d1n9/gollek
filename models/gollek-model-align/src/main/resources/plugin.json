@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKind": "wordpiece",
     "families": ["align", "align_text_model", "align_vision_model"]
   }
 }

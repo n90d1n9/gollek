@@ -376,13 +376,7 @@ public record TrainingReportValidationPolicy(
         if (dataHealth == null) {
             return "data-health status is unavailable";
         }
-        if (!dataHealth.recommendedActions().isEmpty()) {
-            return dataHealth.recommendedActions().get(0);
-        }
-        if (!dataHealth.issueCodes().isEmpty()) {
-            return "inspect data-health issue " + dataHealth.issueCodes().get(0);
-        }
-        return "inspect trainer data-loader and distribution health before promotion";
+        return dataHealth.issueSummary("inspect trainer data-loader and distribution health before promotion");
     }
 
     private static CheckpointIntegrity checkpointIntegrity(Map<String, Object> metadata) {

@@ -10,6 +10,7 @@
   "properties": {
     "extensionPoint": "model-family",
     "bundleProfile": "metadata_only",
+    "tokenizerKinds": ["hf-bpe", "vision-text-processor"],
     "families": ["qwen3_5", "qwen3_5_text", "qwen3_5_vision"]
   }
 }

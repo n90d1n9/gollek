@@ -286,7 +286,7 @@ public final class TrainingReportPortfolioArtifactManifest {
         return new ManifestBundle(
                 resolvedArtifacts.directory(),
                 manifestFile,
-                TrainerCheckpointIO.sha256Hex(manifestFile),
+                TrainingReportArtifactFingerprint.of(manifestFile).sha256(),
                 resolvedGeneratedAt,
                 resolvedArtifacts);
     }
@@ -497,28 +497,15 @@ public final class TrainingReportPortfolioArtifactManifest {
                 sha256Match = false;
                 continue;
             }
-            try {
-                long actualBytes = Files.size(artifact.file());
-                if (actualBytes != artifact.bytes()) {
-                    failures.add(artifact.name() + " artifact byte size mismatch for " + artifact.file()
-                            + " (expected " + artifact.bytes() + " bytes, got " + actualBytes + " bytes)");
-                    bytesMatch = false;
-                }
-            } catch (IOException error) {
-                failures.add(artifact.name() + " artifact byte size could not be read: " + error.getMessage());
-                bytesMatch = false;
-            }
-            try {
-                String actualSha256 = TrainerCheckpointIO.sha256Hex(artifact.file());
-                if (!artifact.sha256().equalsIgnoreCase(actualSha256)) {
-                    failures.add(artifact.name() + " artifact SHA-256 mismatch for " + artifact.file()
-                            + " (expected " + artifact.sha256() + ", got " + actualSha256 + ")");
-                    sha256Match = false;
-                }
-            } catch (IOException error) {
-                failures.add(artifact.name() + " artifact SHA-256 could not be read: " + error.getMessage());
-                sha256Match = false;
-            }
+            TrainingReportArtifactIntegrityVerifier.Result result =
+                    TrainingReportArtifactIntegrityVerifier.verifyDetailedArtifact(
+                            artifact.name(),
+                            artifact.file(),
+                            artifact.bytes(),
+                            artifact.sha256(),
+                            failures);
+            bytesMatch &= result.bytesMatch();
+            sha256Match &= result.sha256Match();
         }
         return new ArtifactIntegrity(bytesMatch, sha256Match);
     }
