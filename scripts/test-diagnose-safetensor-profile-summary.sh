@@ -69,6 +69,37 @@ if ! grep -qx $'status\tpass' "$GATE_DIR/diagnosis.tsv" \
   exit 1
 fi
 
+STRATEGY_SUMMARY="${TMP_DIR}/strategy.tsv"
+{
+  printf 'case\tdurationMs\tbackend\tprofileMetal\tstatus\ttopStage\ttopStageMs\tprefillMs\tdecodeMs\ttpotMs\tsamplingMs\targmaxMs\tattentionMs\tffnMs\tlogitsMs\tlinearPaths\tlogitsPaths\tffnPaths\tattentionPaths\targmaxPaths\tffnStrategy\tffnRowPrefillNativeRows\tffnRowPrefillVariant\tlog\n'
+  printf 'strategy-row\t1230\tmetal\ttrue\tpassed\tffn\t18.00\t4.00\t8.00\t4.00\t1.00\t0.50\t6.00\t18.00\t3.00\tattn_q_proj:metal_matmul_f16=2\tmetal_logits=2\tmatvec-gated-ffn-prefill-rows:accept:geglu:native_bf16=true:native_rows=12:variant=x4=2\tpaged_metal=2\tnative_argmax_f32=2\trow_prefill_matvec_active\t12\tx4\t/tmp/strategy.log\n'
+} > "$STRATEGY_SUMMARY"
+
+STRATEGY_DIR="${TMP_DIR}/strategy-diagnosis"
+bash "$ROOT_DIR/scripts/diagnose-safetensor-profile-summary.sh" \
+  --summary "$STRATEGY_SUMMARY" \
+  --summary-dir "$STRATEGY_DIR" \
+  --case strategy-row > "${TMP_DIR}/strategy.out"
+
+if ! grep -qx $'selectedCase\tstrategy-row' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'primaryStage\tffn' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnPathMetal\ttrue' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnPathFallback\tfalse' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnStrategy\trow_prefill_matvec_active' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnRowPrefillNativeRows\t12' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnRowPrefillVariant\tx4' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx $'ffnStrategyAction\tRow-prefill matvec FFN is active; compare TTFT against fused GEGLU default and disable it if prefill regresses.' "$STRATEGY_DIR/diagnosis.tsv" \
+    || ! grep -qx 'ffnStrategy=row_prefill_matvec_active' "${TMP_DIR}/strategy.out" \
+    || ! grep -qx 'ffnRowPrefillNativeRows=12' "${TMP_DIR}/strategy.out" \
+    || ! grep -qx 'ffnRowPrefillVariant=x4' "${TMP_DIR}/strategy.out"; then
+  echo "Expected safetensor diagnosis to preserve Gemma4 FFN strategy details" >&2
+  cat "$STRATEGY_DIR/diagnosis.tsv" >&2
+  cat "$STRATEGY_DIR/stages.tsv" >&2
+  cat "$STRATEGY_DIR/paths.tsv" >&2
+  cat "${TMP_DIR}/strategy.out" >&2
+  exit 1
+fi
+
 CASE_DIR="${TMP_DIR}/case-diagnosis"
 bash "$ROOT_DIR/scripts/diagnose-safetensor-profile-summary.sh" \
   --summary "$GATE_SUMMARY" \

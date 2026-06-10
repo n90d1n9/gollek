@@ -172,6 +172,9 @@ awk \
     remember(prefix, "linearPaths", linearPaths)
     remember(prefix, "logitsPaths", logitsPaths)
     remember(prefix, "ffnPaths", ffnPaths)
+    remember(prefix, "ffnStrategy", ffnStrategy)
+    remember(prefix, "ffnRowPrefillNativeRows", ffnRowPrefillNativeRows)
+    remember(prefix, "ffnRowPrefillVariant", ffnRowPrefillVariant)
     remember(prefix, "attentionPaths", attentionPaths)
     remember(prefix, "argmaxPaths", argmaxPaths)
     add_value(prefix, "durationMs", durationMs)
@@ -187,6 +190,9 @@ awk \
   function first_existing(a, b) {
     return a ? a : b
   }
+  function first_existing3(a, b, c) {
+    return a ? a : (b ? b : c)
+  }
   function load_row_fields() {
     rowCase = first_existing(column["case"] ? $(column["case"]) : "", column["case_id"] ? $(column["case_id"]) : "")
     status = column["status"] ? $(column["status"]) : ""
@@ -198,6 +204,9 @@ awk \
     linearPaths = column["linearPaths"] ? $(column["linearPaths"]) : ""
     logitsPaths = column["logitsPaths"] ? $(column["logitsPaths"]) : linearPaths
     ffnPaths = column["ffnPaths"] ? $(column["ffnPaths"]) : ""
+    ffnStrategy = first_existing3(column["ffnStrategy"] ? $(column["ffnStrategy"]) : "", column["profileFfnStrategy"] ? $(column["profileFfnStrategy"]) : "", column["profile_ffn_strategy"] ? $(column["profile_ffn_strategy"]) : "")
+    ffnRowPrefillNativeRows = first_existing3(column["ffnRowPrefillNativeRows"] ? $(column["ffnRowPrefillNativeRows"]) : "", column["profileFfnRowPrefillNativeRows"] ? $(column["profileFfnRowPrefillNativeRows"]) : "", column["profile_ffn_row_prefill_native_rows"] ? $(column["profile_ffn_row_prefill_native_rows"]) : "")
+    ffnRowPrefillVariant = first_existing3(column["ffnRowPrefillVariant"] ? $(column["ffnRowPrefillVariant"]) : "", column["profileFfnRowPrefillVariant"] ? $(column["profileFfnRowPrefillVariant"]) : "", column["profile_ffn_row_prefill_variant"] ? $(column["profile_ffn_row_prefill_variant"]) : "")
     attentionPaths = column["attentionPaths"] ? $(column["attentionPaths"]) : ""
     argmaxPaths = column["argmaxPaths"] ? $(column["argmaxPaths"]) : ""
     for (i = 1; i <= metricCount; i++) {
@@ -213,6 +222,9 @@ awk \
     selectedLinearPaths = linearPaths
     selectedLogitsPaths = logitsPaths
     selectedFfnPaths = ffnPaths
+    selectedFfnStrategy = ffnStrategy
+    selectedFfnRowPrefillNativeRows = ffnRowPrefillNativeRows
+    selectedFfnRowPrefillVariant = ffnRowPrefillVariant
     selectedAttentionPaths = attentionPaths
     selectedArgmaxPaths = argmaxPaths
     selected["durationMs"] = durationMs
@@ -231,6 +243,9 @@ awk \
     selectedLinearPaths = remembered[prefix, "linearPaths"]
     selectedLogitsPaths = remembered[prefix, "logitsPaths"]
     selectedFfnPaths = remembered[prefix, "ffnPaths"]
+    selectedFfnStrategy = remembered[prefix, "ffnStrategy"]
+    selectedFfnRowPrefillNativeRows = remembered[prefix, "ffnRowPrefillNativeRows"]
+    selectedFfnRowPrefillVariant = remembered[prefix, "ffnRowPrefillVariant"]
     selectedAttentionPaths = remembered[prefix, "attentionPaths"]
     selectedArgmaxPaths = remembered[prefix, "argmaxPaths"]
     selected["durationMs"] = mean_value(prefix, "durationMs")
@@ -303,7 +318,7 @@ awk \
     if (lowered == "mixed") {
       return "mixed"
     }
-    if (lowered ~ /(metal|mtl|mps|gpu|native_argmax)/) {
+    if (lowered ~ /(metal|mtl|mps|gpu|native_argmax|fused-gated-ffn:accept|matvec-gated-ffn-prefill-rows:accept|native_bf16=true)/) {
       return "true"
     }
     return "false"
@@ -314,6 +329,12 @@ awk \
     }
     if (linear == "mixed" || logits == "mixed" || ffn == "mixed" || attention == "mixed" || argmax == "mixed") {
       return "mixed"
+    }
+    if (linear == "false" || logits == "false" || ffn == "false" || attention == "false" || argmax == "false") {
+      return "fail"
+    }
+    if (linear == "true" || logits == "true" || ffn == "true" || attention == "true" || argmax == "true") {
+      return "pass"
     }
     return "fail"
   }
@@ -326,6 +347,7 @@ awk \
     if (lowered == "mixed") {
       return "mixed"
     }
+    gsub(/matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill/, "", lowered)
     if (lowered ~ /(cpu|java|accelerate|fallback|skip|reject|unavailable)/) {
       return "true"
     }
@@ -337,9 +359,6 @@ awk \
     }
     if (linear == "mixed" || logits == "mixed" || ffn == "mixed" || attention == "mixed" || argmax == "mixed") {
       return "mixed"
-    }
-    if (linear == "missing" || logits == "missing" || ffn == "missing" || attention == "missing" || argmax == "missing") {
-      return "missing"
     }
     return "pass"
   }
@@ -507,6 +526,22 @@ awk \
       return "Argmax path is Metal-clean; tune greedy selection only if it is a top stage."
     }
     return "Linear path is Metal-clean; tune projection latency."
+  }
+  function ffn_strategy_action(strategy) {
+    strategy = clean(strategy)
+    if (strategy == "row_prefill_matvec_active") {
+      return "Row-prefill matvec FFN is active; compare TTFT against fused GEGLU default and disable it if prefill regresses."
+    }
+    if (strategy == "fused_geglu_prefill_over_row_prefill") {
+      return "Fused GEGLU prefill beat the row-prefill candidate; keep fused as default and use gollek.safetensor.prefer_metal_matvec_ffn_prefill_rows=true only for A/B tests."
+    }
+    if (strategy == "fused_geglu_prefill_active") {
+      return "Fused GEGLU prefill is active; prioritize native BF16 fused/batched FFN tuning before row-prefill experiments."
+    }
+    if (strategy == "" || strategy == "n/a") {
+      return "No FFN strategy metadata was present; rerun with a profile build that emits ffn_strategy for Gemma4 comparisons."
+    }
+    return "Review FFN strategy `" strategy "` with raw ffnPaths before changing routing policy."
   }
   function write_path_row(group, primaryGroup, metalStatus, fallbackStatus, evidence, status) {
     metalStatus = group_metal_status(group)
@@ -686,6 +721,9 @@ awk \
     write_diag_row("linearPaths", selectedLinearPaths)
     write_diag_row("logitsPaths", selectedLogitsPaths)
     write_diag_row("ffnPaths", selectedFfnPaths)
+    write_diag_row("ffnStrategy", selectedFfnStrategy)
+    write_diag_row("ffnRowPrefillNativeRows", selectedFfnRowPrefillNativeRows)
+    write_diag_row("ffnRowPrefillVariant", selectedFfnRowPrefillVariant)
     write_diag_row("attentionPaths", selectedAttentionPaths)
     write_diag_row("argmaxPaths", selectedArgmaxPaths)
     write_diag_row("linearPathMetal", linearPathMetal)
@@ -702,6 +740,7 @@ awk \
     write_diag_row("argmaxPathFallback", argmaxPathFallback)
     write_diag_row("pathFallbackStatus", pathFallbackStatus)
     write_diag_row("primaryPathFallback", primaryPathFallback)
+    write_diag_row("ffnStrategyAction", ffn_strategy_action(selectedFfnStrategy))
     write_diag_row("nextAction", action)
     write_diag_row("recommendation", recommendation(bestStage))
   }
@@ -714,6 +753,10 @@ METAL_PATH_STATUS="$(awk 'BEGIN { FS = "\t" } $1 == "metalPathStatus" { print $2
 PRIMARY_PATH_METAL="$(awk 'BEGIN { FS = "\t" } $1 == "primaryPathMetal" { print $2; exit }' "$OUT")"
 PATH_FALLBACK_STATUS="$(awk 'BEGIN { FS = "\t" } $1 == "pathFallbackStatus" { print $2; exit }' "$OUT")"
 PRIMARY_PATH_FALLBACK="$(awk 'BEGIN { FS = "\t" } $1 == "primaryPathFallback" { print $2; exit }' "$OUT")"
+FFN_STRATEGY="$(awk 'BEGIN { FS = "\t" } $1 == "ffnStrategy" { print $2; exit }' "$OUT")"
+FFN_ROW_PREFILL_NATIVE_ROWS="$(awk 'BEGIN { FS = "\t" } $1 == "ffnRowPrefillNativeRows" { print $2; exit }' "$OUT")"
+FFN_ROW_PREFILL_VARIANT="$(awk 'BEGIN { FS = "\t" } $1 == "ffnRowPrefillVariant" { print $2; exit }' "$OUT")"
+FFN_STRATEGY_ACTION="$(awk 'BEGIN { FS = "\t" } $1 == "ffnStrategyAction" { value = $0; sub(/^[^\t]*\t/, "", value); print value; exit }' "$OUT")"
 NEXT_ACTION="$(awk 'BEGIN { FS = "\t" } $1 == "nextAction" { value = $0; sub(/^[^\t]*\t/, "", value); print value; exit }' "$OUT")"
 RECOMMENDATION="$(awk 'BEGIN { FS = "\t" } $1 == "recommendation" { value = $0; sub(/^[^\t]*\t/, "", value); print value; exit }' "$OUT")"
 
@@ -731,6 +774,10 @@ RECOMMENDATION="$(awk 'BEGIN { FS = "\t" } $1 == "recommendation" { value = $0; 
   echo "primaryPathMetal=$PRIMARY_PATH_METAL"
   echo "pathFallbackStatus=$PATH_FALLBACK_STATUS"
   echo "primaryPathFallback=$PRIMARY_PATH_FALLBACK"
+  echo "ffnStrategy=$FFN_STRATEGY"
+  echo "ffnRowPrefillNativeRows=$FFN_ROW_PREFILL_NATIVE_ROWS"
+  echo "ffnRowPrefillVariant=$FFN_ROW_PREFILL_VARIANT"
+  echo "ffnStrategyAction=$FFN_STRATEGY_ACTION"
   echo "nextAction=$NEXT_ACTION"
   echo "recommendation=$RECOMMENDATION"
 } | tee "$REPORT"

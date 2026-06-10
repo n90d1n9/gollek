@@ -24,18 +24,26 @@ Options:
                           (default: "Tell me briefly where Jakarta is located.")
   --max-tokens N          Max tokens per run (default: 3)
   --preset NAME           Apply reusable benchmark defaults
-                          (examples: m4-smoke, m4-greedy-10)
+                          (examples: m4-smoke, m4-greedy-10, m4-gemma4-12b-smoke,
+                          m4-gemma4-12b-row-prefill-ab)
   --list-presets          List safetensor benchmark presets and exit
   --cases LIST            Comma-separated case ids to run
                           (example: metal-deterministic,cpu-deterministic)
   --quick                 Deterministic-only benchmark plan
                           (metal first, plus CPU/turbo variants if requested)
+  --java-opt OPT          Append a JVM/system property to GOLLEK_JAVA_OPTS for
+                          each run; repeatable for A/B flags
   --profile               Enable -Dgollek.profile=true (default: off)
                           Also emits profile.tsv with normalized slowest-stage
                           and backend-path evidence when profile output exists.
   --no-profile            Disable profiling even if a preset enables it
   --require-profile       Fail a case if no [PROFILE] line is emitted
   --no-require-profile    Do not fail when profile output is missing
+  --require-ffn-strategy STRATEGY[,STRATEGY...]
+                          Fail a case unless profile ffn_strategy matches one
+                          of the expected strategies
+  --no-require-ffn-strategy
+                          Do not require a specific FFN strategy
   --require-metal         Fail non-CPU cases unless profile backend proves Metal
                           (falls back to logs only when profile is unavailable)
   --no-require-metal      Do not require Metal backend proof
@@ -81,11 +89,15 @@ Options:
 Environment:
   GOLLEK_BENCH_SAFETENSOR_PRESET         Default preset name
   GOLLEK_BENCH_SAFETENSOR_PRESET_SCRIPT  Preset registry script
+  GOLLEK_BENCH_SAFETENSOR_JAVA_OPTS      Extra JVM/system properties for runs
+  GOLLEK_JAVA_OPTS                       Preserved and prepended to run opts
 
 Examples:
   ./gollek/scripts/bench-safetensor-inference.sh --model 6f469a --with-cpu
   ./gollek/scripts/bench-safetensor-inference.sh --model 1a008d --with-cpu --with-quantize-turbo
   ./gollek/scripts/bench-safetensor-inference.sh --model 7c51c9 --quick --preset m4-greedy-10
+  ./gollek/scripts/bench-safetensor-inference.sh --model 53f473 --quick --preset m4-gemma4-12b-smoke
+  ./gollek/scripts/bench-safetensor-inference.sh --model 53f473 --quick --preset m4-gemma4-12b-row-prefill-ab
 USAGE
 }
 
@@ -99,8 +111,11 @@ NORMAL_PROMPT="Tell me briefly where Jakarta is located."
 MAX_TOKENS=3
 SAFETENSOR_PRESET="${GOLLEK_BENCH_SAFETENSOR_PRESET:-}"
 SAFETENSOR_PRESET_SCRIPT="${GOLLEK_BENCH_SAFETENSOR_PRESET_SCRIPT:-${SCRIPT_DIR}/safetensor-performance-presets.sh}"
+BASE_GOLLEK_JAVA_OPTS="${GOLLEK_JAVA_OPTS:-}"
+BENCH_JAVA_OPTS_ENV="${GOLLEK_BENCH_SAFETENSOR_JAVA_OPTS:-}"
 PROFILE_ENABLED=0
 REQUIRE_PROFILE=0
+REQUIRE_FFN_STRATEGY=""
 REQUIRE_METAL=0
 REQUIRE_METAL_PATHS=0
 REJECT_FALLBACK_PATHS=0
@@ -130,8 +145,11 @@ CASES_FILTER=""
 QUICK_MODE=0
 LIST_PRESETS=0
 FINAL_EXIT_CODE=0
+BENCH_JAVA_OPTS=()
+BENCH_JAVA_OPTS_SET=0
 PROFILE_EXPLICIT=0
 REQUIRE_PROFILE_EXPLICIT=0
+REQUIRE_FFN_STRATEGY_EXPLICIT=0
 MAX_TOKENS_EXPLICIT=0
 REQUIRE_METAL_EXPLICIT=0
 REQUIRE_METAL_PATHS_EXPLICIT=0
@@ -171,10 +189,15 @@ while [[ $# -gt 0 ]]; do
     --list-presets) LIST_PRESETS=1; shift ;;
     --cases) CASES_FILTER="$2"; shift 2 ;;
     --quick) QUICK_MODE=1; shift ;;
+    --java-opt) BENCH_JAVA_OPTS+=( "$2" ); BENCH_JAVA_OPTS_SET=1; shift 2 ;;
+    --java-opt=*) BENCH_JAVA_OPTS+=( "${1#*=}" ); BENCH_JAVA_OPTS_SET=1; shift ;;
     --profile) PROFILE_ENABLED=1; PROFILE_EXPLICIT=1; shift ;;
     --no-profile) PROFILE_ENABLED=0; PROFILE_EXPLICIT=1; shift ;;
     --require-profile) REQUIRE_PROFILE=1; REQUIRE_PROFILE_EXPLICIT=1; shift ;;
     --no-require-profile) REQUIRE_PROFILE=0; REQUIRE_PROFILE_EXPLICIT=1; shift ;;
+    --require-ffn-strategy) REQUIRE_FFN_STRATEGY="$2"; REQUIRE_FFN_STRATEGY_EXPLICIT=1; shift 2 ;;
+    --require-ffn-strategy=*) REQUIRE_FFN_STRATEGY="${1#*=}"; REQUIRE_FFN_STRATEGY_EXPLICIT=1; shift ;;
+    --no-require-ffn-strategy) REQUIRE_FFN_STRATEGY=""; REQUIRE_FFN_STRATEGY_EXPLICIT=1; shift ;;
     --require-metal) REQUIRE_METAL=1; REQUIRE_METAL_EXPLICIT=1; shift ;;
     --no-require-metal) REQUIRE_METAL=0; REQUIRE_METAL_EXPLICIT=1; shift ;;
     --require-metal-paths) REQUIRE_METAL_PATHS=1; REQUIRE_METAL_PATHS_EXPLICIT=1; shift ;;
@@ -232,6 +255,34 @@ valid_coverage_threshold() {
   [[ "$1" =~ ^(0([.][0-9]+)?|1([.]0+)?)$ ]]
 }
 
+trim_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+merged_java_opts() {
+  local -a opts=()
+  if [[ -n "${BASE_GOLLEK_JAVA_OPTS}" ]]; then
+    opts+=( "${BASE_GOLLEK_JAVA_OPTS}" )
+  fi
+  if [[ -n "${BENCH_JAVA_OPTS_ENV}" ]]; then
+    opts+=( "${BENCH_JAVA_OPTS_ENV}" )
+  fi
+  if (( BENCH_JAVA_OPTS_SET == 1 )); then
+    opts+=( "${BENCH_JAVA_OPTS[@]}" )
+  fi
+  if (( $# > 0 )); then
+    opts+=( "$@" )
+  fi
+  if (( ${#opts[@]} == 0 )); then
+    return 0
+  fi
+  local IFS=' '
+  printf '%s' "${opts[*]}"
+}
+
 apply_safetensor_preset() {
   if [[ -z "${SAFETENSOR_PRESET}" ]]; then
     return 0
@@ -262,6 +313,13 @@ apply_safetensor_preset() {
         if (( REQUIRE_PROFILE_EXPLICIT == 0 )); then
           if preset_truthy "${value}"; then REQUIRE_PROFILE=1; else REQUIRE_PROFILE=0; fi
         fi
+        ;;
+      requireFfnStrategy)
+        if (( REQUIRE_FFN_STRATEGY_EXPLICIT == 0 )); then REQUIRE_FFN_STRATEGY="${value}"; fi
+        ;;
+      javaOpt)
+        BENCH_JAVA_OPTS+=( "${value}" )
+        BENCH_JAVA_OPTS_SET=1
         ;;
       requireMetal)
         if (( REQUIRE_METAL_EXPLICIT == 0 )); then
@@ -373,6 +431,18 @@ if [[ -n "${MAX_REPEATED_TOKEN_RUN}" && ! "${MAX_REPEATED_TOKEN_RUN}" =~ ^[1-9][
   echo "Invalid max repeated token run value: ${MAX_REPEATED_TOKEN_RUN}" >&2
   exit 2
 fi
+if [[ -n "${REQUIRE_FFN_STRATEGY}" && -z "$(trim_value "${REQUIRE_FFN_STRATEGY//,/}")" ]]; then
+  echo "Invalid required FFN strategy value: ${REQUIRE_FFN_STRATEGY}" >&2
+  exit 2
+fi
+if (( BENCH_JAVA_OPTS_SET == 1 )); then
+  for java_opt in "${BENCH_JAVA_OPTS[@]}"; do
+    if [[ -z "$(trim_value "${java_opt}")" ]]; then
+      echo "Invalid empty java opt" >&2
+      exit 2
+    fi
+  done
+fi
 if [[ -n "${MIN_CHUNKS}" && ! "${MIN_CHUNKS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "Invalid min chunks value: ${MIN_CHUNKS}" >&2
   exit 2
@@ -436,7 +506,7 @@ generate_outputs() {
     }' "${objects_file}" > "${SUMMARY_JSON}"
 
   {
-    echo "case_id,mode,prompt_kind,quantize,status,exit_code,duration_s,speed_tps,chunks,answer,answer_repeat_run,profile_backend,profile_metal,profile_core_path_status,profile_linear_path_status,profile_logits_path_status,profile_ffn_path_status,profile_attention_path_status,profile_argmax_path_status,profile_core_path_coverage,profile_linear_path_coverage,profile_logits_path_coverage,profile_ffn_path_coverage,profile_attention_path_coverage,profile_argmax_path_coverage,profile_top_stage,profile_top_stage_ms,profile_prefill_ms,profile_decode_ms,profile_tpot_ms,profile_sampling_ms,profile_argmax_ms,profile_attention_ms,profile_ffn_ms,profile_logits_ms,profile_linear_paths,profile_logits_paths,profile_ffn_paths,profile_attention_paths,profile_argmax_paths,profile_summary,fatal_line,log_file"
+    echo "case_id,mode,prompt_kind,quantize,status,exit_code,duration_s,speed_tps,chunks,answer,answer_repeat_run,profile_backend,profile_metal,profile_core_path_status,profile_linear_path_status,profile_logits_path_status,profile_ffn_path_status,profile_attention_path_status,profile_argmax_path_status,profile_core_path_coverage,profile_linear_path_coverage,profile_logits_path_coverage,profile_ffn_path_coverage,profile_attention_path_coverage,profile_argmax_path_coverage,profile_top_stage,profile_top_stage_ms,profile_prefill_ms,profile_decode_ms,profile_tpot_ms,profile_sampling_ms,profile_argmax_ms,profile_attention_ms,profile_ffn_ms,profile_logits_ms,profile_linear_paths,profile_logits_paths,profile_ffn_paths,profile_attention_paths,profile_argmax_paths,profile_ffn_strategy,profile_ffn_row_prefill_native_rows,profile_ffn_row_prefill_variant,profile_summary,fatal_line,log_file"
     jq -s -r '.[] | [
       .case_id,
       .mode,
@@ -478,6 +548,9 @@ generate_outputs() {
       (.profile_ffn_paths // "" | gsub("\""; "\"\"")),
       (.profile_attention_paths // "" | gsub("\""; "\"\"")),
       (.profile_argmax_paths // "" | gsub("\""; "\"\"")),
+      (.profile_ffn_strategy // ""),
+      (.profile_ffn_row_prefill_native_rows // ""),
+      (.profile_ffn_row_prefill_variant // ""),
       (.profile_summary // "" | gsub("\""; "\"\"")),
       (.fatal_line // "" | gsub("\""; "\"\"")),
       .log_file
@@ -485,7 +558,7 @@ generate_outputs() {
   } > "${SUMMARY_CSV}"
 
   {
-    echo "case_id	status	backend	metal	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	logFile"
+    echo "case_id	status	backend	metal	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	ffnStrategy	ffnRowPrefillNativeRows	ffnRowPrefillVariant	logFile"
     jq -s -r '.[] | [
       .case_id,
       .status,
@@ -518,12 +591,15 @@ generate_outputs() {
       (.profile_ffn_paths // "n/a"),
       (.profile_attention_paths // "n/a"),
       (.profile_argmax_paths // "n/a"),
+      (.profile_ffn_strategy // "n/a"),
+      (.profile_ffn_row_prefill_native_rows // "n/a"),
+      (.profile_ffn_row_prefill_variant // "n/a"),
       .log_file
     ] | @tsv' "${objects_file}"
   } > "${PROFILE_TSV}"
 
   {
-    echo "case	durationMs	speedTps	chunks	answerRepeatRun	backend	profileMetal	status	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	log"
+    echo "case	durationMs	speedTps	chunks	answerRepeatRun	backend	profileMetal	status	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	ffnStrategy	ffnRowPrefillNativeRows	ffnRowPrefillVariant	log"
     jq -s -r '.[] | [
       .case_id,
       (if .duration_s == null then "n/a" else (.duration_s * 1000 | round | tostring) end),
@@ -560,6 +636,9 @@ generate_outputs() {
       (.profile_ffn_paths // "n/a" | gsub(","; ";")),
       (.profile_attention_paths // "n/a" | gsub(","; ";")),
       (.profile_argmax_paths // "n/a" | gsub(","; ";")),
+      (.profile_ffn_strategy // "n/a"),
+      (.profile_ffn_row_prefill_native_rows // "n/a"),
+      (.profile_ffn_row_prefill_variant // "n/a"),
       .log_file
     ] | @tsv' "${objects_file}"
   } > "${GATE_TSV}"
@@ -728,6 +807,16 @@ profile_block_field() {
     || true
 }
 
+profile_path_attribute() {
+  local block="$1"
+  local key="$2"
+  printf '%s\n' "${block}" \
+    | grep -oE "(^|[:,[:space:]])${key}=[^:=,[:space:]]+" \
+    | tail -n 1 \
+    | sed -E "s/^[:,[:space:]]*${key}=//" \
+    || true
+}
+
 profile_top_stage() {
   local summary="$1"
   local stage value
@@ -829,6 +918,20 @@ append_min_metric_threshold_failure() {
   fi
 }
 
+ffn_strategy_allowed() {
+  local actual="$1"
+  local required="$2"
+  local expected
+  IFS=',' read -r -a expected_strategies <<< "${required}"
+  for expected in "${expected_strategies[@]}"; do
+    expected="$(trim_value "${expected}")"
+    if [[ -n "${expected}" && "${actual}" == "${expected}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 answer_matches_required_regex() {
   local answer="$1"
   if [[ -z "${REQUIRE_ANSWER_REGEX}" ]]; then
@@ -917,6 +1020,9 @@ metal_path_proven() {
     || "${lower_value}" == *mtl* \
     || "${lower_value}" == *mps* \
     || "${lower_value}" == *gpu* \
+    || "${lower_value}" == *fused-gated-ffn:accept* \
+    || "${lower_value}" == *matvec-gated-ffn-prefill-rows:accept* \
+    || "${lower_value}" == *native_bf16=true* \
     || "${lower_value}" == *native_argmax* ]]
 }
 
@@ -924,6 +1030,7 @@ fallback_path_present() {
   local value="$1"
   local lower_value
   lower_value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+  lower_value="${lower_value//matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill/}"
   [[ "${lower_value}" == *cpu* \
     || "${lower_value}" == *java* \
     || "${lower_value}" == *accelerate* \
@@ -1001,6 +1108,8 @@ run_case() {
   if (( PROFILE_ENABLED == 1 )); then
     java_opts+=( "-Dgollek.profile=true" )
   fi
+  local effective_java_opts
+  effective_java_opts="$(merged_java_opts "${java_opts[@]}")"
 
   if [[ "${mode}" == "cpu" ]]; then
     cmd+=( "--use-cpu" )
@@ -1030,9 +1139,10 @@ run_case() {
     echo "prompt_kind=${prompt_kind}"
     echo "quantize=${quant_strategy:-none}"
     echo "command=${cmd[*]}"
+    echo "gollek_java_opts=${effective_java_opts:-none}"
     echo
-    if (( ${#java_opts[@]} > 0 )); then
-      GOLLEK_JAVA_OPTS="${java_opts[*]}" "${cmd[@]}"
+    if [[ -n "${effective_java_opts}" ]]; then
+      GOLLEK_JAVA_OPTS="${effective_java_opts}" "${cmd[@]}"
     else
       "${cmd[@]}"
     fi
@@ -1053,6 +1163,7 @@ run_case() {
   local profile_prefill_ms profile_decode_ms profile_tpot_ms profile_sampling_ms profile_argmax_ms
   local profile_attention_ms profile_ffn_ms profile_logits_ms
   local profile_linear_paths profile_logits_paths profile_ffn_paths profile_attention_paths profile_argmax_paths
+  local profile_ffn_strategy profile_ffn_row_prefill_native_rows profile_ffn_row_prefill_variant
   local profile_path_status profile_core_path_status profile_linear_path_status profile_logits_path_status
   local profile_ffn_path_status profile_attention_path_status profile_argmax_path_status
   local profile_path_coverage profile_core_path_coverage profile_linear_path_coverage profile_logits_path_coverage
@@ -1085,6 +1196,9 @@ run_case() {
   profile_ffn_paths="$(profile_block "${profile}" ffn_paths)"
   profile_attention_paths="$(profile_block "${profile}" attention_paths)"
   profile_argmax_paths="$(profile_block "${profile}" argmax_paths)"
+  profile_ffn_strategy="$(profile_field "${profile}" ffn_strategy)"
+  profile_ffn_row_prefill_native_rows="$(profile_path_attribute "${profile_ffn_paths}" native_rows)"
+  profile_ffn_row_prefill_variant="$(profile_path_attribute "${profile_ffn_paths}" variant)"
   profile_path_status="$(profile_block "${profile}" path_status)"
   profile_core_path_status="$(profile_block_field "${profile_path_status}" core)"
   profile_linear_path_status="$(profile_block_field "${profile_path_status}" linear)"
@@ -1103,6 +1217,15 @@ run_case() {
   local gate_failure=""
   if (( REQUIRE_PROFILE == 1 )) && [[ -z "${profile}" ]]; then
     gate_failure="$(append_gate_failure "${gate_failure}" "missing safetensor profile output")"
+  fi
+  if [[ -n "${REQUIRE_FFN_STRATEGY}" ]]; then
+    if [[ -z "${profile_ffn_strategy}" ]]; then
+      gate_failure="$(append_gate_failure "${gate_failure}" \
+        "ffn_strategy was required but not measured (${REQUIRE_FFN_STRATEGY})")"
+    elif ! ffn_strategy_allowed "${profile_ffn_strategy}" "${REQUIRE_FFN_STRATEGY}"; then
+      gate_failure="$(append_gate_failure "${gate_failure}" \
+        "ffn_strategy=${profile_ffn_strategy} did not match required ${REQUIRE_FFN_STRATEGY}")"
+    fi
   fi
   if (( REQUIRE_METAL == 1 )) && [[ "${mode}" != "cpu" && "${profile_metal}" != "true" ]]; then
     gate_failure="$(append_gate_failure "${gate_failure}" "Metal backend was required but not proven")"
@@ -1223,6 +1346,9 @@ run_case() {
     --arg profile_ffn_paths "${profile_ffn_paths:-}" \
     --arg profile_attention_paths "${profile_attention_paths:-}" \
     --arg profile_argmax_paths "${profile_argmax_paths:-}" \
+    --arg profile_ffn_strategy "${profile_ffn_strategy:-}" \
+    --arg profile_ffn_row_prefill_native_rows "${profile_ffn_row_prefill_native_rows:-}" \
+    --arg profile_ffn_row_prefill_variant "${profile_ffn_row_prefill_variant:-}" \
     --arg status "${status}" \
     --arg fatal_line "${fatal_line:-}" \
     --argjson exit_code "${exit_code}" \
@@ -1271,6 +1397,9 @@ run_case() {
       profile_ffn_paths: (if $profile_ffn_paths == "" then null else $profile_ffn_paths end),
       profile_attention_paths: (if $profile_attention_paths == "" then null else $profile_attention_paths end),
       profile_argmax_paths: (if $profile_argmax_paths == "" then null else $profile_argmax_paths end),
+      profile_ffn_strategy: (if $profile_ffn_strategy == "" then null else $profile_ffn_strategy end),
+      profile_ffn_row_prefill_native_rows: (if $profile_ffn_row_prefill_native_rows == "" then null else ($profile_ffn_row_prefill_native_rows | tonumber) end),
+      profile_ffn_row_prefill_variant: (if $profile_ffn_row_prefill_variant == "" then null else $profile_ffn_row_prefill_variant end),
       fatal_line: $fatal_line,
       log_file: $log_file
     }' >> "${jsonl_file}"

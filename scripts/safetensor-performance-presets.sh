@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 gollek_safetensor_performance_preset_names() {
-  printf '%s\n' m4-smoke m4-greedy-10
+  printf '%s\n' m4-smoke m4-greedy-10 m4-gemma4-12b-smoke m4-gemma4-12b-row-prefill-ab
 }
 
 gollek_safetensor_performance_preset_names_csv() {
-  printf 'm4-smoke,m4-greedy-10'
+  printf 'm4-smoke,m4-greedy-10,m4-gemma4-12b-smoke,m4-gemma4-12b-row-prefill-ab'
 }
 
 gollek_safetensor_performance_preset_description() {
@@ -16,6 +16,12 @@ gollek_safetensor_performance_preset_description() {
     m4-greedy-10)
       printf 'M4 greedy 10-token Jakarta smoke with real Metal path proof, full coverage, fallback rejection, and bounded safetensor profile stages'
       ;;
+    m4-gemma4-12b-smoke)
+      printf 'M4 Gemma4 12B smoke gate with Metal path proof, fallback rejection, and fused GEGLU-over-row-prefill strategy proof'
+      ;;
+    m4-gemma4-12b-row-prefill-ab)
+      printf 'M4 Gemma4 12B row-prefill A/B gate with Metal path proof and row-prefill strategy proof'
+      ;;
     *)
       return 1
       ;;
@@ -24,7 +30,7 @@ gollek_safetensor_performance_preset_description() {
 
 gollek_safetensor_performance_preset_validate() {
   case "$1" in
-    ""|m4-smoke|m4-greedy-10) return 0 ;;
+    ""|m4-smoke|m4-greedy-10|m4-gemma4-12b-smoke|m4-gemma4-12b-row-prefill-ab) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -56,6 +62,19 @@ gollek_safetensor_emit_m4_smoke_thresholds() {
   printf '%s\t%s\n' logitsThresholdMs 1500
 }
 
+gollek_safetensor_emit_m4_gemma4_12b_smoke_thresholds() {
+  printf '%s\t%s\n' minSpeedTps 0.1
+  printf '%s\t%s\n' topStageThresholdMs 60000
+  printf '%s\t%s\n' prefillThresholdMs 60000
+  printf '%s\t%s\n' decodeThresholdMs 60000
+  printf '%s\t%s\n' tpotThresholdMs 10000
+  printf '%s\t%s\n' samplingThresholdMs 2000
+  printf '%s\t%s\n' argmaxThresholdMs 1000
+  printf '%s\t%s\n' attentionThresholdMs 30000
+  printf '%s\t%s\n' ffnThresholdMs 30000
+  printf '%s\t%s\n' logitsThresholdMs 5000
+}
+
 gollek_safetensor_performance_preset_defaults() {
   case "$1" in
     m4-smoke)
@@ -70,6 +89,20 @@ gollek_safetensor_performance_preset_defaults() {
       printf '%s\t%s\n' maxRepeatedTokenRun 2
       printf '%s\t%s\n' minChunks 2
       gollek_safetensor_emit_m4_smoke_thresholds
+      ;;
+    m4-gemma4-12b-smoke)
+      gollek_safetensor_emit_m4_metal_path_gates
+      printf '%s\t%s\n' requireFfnStrategy fused_geglu_prefill_over_row_prefill
+      printf '%s\t%s\n' maxTokens 3
+      gollek_safetensor_emit_m4_gemma4_12b_smoke_thresholds
+      ;;
+    m4-gemma4-12b-row-prefill-ab)
+      gollek_safetensor_emit_m4_metal_path_gates
+      printf '%s\t%s\n' requireFfnStrategy row_prefill_matvec_active
+      printf '%s\t%s\n' javaOpt -Dgollek.safetensor.enable_metal_matvec_ffn_prefill_rows=true
+      printf '%s\t%s\n' javaOpt -Dgollek.safetensor.prefer_metal_matvec_ffn_prefill_rows=true
+      printf '%s\t%s\n' maxTokens 3
+      gollek_safetensor_emit_m4_gemma4_12b_smoke_thresholds
       ;;
     "")
       ;;

@@ -18,9 +18,10 @@ printf 'Platform: Metal\n'
 printf '✓ GPU acceleration enabled (Apple M4)\n'
 printf 'Model: fake-safetensor\n'
 printf 'Provider: safetensor\n'
+printf 'GOLLEK_JAVA_OPTS=%s\n' "${GOLLEK_JAVA_OPTS:-}"
 printf '%s\n' '--------------------------------------------------'
 printf 'Jakarta is in Indonesia.\n'
-printf '\n[PROFILE] backend=metal mode=direct load=1.00ms tokenize=2.00ms session=3.00ms ttft=15.00ms engine_ttft=10.00ms prefill=4.00ms decode=18.00ms tpot=9.00ms sampling=1.00ms argmax=0.50ms attention=6.00ms ffn=14.00ms logits=3.00ms logits_copy=1.00ms steps=2 linear={attn_q_proj=8.00, ffn_down=12.00} linear_paths={attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2} logits_paths={metal_matmul_f16=2} ffn_paths={metal_geglu=2} attention_paths={paged_metal=2} argmax_paths={native_argmax_f32=2} path_status={core=metal, linear=metal, logits=metal, ffn=metal, attention=metal, argmax=metal} path_coverage={core=12/12, linear=6/6, logits=2/2, ffn=2/2, attention=2/2, argmax=2/2}\n'
+printf '\n[PROFILE] backend=metal mode=direct load=1.00ms tokenize=2.00ms session=3.00ms ttft=15.00ms engine_ttft=10.00ms prefill=4.00ms decode=18.00ms tpot=9.00ms sampling=1.00ms argmax=0.50ms attention=6.00ms ffn=14.00ms logits=3.00ms logits_copy=1.00ms steps=2 linear={attn_q_proj=8.00, ffn_down=12.00} linear_paths={attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2} logits_paths={metal_matmul_f16=2} ffn_paths={matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill=2, fused-gated-ffn:accept:geglu:native_bf16=true=2} attention_paths={paged_metal=2} argmax_paths={native_argmax_f32=2} ffn_strategy=fused_geglu_prefill_over_row_prefill path_status={core=metal, linear=metal, logits=metal, ffn=metal, attention=metal, argmax=metal} path_coverage={core=12/12, linear=6/6, logits=2/2, ffn=2/2, attention=2/2, argmax=2/2}\n'
 printf '[Stream updates: 2, Duration: 1,23s, Speed: 1,63 t/s]\n'
 SH
 chmod +x "$GOLLEK_BIN"
@@ -29,9 +30,33 @@ PRESETS_TSV="$TMP_DIR/presets.tsv"
 bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" --list-presets > "$PRESETS_TSV"
 if ! grep -qx $'name\tdescription' "$PRESETS_TSV" \
     || ! grep -q $'^m4-smoke\tM4 Metal smoke gate with real Metal path proof' "$PRESETS_TSV" \
-    || ! grep -q $'^m4-greedy-10\tM4 greedy 10-token Jakarta smoke with real Metal path proof' "$PRESETS_TSV"; then
-  echo "Expected direct safetensor benchmark preset list to include m4-smoke and m4-greedy-10" >&2
+    || ! grep -q $'^m4-greedy-10\tM4 greedy 10-token Jakarta smoke with real Metal path proof' "$PRESETS_TSV" \
+    || ! grep -q $'^m4-gemma4-12b-smoke\tM4 Gemma4 12B smoke gate with Metal path proof' "$PRESETS_TSV" \
+    || ! grep -q $'^m4-gemma4-12b-row-prefill-ab\tM4 Gemma4 12B row-prefill A/B gate' "$PRESETS_TSV"; then
+  echo "Expected direct safetensor benchmark preset list to include M4 and Gemma4 12B presets" >&2
   cat "$PRESETS_TSV" >&2
+  exit 1
+fi
+
+GEMMA4_PRESET_DEFAULTS="$TMP_DIR/gemma4-12b-preset-defaults.tsv"
+bash "$ROOT_DIR/scripts/safetensor-performance-presets.sh" defaults m4-gemma4-12b-smoke > "$GEMMA4_PRESET_DEFAULTS"
+if ! grep -qx $'requireFfnStrategy\tfused_geglu_prefill_over_row_prefill' "$GEMMA4_PRESET_DEFAULTS" \
+    || ! grep -qx $'maxTokens\t3' "$GEMMA4_PRESET_DEFAULTS" \
+    || ! grep -qx $'ffnThresholdMs\t30000' "$GEMMA4_PRESET_DEFAULTS" \
+    || ! grep -qx $'topStageThresholdMs\t60000' "$GEMMA4_PRESET_DEFAULTS"; then
+  echo "Expected Gemma4 12B preset defaults to require fused strategy with relaxed 12B thresholds" >&2
+  cat "$GEMMA4_PRESET_DEFAULTS" >&2
+  exit 1
+fi
+
+ROW_PREFILL_PRESET_DEFAULTS="$TMP_DIR/gemma4-12b-row-prefill-preset-defaults.tsv"
+bash "$ROOT_DIR/scripts/safetensor-performance-presets.sh" defaults m4-gemma4-12b-row-prefill-ab > "$ROW_PREFILL_PRESET_DEFAULTS"
+if ! grep -qx $'requireFfnStrategy\trow_prefill_matvec_active' "$ROW_PREFILL_PRESET_DEFAULTS" \
+    || ! grep -qx $'javaOpt\t-Dgollek.safetensor.enable_metal_matvec_ffn_prefill_rows=true' "$ROW_PREFILL_PRESET_DEFAULTS" \
+    || ! grep -qx $'javaOpt\t-Dgollek.safetensor.prefer_metal_matvec_ffn_prefill_rows=true' "$ROW_PREFILL_PRESET_DEFAULTS" \
+    || ! grep -qx $'maxTokens\t3' "$ROW_PREFILL_PRESET_DEFAULTS"; then
+  echo "Expected Gemma4 12B row-prefill preset defaults to require row-prefill strategy and Java opts" >&2
+  cat "$ROW_PREFILL_PRESET_DEFAULTS" >&2
   exit 1
 fi
 
@@ -47,6 +72,7 @@ bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
   --quick \
   --profile \
   --require-profile \
+  --require-ffn-strategy fused_geglu_prefill_over_row_prefill \
   --require-metal \
   --require-metal-paths \
   --max-top-stage-ms 20 \
@@ -107,7 +133,10 @@ if ! jq -e '
   and .runs[0].profile_logits_ms == 3
   and .runs[0].profile_linear_paths == "attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2"
   and .runs[0].profile_logits_paths == "metal_matmul_f16=2"
-  and .runs[0].profile_ffn_paths == "metal_geglu=2"
+  and .runs[0].profile_ffn_paths == "matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill=2, fused-gated-ffn:accept:geglu:native_bf16=true=2"
+  and .runs[0].profile_ffn_strategy == "fused_geglu_prefill_over_row_prefill"
+  and .runs[0].profile_ffn_row_prefill_native_rows == null
+  and .runs[0].profile_ffn_row_prefill_variant == null
   and .runs[0].profile_attention_paths == "paged_metal=2"
   and .runs[0].profile_argmax_paths == "native_argmax_f32=2"
 ' "$SUMMARY_JSON" >/dev/null; then
@@ -116,15 +145,15 @@ if ! jq -e '
   exit 1
 fi
 
-if ! grep -qx $'case_id	status	backend	metal	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	logFile' "$PROFILE_TSV" \
-    || ! grep -q $'^metal-deterministic	passed	metal	true	metal	metal	metal	metal	metal	metal	12/12	6/6	2/2	2/2	2/2	2/2	decode	18.00	4.00	18.00	9.00	1.00	0.50	6.00	14.00	3.00	attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2	metal_matmul_f16=2	metal_geglu=2	paged_metal=2	native_argmax_f32=2	' "$PROFILE_TSV"; then
+if ! grep -qx $'case_id	status	backend	metal	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	ffnStrategy	ffnRowPrefillNativeRows	ffnRowPrefillVariant	logFile' "$PROFILE_TSV" \
+    || ! grep -q $'^metal-deterministic	passed	metal	true	metal	metal	metal	metal	metal	metal	12/12	6/6	2/2	2/2	2/2	2/2	decode	18.00	4.00	18.00	9.00	1.00	0.50	6.00	14.00	3.00	attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2	metal_matmul_f16=2	matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill=2, fused-gated-ffn:accept:geglu:native_bf16=true=2	paged_metal=2	native_argmax_f32=2	fused_geglu_prefill_over_row_prefill	n/a	n/a	' "$PROFILE_TSV"; then
   echo "Expected profile.tsv to capture backend, Metal proof, slowest stage, timings, and paths" >&2
   cat "$PROFILE_TSV" >&2
   exit 1
 fi
 
-if ! grep -qx $'case	durationMs	speedTps	chunks	answerRepeatRun	backend	profileMetal	status	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	log' "$GATE_TSV" \
-    || ! grep -q $'^metal-deterministic	1230	1.63	2	1	metal	true	passed	metal	metal	metal	metal	metal	metal	12/12	6/6	2/2	2/2	2/2	2/2	decode	18.00	4.00	18.00	9.00	1.00	0.50	6.00	14.00	3.00	attn_q_proj:metal_matmul_f16=2; ffn_down:metal_matmul_f16=2; logits:metal_matmul_f16=2	metal_matmul_f16=2	metal_geglu=2	paged_metal=2	native_argmax_f32=2	' "$GATE_TSV"; then
+if ! grep -qx $'case	durationMs	speedTps	chunks	answerRepeatRun	backend	profileMetal	status	corePathStatus	linearPathStatus	logitsPathStatus	ffnPathStatus	attentionPathStatus	argmaxPathStatus	corePathCoverage	linearPathCoverage	logitsPathCoverage	ffnPathCoverage	attentionPathCoverage	argmaxPathCoverage	topStage	topStageMs	prefillMs	decodeMs	tpotMs	samplingMs	argmaxMs	attentionMs	ffnMs	logitsMs	linearPaths	logitsPaths	ffnPaths	attentionPaths	argmaxPaths	ffnStrategy	ffnRowPrefillNativeRows	ffnRowPrefillVariant	log' "$GATE_TSV" \
+    || ! grep -q $'^metal-deterministic	1230	1.63	2	1	metal	true	passed	metal	metal	metal	metal	metal	metal	12/12	6/6	2/2	2/2	2/2	2/2	decode	18.00	4.00	18.00	9.00	1.00	0.50	6.00	14.00	3.00	attn_q_proj:metal_matmul_f16=2; ffn_down:metal_matmul_f16=2; logits:metal_matmul_f16=2	metal_matmul_f16=2	matvec-gated-ffn-prefill-rows:skip:strategy_prefers_fused_geglu_prefill=2; fused-gated-ffn:accept:geglu:native_bf16=true=2	paged_metal=2	native_argmax_f32=2	fused_geglu_prefill_over_row_prefill	n/a	n/a	' "$GATE_TSV"; then
   echo "Expected gate TSV to expose aggregate-friendly safetensor metrics" >&2
   cat "$GATE_TSV" >&2
   exit 1
@@ -132,10 +161,11 @@ fi
 
 if ! head -n 1 "$SUMMARY_CSV" | grep -q 'profile_sampling_ms,profile_argmax_ms' \
     || ! head -n 1 "$SUMMARY_CSV" | grep -q 'profile_core_path_coverage,profile_linear_path_coverage' \
-    || ! head -n 1 "$SUMMARY_CSV" | grep -q 'profile_attention_paths,profile_argmax_paths' \
+    || ! head -n 1 "$SUMMARY_CSV" | grep -q 'profile_attention_paths,profile_argmax_paths,profile_ffn_strategy' \
     || ! grep -q '"attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2"' "$SUMMARY_CSV" \
     || ! grep -q 'native_argmax_f32=2' "$SUMMARY_CSV" \
-    || ! grep -q 'metal_matmul_f16=2' "$SUMMARY_CSV"; then
+    || ! grep -q 'fused_geglu_prefill_over_row_prefill' "$SUMMARY_CSV" \
+    || ! grep -q 'fused-gated-ffn:accept:geglu:native_bf16=true=2' "$SUMMARY_CSV"; then
   echo "Expected summary.csv to expose normalized profile columns" >&2
   cat "$SUMMARY_CSV" >&2
   exit 1
@@ -151,6 +181,170 @@ if ! grep -q 'metal-deterministic.*metal.*true.*metal.*12/12.*decode.*18' "$REPO
   echo "Expected report and command output to reference profile evidence" >&2
   cat "$REPORT_TXT" >&2
   cat "$TMP_DIR/bench.out" >&2
+  exit 1
+fi
+
+JAVA_OPTS_LABEL="java-opts-merge"
+GOLLEK_JAVA_OPTS="-Dbase.option=true" \
+GOLLEK_BENCH_SAFETENSOR_JAVA_OPTS="-Denv.option=true" \
+bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
+  --model fake-model \
+  --gollek-bin "$GOLLEK_BIN" \
+  --out-dir "$OUT_DIR" \
+  --label "$JAVA_OPTS_LABEL" \
+  --quick \
+  --profile \
+  --java-opt -Dcli.option=true \
+  --java-opt -Dgemma4.row_prefill_probe=true \
+  --max-tokens 2 > "$TMP_DIR/bench-java-opts.out"
+
+JAVA_OPTS_LOG="$OUT_DIR/$JAVA_OPTS_LABEL/logs/metal-deterministic.log"
+EXPECTED_JAVA_OPTS='-Dbase.option=true -Denv.option=true -Dcli.option=true -Dgemma4.row_prefill_probe=true -Dgollek.profile=true'
+if ! grep -qx "gollek_java_opts=$EXPECTED_JAVA_OPTS" "$JAVA_OPTS_LOG" \
+    || ! grep -qx "GOLLEK_JAVA_OPTS=$EXPECTED_JAVA_OPTS" "$JAVA_OPTS_LOG"; then
+  echo "Expected benchmark Java opts to preserve caller/env opts and append profile flag" >&2
+  cat "$JAVA_OPTS_LOG" >&2
+  cat "$TMP_DIR/bench-java-opts.out" >&2
+  exit 1
+fi
+
+ROW_PREFILL_BIN="$TMP_DIR/gollek-row-prefill"
+cat > "$ROW_PREFILL_BIN" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'Platform: Metal\n'
+printf '✓ GPU acceleration enabled (Apple M4)\n'
+printf 'Model: fake-safetensor\n'
+printf 'Provider: safetensor\n'
+printf 'GOLLEK_JAVA_OPTS=%s\n' "${GOLLEK_JAVA_OPTS:-}"
+printf '%s\n' '--------------------------------------------------'
+printf 'Jakarta is in Indonesia.\n'
+printf '\n[PROFILE] backend=metal mode=direct prefill=4.00ms decode=18.00ms tpot=9.00ms sampling=1.00ms argmax=0.50ms attention=6.00ms ffn=14.00ms logits=3.00ms steps=2 linear_paths={attn_q_proj:metal_matmul_f16=2, ffn_down:metal_matmul_f16=2, logits:metal_matmul_f16=2} logits_paths={metal_matmul_f16=2} ffn_paths={matvec-gated-ffn-prefill-rows:accept:geglu:native_bf16=true:native_rows=12:variant=x4=2} attention_paths={paged_metal=2} argmax_paths={native_argmax_f32=2} ffn_strategy=row_prefill_matvec_active path_status={core=metal, linear=metal, logits=metal, ffn=metal, attention=metal, argmax=metal} path_coverage={core=12/12, linear=6/6, logits=2/2, ffn=2/2, attention=2/2, argmax=2/2}\n'
+printf '[Stream updates: 2, Duration: 1,23s, Speed: 1,63 t/s]\n'
+SH
+chmod +x "$ROW_PREFILL_BIN"
+
+ROW_PREFILL_LABEL="row-prefill-profile"
+ROW_PREFILL_GATE_TSV="$TMP_DIR/row-prefill-gate.tsv"
+bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
+  --model fake-model \
+  --gollek-bin "$ROW_PREFILL_BIN" \
+  --out-dir "$OUT_DIR" \
+  --label "$ROW_PREFILL_LABEL" \
+  --summary-file "$ROW_PREFILL_GATE_TSV" \
+  --quick \
+  --profile \
+  --require-profile \
+  --require-ffn-strategy row_prefill_matvec_active \
+  --require-metal \
+  --require-metal-paths \
+  --reject-fallback-paths \
+  --max-tokens 2 > "$TMP_DIR/bench-row-prefill.out"
+
+ROW_PREFILL_JSON="$OUT_DIR/$ROW_PREFILL_LABEL/summary.json"
+if ! jq -e '
+  .runs[0].status == "passed"
+  and .runs[0].profile_ffn_path_status == "metal"
+  and .runs[0].profile_ffn_strategy == "row_prefill_matvec_active"
+  and .runs[0].profile_ffn_row_prefill_native_rows == 12
+  and .runs[0].profile_ffn_row_prefill_variant == "x4"
+  and (.runs[0].profile_ffn_paths | contains("matvec-gated-ffn-prefill-rows:accept"))
+' "$ROW_PREFILL_JSON" >/dev/null \
+    || ! grep -q $'^metal-deterministic	.*	row_prefill_matvec_active	12	x4	' "$ROW_PREFILL_GATE_TSV"; then
+  echo "Expected row-prefill FFN strategy details to be extracted and accepted as native Metal evidence" >&2
+  cat "$ROW_PREFILL_JSON" >&2
+  cat "$ROW_PREFILL_GATE_TSV" >&2
+  cat "$TMP_DIR/bench-row-prefill.out" >&2
+  exit 1
+fi
+
+ROW_PREFILL_PRESET_LABEL="preset-gemma4-12b-row-prefill-ab"
+bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
+  --model fake-model \
+  --gollek-bin "$ROW_PREFILL_BIN" \
+  --out-dir "$OUT_DIR" \
+  --label "$ROW_PREFILL_PRESET_LABEL" \
+  --quick \
+  --preset m4-gemma4-12b-row-prefill-ab \
+  --max-tokens 2 > "$TMP_DIR/bench-preset-row-prefill.out"
+
+ROW_PREFILL_PRESET_JSON="$OUT_DIR/$ROW_PREFILL_PRESET_LABEL/summary.json"
+ROW_PREFILL_PRESET_LOG="$OUT_DIR/$ROW_PREFILL_PRESET_LABEL/logs/metal-deterministic.log"
+ROW_PREFILL_PRESET_JAVA_OPTS='-Dgollek.safetensor.enable_metal_matvec_ffn_prefill_rows=true -Dgollek.safetensor.prefer_metal_matvec_ffn_prefill_rows=true -Dgollek.profile=true'
+if ! jq -e '
+  .runs[0].status == "passed"
+  and .runs[0].profile_ffn_path_status == "metal"
+  and .runs[0].profile_ffn_strategy == "row_prefill_matvec_active"
+  and .runs[0].profile_ffn_row_prefill_native_rows == 12
+  and .runs[0].profile_ffn_row_prefill_variant == "x4"
+' "$ROW_PREFILL_PRESET_JSON" >/dev/null \
+    || ! grep -qx "gollek_java_opts=$ROW_PREFILL_PRESET_JAVA_OPTS" "$ROW_PREFILL_PRESET_LOG" \
+    || ! grep -qx "GOLLEK_JAVA_OPTS=$ROW_PREFILL_PRESET_JAVA_OPTS" "$ROW_PREFILL_PRESET_LOG"; then
+  echo "Expected row-prefill preset to inject Java opts and require row-prefill strategy" >&2
+  cat "$ROW_PREFILL_PRESET_JSON" >&2
+  cat "$ROW_PREFILL_PRESET_LOG" >&2
+  cat "$TMP_DIR/bench-preset-row-prefill.out" >&2
+  exit 1
+fi
+
+FFN_STRATEGY_FAIL_LABEL="ffn-strategy-fail"
+set +e
+bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
+  --model fake-model \
+  --gollek-bin "$GOLLEK_BIN" \
+  --out-dir "$OUT_DIR" \
+  --label "$FFN_STRATEGY_FAIL_LABEL" \
+  --quick \
+  --profile \
+  --require-profile \
+  --require-ffn-strategy row_prefill_matvec_active \
+  --max-tokens 2 > "$TMP_DIR/bench-ffn-strategy-fail.out" 2>&1
+ffn_strategy_fail_exit=$?
+set -e
+
+if [[ "$ffn_strategy_fail_exit" -eq 0 ]]; then
+  echo "Expected mismatched FFN strategy gate to fail" >&2
+  cat "$TMP_DIR/bench-ffn-strategy-fail.out" >&2
+  exit 1
+fi
+
+FFN_STRATEGY_FAIL_JSON="$OUT_DIR/$FFN_STRATEGY_FAIL_LABEL/summary.json"
+if ! jq -e '
+  .runs[0].status == "failed"
+  and .runs[0].exit_code == 1
+  and .runs[0].profile_ffn_strategy == "fused_geglu_prefill_over_row_prefill"
+  and (.runs[0].fatal_line | contains("ffn_strategy=fused_geglu_prefill_over_row_prefill did not match required row_prefill_matvec_active"))
+' "$FFN_STRATEGY_FAIL_JSON" >/dev/null; then
+  echo "Expected mismatched FFN strategy failure to be recorded in summary.json" >&2
+  cat "$FFN_STRATEGY_FAIL_JSON" >&2
+  cat "$TMP_DIR/bench-ffn-strategy-fail.out" >&2
+  exit 1
+fi
+
+GEMMA4_PRESET_LABEL="preset-gemma4-12b-smoke"
+bash "$ROOT_DIR/scripts/bench-safetensor-inference.sh" \
+  --model fake-model \
+  --gollek-bin "$GOLLEK_BIN" \
+  --out-dir "$OUT_DIR" \
+  --label "$GEMMA4_PRESET_LABEL" \
+  --quick \
+  --preset m4-gemma4-12b-smoke \
+  --max-tokens 2 > "$TMP_DIR/bench-preset-gemma4-12b.out"
+
+GEMMA4_PRESET_JSON="$OUT_DIR/$GEMMA4_PRESET_LABEL/summary.json"
+GEMMA4_PRESET_LOG="$OUT_DIR/$GEMMA4_PRESET_LABEL/logs/metal-deterministic.log"
+if ! jq -e '
+  .runs[0].status == "passed"
+  and .runs[0].profile_backend == "metal"
+  and .runs[0].profile_metal == "true"
+  and .runs[0].profile_ffn_path_status == "metal"
+  and .runs[0].profile_ffn_strategy == "fused_geglu_prefill_over_row_prefill"
+' "$GEMMA4_PRESET_JSON" >/dev/null \
+    || ! grep -q -- '--max-tokens 2' "$GEMMA4_PRESET_LOG"; then
+  echo "Expected Gemma4 12B preset to require fused FFN strategy while preserving explicit max tokens" >&2
+  cat "$GEMMA4_PRESET_JSON" >&2
+  cat "$GEMMA4_PRESET_LOG" >&2
   exit 1
 fi
 
