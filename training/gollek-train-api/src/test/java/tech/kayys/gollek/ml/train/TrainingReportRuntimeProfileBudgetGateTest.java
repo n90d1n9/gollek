@@ -199,6 +199,9 @@ class TrainingReportRuntimeProfileBudgetGateTest {
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
         assertTrue(Files.exists(bundle.junitXmlFile()));
+        assertFalse(bundle.artifact().hasManifest());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertTrue(inspection.markdown().contains("# Runtime Profile Budget Gate"));
         assertTrue(inspection.junitXml().contains("gollek.training.runtime.profile"));
         assertTrue(verification.passed(), verification.message());

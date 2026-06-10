@@ -71,15 +71,24 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
             return result.passed();
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("result", result.toMap());
             return Map.copyOf(map);
@@ -116,6 +125,21 @@ public final class TrainingReportRuntimeProfileBudgetGateArtifacts {
 
         public boolean passed() {
             return booleanValue(result.get("passed"));
+        }
+
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 

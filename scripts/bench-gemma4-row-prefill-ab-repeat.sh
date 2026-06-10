@@ -19,6 +19,10 @@ Options:
   --repeat N             Number of A/B samples to run (default: 3)
   --runner-script PATH   Single-sample A/B runner path
   --runner-arg ARG       Extra argument passed to each A/B runner; repeatable
+  --max-p95-regression-percent N
+                         Fail when any metric p95 regression exceeds N percent
+  --fail-unstable-metrics
+                         Fail when any metric has mixed better/worse samples or high variance
   --help                 Show this help
 
 Any arguments after `--` are forwarded to every single-sample A/B run.
@@ -34,6 +38,8 @@ GOLLEK_BIN="${HOME}/.local/bin/gollek"
 OUT_DIR="gollek/ops/benchmarks/safetensor/gemma4-row-prefill-ab-repeat"
 REPEAT_COUNT=3
 RUNNER_SCRIPT="${GOLLEK_GEMMA4_ROW_PREFILL_AB_RUNNER_SCRIPT:-${SCRIPT_DIR}/bench-gemma4-row-prefill-ab.sh}"
+MAX_P95_REGRESSION_PERCENT=""
+FAIL_UNSTABLE_METRICS=0
 RUNNER_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -50,6 +56,9 @@ while [[ $# -gt 0 ]]; do
     --runner-script=*) RUNNER_SCRIPT="${1#*=}"; shift ;;
     --runner-arg) RUNNER_ARGS+=("$2"); shift 2 ;;
     --runner-arg=*) RUNNER_ARGS+=("${1#*=}"); shift ;;
+    --max-p95-regression-percent) MAX_P95_REGRESSION_PERCENT="$2"; shift 2 ;;
+    --max-p95-regression-percent=*) MAX_P95_REGRESSION_PERCENT="${1#*=}"; shift ;;
+    --fail-unstable-metrics) FAIL_UNSTABLE_METRICS=1; shift ;;
     --) shift; RUNNER_ARGS+=("$@"); break ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 2 ;;
@@ -67,6 +76,10 @@ if [[ ! -f "$RUNNER_SCRIPT" ]]; then
 fi
 if [[ ! "$REPEAT_COUNT" =~ ^[0-9]+$ || "$REPEAT_COUNT" -lt 1 ]]; then
   echo "Invalid repeat count: $REPEAT_COUNT" >&2
+  exit 2
+fi
+if [[ -n "$MAX_P95_REGRESSION_PERCENT" && ! "$MAX_P95_REGRESSION_PERCENT" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "Invalid max p95 regression percent: $MAX_P95_REGRESSION_PERCENT" >&2
   exit 2
 fi
 for cmd in awk date mkdir tee; do
@@ -107,6 +120,8 @@ config_row outDir "$OUT_DIR"
 config_row repeat "$REPEAT_COUNT"
 config_row runnerScript "$RUNNER_SCRIPT"
 config_row runnerArgs "${RUNNER_ARGS[*]:-}"
+config_row maxP95RegressionPercent "$MAX_P95_REGRESSION_PERCENT"
+config_row failUnstableMetrics "$FAIL_UNSTABLE_METRICS"
 
 report_value() {
   local key="$1"
@@ -367,13 +382,50 @@ else
 fi
 
 UNSTABLE_METRICS="$(awk 'BEGIN { FS = "\t" } NR > 1 && $NF == "true" { count++ } END { print count + 0 }' "$METRICS_TSV")"
+P95_REGRESSION_GATE_FAILURES=0
+if [[ -n "$MAX_P95_REGRESSION_PERCENT" ]]; then
+  P95_REGRESSION_GATE_FAILURES="$(
+    awk -v max="$MAX_P95_REGRESSION_PERCENT" '
+      BEGIN { FS = "\t" }
+      NR == 1 {
+        for (i = 1; i <= NF; i++) {
+          col[$i] = i
+        }
+        next
+      }
+      $(col["p95RegressionPercent"]) + 0 > max + 0 { count++ }
+      END { print count + 0 }
+    ' "$METRICS_TSV"
+  )"
+fi
+UNSTABLE_GATE_FAILURES=0
+if (( FAIL_UNSTABLE_METRICS == 1 )); then
+  UNSTABLE_GATE_FAILURES="$UNSTABLE_METRICS"
+fi
+AGGREGATE_GATE_FAILURES=$((P95_REGRESSION_GATE_FAILURES + UNSTABLE_GATE_FAILURES))
+AGGREGATE_GATE_REASON=""
+if (( P95_REGRESSION_GATE_FAILURES > 0 )); then
+  AGGREGATE_GATE_REASON="p95-regression"
+fi
+if (( UNSTABLE_GATE_FAILURES > 0 )); then
+  if [[ -n "$AGGREGATE_GATE_REASON" ]]; then
+    AGGREGATE_GATE_REASON="${AGGREGATE_GATE_REASON}; unstable-metrics"
+  else
+    AGGREGATE_GATE_REASON="unstable-metrics"
+  fi
+fi
 
 awk \
   -v repeat="$REPEAT_COUNT" \
   -v unstableMetrics="$UNSTABLE_METRICS" \
+  -v aggregateGateFailures="$AGGREGATE_GATE_FAILURES" \
+  -v aggregateGateReason="$AGGREGATE_GATE_REASON" \
+  -v p95RegressionGateFailures="$P95_REGRESSION_GATE_FAILURES" \
+  -v unstableGateFailures="$UNSTABLE_GATE_FAILURES" \
   -v summaryOut="$SUMMARY_TSV" '
   BEGIN { FS = OFS = "\t" }
   function write_summary(key, value) { print key, value >> summaryOut }
+  function append_reason(existing, nextReason) { return existing == "" ? nextReason : existing "; " nextReason }
   NR == 1 { next }
   {
     samples++
@@ -402,7 +454,14 @@ awk \
   }
   END {
     print "key", "value" > summaryOut
-    status = (failedSamples + errorSamples + rejectSamples == 0) ? "pass" : "fail"
+    reason = ""
+    if (failedSamples + errorSamples + rejectSamples > 0) {
+      reason = append_reason(reason, "sample-regression")
+    }
+    if (aggregateGateReason != "") {
+      reason = append_reason(reason, aggregateGateReason)
+    }
+    status = (failedSamples + errorSamples + rejectSamples + aggregateGateFailures == 0) ? "pass" : "fail"
     if (status == "fail") {
       recommendation = "reject-current"
     } else if (promoteSamples == samples) {
@@ -417,6 +476,7 @@ awk \
       recommendation = "collect-more-samples"
     }
     write_summary("status", status)
+    write_summary("reason", reason)
     write_summary("recommendation", recommendation)
     write_summary("requestedSamples", repeat)
     write_summary("samples", samples + 0)
@@ -425,6 +485,9 @@ awk \
     write_summary("errorSamples", errorSamples + 0)
     write_summary("failedMetrics", failedMetrics + 0)
     write_summary("unstableMetrics", unstableMetrics + 0)
+    write_summary("aggregateGateFailures", aggregateGateFailures + 0)
+    write_summary("p95RegressionGateFailures", p95RegressionGateFailures + 0)
+    write_summary("unstableGateFailures", unstableGateFailures + 0)
     write_summary("promoteCurrentSamples", promoteSamples + 0)
     write_summary("watchlistSamples", watchlistSamples + 0)
     write_summary("holdSamples", holdSamples + 0)
@@ -434,6 +497,7 @@ awk \
 ' "$SAMPLES_TSV"
 
 STATUS="$(awk 'BEGIN { FS = "\t" } $1 == "status" { print $2; exit }' "$SUMMARY_TSV")"
+REASON="$(awk 'BEGIN { FS = "\t" } $1 == "reason" { print $2; exit }' "$SUMMARY_TSV")"
 RECOMMENDATION="$(awk 'BEGIN { FS = "\t" } $1 == "recommendation" { print $2; exit }' "$SUMMARY_TSV")"
 SAMPLES="$(awk 'BEGIN { FS = "\t" } $1 == "samples" { print $2; exit }' "$SUMMARY_TSV")"
 PASSED_SAMPLES="$(awk 'BEGIN { FS = "\t" } $1 == "passedSamples" { print $2; exit }' "$SUMMARY_TSV")"
@@ -441,6 +505,9 @@ FAILED_SAMPLES="$(awk 'BEGIN { FS = "\t" } $1 == "failedSamples" { print $2; exi
 ERROR_SAMPLES="$(awk 'BEGIN { FS = "\t" } $1 == "errorSamples" { print $2; exit }' "$SUMMARY_TSV")"
 FAILED_METRICS="$(awk 'BEGIN { FS = "\t" } $1 == "failedMetrics" { print $2; exit }' "$SUMMARY_TSV")"
 UNSTABLE_METRICS="$(awk 'BEGIN { FS = "\t" } $1 == "unstableMetrics" { print $2; exit }' "$SUMMARY_TSV")"
+AGGREGATE_GATE_FAILURES="$(awk 'BEGIN { FS = "\t" } $1 == "aggregateGateFailures" { print $2; exit }' "$SUMMARY_TSV")"
+P95_REGRESSION_GATE_FAILURES="$(awk 'BEGIN { FS = "\t" } $1 == "p95RegressionGateFailures" { print $2; exit }' "$SUMMARY_TSV")"
+UNSTABLE_GATE_FAILURES="$(awk 'BEGIN { FS = "\t" } $1 == "unstableGateFailures" { print $2; exit }' "$SUMMARY_TSV")"
 
 {
   echo "Gollek Gemma4 row-prefill repeat A/B"
@@ -452,6 +519,7 @@ UNSTABLE_METRICS="$(awk 'BEGIN { FS = "\t" } $1 == "unstableMetrics" { print $2;
   echo "artifacts.metrics=$METRICS_TSV"
   echo "artifacts.summary=$SUMMARY_TSV"
   echo "status=$STATUS"
+  echo "reason=$REASON"
   echo "recommendation=$RECOMMENDATION"
   echo "samples=$SAMPLES"
   echo "passedSamples=$PASSED_SAMPLES"
@@ -459,6 +527,9 @@ UNSTABLE_METRICS="$(awk 'BEGIN { FS = "\t" } $1 == "unstableMetrics" { print $2;
   echo "errorSamples=$ERROR_SAMPLES"
   echo "failedMetrics=$FAILED_METRICS"
   echo "unstableMetrics=$UNSTABLE_METRICS"
+  echo "aggregateGateFailures=$AGGREGATE_GATE_FAILURES"
+  echo "p95RegressionGateFailures=$P95_REGRESSION_GATE_FAILURES"
+  echo "unstableGateFailures=$UNSTABLE_GATE_FAILURES"
 } | tee "$REPORT"
 
 if [[ "$STATUS" == "fail" ]]; then

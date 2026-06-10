@@ -4,13 +4,24 @@ on:
   pull_request:
     paths:
       - "core/**"
-      - "extension/**"
+      - "backend/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "ml/**"
+      - "models/**"
       - "plugins/**"
+      - "provider/**"
       - "repository/**"
+      - "runner/**"
+      - "runtime/**"
       - "sdk/**"
+      - "spi/**"
       - "ui/**"
       - "scripts/**"
-      - "pom.xml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
       - ".github/workflows/ci.yml"
   push:
     branches:
@@ -18,13 +29,24 @@ on:
       - master
     paths:
       - "core/**"
-      - "extension/**"
+      - "backend/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "ml/**"
+      - "models/**"
       - "plugins/**"
+      - "provider/**"
       - "repository/**"
+      - "runner/**"
+      - "runtime/**"
       - "sdk/**"
+      - "spi/**"
       - "ui/**"
       - "scripts/**"
-      - "pom.xml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 
@@ -42,7 +64,13 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: maven
+          cache: gradle
+
+      - name: Check product boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/check-product-boundaries.sh
 
       - name: Prepare llama.cpp source
         shell: bash
@@ -82,13 +110,13 @@ jobs:
       - name: Build Gollek CLI (JVM)
         shell: bash
         env:
-          MAVEN_OPTS: -Xmx3G
+          GRADLE_OPTS: -Xmx3G
         run: |
           set -euo pipefail
           export GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp"
           export GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch"
           export GOLLEK_LIBTORCH_LIB_PATH="$HOME/.gollek/source/vendor/libtorch/lib"
-          mvn -B clean package -pl ui/gollek-cli -am -DskipTests
+          ./gradlew --no-daemon --stacktrace :ui:gollek-cli:quarkusBuild -x test
 
   build-native:
     name: Build CLI (Native Smoke)
@@ -103,7 +131,7 @@ jobs:
         with:
           distribution: graalvm
           java-version: "25"
-          cache: maven
+          cache: gradle
 
       - name: Prepare llama.cpp source
         shell: bash
@@ -127,10 +155,10 @@ jobs:
       - name: Build Gollek CLI (Native)
         shell: bash
         env:
-          MAVEN_OPTS: -Xmx3G
+          GRADLE_OPTS: -Xmx3G
         run: |
           set -euo pipefail
           export GOLLEK_LLAMA_SOURCE_DIR="$HOME/.gollek/source/vendor/llama.cpp"
           export GOLLEK_LIBTORCH_SOURCE_DIR="$HOME/.gollek/source/vendor/libtorch"
           export GOLLEK_LIBTORCH_LIB_PATH="$HOME/.gollek/source/vendor/libtorch/lib"
-          mvn -B clean package -pl ui/gollek-cli -am -DskipTests -Pnative
+          ./gradlew --no-daemon --stacktrace :ui:gollek-cli:buildNative -x test

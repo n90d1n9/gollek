@@ -113,6 +113,8 @@ class TrainingReportRuntimeEfficiencyRegressionTest {
         assertEquals(64, bundle.markdownSha256().length());
         assertEquals(64, bundle.junitXmlSha256().length());
         assertEquals(64, bundle.manifestSha256().length());
+        assertTrue(bundle.artifact().hasManifest());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
         assertTrue(Files.readString(bundle.jsonFile()).contains("\"runtime-regression-accounted-wall-time\""));
         assertTrue(Files.readString(bundle.markdownFile()).contains("# Runtime Regression Gate"));
         assertTrue(Files.readString(bundle.junitXmlFile()).contains("gollek.training.runtime.regression"));
@@ -131,6 +133,7 @@ class TrainingReportRuntimeEfficiencyRegressionTest {
         assertEquals(bundle.manifestSha256(), inspection.manifestSha256());
         assertTrue(inspection.hasManifest());
         assertEquals(bundle.markdownSha256(), inspection.manifest().get("markdownSha256"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertEquals(false, inspection.passed());
 
         TrainingReportRuntimeRegressionGateArtifacts.ArtifactVerification verification =

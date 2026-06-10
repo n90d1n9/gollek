@@ -84,7 +84,7 @@ public class MCPConnection implements AutoCloseable {
                         "roots", Map.of("listChanged", true),
                         "sampling", Map.of()),
                 "clientInfo", Map.of(
-                        "name", "wayang-inference-server",
+                        "name", "gollek-inference-server",
                         "version", "1.0.0"));
 
         MCPRequest request = MCPRequest.builder()

@@ -12,10 +12,10 @@ import java.util.Map;
 /**
  * Read-only view over Gollek's agent-facing serving contract.
  *
- * <p>The view is meant for agent runtimes that run on top of Gollek, such as
- * Wayang-Gollek. It helps callers verify that Gollek is acting as an inference
- * and serving boundary while planning, memory policy, tool execution, and
- * workflow state remain outside Gollek.
+ * <p>The view is meant for agent runtimes that run on top of Gollek. It helps
+ * callers verify that Gollek is acting as an inference and serving boundary
+ * while planning, memory policy, tool execution, and workflow state remain
+ * outside Gollek.
  */
 public final class AgentServingContract {
     private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();

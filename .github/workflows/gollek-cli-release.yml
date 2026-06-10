@@ -43,14 +43,20 @@ jobs:
         with:
           distribution: graalvm
           java-version: '25'
+          cache: gradle
+
+      - name: Check product boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/check-product-boundaries.sh
 
       - name: Prepare llama.cpp source (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp" \
           ./scripts/prepare-llama-source.sh
 
@@ -59,8 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch" \
           ./scripts/prepare-libtorch-source.sh
 
@@ -78,27 +83,25 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
           export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
           export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
-          mvn -B clean package -pl ui/gollek-cli -am -DskipTests -Pnative
+          ./gradlew --no-daemon --stacktrace :ui:gollek-cli:buildNative -x test
         env:
-          MAVEN_OPTS: -Xmx3G
+          GRADLE_OPTS: -Xmx3G
 
       - name: Build native executable (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
           export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
           export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
-          mvn -B clean package -pl ui/gollek-cli -am -DskipTests -Pnative -Dexec.skip=true
+          ./gradlew --no-daemon --stacktrace :ui:gollek-cli:buildNative -x test
         env:
-          MAVEN_OPTS: -Xmx3G
+          GRADLE_OPTS: -Xmx3G
 
       - name: Stage native artifacts (Linux/macOS)
         if: runner.os != 'Windows'
@@ -106,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          BIN_PATH=$(ls ui/gollek-cli/target/${{ matrix.runner_pattern }} | head -n 1)
+          BIN_PATH=$(ls ui/gollek-cli/build/${{ matrix.runner_pattern }} | head -n 1)
           cp "$BIN_PATH" "dist/${{ matrix.binary_name }}"
           chmod +x "dist/${{ matrix.binary_name }}"
           tar -czf "dist/${{ matrix.binary_name }}.tar.gz" -C dist "${{ matrix.binary_name }}"
@@ -137,7 +140,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $bin = Get-ChildItem "ui/gollek-cli/target/${{ matrix.runner_pattern }}" | Select-Object -First 1
+          $bin = Get-ChildItem "ui/gollek-cli/build/${{ matrix.runner_pattern }}" | Select-Object -First 1
           Copy-Item $bin.FullName "dist/${{ matrix.binary_name }}"
           Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath "dist/gollek-windows-x64.zip" -Force
 
@@ -159,13 +162,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+          cache: gradle
 
       - name: Prepare llama.cpp source
         shell: bash
         run: |
           set -euo pipefail
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp" \
           ./scripts/prepare-llama-source.sh
 
@@ -173,27 +176,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch" \
           ./scripts/prepare-libtorch-source.sh
 
       - name: Build JVM package
         shell: bash
         run: |
-          export WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          export GOLLEK_HOME="${GOLLEK_HOME:-$WAYANG_HOME/gollek}"
+          export GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           export GOLLEK_LLAMA_SOURCE_DIR="$GOLLEK_HOME/source/vendor/llama.cpp"
           export GOLLEK_LIBTORCH_SOURCE_DIR="$GOLLEK_HOME/source/vendor/libtorch"
           export GOLLEK_LIBTORCH_LIB_PATH="$GOLLEK_HOME/source/vendor/libtorch/lib"
-          mvn -B clean package -pl ui/gollek-cli -am -DskipTests
+          ./gradlew --no-daemon --stacktrace :ui:gollek-cli:quarkusBuild -x test
 
       - name: Stage JVM bundle
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/jvm/bin dist/jvm/app
-          cp -R ui/gollek-cli/target/quarkus-app/. dist/jvm/app/
+          cp -R ui/gollek-cli/build/quarkus-app/. dist/jvm/app/
 
           cat > dist/jvm/bin/gollek <<'SH'
           #!/usr/bin/env bash
@@ -262,14 +263,7 @@ jobs:
           REPO="__REPO__"
           TAG="__TAG__"
           INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-          WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          if [ -n "${GOLLEK_HOME:-}" ]; then
-            GOLLEK_HOME="$GOLLEK_HOME"
-          elif [ -d "$WAYANG_HOME/gollek" ] || [ ! -d "$HOME/.gollek" ]; then
-            GOLLEK_HOME="$WAYANG_HOME/gollek"
-          else
-            GOLLEK_HOME="$HOME/.gollek"
-          fi
+          GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
           TMP_DIR="$(mktemp -d)"
           trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -294,14 +288,12 @@ jobs:
             sudo cp "${TMP_DIR}/gollek" "${INSTALL_DIR}/gollek"
           fi
 
-          mkdir -p "$WAYANG_HOME"/{config,logs,models,mcp,run}
           mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,libs,source/vendor,run}
 
           cat > "${GOLLEK_HOME}/config/environment" <<'ENVFILE'
-          WAYANG_HOME=${WAYANG_HOME:-$HOME/.wayang}
-          GOLLEK_HOME=${GOLLEK_HOME:-$WAYANG_HOME/gollek}
-          GOLLEK_CLI_LOG_FILE=${GOLLEK_CLI_LOG_FILE:-$WAYANG_HOME/logs/gollek.log}
-          WAYANG_SERVICE_CMD=${WAYANG_SERVICE_CMD:-/usr/local/bin/gollek}
+          GOLLEK_HOME=${GOLLEK_HOME:-$HOME/.gollek}
+          GOLLEK_CLI_LOG_FILE=${GOLLEK_CLI_LOG_FILE:-$GOLLEK_HOME/logs/gollek.log}
+          GOLLEK_SERVICE_CMD=${GOLLEK_SERVICE_CMD:-/usr/local/bin/gollek}
           ENVFILE
 
           echo "Installed to ${INSTALL_DIR}/gollek"
@@ -318,42 +310,33 @@ jobs:
             exit 1
           fi
 
-          WAYANG_HOME="${WAYANG_HOME:-$HOME/.wayang}"
-          if [ -n "${GOLLEK_HOME:-}" ]; then
-            GOLLEK_HOME="$GOLLEK_HOME"
-          elif [ -d "$WAYANG_HOME/gollek" ] || [ ! -d "$HOME/.gollek" ]; then
-            GOLLEK_HOME="$WAYANG_HOME/gollek"
-          else
-            GOLLEK_HOME="$HOME/.gollek"
-          fi
+          GOLLEK_HOME="${GOLLEK_HOME:-$HOME/.gollek}"
 
-          mkdir -p "$WAYANG_HOME"/{config,logs,models,mcp,run}
           mkdir -p "$GOLLEK_HOME"/{config,logs,models,mcp,run,libs,source/vendor}
           if command -v gollek >/dev/null 2>&1; then
             DEFAULT_SERVICE_CMD="$(command -v gollek)"
           else
             DEFAULT_SERVICE_CMD="/usr/local/bin/gollek"
           fi
-          SERVICE_FILE="$HOME/.config/systemd/user/wayang-gollek.service"
+          SERVICE_FILE="$HOME/.config/systemd/user/gollek.service"
           mkdir -p "$(dirname "$SERVICE_FILE")"
 
           cat > "$SERVICE_FILE" <<EOF
           [Unit]
-          Description=Wayang Gollek Service
+          Description=Gollek Service
           After=network.target
 
           [Service]
           Type=simple
           EnvironmentFile=-$GOLLEK_HOME/config/environment
-          Environment=WAYANG_HOME=$WAYANG_HOME
           Environment=GOLLEK_HOME=$GOLLEK_HOME
-          Environment=GOLLEK_CLI_LOG_FILE=$WAYANG_HOME/logs/gollek.log
-          Environment=WAYANG_SERVICE_CMD=\${WAYANG_SERVICE_CMD:-$DEFAULT_SERVICE_CMD}
-          ExecStart=/bin/sh -lc '\$WAYANG_SERVICE_CMD'
+          Environment=GOLLEK_CLI_LOG_FILE=$GOLLEK_HOME/logs/gollek.log
+          Environment=GOLLEK_SERVICE_CMD=\${GOLLEK_SERVICE_CMD:-$DEFAULT_SERVICE_CMD}
+          ExecStart=/bin/sh -lc '\$GOLLEK_SERVICE_CMD'
           Restart=on-failure
           RestartSec=5
-          StandardOutput=append:$WAYANG_HOME/logs/wayang-gollek-service.log
-          StandardError=append:$WAYANG_HOME/logs/wayang-gollek-service.log
+          StandardOutput=append:$GOLLEK_HOME/logs/gollek-service.log
+          StandardError=append:$GOLLEK_HOME/logs/gollek-service.log
           WorkingDirectory=$GOLLEK_HOME
 
           [Install]
@@ -361,11 +344,11 @@ jobs:
           EOF
 
           systemctl --user daemon-reload
-          systemctl --user enable wayang-gollek.service
-          echo "Installed user service template: wayang-gollek.service"
-          echo "Set WAYANG_SERVICE_CMD in \$GOLLEK_HOME/config/environment, then run:"
-          echo "  systemctl --user start wayang-gollek.service"
-          echo "Logs: $WAYANG_HOME/logs/gollek.log"
+          systemctl --user enable gollek.service
+          echo "Installed user service template: gollek.service"
+          echo "Set GOLLEK_SERVICE_CMD in \$GOLLEK_HOME/config/environment, then run:"
+          echo "  systemctl --user start gollek.service"
+          echo "Logs: $GOLLEK_HOME/logs/gollek.log"
           INSTALL_SERVICE_SH
 
           cat > release/install.ps1 <<'INSTALL_PS1'
@@ -381,18 +364,7 @@ jobs:
             New-Item -ItemType Directory -Path $installDir -Force | Out-Null
           }
 
-          $wayangHome = if ($env:WAYANG_HOME) { $env:WAYANG_HOME } else { Join-Path $HOME ".wayang" }
-          $gollekHome = if ($env:GOLLEK_HOME) {
-            $env:GOLLEK_HOME
-          } elseif ((Test-Path (Join-Path $wayangHome "gollek")) -or -not (Test-Path (Join-Path $HOME ".gollek"))) {
-            Join-Path $wayangHome "gollek"
-          } else {
-            Join-Path $HOME ".gollek"
-          }
-          New-Item -ItemType Directory -Force -Path $wayangHome | Out-Null
-          foreach ($dir in @("config","logs","models","mcp","run")) {
-            New-Item -ItemType Directory -Force -Path (Join-Path $wayangHome $dir) | Out-Null
-          }
+          $gollekHome = if ($env:GOLLEK_HOME) { $env:GOLLEK_HOME } else { Join-Path $HOME ".gollek" }
           New-Item -ItemType Directory -Force -Path $gollekHome | Out-Null
           foreach ($dir in @("config","logs","models","mcp","run","libs","source\\vendor")) {
             New-Item -ItemType Directory -Force -Path (Join-Path $gollekHome $dir) | Out-Null

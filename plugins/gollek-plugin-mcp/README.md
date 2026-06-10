@@ -6,11 +6,11 @@
 ## External `mcpServers` JSON Input
 
 This plugin can load server definitions from standard MCP JSON input, not only from
-`wayang.inference.mcp.servers` YAML blocks.
+`gollek.mcp.servers` YAML blocks.
 
 Supported input keys:
-- `wayang.inference.mcp.mcp-servers-json` (inline JSON string; useful for CLI `-D`)
-- `wayang.inference.mcp.mcp-servers-json-file` (path to JSON file)
+- `gollek.mcp.mcp-servers-json` (inline JSON string; useful for CLI `-D`)
+- `gollek.mcp.mcp-servers-json-file` (path to JSON file)
 
 Accepted JSON shape:
 
@@ -35,7 +35,7 @@ Notes:
 ```
 inference-provider-mcp/
 ├── pom.xml
-└── src/main/java/tech/kayys/wayang/inference/providers/mcp/
+└── src/main/java/tech/kayys/gollek/mcp/
     ├── client/
     │   ├── MCPClient.java
     │   ├── MCPClientConfig.java

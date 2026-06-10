@@ -77,6 +77,24 @@ public final class TrainingReportRuntimeRegressionGateArtifacts {
             return result.passed();
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    manifestFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256,
+                    manifestSha256,
+                    true);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> artifactManifest() {
             Map<String, Object> manifest = new LinkedHashMap<>();
             manifest.put("schema", "gollek.training.runtime.regression.gate.artifacts.v1");
@@ -97,6 +115,7 @@ public final class TrainingReportRuntimeRegressionGateArtifacts {
             Map<String, Object> map = new LinkedHashMap<>(artifactManifest());
             map.put("manifestSha256", manifestSha256);
             map.put("directory", directory.toString());
+            map.put("artifact", artifactMap());
             map.put("result", result.toMap());
             return Map.copyOf(map);
         }
@@ -144,6 +163,24 @@ public final class TrainingReportRuntimeRegressionGateArtifacts {
 
         public boolean hasManifest() {
             return !manifest.isEmpty();
+        }
+
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    manifestFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256,
+                    manifestSha256,
+                    hasManifest());
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 

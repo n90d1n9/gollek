@@ -1,16 +1,17 @@
 package tech.kayys.gollek.sdk.util;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
  * Resolves Gollek runtime home with Gollek-first defaults.
- * Centralized in SDK for consistency across CLI, Server, and other clients.
+ *
+ * <p>Centralizes the public Gollek home contract for the CLI, SDK, runners, and
+ * embedding applications. Host products can set {@code gollek.home} or
+ * {@code GOLLEK_HOME}; otherwise Gollek uses {@code ~/.gollek}.
  */
 public final class GollekHome {
     private static final String GOLLEK_HOME_PROP = "gollek.home";
-    private static final String WAYANG_HOME_PROP = "wayang.home";
 
     private GollekHome() {
     }
@@ -18,23 +19,13 @@ public final class GollekHome {
     public static Path resolve() {
         String explicit = firstNonBlank(
                 System.getProperty(GOLLEK_HOME_PROP),
-                System.getenv("GOLLEK_HOME"),
-                System.getenv("WAYANG_GOLLEK_HOME"));
+                System.getenv("GOLLEK_HOME"));
         if (hasText(explicit)) {
             return Paths.get(explicit).toAbsolutePath().normalize();
         }
 
         String userHome = System.getProperty("user.home");
-        Path gollekHome = Paths.get(userHome, ".gollek");
-        String wayangHome = firstNonBlank(System.getProperty(WAYANG_HOME_PROP), System.getenv("WAYANG_HOME"));
-        Path legacyWayangHome = hasText(wayangHome)
-                ? Paths.get(wayangHome, "gollek")
-                : Paths.get(userHome, ".wayang", "gollek");
-
-        if (Files.isDirectory(gollekHome) || !Files.isDirectory(legacyWayangHome)) {
-            return gollekHome.toAbsolutePath().normalize();
-        }
-        return legacyWayangHome.toAbsolutePath().normalize();
+        return Paths.get(userHome, ".gollek").toAbsolutePath().normalize();
     }
 
     public static Path path(String... parts) {
@@ -49,15 +40,6 @@ public final class GollekHome {
         Path resolved = resolve();
         if (!hasText(System.getProperty(GOLLEK_HOME_PROP))) {
             System.setProperty(GOLLEK_HOME_PROP, resolved.toString());
-        }
-        if (!hasText(System.getProperty(WAYANG_HOME_PROP))) {
-            Path wayangHome = resolved;
-            if ("gollek".equals(resolved.getFileName() != null ? resolved.getFileName().toString() : "")) {
-                wayangHome = resolved.getParent();
-            }
-            if (wayangHome != null) {
-                System.setProperty(WAYANG_HOME_PROP, wayangHome.toString());
-            }
         }
     }
 

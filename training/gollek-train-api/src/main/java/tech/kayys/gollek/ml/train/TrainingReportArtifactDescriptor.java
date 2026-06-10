@@ -97,6 +97,72 @@ public record TrainingReportArtifactDescriptor(
         return Map.copyOf(map);
     }
 
+    public ChecksumMatch checksumMatch(
+            String expectedJsonSha256,
+            String expectedMarkdownSha256,
+            String expectedJunitXmlSha256) {
+        return checksumMatch(expectedJsonSha256, expectedMarkdownSha256, expectedJunitXmlSha256, null);
+    }
+
+    public ChecksumMatch checksumMatch(
+            String expectedJsonSha256,
+            String expectedMarkdownSha256,
+            String expectedJunitXmlSha256,
+            String expectedManifestSha256) {
+        String normalizedJsonSha = normalizeOptionalSha256(expectedJsonSha256, "expectedJsonSha256");
+        String normalizedMarkdownSha = normalizeOptionalSha256(expectedMarkdownSha256, "expectedMarkdownSha256");
+        String normalizedJunitXmlSha = normalizeOptionalSha256(expectedJunitXmlSha256, "expectedJunitXmlSha256");
+        String normalizedManifestSha = normalizeOptionalSha256(expectedManifestSha256, "expectedManifestSha256");
+        return new ChecksumMatch(
+                normalizedJsonSha,
+                normalizedMarkdownSha,
+                normalizedJunitXmlSha,
+                normalizedManifestSha,
+                normalizedJsonSha == null || normalizedJsonSha.equals(jsonSha256),
+                normalizedMarkdownSha == null || normalizedMarkdownSha.equals(markdownSha256),
+                normalizedJunitXmlSha == null || normalizedJunitXmlSha.equals(junitXmlSha256),
+                normalizedManifestSha == null || normalizedManifestSha.equals(manifestSha256));
+    }
+
+    /**
+     * Result of comparing expected artifact checksums with a descriptor's current checksums.
+     */
+    public record ChecksumMatch(
+            String expectedJsonSha256,
+            String expectedMarkdownSha256,
+            String expectedJunitXmlSha256,
+            String expectedManifestSha256,
+            boolean jsonMatches,
+            boolean markdownMatches,
+            boolean junitXmlMatches,
+            boolean manifestMatches) {
+        public boolean passed() {
+            return jsonMatches && markdownMatches && junitXmlMatches && manifestMatches;
+        }
+
+        public Map<String, Object> toMap() {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("passed", passed());
+            map.put("jsonMatches", jsonMatches);
+            map.put("markdownMatches", markdownMatches);
+            map.put("junitXmlMatches", junitXmlMatches);
+            map.put("manifestMatches", manifestMatches);
+            if (expectedJsonSha256 != null) {
+                map.put("expectedJsonSha256", expectedJsonSha256);
+            }
+            if (expectedMarkdownSha256 != null) {
+                map.put("expectedMarkdownSha256", expectedMarkdownSha256);
+            }
+            if (expectedJunitXmlSha256 != null) {
+                map.put("expectedJunitXmlSha256", expectedJunitXmlSha256);
+            }
+            if (expectedManifestSha256 != null) {
+                map.put("expectedManifestSha256", expectedManifestSha256);
+            }
+            return Map.copyOf(map);
+        }
+    }
+
     private static Path normalizePath(Path value, String fieldName) {
         return Objects.requireNonNull(value, fieldName + " must not be null")
                 .toAbsolutePath()

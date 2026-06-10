@@ -55,6 +55,9 @@ if ! grep -qx $'status\tpass' "$OUT_DIR/summary.tsv" \
     || ! grep -qx $'errorSamples\t0' "$OUT_DIR/summary.tsv" \
     || ! grep -qx $'failedMetrics\t0' "$OUT_DIR/summary.tsv" \
     || ! grep -qx $'unstableMetrics\t0' "$OUT_DIR/summary.tsv" \
+    || ! grep -qx $'aggregateGateFailures\t0' "$OUT_DIR/summary.tsv" \
+    || ! grep -qx $'p95RegressionGateFailures\t0' "$OUT_DIR/summary.tsv" \
+    || ! grep -qx $'unstableGateFailures\t0' "$OUT_DIR/summary.tsv" \
     || ! grep -qx $'watchlistSamples\t2' "$OUT_DIR/summary.tsv"; then
   echo "Expected repeat A/B summary to aggregate passing watchlist samples" >&2
   cat "$OUT_DIR/summary.tsv" >&2
@@ -86,7 +89,8 @@ if ! grep -Fqx "artifacts.samples=$OUT_DIR/samples.tsv" "$TMP_DIR/repeat.out" \
     || ! grep -Fqx 'recommendation=promote-current-with-watchlist' "$TMP_DIR/repeat.out" \
     || ! grep -Fqx 'samples=2' "$TMP_DIR/repeat.out" \
     || ! grep -Fqx 'passedSamples=2' "$TMP_DIR/repeat.out" \
-    || ! grep -Fqx 'unstableMetrics=0' "$TMP_DIR/repeat.out"; then
+    || ! grep -Fqx 'unstableMetrics=0' "$TMP_DIR/repeat.out" \
+    || ! grep -Fqx 'aggregateGateFailures=0' "$TMP_DIR/repeat.out"; then
   echo "Expected repeat A/B stdout to summarize aggregate artifacts" >&2
   cat "$TMP_DIR/repeat.out" >&2
   exit 1
@@ -111,17 +115,126 @@ if ! grep -qx $'status\tfail' "$FAIL_OUT_DIR/summary.tsv" \
     || ! grep -qx $'failedSamples\t2' "$FAIL_OUT_DIR/summary.tsv" \
     || ! grep -qx $'failedMetrics\t2' "$FAIL_OUT_DIR/summary.tsv" \
     || ! grep -qx $'unstableMetrics\t0' "$FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'aggregateGateFailures\t0' "$FAIL_OUT_DIR/summary.tsv" \
     || ! grep -qx $'rejectSamples\t2' "$FAIL_OUT_DIR/summary.tsv" \
     || ! grep -qx $'decodeMs\t2\t0\t2\t0\t2.000\t2.000\t2.000\t0.000\t4.000\t4.000\t4.000\t0.000\t0.000\t4.000\t2\tfalse' "$FAIL_OUT_DIR/metrics.tsv" \
     || ! grep -Fqx 'status=fail' "$TMP_DIR/repeat-fail.out" \
     || ! grep -Fqx 'recommendation=reject-current' "$TMP_DIR/repeat-fail.out" \
     || ! grep -Fqx 'failedSamples=2' "$TMP_DIR/repeat-fail.out" \
-    || ! grep -Fqx 'unstableMetrics=0' "$TMP_DIR/repeat-fail.out"; then
+    || ! grep -Fqx 'unstableMetrics=0' "$TMP_DIR/repeat-fail.out" \
+    || ! grep -Fqx 'aggregateGateFailures=0' "$TMP_DIR/repeat-fail.out"; then
   echo "Expected repeat A/B aggregate to reject repeated decode regression" >&2
   cat "$FAIL_OUT_DIR/summary.tsv" >&2
   cat "$FAIL_OUT_DIR/metrics.tsv" >&2
   cat "$TMP_DIR/repeat-fail.out" >&2
   cat "$TMP_DIR/repeat-fail.err" >&2
+  exit 1
+fi
+
+P95_FAIL_OUT_DIR="$TMP_DIR/repeat-p95-fail"
+if bash "$ROOT_DIR/scripts/bench-gemma4-row-prefill-ab-repeat.sh" \
+    --model fake-model \
+    --gollek-bin "$GOLLEK_BIN" \
+    --out-dir "$P95_FAIL_OUT_DIR" \
+    --repeat 2 \
+    --max-p95-regression-percent 15 \
+    -- --max-tokens 2 > "$TMP_DIR/repeat-p95-fail.out" 2> "$TMP_DIR/repeat-p95-fail.err"; then
+  echo "Expected repeat A/B aggregate failure for p95 regression" >&2
+  cat "$TMP_DIR/repeat-p95-fail.out" >&2
+  cat "$TMP_DIR/repeat-p95-fail.err" >&2
+  exit 1
+fi
+
+if ! grep -qx $'status\tfail' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'reason\tp95-regression' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'recommendation\treject-current' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'failedSamples\t0' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'aggregateGateFailures\t1' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'p95RegressionGateFailures\t1' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'unstableGateFailures\t0' "$P95_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -Fqx 'status=fail' "$TMP_DIR/repeat-p95-fail.out" \
+    || ! grep -Fqx 'reason=p95-regression' "$TMP_DIR/repeat-p95-fail.out" \
+    || ! grep -Fqx 'p95RegressionGateFailures=1' "$TMP_DIR/repeat-p95-fail.out"; then
+  echo "Expected repeat A/B aggregate to reject p95 regression budget breach" >&2
+  cat "$P95_FAIL_OUT_DIR/summary.tsv" >&2
+  cat "$P95_FAIL_OUT_DIR/metrics.tsv" >&2
+  cat "$TMP_DIR/repeat-p95-fail.out" >&2
+  cat "$TMP_DIR/repeat-p95-fail.err" >&2
+  exit 1
+fi
+
+STUB_RUNNER="$TMP_DIR/stub-ab-runner.sh"
+cat > "$STUB_RUNNER" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+out_dir=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out-dir) out_dir="$2"; shift 2 ;;
+    --out-dir=*) out_dir="${1#*=}"; shift ;;
+    *) shift ;;
+  esac
+done
+if [[ -z "$out_dir" ]]; then
+  echo "--out-dir is required" >&2
+  exit 2
+fi
+
+sample="$(basename "$out_dir")"
+mkdir -p "$out_dir/compare"
+{
+  printf 'case\tmetric\tbaseline\tcurrent\tdelta\tdeltaPercent\tdirection\ttrend\tbaselineFfnStrategy\tcurrentFfnStrategy\tbaselineRowPrefill\tcurrentRowPrefill\tgateStatus\tgateReason\n'
+  if [[ "$sample" == "sample-01" ]]; then
+    printf 'metal-deterministic\tdecodeMs\t50.000\t48.000\t-2.000\t-4.000\tlower\tbetter\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tnot-configured\t\n'
+  else
+    printf 'metal-deterministic\tdecodeMs\t50.000\t52.000\t2.000\t4.000\tlower\tworse\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tnot-configured\t\n'
+  fi
+} > "$out_dir/compare/comparison.tsv"
+
+{
+  echo "status=pass"
+  echo "recommendation=promote-current-with-watchlist"
+  echo "gatedMetrics=0"
+  echo "failedMetrics=0"
+  echo "largestImprovement=decodeMs:4.000%"
+  echo "largestRegression=decodeMs:4.000%"
+  echo "ffnStrategyTransition=fused_geglu_prefill_over_row_prefill->row_prefill_matvec_active"
+  echo "rowPrefillTransition=n/a/n/a->12/x4"
+} > "$out_dir/report.txt"
+SH
+chmod +x "$STUB_RUNNER"
+
+UNSTABLE_FAIL_OUT_DIR="$TMP_DIR/repeat-unstable-fail"
+if bash "$ROOT_DIR/scripts/bench-gemma4-row-prefill-ab-repeat.sh" \
+    --model fake-model \
+    --gollek-bin "$GOLLEK_BIN" \
+    --out-dir "$UNSTABLE_FAIL_OUT_DIR" \
+    --repeat 2 \
+    --runner-script "$STUB_RUNNER" \
+    --fail-unstable-metrics > "$TMP_DIR/repeat-unstable-fail.out" 2> "$TMP_DIR/repeat-unstable-fail.err"; then
+  echo "Expected repeat A/B aggregate failure for unstable metric" >&2
+  cat "$TMP_DIR/repeat-unstable-fail.out" >&2
+  cat "$TMP_DIR/repeat-unstable-fail.err" >&2
+  exit 1
+fi
+
+if ! grep -qx $'status\tfail' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'reason\tunstable-metrics' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'recommendation\treject-current' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'unstableMetrics\t1' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'aggregateGateFailures\t1' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'p95RegressionGateFailures\t0' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'unstableGateFailures\t1' "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" \
+    || ! grep -qx $'decodeMs\t2\t1\t1\t0\t0.000\t0.000\t2.000\t2.000\t0.000\t0.000\t4.000\t4.000\t4.000\t4.000\t0\ttrue' "$UNSTABLE_FAIL_OUT_DIR/metrics.tsv" \
+    || ! grep -Fqx 'status=fail' "$TMP_DIR/repeat-unstable-fail.out" \
+    || ! grep -Fqx 'reason=unstable-metrics' "$TMP_DIR/repeat-unstable-fail.out" \
+    || ! grep -Fqx 'unstableGateFailures=1' "$TMP_DIR/repeat-unstable-fail.out"; then
+  echo "Expected repeat A/B aggregate to reject unstable metric evidence" >&2
+  cat "$UNSTABLE_FAIL_OUT_DIR/summary.tsv" >&2
+  cat "$UNSTABLE_FAIL_OUT_DIR/metrics.tsv" >&2
+  cat "$TMP_DIR/repeat-unstable-fail.out" >&2
+  cat "$TMP_DIR/repeat-unstable-fail.err" >&2
   exit 1
 fi
 

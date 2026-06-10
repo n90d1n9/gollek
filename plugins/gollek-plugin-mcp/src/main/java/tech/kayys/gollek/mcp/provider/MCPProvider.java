@@ -109,9 +109,9 @@ public class MCPProvider implements LLMProvider {
         return ProviderMetadata.builder()
                 .providerId(PROVIDER_ID)
                 .name(name())
-                .vendor("Wayang")
+                .vendor("Gollek")
                 .version("1.0.0")
-                .homepage("https://github.com/kayys/wayang")
+                .homepage("https://github.com/kayys/gollek")
                 .build();
     }
 

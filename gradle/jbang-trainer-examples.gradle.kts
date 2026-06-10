@@ -80,8 +80,8 @@ val jbangAgentBridgeOffline = providers.gradleProperty("gollek.jbang.agentBridge
     .map { it.toBooleanStrictOrNull() ?: false }
     .orElse(false)
 val jbangTrainerHomeDir = layout.buildDirectory.dir("jbang/.jbang")
-val wayangGollekBridgeOutputFile =
-    layout.buildDirectory.file("jbang/integration/wayang-gollek-serving-bridge.out")
+val agentServingContractBridgeOutputFile =
+    layout.buildDirectory.file("jbang/integration/agent-serving-contract-bridge.out")
 val qualityProfileEvidenceOutputDir =
     layout.buildDirectory.dir("jbang/trainer/quality-profile-ci-gate-evidence")
 val qualityProfileEvidenceSummaryFile =
@@ -722,23 +722,23 @@ val verifyJbangTrainerEvidenceIndex =
         }
     }
 
-val smokeJbangWayangGollekServingBridge =
-    tasks.register("smokeJbangWayangGollekServingBridge") {
+val smokeJbangAgentServingContractBridge =
+    tasks.register("smokeJbangAgentServingContractBridge") {
         group = "verification"
-        description = "Runs the Wayang-Gollek serving bridge JBang example in mock mode."
+        description = "Runs the generic agent serving contract JBang example in mock mode."
         dependsOn(publishJbangAgentBridgeExamplesToMavenLocal)
 
-        inputs.file(layout.projectDirectory.file("examples/jbang/integration/wayang_gollek_serving_bridge.java"))
+        inputs.file(layout.projectDirectory.file("examples/jbang/integration/agent_serving_contract_bridge.java"))
         inputs.dir(layout.projectDirectory.dir("sdk/gollek-sdk-agent/src/main/java"))
         inputs.file(layout.projectDirectory.file("sdk/gollek-sdk-agent/build.gradle.kts"))
-        outputs.file(wayangGollekBridgeOutputFile)
+        outputs.file(agentServingContractBridgeOutputFile)
         outputs.upToDateWhen { false }
 
         doLast {
             val jbangHome = jbangTrainerHomeDir.get().asFile
             jbangHome.mkdirs()
 
-            val outputFile = wayangGollekBridgeOutputFile.get().asFile
+            val outputFile = agentServingContractBridgeOutputFile.get().asFile
             outputFile.parentFile.mkdirs()
 
             val command = mutableListOf(
@@ -751,7 +751,7 @@ val smokeJbangWayangGollekServingBridge =
                 command += "--offline"
             }
             command += listOf(
-                "integration/wayang_gollek_serving_bridge.java",
+                "integration/agent_serving_contract_bridge.java",
                 "--mock",
             )
 
@@ -770,7 +770,7 @@ val smokeJbangWayangGollekServingBridge =
             outputFile.writeText(text)
             if (exitValue != 0) {
                 throw GradleException(
-                    "Wayang-Gollek bridge JBang smoke failed with exit $exitValue. "
+                    "Agent serving contract JBang smoke failed with exit $exitValue. "
                         + "See ${outputFile.absolutePath}."
                 )
             }
@@ -778,22 +778,22 @@ val smokeJbangWayangGollekServingBridge =
             fun requireMarker(marker: String) {
                 if (!text.contains(marker)) {
                     throw GradleException(
-                        "Wayang-Gollek bridge smoke output is missing marker '$marker'. "
+                        "Agent serving contract smoke output is missing marker '$marker'. "
                             + "See ${outputFile.absolutePath}."
                     )
                 }
             }
 
             listOf(
-                "== Wayang-Gollek on Gollek",
+                "== Caller Agent on Gollek",
                 "service_role: inference_serving_engine",
                 "tool_names: [search_context]",
                 "embedding_dimensions: 6",
                 "stream_delta: Gollek can answer",
                 "stream_tool_preview: [search_context]",
                 "finish_reason: tool_calls",
-                "wayang_executes: search_context through Wayang policy, credentials, and audit log",
-                "wayang-gollek: planning, tool execution, RAG store, approvals, memory, workflow state, follow-up loops",
+                "caller_executes: search_context through caller agent policy, credentials, and audit log",
+                "caller-agent: planning, tool execution, RAG store, approvals, memory, workflow state, follow-up loops",
             ).forEach(::requireMarker)
         }
     }
@@ -801,7 +801,7 @@ val smokeJbangWayangGollekServingBridge =
 tasks.register("smokeJbangAgentBridgeExamples") {
     group = "verification"
     description = "Runs focused smoke checks for agent bridge JBang examples."
-    dependsOn(smokeJbangWayangGollekServingBridge)
+    dependsOn(smokeJbangAgentServingContractBridge)
 }
 
 tasks.register("smokeJbangTrainerExamples") {

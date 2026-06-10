@@ -59,8 +59,8 @@ public class McpRegistryEngine implements McpRegistryManager {
     private static final String ENTERPRISE_ENABLED_ENV = "GOLLEK_ENTERPRISE_ENABLED";
     private static final String EDITION_PROP = "gollek.edition";
     private static final String EDITION_ENV = "GOLLEK_EDITION";
-    private static final String MULTITENANCY_PROP = "wayang.multitenancy.enabled";
-    private static final String MULTITENANCY_ENV = "WAYANG_MULTITENANCY_ENABLED";
+    private static final String MULTITENANCY_PROP = "gollek.multitenancy.enabled";
+    private static final String MULTITENANCY_ENV = "GOLLEK_MULTITENANCY_ENABLED";
     private static final String TENANT_HEADER_ENABLED_PROP = "gollek.mcp.registry.tenant-header.enabled";
     private static final String TENANT_HEADER_ENABLED_ENV = "GOLLEK_MCP_REGISTRY_TENANT_HEADER_ENABLED";
     private static final String TENANT_HEADER_NAME_PROP = "gollek.mcp.registry.tenant-header.name";

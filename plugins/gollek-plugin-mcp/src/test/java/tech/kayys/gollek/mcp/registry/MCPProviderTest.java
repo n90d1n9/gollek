@@ -48,7 +48,7 @@ class MCPProviderTest {
     void testProviderMetadata() {
         var metadata = mcpProvider.metadata();
         assertNotNull(metadata, "Metadata should not be null");
-        assertEquals("Wayang", metadata.getVendor(), "Vendor should be Wayang");
+        assertEquals("Gollek", metadata.getVendor(), "Vendor should be Gollek");
     }
 
     @Test

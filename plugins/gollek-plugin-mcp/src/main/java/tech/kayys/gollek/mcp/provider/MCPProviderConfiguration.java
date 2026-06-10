@@ -12,7 +12,7 @@ import java.util.Optional;
  * Configuration for MCP provider.
  * Supports multiple MCP server connections.
  */
-@ConfigMapping(prefix = "wayang.inference.mcp")
+@ConfigMapping(prefix = "gollek.mcp")
 public interface MCPProviderConfiguration {
 
     /**

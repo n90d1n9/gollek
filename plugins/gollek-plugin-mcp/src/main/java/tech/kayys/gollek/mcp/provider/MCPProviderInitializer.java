@@ -36,10 +36,10 @@ public class MCPProviderInitializer {
     @Inject
     ObjectMapper objectMapper;
 
-    @ConfigProperty(name = "wayang.inference.mcp.mcp-servers-json")
+    @ConfigProperty(name = "gollek.mcp.mcp-servers-json")
     Optional<String> mcpServersJson;
 
-    @ConfigProperty(name = "wayang.inference.mcp.mcp-servers-json-file")
+    @ConfigProperty(name = "gollek.mcp.mcp-servers-json-file")
     Optional<String> mcpServersJsonFile;
 
     /**
