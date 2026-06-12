@@ -154,6 +154,10 @@ class TrainingReportComparisonTest {
                 .contains("<testsuite name=\"gollek.training.report.comparison\""));
         assertEquals(bundle.markdownSha256(), inspection.markdownSha256());
         assertEquals(bundle.junitXmlSha256(), inspection.junitXmlSha256());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
+        assertEquals(bundle.metricsCsvFile().toString(), bundle.toMap().get("metricsCsvFile"));
+        assertEquals(bundle.findingsCsvFile().toString(), inspection.toMap().get("findingsCsvFile"));
         assertTrue(verification.markdownSha256Matches());
         assertTrue(verification.junitXmlSha256Matches());
         assertTrue(verification.junitXmlWellFormed());
@@ -161,6 +165,8 @@ class TrainingReportComparisonTest {
         assertTrue(verification.junitXmlMatchesJson());
         assertTrue(verification.metricsCsvMatchesJson());
         assertTrue(verification.findingsCsvMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertTrue(verification.passed());
     }
 

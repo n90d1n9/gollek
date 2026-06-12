@@ -46,9 +46,7 @@ final class TrainingReportPromotionGateVerificationReportVerifier {
             String expectedReportSha256) throws IOException {
         TrainingReportPromotionGateArtifactPackage.VerificationReportInspection inspection = read(reportFile);
         List<String> failures = new ArrayList<>();
-        String normalizedExpectedSha256 = expectedReportSha256 == null || expectedReportSha256.isBlank()
-                ? null
-                : expectedReportSha256.trim();
+        String normalizedExpectedSha256 = normalizeExpectedSha256(expectedReportSha256);
         boolean reportSha256Matches = normalizedExpectedSha256 == null
                 || normalizedExpectedSha256.equalsIgnoreCase(inspection.reportSha256());
         if (!reportSha256Matches) {
@@ -83,6 +81,12 @@ final class TrainingReportPromotionGateVerificationReportVerifier {
                 packageRevalidated,
                 packageVerification,
                 failures);
+    }
+
+    private static String normalizeExpectedSha256(String expectedReportSha256) {
+        return expectedReportSha256 == null || expectedReportSha256.isBlank()
+                ? null
+                : expectedReportSha256.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private static TrainingReportPromotionGateArtifactPackage.Options optionsFromInspection(

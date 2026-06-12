@@ -118,19 +118,28 @@ public final class TrainingReportPortfolioArtifacts {
             return export.hasComparisonFindings();
         }
 
+        public TrainingReportPortfolioArtifactDescriptor artifact() {
+            return new TrainingReportPortfolioArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    leaderboardCsvFile,
+                    comparisonMetricsCsvFile,
+                    comparisonFindingsCsvFile,
+                    jsonSha256,
+                    markdownSha256,
+                    leaderboardCsvSha256,
+                    comparisonMetricsCsvSha256,
+                    comparisonFindingsCsvSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("leaderboardCsvFile", leaderboardCsvFile.toString());
-            map.put("comparisonMetricsCsvFile", comparisonMetricsCsvFile.toString());
-            map.put("comparisonFindingsCsvFile", comparisonFindingsCsvFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("leaderboardCsvSha256", leaderboardCsvSha256);
-            map.put("comparisonMetricsCsvSha256", comparisonMetricsCsvSha256);
-            map.put("comparisonFindingsCsvSha256", comparisonFindingsCsvSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("entryCount", export.entryCount());
             map.put("comparisonMetricCount", export.comparisonMetricCount());
             map.put("comparisonFindingCount", export.comparisonFindingCount());
@@ -211,19 +220,28 @@ public final class TrainingReportPortfolioArtifacts {
             return booleanValue(export.get("hasComparisonFindings"));
         }
 
+        public TrainingReportPortfolioArtifactDescriptor artifact() {
+            return new TrainingReportPortfolioArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    leaderboardCsvFile,
+                    comparisonMetricsCsvFile,
+                    comparisonFindingsCsvFile,
+                    jsonSha256,
+                    markdownSha256,
+                    leaderboardCsvSha256,
+                    comparisonMetricsCsvSha256,
+                    comparisonFindingsCsvSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("leaderboardCsvFile", leaderboardCsvFile.toString());
-            map.put("comparisonMetricsCsvFile", comparisonMetricsCsvFile.toString());
-            map.put("comparisonFindingsCsvFile", comparisonFindingsCsvFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("leaderboardCsvSha256", leaderboardCsvSha256);
-            map.put("comparisonMetricsCsvSha256", comparisonMetricsCsvSha256);
-            map.put("comparisonFindingsCsvSha256", comparisonFindingsCsvSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("entryCount", entryCount());
             map.put("comparisonMetricCount", comparisonMetricCount());
             map.put("comparisonFindingCount", comparisonFindingCount());
@@ -278,8 +296,17 @@ public final class TrainingReportPortfolioArtifacts {
             return "Portfolio export artifact verification failed: " + String.join("; ", failures) + ".";
         }
 
+        public TrainingReportPortfolioArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
@@ -659,35 +686,26 @@ public final class TrainingReportPortfolioArtifacts {
             String expectedComparisonMetricsCsvSha256,
             String expectedComparisonFindingsCsvSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        String normalizedLeaderboardSha = normalizeChecksum(expectedLeaderboardCsvSha256);
-        String normalizedMetricsSha = normalizeChecksum(expectedComparisonMetricsCsvSha256);
-        String normalizedFindingsSha = normalizeChecksum(expectedComparisonFindingsCsvSha256);
-        boolean jsonMatches = normalizedJsonSha == null
-                || normalizedJsonSha.equalsIgnoreCase(inspection.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(inspection.markdownSha256());
-        boolean leaderboardMatches = normalizedLeaderboardSha == null
-                || normalizedLeaderboardSha.equalsIgnoreCase(inspection.leaderboardCsvSha256());
-        boolean metricsMatches = normalizedMetricsSha == null
-                || normalizedMetricsSha.equalsIgnoreCase(inspection.comparisonMetricsCsvSha256());
-        boolean findingsMatches = normalizedFindingsSha == null
-                || normalizedFindingsSha.equalsIgnoreCase(inspection.comparisonFindingsCsvSha256());
+        TrainingReportPortfolioArtifactDescriptor.ChecksumMatch checksums = inspection.artifact().checksumMatch(
+                expectedJsonSha256,
+                expectedMarkdownSha256,
+                expectedLeaderboardCsvSha256,
+                expectedComparisonMetricsCsvSha256,
+                expectedComparisonFindingsCsvSha256);
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
-        if (!leaderboardMatches) {
+        if (!checksums.leaderboardCsvMatches()) {
             failures.add("Leaderboard CSV checksum mismatch for " + inspection.leaderboardCsvFile());
         }
-        if (!metricsMatches) {
+        if (!checksums.comparisonMetricsCsvMatches()) {
             failures.add("Comparison metrics CSV checksum mismatch for " + inspection.comparisonMetricsCsvFile());
         }
-        if (!findingsMatches) {
+        if (!checksums.comparisonFindingsCsvMatches()) {
             failures.add("Comparison findings CSV checksum mismatch for " + inspection.comparisonFindingsCsvFile());
         }
         TrainingReportPortfolioExport renderedExport = null;
@@ -724,16 +742,16 @@ public final class TrainingReportPortfolioArtifacts {
         }
         return new ArtifactVerification(
                 inspection,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                normalizedLeaderboardSha,
-                normalizedMetricsSha,
-                normalizedFindingsSha,
-                jsonMatches,
-                markdownMatches,
-                leaderboardMatches,
-                metricsMatches,
-                findingsMatches,
+                checksums.expectedJsonSha256(),
+                checksums.expectedMarkdownSha256(),
+                checksums.expectedLeaderboardCsvSha256(),
+                checksums.expectedComparisonMetricsCsvSha256(),
+                checksums.expectedComparisonFindingsCsvSha256(),
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
+                checksums.leaderboardCsvMatches(),
+                checksums.comparisonMetricsCsvMatches(),
+                checksums.comparisonFindingsCsvMatches(),
                 markdownMatchesJson,
                 leaderboardCsvMatchesJson,
                 comparisonMetricsCsvMatchesJson,

@@ -332,14 +332,18 @@ class TrainingReportQualityProfileTest {
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
         assertTrue(Files.exists(bundle.junitXmlFile()));
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
         assertEquals(validation.toMap(), inspection.result());
         assertEquals(List.of("artifact-gpu-lab"), inspection.parsedResult().profileIds());
         assertTrue(inspection.junitXml().contains("gollek.training.quality-profile-catalog.validation"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertTrue(Gollek.DL.trainingReportQualityProfileCatalogValidationJUnitXml(validation)
                 .contains("failures=\"0\""));
         assertTrue(verification.passed());
         assertTrue(verification.markdownMatchesJson());
         assertTrue(verification.junitXmlMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertDoesNotThrow(verification::requirePassed);
 
         Files.writeString(
@@ -466,12 +470,16 @@ class TrainingReportQualityProfileTest {
         assertTrue(bundle.readyForCi());
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
         assertEquals(advice.readyForCi(), inspection.parsedResult().readyForCi());
         assertEquals(advice.validation().toMap(), inspection.parsedResult().validation().toMap());
         assertEquals(advice.recommendations().size(), inspection.parsedResult().recommendations().size());
         assertTrue(inspection.markdown().contains("Add a strict accelerator-aware CI profile"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertTrue(verification.passed());
         assertTrue(verification.markdownMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertDoesNotThrow(verification::requirePassed);
 
         Files.writeString(
@@ -505,12 +513,14 @@ class TrainingReportQualityProfileTest {
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
         assertEquals(TrainingReportQualityProfile.ids(), bundle.catalog().ids());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
 
         TrainingReportQualityProfileArtifacts.ArtifactInspection inspection =
                 Gollek.DL.readTrainingReportQualityProfileArtifacts(artifacts);
         assertEquals(TrainingReportQualityProfile.ids(), inspection.profileIds());
         assertEquals(bundle.jsonSha256(), inspection.jsonSha256());
         assertTrue(inspection.markdown().contains("# Gollek Training Report Quality Profiles"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
 
         TrainingReportQualityProfileArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportQualityProfileArtifacts(bundle);
@@ -519,6 +529,8 @@ class TrainingReportQualityProfileTest {
         assertTrue(verification.markdownSha256Matches());
         assertTrue(verification.jsonMatchesCatalog());
         assertTrue(verification.markdownMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertDoesNotThrow(verification::requirePassed);
 
         Files.writeString(

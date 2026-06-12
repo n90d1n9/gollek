@@ -221,6 +221,7 @@ class TrainingReportPortfolioTest {
         assertEquals("baselineReport,candidateReport,severity,code,message,metric,evidence\n", comparisonFindingsCsv);
         assertEquals(bundle.jsonFile().toString(), bundle.toMap().get("jsonFile"));
         assertEquals(bundle.markdownFile().toString(), bundle.toMap().get("markdownFile"));
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
         assertEquals(2, bundle.toMap().get("entryCount"));
         assertEquals(8, bundle.toMap().get("comparisonMetricCount"));
 
@@ -239,6 +240,8 @@ class TrainingReportPortfolioTest {
         assertEquals(bundle.jsonSha256(), inspection.jsonSha256());
         assertEquals(bundle.markdownSha256(), inspection.markdownSha256());
         assertEquals(bundle.leaderboardCsvSha256(), inspection.leaderboardCsvSha256());
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
+        assertEquals(inspection.artifactMap(), inspection.toMap().get("artifact"));
         assertEquals(2, inspection.toMap().get("entryCount"));
         assertTrue(Gollek.DL.trainingReportPortfolioArtifactMarkdown(bundle)
                 .contains("Markdown summary"));
@@ -254,6 +257,8 @@ class TrainingReportPortfolioTest {
         assertTrue(verification.leaderboardCsvMatchesJson());
         assertTrue(verification.comparisonMetricsCsvMatchesJson());
         assertTrue(verification.comparisonFindingsCsvMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertTrue(Gollek.DL.trainingReportPortfolioArtifactVerificationMarkdown(verification)
                 .contains("Portfolio Artifact Verification"));
 
@@ -338,6 +343,7 @@ class TrainingReportPortfolioTest {
         assertEquals(
                 TrainerCheckpointIO.sha256Hex(verificationReport.junitXmlFile()),
                 verificationReport.junitXmlSha256());
+        assertEquals(verificationReport.artifactMap(), verificationReport.toMap().get("artifact"));
         assertTrue(Files.readString(verificationReport.jsonFile(), StandardCharsets.UTF_8)
                 .contains(TrainingReportPortfolioArtifactPackageReport.FORMAT));
         assertTrue(Files.readString(verificationReport.markdownFile(), StandardCharsets.UTF_8)
@@ -360,6 +366,8 @@ class TrainingReportPortfolioTest {
         assertEquals(64, reportInspection.contentFingerprint().length());
         assertTrue(reportInspection.packagePassed());
         assertEquals(0, reportInspection.failureCount());
+        assertEquals(verificationReport.artifactMap(), reportInspection.artifactMap());
+        assertEquals(reportInspection.artifactMap(), reportInspection.toMap().get("artifact"));
         TrainingReportPortfolioArtifactPackageReport.ReportVerification reportVerification =
                 Gollek.DL.verifyTrainingReportPortfolioArtifactPackageVerificationReport(verificationReport);
         assertTrue(reportVerification.passed());
@@ -373,6 +381,8 @@ class TrainingReportPortfolioTest {
         assertTrue(reportVerification.markdownMatchesJson());
         assertTrue(reportVerification.junitXmlWellFormed());
         assertTrue(reportVerification.junitXmlMatchesJson());
+        assertEquals(verificationReport.artifactMap(), reportVerification.artifactMap());
+        assertEquals(reportVerification.artifactMap(), reportVerification.toMap().get("artifact"));
         reportVerification.requirePassed();
         TrainingReportPortfolioArtifactPackageReport.ReportPackageConsistency reportConsistency =
                 Gollek.DL.verifyTrainingReportPortfolioArtifactPackageVerificationReportAgainstPackage(

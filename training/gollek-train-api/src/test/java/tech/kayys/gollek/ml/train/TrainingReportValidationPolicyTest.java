@@ -216,6 +216,7 @@ class TrainingReportValidationPolicyTest {
         assertTrue(Files.exists(bundle.markdownFile()));
         assertTrue(Files.exists(bundle.junitXmlFile()));
         assertDoesNotThrow(bundle::requirePassed);
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
 
         TrainingReportValidationArtifacts.ArtifactInspection inspection =
                 Gollek.DL.readTrainingReportValidationArtifacts(bundle.directory());
@@ -224,6 +225,7 @@ class TrainingReportValidationPolicyTest {
         assertEquals(bundle.jsonSha256(), inspection.jsonSha256());
         assertTrue(inspection.markdown().contains("# Gollek Training Report Validation"));
         assertTrue(inspection.junitXml().contains("gollek.training.report.validation"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
 
         TrainingReportValidationArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportValidationArtifacts(bundle);
@@ -234,6 +236,8 @@ class TrainingReportValidationPolicyTest {
         assertTrue(verification.junitXmlWellFormed());
         assertTrue(verification.markdownMatchesJson());
         assertTrue(verification.junitXmlMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertDoesNotThrow(verification::requirePassed);
 
         Files.writeString(

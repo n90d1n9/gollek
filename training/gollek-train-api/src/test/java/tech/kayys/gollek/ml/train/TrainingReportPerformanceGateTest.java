@@ -167,9 +167,14 @@ class TrainingReportPerformanceGateTest {
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
         assertTrue(Files.exists(bundle.junitXmlFile()));
+        assertFalse(bundle.artifact().hasManifest());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertTrue(inspection.markdown().contains("# Gollek Trainer Performance Gate"));
         assertTrue(inspection.junitXml().contains("gollek-trainer-performance-gate"));
         assertTrue(verification.passed(), verification.message());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         verification.requirePassed();
 
         Files.writeString(bundle.markdownFile(), inspection.markdown() + "\n<!-- stale -->\n");

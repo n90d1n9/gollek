@@ -67,15 +67,24 @@ public final class TrainingReportPerformanceGateArtifacts {
             return result.passed();
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("result", result.toMap());
             return Map.copyOf(map);
@@ -114,19 +123,28 @@ public final class TrainingReportPerformanceGateArtifacts {
             return booleanValue(result.get("passed"));
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("result", result);
             map.put("markdown", markdown);
             map.put("junitXml", junitXml);
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
             return Map.copyOf(map);
         }
     }
@@ -166,6 +184,7 @@ public final class TrainingReportPerformanceGateArtifacts {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("passed", passed());
             map.put("message", message());
+            map.put("artifact", artifactMap());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
             map.put("junitXmlSha256Matches", junitXmlSha256Matches);
@@ -174,6 +193,14 @@ public final class TrainingReportPerformanceGateArtifacts {
             map.put("junitXmlMatchesJson", junitXmlMatchesJson);
             map.put("failures", failures);
             return Map.copyOf(map);
+        }
+
+        public TrainingReportArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 
@@ -282,17 +309,19 @@ public final class TrainingReportPerformanceGateArtifacts {
             String expectedJunitXmlSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
         List<String> failures = new ArrayList<>();
-        boolean jsonMatches = checksumMatches(expectedJsonSha256, inspection.jsonSha256());
-        boolean markdownMatches = checksumMatches(expectedMarkdownSha256, inspection.markdownSha256());
-        boolean junitXmlMatches = checksumMatches(expectedJunitXmlSha256, inspection.junitXmlSha256());
+        TrainingReportArtifactDescriptor.ChecksumMatch checksums =
+                inspection.artifact().checksumMatch(
+                        expectedJsonSha256,
+                        expectedMarkdownSha256,
+                        expectedJunitXmlSha256);
         boolean junitXmlWellFormed = TrainingReportXml.isWellFormed(inspection.junitXml());
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
-        if (!junitXmlMatches) {
+        if (!checksums.junitXmlMatches()) {
             failures.add("JUnit XML checksum mismatch for " + inspection.junitXmlFile());
         }
         if (!junitXmlWellFormed) {
@@ -314,9 +343,9 @@ public final class TrainingReportPerformanceGateArtifacts {
         }
         return new ArtifactVerification(
                 inspection,
-                jsonMatches,
-                markdownMatches,
-                junitXmlMatches,
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
+                checksums.junitXmlMatches(),
                 junitXmlWellFormed,
                 markdownMatchesJson,
                 junitXmlMatchesJson,
@@ -425,11 +454,6 @@ public final class TrainingReportPerformanceGateArtifacts {
             values.put(String.valueOf(entry.getKey()), entry.getValue());
         }
         return Map.copyOf(values);
-    }
-
-    private static boolean checksumMatches(String expected, String actual) {
-        String normalizedExpected = normalizeChecksum(expected);
-        return normalizedExpected == null || normalizedExpected.equalsIgnoreCase(actual);
     }
 
     private static String normalizeChecksum(String value) {

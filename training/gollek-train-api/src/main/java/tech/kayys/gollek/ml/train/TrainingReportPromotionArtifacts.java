@@ -64,13 +64,22 @@ public final class TrainingReportPromotionArtifacts {
             decision.requirePromotable();
         }
 
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return new TrainingReportDocumentArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    jsonSha256,
+                    markdownSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("promotable", promotable());
             map.put("decision", decision.toMap());
             return Map.copyOf(map);
@@ -127,13 +136,22 @@ public final class TrainingReportPromotionArtifacts {
             return TrainingReportPromotionArtifacts.sourceReports(this);
         }
 
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return new TrainingReportDocumentArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    jsonSha256,
+                    markdownSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("promotable", promotable());
             map.put("decisionStatus", decisionStatus());
             decisionCandidate().ifPresent(candidate -> map.put("decisionCandidate", candidate));
@@ -250,8 +268,17 @@ public final class TrainingReportPromotionArtifacts {
             return "Promotion artifact verification failed: " + String.join("; ", failures) + ".";
         }
 
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
@@ -371,25 +398,21 @@ public final class TrainingReportPromotionArtifacts {
             String expectedJsonSha256,
             String expectedMarkdownSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        boolean jsonMatches = normalizedJsonSha == null
-                || normalizedJsonSha.equalsIgnoreCase(inspection.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(inspection.markdownSha256());
+        TrainingReportDocumentArtifactDescriptor.ChecksumMatch checksumMatch =
+                inspection.artifact().checksumMatch(expectedJsonSha256, expectedMarkdownSha256);
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksumMatch.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksumMatch.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
         return new ArtifactVerification(
                 inspection,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                jsonMatches,
-                markdownMatches,
+                checksumMatch.expectedJsonSha256(),
+                checksumMatch.expectedMarkdownSha256(),
+                checksumMatch.jsonMatches(),
+                checksumMatch.markdownMatches(),
                 failures);
     }
 

@@ -2,7 +2,6 @@ package tech.kayys.gollek.ml.train;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -26,10 +25,10 @@ public record TrainingReportArtifactDescriptor(
         markdownFile = normalizePath(markdownFile, "markdownFile");
         junitXmlFile = normalizePath(junitXmlFile, "junitXmlFile");
         manifestFile = manifestFile == null ? null : normalizePath(manifestFile, "manifestFile");
-        jsonSha256 = requireSha256(jsonSha256, "jsonSha256");
-        markdownSha256 = requireSha256(markdownSha256, "markdownSha256");
-        junitXmlSha256 = requireSha256(junitXmlSha256, "junitXmlSha256");
-        manifestSha256 = normalizeOptionalSha256(manifestSha256, "manifestSha256");
+        jsonSha256 = TrainingReportSha256.require(jsonSha256, "jsonSha256");
+        markdownSha256 = TrainingReportSha256.require(markdownSha256, "markdownSha256");
+        junitXmlSha256 = TrainingReportSha256.require(junitXmlSha256, "junitXmlSha256");
+        manifestSha256 = TrainingReportSha256.normalizeOptional(manifestSha256, "manifestSha256");
         hasManifest = hasManifest && manifestFile != null && manifestSha256 != null;
     }
 
@@ -109,10 +108,13 @@ public record TrainingReportArtifactDescriptor(
             String expectedMarkdownSha256,
             String expectedJunitXmlSha256,
             String expectedManifestSha256) {
-        String normalizedJsonSha = normalizeOptionalSha256(expectedJsonSha256, "expectedJsonSha256");
-        String normalizedMarkdownSha = normalizeOptionalSha256(expectedMarkdownSha256, "expectedMarkdownSha256");
-        String normalizedJunitXmlSha = normalizeOptionalSha256(expectedJunitXmlSha256, "expectedJunitXmlSha256");
-        String normalizedManifestSha = normalizeOptionalSha256(expectedManifestSha256, "expectedManifestSha256");
+        String normalizedJsonSha = TrainingReportSha256.normalizeOptional(expectedJsonSha256, "expectedJsonSha256");
+        String normalizedMarkdownSha =
+                TrainingReportSha256.normalizeOptional(expectedMarkdownSha256, "expectedMarkdownSha256");
+        String normalizedJunitXmlSha =
+                TrainingReportSha256.normalizeOptional(expectedJunitXmlSha256, "expectedJunitXmlSha256");
+        String normalizedManifestSha =
+                TrainingReportSha256.normalizeOptional(expectedManifestSha256, "expectedManifestSha256");
         return new ChecksumMatch(
                 normalizedJsonSha,
                 normalizedMarkdownSha,
@@ -169,18 +171,4 @@ public record TrainingReportArtifactDescriptor(
                 .normalize();
     }
 
-    private static String normalizeOptionalSha256(String value, String fieldName) {
-        return value == null || value.isBlank() ? null : requireSha256(value, fieldName);
-    }
-
-    private static String requireSha256(String value, String fieldName) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.matches("[0-9a-f]{64}")) {
-            throw new IllegalArgumentException(fieldName + " must be a 64-character SHA-256 hex string");
-        }
-        return normalized;
-    }
 }

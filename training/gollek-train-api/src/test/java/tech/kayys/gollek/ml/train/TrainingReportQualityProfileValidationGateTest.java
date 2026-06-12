@@ -179,6 +179,7 @@ class TrainingReportQualityProfileValidationGateTest {
         assertTrue(bundle.validationPassed());
         assertTrue(Files.isRegularFile(bundle.jsonFile()));
         assertTrue(Files.isRegularFile(bundle.markdownFile()));
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
 
         TrainingReportQualityProfileValidationGateArtifacts.ArtifactInspection inspection =
                 Gollek.DL.readTrainingReportQualityProfileValidationGateArtifacts(artifacts);
@@ -189,6 +190,7 @@ class TrainingReportQualityProfileValidationGateTest {
         assertTrue(inspection.failureCodes().isEmpty());
         assertTrue(inspection.markdown().contains("# Gollek Training Quality Profile Validation Gate"));
         assertTrue(inspection.markdown().contains("**Performance:** `PASS`"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
 
         TrainingReportQualityProfileValidationGateArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportQualityProfileValidationGateArtifacts(bundle);
@@ -196,6 +198,8 @@ class TrainingReportQualityProfileValidationGateTest {
         assertTrue(verification.profileKnown());
         assertTrue(verification.validationPayloadConsistent());
         assertTrue(verification.markdownMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertDoesNotThrow(verification::requirePassed);
 
         Files.writeString(

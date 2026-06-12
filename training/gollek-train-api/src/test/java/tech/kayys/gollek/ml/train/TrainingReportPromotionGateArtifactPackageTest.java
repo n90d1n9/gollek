@@ -188,6 +188,7 @@ class TrainingReportPromotionGateArtifactPackageTest {
                 TrainingReportPromotionGateArtifactPackage.defaultVerificationReportFile(reportBundleDirectory),
                 reportBundle.json().reportFile());
         assertTrue(reportBundle.toMap().containsKey("junitXml"));
+        assertEquals(reportBundle.artifactMap(), reportBundle.toMap().get("artifact"));
 
         TrainingReportPromotionGateArtifactPackage.VerificationReportBundleInspection reportBundleInspection =
                 Gollek.DL.readTrainingReportPromotionGatePackageVerificationReports(reportBundleDirectory);
@@ -195,6 +196,7 @@ class TrainingReportPromotionGateArtifactPackageTest {
         assertEquals(reportBundle.json().reportFile(), reportBundleInspection.json().reportFile());
         assertEquals(reportBundle.markdown().markdownFile(), reportBundleInspection.markdownFile());
         assertEquals(reportBundle.junitXml().junitXmlFile(), reportBundleInspection.junitXmlFile());
+        assertEquals(reportBundle.artifactMap(), reportBundleInspection.artifactMap());
 
         TrainingReportPromotionGateArtifactPackage.VerificationReportBundleVerification reportBundleVerification =
                 Gollek.DL.verifyTrainingReportPromotionGatePackageVerificationReports(
@@ -205,7 +207,22 @@ class TrainingReportPromotionGateArtifactPackageTest {
         assertTrue(reportBundleVerification.markdownMatchesRendered());
         assertTrue(reportBundleVerification.junitXmlMatchesRendered());
         assertTrue(reportBundleVerification.jsonVerification().passed());
+        assertEquals(reportBundle.artifactMap(), reportBundleVerification.artifactMap());
+        assertEquals(reportBundleVerification.artifactMap(), reportBundleVerification.toMap().get("artifact"));
         reportBundleVerification.requirePassed();
+
+        TrainingReportPromotionGateArtifactPackage.VerificationReportBundleVerification uppercaseShaVerification =
+                Gollek.DL.verifyTrainingReportPromotionGatePackageVerificationReports(
+                        reportBundleDirectory,
+                        reportBundle.json().reportSha256().toUpperCase(java.util.Locale.ROOT));
+        assertTrue(uppercaseShaVerification.passed());
+        assertTrue(uppercaseShaVerification.jsonVerification().reportSha256Matches());
+        assertEquals(
+                reportBundle.json().reportSha256(),
+                uppercaseShaVerification.toMap().get("expectedJsonReportSha256"));
+        assertEquals(
+                reportBundle.json().reportSha256(),
+                uppercaseShaVerification.jsonVerification().toMap().get("expectedReportSha256"));
 
         TrainingReportPromotionGateArtifactPackage.VerificationReportBundle defaultReportBundle =
                 Gollek.DL.verifyAndWriteTrainingReportPromotionGatePackageVerificationReports(bundle.directory());
@@ -361,6 +378,18 @@ class TrainingReportPromotionGateArtifactPackageTest {
         assertTrue(reportBundleReceiptVerification.schemaValid());
         assertTrue(reportBundleReceiptVerification.reportBundleRevalidated());
         assertTrue(reportBundleReceiptVerification.reportBundleVerification().passed());
+        TrainingReportPromotionGateArtifactPackage.VerificationReportBundleReceiptVerification
+                uppercaseReportBundleReceiptVerification =
+                        Gollek.DL.verifyTrainingReportPromotionGatePackageVerificationReportsReceipt(
+                                verified.reportBundleReceipt().receiptFile(),
+                                verified.reportBundleReceipt().receiptSha256().toUpperCase(java.util.Locale.ROOT));
+        assertTrue(
+                uppercaseReportBundleReceiptVerification.passed(),
+                uppercaseReportBundleReceiptVerification.failures().toString());
+        assertTrue(uppercaseReportBundleReceiptVerification.receiptSha256Matches());
+        assertEquals(
+                verified.reportBundleReceipt().receiptSha256(),
+                uppercaseReportBundleReceiptVerification.toMap().get("expectedReceiptSha256"));
         reportBundleReceiptVerification.requirePassed();
         Path manualReportBundleReceiptFile =
                 reportDirectory.resolve("manual-promotion-gate-package-verification.reports.receipt.json");
@@ -433,6 +462,15 @@ class TrainingReportPromotionGateArtifactPackageTest {
         assertTrue(receiptVerification.schemaValid());
         assertTrue(receiptVerification.indexRevalidated());
         assertTrue(receiptVerification.indexVerification().passed());
+        TrainingReportPromotionGateArtifactPackage.VerificationIndexReceiptVerification uppercaseReceiptVerification =
+                Gollek.DL.verifyTrainingReportPromotionGatePackageVerificationIndexReceipt(
+                        receipt.receiptFile(),
+                        receipt.receiptSha256().toUpperCase(java.util.Locale.ROOT));
+        assertTrue(uppercaseReceiptVerification.passed(), uppercaseReceiptVerification.failures().toString());
+        assertTrue(uppercaseReceiptVerification.receiptSha256Matches());
+        assertEquals(
+                receipt.receiptSha256(),
+                uppercaseReceiptVerification.toMap().get("expectedReceiptSha256"));
         receiptVerification.requirePassed();
         receipt.requirePassed();
         TrainingReportPromotionGateArtifactPackage.VerificationIndexPackageAudit packageAudit =
@@ -545,6 +583,18 @@ class TrainingReportPromotionGateArtifactPackageTest {
         assertTrue(evidenceReceiptVerification.schemaValid());
         assertTrue(evidenceReceiptVerification.evidenceRevalidated());
         assertTrue(evidenceReceiptVerification.evidenceVerification().passed());
+        TrainingReportPromotionGateArtifactPackage.VerificationEvidenceReceiptVerification
+                uppercaseEvidenceReceiptVerification =
+                        Gollek.DL.verifyTrainingReportPromotionGatePackageVerificationEvidenceReceipt(
+                                verified.evidenceReceipt().receiptFile(),
+                                verified.evidenceReceipt().receiptSha256().toUpperCase(java.util.Locale.ROOT));
+        assertTrue(
+                uppercaseEvidenceReceiptVerification.passed(),
+                uppercaseEvidenceReceiptVerification.failures().toString());
+        assertTrue(uppercaseEvidenceReceiptVerification.receiptSha256Matches());
+        assertEquals(
+                verified.evidenceReceipt().receiptSha256(),
+                uppercaseEvidenceReceiptVerification.toMap().get("expectedReceiptSha256"));
         evidenceReceiptVerification.requirePassed();
         Path manualEvidenceReceiptFile =
                 reportDirectory.resolve("manual-promotion-gate-package-verification.evidence.receipt.json");

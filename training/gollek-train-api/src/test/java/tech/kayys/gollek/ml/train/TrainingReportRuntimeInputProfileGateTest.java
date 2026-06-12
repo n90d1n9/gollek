@@ -212,9 +212,14 @@ class TrainingReportRuntimeInputProfileGateTest {
         assertTrue(Files.exists(bundle.jsonFile()));
         assertTrue(Files.exists(bundle.markdownFile()));
         assertTrue(Files.exists(bundle.junitXmlFile()));
+        assertFalse(bundle.artifact().hasManifest());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
         assertTrue(inspection.markdown().contains("# Runtime Input Profile Gate"));
         assertTrue(inspection.junitXml().contains("gollek.training.runtime.input"));
         assertTrue(verification.passed(), verification.message());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         assertTrue(verification.markdownMatchesJson());
         assertTrue(verification.junitXmlMatchesJson());
         verification.requirePassed();

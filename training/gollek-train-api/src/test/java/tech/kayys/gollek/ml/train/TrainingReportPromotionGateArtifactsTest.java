@@ -63,6 +63,7 @@ class TrainingReportPromotionGateArtifactsTest {
         Map<String, Object> map = bundle.toMap();
         assertEquals(Boolean.TRUE, map.get("passed"));
         assertEquals(bundle.junitXmlFile().toString(), map.get("junitXmlFile"));
+        assertEquals(bundle.artifactMap(), map.get("artifact"));
         bundle.requirePassed();
 
         TrainingReportPromotionGateArtifacts.ArtifactInspection inspection =
@@ -74,6 +75,7 @@ class TrainingReportPromotionGateArtifactsTest {
         assertEquals(bundle.jsonSha256(), inspection.jsonSha256());
         assertEquals(bundle.markdownSha256(), inspection.markdownSha256());
         assertEquals(bundle.junitXmlSha256(), inspection.junitXmlSha256());
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
 
         TrainingReportPromotionGateArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportPromotionGateArtifacts(bundle);
@@ -84,6 +86,8 @@ class TrainingReportPromotionGateArtifactsTest {
         assertTrue(verification.junitXmlWellFormed());
         assertTrue(verification.markdownMatchesJson());
         assertTrue(verification.junitXmlMatchesJson());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         verification.requirePassed();
     }
 

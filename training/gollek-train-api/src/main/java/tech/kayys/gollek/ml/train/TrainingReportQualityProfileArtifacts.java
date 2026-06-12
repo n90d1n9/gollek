@@ -51,13 +51,22 @@ public final class TrainingReportQualityProfileArtifacts {
             catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         }
 
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return new TrainingReportDocumentArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    jsonSha256,
+                    markdownSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("profileIds", catalog.ids());
             map.put("catalog", catalog.toMap());
             return Map.copyOf(map);
@@ -101,13 +110,22 @@ public final class TrainingReportQualityProfileArtifacts {
             return List.copyOf(ids);
         }
 
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return new TrainingReportDocumentArtifactDescriptor(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    jsonSha256,
+                    markdownSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("profileIds", profileIds());
             map.put("catalog", catalog);
             return Map.copyOf(map);
@@ -151,6 +169,7 @@ public final class TrainingReportQualityProfileArtifacts {
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("passed", passed());
+            map.put("artifact", artifactMap());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
             map.put("jsonMatchesCatalog", jsonMatchesCatalog);
@@ -166,6 +185,14 @@ public final class TrainingReportQualityProfileArtifacts {
             map.put("failures", failures);
             map.put("inspection", inspection.toMap());
             return Map.copyOf(map);
+        }
+
+        public TrainingReportDocumentArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 
@@ -298,16 +325,13 @@ public final class TrainingReportQualityProfileArtifacts {
             String expectedJsonSha256,
             String expectedMarkdownSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        boolean jsonMatches = normalizedJsonSha == null || normalizedJsonSha.equalsIgnoreCase(inspection.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(inspection.markdownSha256());
+        TrainingReportDocumentArtifactDescriptor.ChecksumMatch checksums =
+                inspection.artifact().checksumMatch(expectedJsonSha256, expectedMarkdownSha256);
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
 
@@ -333,10 +357,10 @@ public final class TrainingReportQualityProfileArtifacts {
         }
         return new ArtifactVerification(
                 inspection,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                jsonMatches,
-                markdownMatches,
+                checksums.expectedJsonSha256(),
+                checksums.expectedMarkdownSha256(),
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
                 jsonMatchesCatalog,
                 markdownMatchesJson,
                 failures);

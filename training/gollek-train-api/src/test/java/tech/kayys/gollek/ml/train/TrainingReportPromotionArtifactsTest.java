@@ -78,6 +78,7 @@ class TrainingReportPromotionArtifactsTest {
         Map<String, Object> map = bundle.toMap();
         assertEquals(bundle.jsonFile().toString(), map.get("jsonFile"));
         assertEquals(bundle.markdownFile().toString(), map.get("markdownFile"));
+        assertEquals(bundle.artifactMap(), map.get("artifact"));
         assertEquals(Boolean.TRUE, map.get("promotable"));
 
         TrainingReportPromotionArtifacts.ArtifactInspection inspection =
@@ -92,12 +93,16 @@ class TrainingReportPromotionArtifactsTest {
         assertEquals("baseline", inspection.sourceReports().get(0).role());
         assertEquals("candidate", inspection.sourceReports().get(1).name());
         assertTrue(inspection.toMap().containsKey("sourceReports"));
+        assertEquals(bundle.artifactMap(), inspection.artifactMap());
+        assertEquals(inspection.artifactMap(), inspection.toMap().get("artifact"));
 
         TrainingReportPromotionArtifacts.ArtifactVerification verification =
                 Gollek.DL.verifyTrainingReportPromotionArtifacts(bundle);
         assertTrue(verification.passed());
         assertTrue(verification.jsonSha256Matches());
         assertTrue(verification.markdownSha256Matches());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
         verification.requirePassed();
 
         List<TrainingReportPromotionArtifacts.SourceReport> sourceReports =

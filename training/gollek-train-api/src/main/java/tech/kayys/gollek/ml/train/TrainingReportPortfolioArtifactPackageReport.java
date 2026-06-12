@@ -65,6 +65,17 @@ public final class TrainingReportPortfolioArtifactPackageReport {
             "hasComparisons",
             "hasComparisonFindings",
             "export");
+    private static final List<String> ARTIFACT_INSPECTION_FINGERPRINT_FIELDS = List.of(
+            "jsonSha256",
+            "markdownSha256",
+            "leaderboardCsvSha256",
+            "comparisonMetricsCsvSha256",
+            "comparisonFindingsCsvSha256",
+            "entryCount",
+            "comparisonMetricCount",
+            "comparisonFindingCount",
+            "hasComparisons",
+            "hasComparisonFindings");
 
     private TrainingReportPortfolioArtifactPackageReport() {
     }
@@ -117,15 +128,24 @@ public final class TrainingReportPortfolioArtifactPackageReport {
             return TrainingReportPortfolioArtifactPackageReport.contentFingerprint(verification);
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("contentFingerprint", contentFingerprint());
             map.put("passed", passed());
             map.put("verification", verification.toMap());
@@ -185,15 +205,24 @@ public final class TrainingReportPortfolioArtifactPackageReport {
             return value instanceof List<?> failures ? failures.size() : 0;
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("format", format());
             map.put("schemaVersion", schemaVersion());
             map.put("packagePassed", packagePassed());
@@ -250,8 +279,17 @@ public final class TrainingReportPortfolioArtifactPackageReport {
                     + String.join("; ", failures) + ".";
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
@@ -631,26 +669,19 @@ public final class TrainingReportPortfolioArtifactPackageReport {
             String expectedMarkdownSha256,
             String expectedJunitXmlSha256) {
         ReportInspection resolved = Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        String normalizedJunitXmlSha = normalizeChecksum(expectedJunitXmlSha256);
-        boolean jsonMatches = normalizedJsonSha == null
-                || normalizedJsonSha.equalsIgnoreCase(resolved.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(resolved.markdownSha256());
-        boolean junitXmlMatches = normalizedJunitXmlSha == null
-                || normalizedJunitXmlSha.equalsIgnoreCase(resolved.junitXmlSha256());
+        TrainingReportArtifactDescriptor.ChecksumMatch checksums =
+                resolved.artifact().checksumMatch(expectedJsonSha256, expectedMarkdownSha256, expectedJunitXmlSha256);
         boolean formatMatches = FORMAT.equals(resolved.format());
         boolean schemaVersionMatches = resolved.schemaVersion() == SCHEMA_VERSION;
         boolean junitXmlWellFormed = isWellFormedXml(resolved.junitXml());
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + resolved.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + resolved.markdownFile());
         }
-        if (!junitXmlMatches) {
+        if (!checksums.junitXmlMatches()) {
             failures.add("JUnit XML checksum mismatch for " + resolved.junitXmlFile());
         }
         if (!formatMatches) {
@@ -682,12 +713,12 @@ public final class TrainingReportPortfolioArtifactPackageReport {
         }
         return new ReportVerification(
                 resolved,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                normalizedJunitXmlSha,
-                jsonMatches,
-                markdownMatches,
-                junitXmlMatches,
+                checksums.expectedJsonSha256(),
+                checksums.expectedMarkdownSha256(),
+                checksums.expectedJunitXmlSha256(),
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
+                checksums.junitXmlMatches(),
                 formatMatches,
                 schemaVersionMatches,
                 jsonShapeValid,
@@ -875,21 +906,32 @@ public final class TrainingReportPortfolioArtifactPackageReport {
         Map<String, Object> reportArtifactVerification = stringKeyMap(map);
         Map<String, Object> packageArtifactVerification = packageArtifactOptional.orElseThrow().toMap();
         boolean matches = true;
-        for (String field : ARTIFACT_VERIFICATION_COMPARISON_FIELDS) {
-            matches &= compareField(
-                    failures,
-                    "artifactVerification." + field,
-                    reportArtifactVerification.get(field),
-                    packageArtifactVerification.get(field));
-        }
+        matches &= compareFields(
+                failures,
+                "artifactVerification.",
+                reportArtifactVerification,
+                packageArtifactVerification,
+                ARTIFACT_VERIFICATION_COMPARISON_FIELDS);
         Map<String, Object> reportInspection = objectMap(reportArtifactVerification.get("inspection"));
         Map<String, Object> packageInspection = objectMap(packageArtifactVerification.get("inspection"));
-        for (String field : ARTIFACT_INSPECTION_COMPARISON_FIELDS) {
-            matches &= compareField(
-                    failures,
-                    "artifactVerification.inspection." + field,
-                    reportInspection.get(field),
-                    packageInspection.get(field));
+        matches &= compareFields(
+                failures,
+                "artifactVerification.inspection.",
+                reportInspection,
+                packageInspection,
+                ARTIFACT_INSPECTION_COMPARISON_FIELDS);
+        return matches;
+    }
+
+    private static boolean compareFields(
+            List<String> failures,
+            String prefix,
+            Map<String, Object> actual,
+            Map<String, Object> expected,
+            List<String> fields) {
+        boolean matches = true;
+        for (String field : fields) {
+            matches &= compareField(failures, prefix + field, actual.get(field), expected.get(field));
         }
         return matches;
     }
@@ -1648,114 +1690,38 @@ public final class TrainingReportPortfolioArtifactPackageReport {
 
         appendFingerprintField(canonical, "artifactVerification.present", !artifactVerification.isEmpty());
         if (!artifactVerification.isEmpty()) {
-            appendFingerprintField(canonical, "artifactVerification.passed", artifactVerification.get("passed"));
-            appendFingerprintField(
+            appendArtifactVerificationFingerprint(canonical, artifactVerification);
+            appendFingerprintFields(
                     canonical,
-                    "artifactVerification.jsonSha256Matches",
-                    artifactVerification.get("jsonSha256Matches"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.markdownSha256Matches",
-                    artifactVerification.get("markdownSha256Matches"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.leaderboardCsvSha256Matches",
-                    artifactVerification.get("leaderboardCsvSha256Matches"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.comparisonMetricsCsvSha256Matches",
-                    artifactVerification.get("comparisonMetricsCsvSha256Matches"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.comparisonFindingsCsvSha256Matches",
-                    artifactVerification.get("comparisonFindingsCsvSha256Matches"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.actualJsonSha256",
-                    artifactVerification.get("actualJsonSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.actualMarkdownSha256",
-                    artifactVerification.get("actualMarkdownSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.actualLeaderboardCsvSha256",
-                    artifactVerification.get("actualLeaderboardCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.actualComparisonMetricsCsvSha256",
-                    artifactVerification.get("actualComparisonMetricsCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.actualComparisonFindingsCsvSha256",
-                    artifactVerification.get("actualComparisonFindingsCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.expectedJsonSha256",
-                    artifactVerification.get("expectedJsonSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.expectedMarkdownSha256",
-                    artifactVerification.get("expectedMarkdownSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.expectedLeaderboardCsvSha256",
-                    artifactVerification.get("expectedLeaderboardCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.expectedComparisonMetricsCsvSha256",
-                    artifactVerification.get("expectedComparisonMetricsCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.expectedComparisonFindingsCsvSha256",
-                    artifactVerification.get("expectedComparisonFindingsCsvSha256"));
-            appendFingerprintList(
-                    canonical,
-                    "artifactVerification.failures",
-                    stringList(artifactVerification.get("failures")));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.jsonSha256",
-                    artifactInspection.get("jsonSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.markdownSha256",
-                    artifactInspection.get("markdownSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.leaderboardCsvSha256",
-                    artifactInspection.get("leaderboardCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.comparisonMetricsCsvSha256",
-                    artifactInspection.get("comparisonMetricsCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.comparisonFindingsCsvSha256",
-                    artifactInspection.get("comparisonFindingsCsvSha256"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.entryCount",
-                    artifactInspection.get("entryCount"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.comparisonMetricCount",
-                    artifactInspection.get("comparisonMetricCount"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.comparisonFindingCount",
-                    artifactInspection.get("comparisonFindingCount"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.hasComparisons",
-                    artifactInspection.get("hasComparisons"));
-            appendFingerprintField(
-                    canonical,
-                    "artifactVerification.inspection.hasComparisonFindings",
-                    artifactInspection.get("hasComparisonFindings"));
+                    "artifactVerification.inspection.",
+                    artifactInspection,
+                    ARTIFACT_INSPECTION_FINGERPRINT_FIELDS);
         }
 
         return sha256Hex(canonical.toString());
+    }
+
+    private static void appendArtifactVerificationFingerprint(
+            StringBuilder canonical,
+            Map<String, Object> artifactVerification) {
+        for (String field : ARTIFACT_VERIFICATION_COMPARISON_FIELDS) {
+            String key = "artifactVerification." + field;
+            if ("failures".equals(field)) {
+                appendFingerprintList(canonical, key, stringList(artifactVerification.get(field)));
+            } else {
+                appendFingerprintField(canonical, key, artifactVerification.get(field));
+            }
+        }
+    }
+
+    private static void appendFingerprintFields(
+            StringBuilder canonical,
+            String prefix,
+            Map<String, Object> values,
+            List<String> fields) {
+        for (String field : fields) {
+            appendFingerprintField(canonical, prefix + field, values.get(field));
+        }
     }
 
     private static void appendFingerprintMap(

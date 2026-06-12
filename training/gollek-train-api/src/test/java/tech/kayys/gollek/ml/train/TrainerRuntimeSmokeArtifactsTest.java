@@ -33,6 +33,10 @@ class TrainerRuntimeSmokeArtifactsTest {
         assertTrue(verification.junitXmlMatchesJson());
         assertTrue(verification.junitXmlWellFormed());
         assertTrue(verification.inspection().smokePassed());
+        assertEquals(bundle.artifactMap(), bundle.toMap().get("artifact"));
+        assertEquals(bundle.artifactMap(), verification.inspection().artifactMap());
+        assertEquals(bundle.artifactMap(), verification.artifactMap());
+        assertEquals(verification.artifactMap(), verification.toMap().get("artifact"));
     }
 
     @Test

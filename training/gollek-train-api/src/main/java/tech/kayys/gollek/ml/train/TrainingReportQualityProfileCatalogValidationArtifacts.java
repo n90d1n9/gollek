@@ -58,15 +58,24 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
             return result.passed();
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("result", result.toMap());
             return Map.copyOf(map);
@@ -102,15 +111,24 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
             return TrainingReportQualityProfileCatalogValidator.Result.fromMap(result);
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    jsonFile,
+                    markdownFile,
+                    junitXmlFile,
+                    jsonSha256,
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
-            map.put("jsonFile", jsonFile.toString());
-            map.put("markdownFile", markdownFile.toString());
-            map.put("junitXmlFile", junitXmlFile.toString());
-            map.put("jsonSha256", jsonSha256);
-            map.put("markdownSha256", markdownSha256);
-            map.put("junitXmlSha256", junitXmlSha256);
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("result", result);
             map.put("markdown", markdown);
             map.put("junitXml", junitXml);
@@ -160,6 +178,7 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("passed", passed());
             map.put("message", message());
+            map.put("artifact", artifactMap());
             map.put("jsonSha256Matches", jsonSha256Matches);
             map.put("markdownSha256Matches", markdownSha256Matches);
             map.put("junitXmlSha256Matches", junitXmlSha256Matches);
@@ -177,6 +196,14 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
             map.put("failures", failures);
             map.put("inspection", inspection.toMap());
             return Map.copyOf(map);
+        }
+
+        public TrainingReportArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
         }
     }
 
@@ -290,26 +317,22 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
             String expectedMarkdownSha256,
             String expectedJunitXmlSha256) {
         Objects.requireNonNull(inspection, "inspection must not be null");
-        String normalizedJsonSha = normalizeChecksum(expectedJsonSha256);
-        String normalizedMarkdownSha = normalizeChecksum(expectedMarkdownSha256);
-        String normalizedJunitXmlSha = normalizeChecksum(expectedJunitXmlSha256);
-        boolean jsonMatches = normalizedJsonSha == null || normalizedJsonSha.equalsIgnoreCase(inspection.jsonSha256());
-        boolean markdownMatches = normalizedMarkdownSha == null
-                || normalizedMarkdownSha.equalsIgnoreCase(inspection.markdownSha256());
-        boolean junitXmlMatches = normalizedJunitXmlSha == null
-                || normalizedJunitXmlSha.equalsIgnoreCase(inspection.junitXmlSha256());
+        TrainingReportArtifactDescriptor.ChecksumMatch checksums = inspection.artifact().checksumMatch(
+                expectedJsonSha256,
+                expectedMarkdownSha256,
+                expectedJunitXmlSha256);
         TrainingReportQualityProfileCatalogValidator.Result result = inspection.parsedResult();
         boolean markdownMatchesJson = result.markdown().equals(inspection.markdown());
         boolean junitXmlMatchesJson = result.junitXml().equals(inspection.junitXml());
 
         List<String> failures = new ArrayList<>();
-        if (!jsonMatches) {
+        if (!checksums.jsonMatches()) {
             failures.add("JSON checksum mismatch for " + inspection.jsonFile());
         }
-        if (!markdownMatches) {
+        if (!checksums.markdownMatches()) {
             failures.add("Markdown checksum mismatch for " + inspection.markdownFile());
         }
-        if (!junitXmlMatches) {
+        if (!checksums.junitXmlMatches()) {
             failures.add("JUnit XML checksum mismatch for " + inspection.junitXmlFile());
         }
         if (!markdownMatchesJson) {
@@ -320,12 +343,12 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
         }
         return new ArtifactVerification(
                 inspection,
-                normalizedJsonSha,
-                normalizedMarkdownSha,
-                normalizedJunitXmlSha,
-                jsonMatches,
-                markdownMatches,
-                junitXmlMatches,
+                checksums.expectedJsonSha256(),
+                checksums.expectedMarkdownSha256(),
+                checksums.expectedJunitXmlSha256(),
+                checksums.jsonMatches(),
+                checksums.markdownMatches(),
+                checksums.junitXmlMatches(),
                 markdownMatchesJson,
                 junitXmlMatchesJson,
                 failures);
@@ -392,4 +415,5 @@ public final class TrainingReportQualityProfileCatalogValidationArtifacts {
         }
         return checksum.trim().toLowerCase(java.util.Locale.ROOT);
     }
+
 }

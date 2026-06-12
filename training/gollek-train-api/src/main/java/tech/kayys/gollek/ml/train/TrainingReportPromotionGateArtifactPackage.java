@@ -580,9 +580,24 @@ public final class TrainingReportPromotionGateArtifactPackage {
             verification().requirePassed();
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    json.reportFile(),
+                    markdown.markdownFile(),
+                    junitXml.junitXmlFile(),
+                    json.reportSha256(),
+                    markdown.markdownSha256(),
+                    junitXml.junitXmlSha256());
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("passed", passed());
             map.put("json", json.toMap());
             map.put("markdown", markdown.toMap());
@@ -618,9 +633,24 @@ public final class TrainingReportPromotionGateArtifactPackage {
             }
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return TrainingReportArtifactDescriptor.withoutManifest(
+                    directory,
+                    json.reportFile(),
+                    markdownFile,
+                    junitXmlFile,
+                    json.reportSha256(),
+                    markdownSha256,
+                    junitXmlSha256);
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("directory", directory.toString());
+            Map<String, Object> map = new LinkedHashMap<>(artifactMap());
+            map.put("artifact", artifactMap());
             map.put("json", json.toMap());
             map.put("markdownFile", markdownFile.toString());
             map.put("markdownSha256", markdownSha256);
@@ -666,9 +696,18 @@ public final class TrainingReportPromotionGateArtifactPackage {
                     + String.join("; ", failures) + ".";
         }
 
+        public TrainingReportArtifactDescriptor artifact() {
+            return inspection.artifact();
+        }
+
+        public Map<String, Object> artifactMap() {
+            return artifact().toMap();
+        }
+
         public Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("passed", passed());
+            map.put("artifact", artifactMap());
             map.put("jsonReportVerified", jsonReportVerified);
             map.put("markdownMatchesRendered", markdownMatchesRendered);
             map.put("junitXmlMatchesRendered", junitXmlMatchesRendered);
@@ -807,9 +846,8 @@ public final class TrainingReportPromotionGateArtifactPackage {
             List<String> failures) {
         public VerificationReportBundleReceiptVerification {
             inspection = Objects.requireNonNull(inspection, "inspection must not be null");
-            expectedReceiptSha256 = expectedReceiptSha256 == null || expectedReceiptSha256.isBlank()
-                    ? null
-                    : expectedReceiptSha256.trim();
+            expectedReceiptSha256 =
+                    TrainingReportSha256.normalizeOptional(expectedReceiptSha256, "expectedReceiptSha256");
             failures = failures == null ? List.of() : List.copyOf(failures);
         }
 
@@ -1072,9 +1110,8 @@ public final class TrainingReportPromotionGateArtifactPackage {
             List<String> failures) {
         public VerificationIndexReceiptVerification {
             inspection = Objects.requireNonNull(inspection, "inspection must not be null");
-            expectedReceiptSha256 = expectedReceiptSha256 == null || expectedReceiptSha256.isBlank()
-                    ? null
-                    : expectedReceiptSha256.trim();
+            expectedReceiptSha256 =
+                    TrainingReportSha256.normalizeOptional(expectedReceiptSha256, "expectedReceiptSha256");
             failures = failures == null ? List.of() : List.copyOf(failures);
         }
 
@@ -1515,9 +1552,8 @@ public final class TrainingReportPromotionGateArtifactPackage {
             List<String> failures) {
         public VerificationEvidenceReceiptVerification {
             inspection = Objects.requireNonNull(inspection, "inspection must not be null");
-            expectedReceiptSha256 = expectedReceiptSha256 == null || expectedReceiptSha256.isBlank()
-                    ? null
-                    : expectedReceiptSha256.trim();
+            expectedReceiptSha256 =
+                    TrainingReportSha256.normalizeOptional(expectedReceiptSha256, "expectedReceiptSha256");
             failures = failures == null ? List.of() : List.copyOf(failures);
         }
 

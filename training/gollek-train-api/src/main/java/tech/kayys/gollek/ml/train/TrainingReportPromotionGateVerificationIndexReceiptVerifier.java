@@ -46,9 +46,8 @@ final class TrainingReportPromotionGateVerificationIndexReceiptVerifier {
             String expectedReceiptSha256) throws IOException {
         TrainingReportPromotionGateArtifactPackage.VerificationIndexReceiptInspection inspection = read(receiptFile);
         List<String> failures = new ArrayList<>();
-        String normalizedExpectedSha256 = expectedReceiptSha256 == null || expectedReceiptSha256.isBlank()
-                ? null
-                : expectedReceiptSha256.trim();
+        String normalizedExpectedSha256 =
+                TrainingReportSha256.normalizeOptional(expectedReceiptSha256, "expectedReceiptSha256");
         boolean receiptSha256Matches = normalizedExpectedSha256 == null
                 || normalizedExpectedSha256.equalsIgnoreCase(inspection.receiptSha256());
         if (!receiptSha256Matches) {

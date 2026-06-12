@@ -56,12 +56,11 @@ final class TrainingReportPromotionGateVerificationReportBundleVerifier {
             markdownMatchesRendered = verifyMarkdownReport(inspection, packageVerification, failures);
             junitXmlMatchesRendered = verifyJunitXmlReport(inspection, packageVerification, failures);
         }
-        String normalizedExpectedSha256 = expectedJsonReportSha256 == null || expectedJsonReportSha256.isBlank()
-                ? null
-                : expectedJsonReportSha256.trim();
+        TrainingReportArtifactDescriptor.ChecksumMatch checksums =
+                inspection.artifact().checksumMatch(expectedJsonReportSha256, null, null);
         return new TrainingReportPromotionGateArtifactPackage.VerificationReportBundleVerification(
                 inspection,
-                normalizedExpectedSha256,
+                checksums.expectedJsonSha256(),
                 jsonVerification.passed(),
                 markdownMatchesRendered,
                 junitXmlMatchesRendered,
