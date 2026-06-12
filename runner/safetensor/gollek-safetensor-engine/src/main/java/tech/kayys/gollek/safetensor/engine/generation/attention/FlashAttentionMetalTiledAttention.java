@@ -12,6 +12,7 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -40,7 +41,8 @@ final class FlashAttentionMetalTiledAttention {
 
     AccelTensor compute(AccelTensor q, KVCacheManager.KVCacheSession kvSession, int kvLayerIdx,
             int startPos, int numHeads, int numKVHeads, int headDim, float scale, boolean causal, float softCap,
-            ModelConfig config, FlashAttentionModelPolicy modelPolicy, int layerIdx) {
+            ModelConfig config, FlashAttentionModelPolicy modelPolicy, int layerIdx,
+            MemorySegment attentionContextBuffer) {
         BlockManager blockManager = kvSession.blockManager();
         long batch = q.size(0);
         long seqLen = q.size(1);
@@ -55,7 +57,7 @@ final class FlashAttentionMetalTiledAttention {
         if (preferPagedMetalFirst && !kvSession.isQuantized()) {
             AccelTensor pagedOut = pagedAttention.tryCompute(q, kvSession, blockManager, blocks, kvLayerIdx,
                     startPos, numHeads, numKVHeads, headDim, scale, causal, softCap, config, layerIdx, totalTokens,
-                    batch, seqLen, slidingLayer, null, modelPolicy);
+                    batch, seqLen, slidingLayer, null, modelPolicy, attentionContextBuffer);
             if (pagedOut != null) {
                 DirectInferenceProfiler.recordAttentionPath(
                         routing.pagedAttentionPathName(slidingLayer, seqLen, totalTokens, true));
@@ -67,14 +69,14 @@ final class FlashAttentionMetalTiledAttention {
             if (!preferPagedMetalFirst && canUseFa4Path) {
                 AccelTensor fa4Out = fa4Gathered.tryCompute(q, kvSession, blockManager, kvLayerIdx, totalTokens,
                         numHeads, numKVHeads, headDim, scale, causal, softCap, batch, seqLen, arena,
-                        "fa4_gathered");
+                        "fa4_gathered", attentionContextBuffer);
                 if (fa4Out != null) {
                     return fa4Out;
                 }
             }
             AccelTensor pagedOut = pagedAttention.tryCompute(q, kvSession, blockManager, blocks, kvLayerIdx,
                     startPos, numHeads, numKVHeads, headDim, scale, causal, softCap, config, layerIdx, totalTokens,
-                    batch, seqLen, slidingLayer, arena, modelPolicy);
+                    batch, seqLen, slidingLayer, arena, modelPolicy, attentionContextBuffer);
             if (pagedOut != null) {
                 DirectInferenceProfiler.recordAttentionPath(
                         routing.pagedAttentionPathName(slidingLayer, seqLen, totalTokens, false));
@@ -83,14 +85,14 @@ final class FlashAttentionMetalTiledAttention {
             if (canUseFa4Path) {
                 AccelTensor fa4Out = fa4Gathered.tryCompute(q, kvSession, blockManager, kvLayerIdx, totalTokens,
                         numHeads, numKVHeads, headDim, scale, causal, softCap, batch, seqLen, arena,
-                        "fa4_gathered_after_paged");
+                        "fa4_gathered_after_paged", attentionContextBuffer);
                 if (fa4Out != null) {
                     return fa4Out;
                 }
             }
             DirectInferenceProfiler.recordAttentionPath("paged_java");
             return PagedAttentionVectorAPI.compute(q, null, kvSession, kvLayerIdx, kvLayerIdx, startPos, numHeads,
-                    numKVHeads, headDim, scale, causal, softCap, pagedAttentionOptions);
+                    numKVHeads, headDim, scale, causal, softCap, pagedAttentionOptions, attentionContextBuffer);
         }
     }
 

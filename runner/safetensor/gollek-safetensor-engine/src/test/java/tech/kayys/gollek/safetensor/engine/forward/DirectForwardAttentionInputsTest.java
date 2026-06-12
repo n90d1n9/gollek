@@ -81,8 +81,8 @@ class DirectForwardAttentionInputsTest {
         try {
             DirectForwardLayerStageContext ctx = new DirectForwardLayerStageContext(
                     null,
-                    null,
-                    null,
+                    workspace.getHiddenASeg(),
+                    workspace.getHiddenBSeg(),
                     config,
                     null,
                     7,
@@ -124,6 +124,7 @@ class DirectForwardAttentionInputsTest {
             assertSame(kNormW, input.kNormW);
             assertSame(postAttnNormW, input.postAttnNormW);
             assertSame(sharedKvStates, input.sharedKvStates);
+            assertSame(workspace.getHiddenBSeg(), input.attentionContextBuffer);
             assertSame(workspace.getNormedFfnSeg(), input.attentionOutputBuffer);
             assertTrue(input.isCausal);
         } finally {

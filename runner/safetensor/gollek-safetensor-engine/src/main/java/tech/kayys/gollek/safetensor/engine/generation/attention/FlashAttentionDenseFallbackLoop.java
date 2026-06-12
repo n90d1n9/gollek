@@ -17,11 +17,19 @@ final class FlashAttentionDenseFallbackLoop {
     static AccelTensor compute(AccelTensor q, KeyValueSource keyValueSource,
             ModelConfig config, int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
             float scale, boolean causal, float softCap) {
+        return compute(q, keyValueSource, config, layerIdx, startPos, numQHeads, numKVHeads, headDim,
+                scale, causal, softCap, null);
+    }
+
+    static AccelTensor compute(AccelTensor q, KeyValueSource keyValueSource,
+            ModelConfig config, int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
+            float scale, boolean causal, float softCap, MemorySegment attentionContextBuffer) {
         long batch = q.size(0);
         long seqLenQ = q.size(1);
         int slidingWindow = slidingWindow(config, layerIdx);
 
-        AccelTensor out = AccelTensor.zeros(q.shape());
+        AccelTensor out = FlashAttentionContextOutputBuffer.viewOrAllocate(attentionContextBuffer, q);
+        boolean success = false;
         MemorySegment qSeg = q.dataSegment();
         MemorySegment oSeg = out.dataSegment();
         long qStride0 = q.stride()[0];
@@ -31,21 +39,27 @@ final class FlashAttentionDenseFallbackLoop {
         long oStride1 = out.stride()[1];
         long oStride2 = out.stride()[2];
         int gqaGroup = numQHeads / Math.max(1, numKVHeads);
+        AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDim], headDim);
 
-        for (int b = 0; b < batch; b++) {
-            for (int h = 0; h < numQHeads; h++) {
-                int kvHeadIdx = h / gqaGroup;
-                AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDim], headDim);
-                for (int i = 0; i < seqLenQ; i++) {
-                    scanQueryPosition(qSeg, oSeg, keyValueSource, softmax,
-                            ((long) b * qStride0 + (long) i * qStride1 + (long) h * qStride2),
-                            ((long) b * oStride0 + (long) i * oStride1 + (long) h * oStride2),
-                            b, i, kvHeadIdx, startPos, slidingWindow, headDim, scale, causal, softCap);
+        try {
+            for (int b = 0; b < batch; b++) {
+                for (int h = 0; h < numQHeads; h++) {
+                    int kvHeadIdx = h / gqaGroup;
+                    for (int i = 0; i < seqLenQ; i++) {
+                        scanQueryPosition(qSeg, oSeg, keyValueSource, softmax,
+                                ((long) b * qStride0 + (long) i * qStride1 + (long) h * qStride2),
+                                ((long) b * oStride0 + (long) i * oStride1 + (long) h * oStride2),
+                                b, i, kvHeadIdx, startPos, slidingWindow, headDim, scale, causal, softCap);
+                    }
                 }
             }
+            success = true;
+            return out;
+        } finally {
+            if (!success && !out.isClosed()) {
+                out.close();
+            }
         }
-
-        return out;
     }
 
     private static void scanQueryPosition(MemorySegment qSeg, MemorySegment outSeg, KeyValueSource keyValueSource,

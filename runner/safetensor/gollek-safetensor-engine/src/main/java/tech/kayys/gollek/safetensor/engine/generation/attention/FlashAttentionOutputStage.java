@@ -8,6 +8,10 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
+/**
+ * Reshapes attention context and applies the final O projection, preserving
+ * reusable output workspaces through optional post-attention normalization.
+ */
 final class FlashAttentionOutputStage {
     private final FlashAttentionProjector projector;
     private final FlashAttentionNormalizer normalizer;
@@ -26,8 +30,11 @@ final class FlashAttentionOutputStage {
             return projected;
         }
 
-        AccelTensor normed = normalizer.rmsNorm(projected, in.postAttnNormW, config.rmsNormEps(), addOneRmsNorm);
-        projected.close();
+        AccelTensor normed = normalizer.rmsNormReusingInput(projected, in.postAttnNormW, config.rmsNormEps(),
+                addOneRmsNorm);
+        if (normed != projected) {
+            projected.close();
+        }
         return normed;
     }
 

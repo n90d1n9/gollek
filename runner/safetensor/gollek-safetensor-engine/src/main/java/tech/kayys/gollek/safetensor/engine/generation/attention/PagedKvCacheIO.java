@@ -12,6 +12,10 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import java.lang.foreign.MemorySegment;
 import java.util.List;
 
+/**
+ * Copies projected attention keys and values between dense tensors and the
+ * paged KV cache used by direct inference.
+ */
 final class PagedKvCacheIO {
     private PagedKvCacheIO() {
     }
@@ -63,7 +67,8 @@ final class PagedKvCacheIO {
         int blockSize = kvSession.tokensPerBlock();
         PagedKvCacheLayout layout = PagedKvCacheLayout.source(blockManager, numKVHeads, headDim, blockSize);
         BlockManager.KvStorageType storageType = blockManager.getStorageType();
-        for (int blk = 0; blk < blocks.size(); blk++) {
+        int usedBlocks = usedBlockCount(totalTokens, blockSize, blocks.size());
+        for (int blk = 0; blk < usedBlocks; blk++) {
             int phys = blocks.get(blk);
             int tokenStart = blk * blockSize;
             int tokenEnd = Math.min(totalTokens, tokenStart + blockSize);
@@ -87,4 +92,11 @@ final class PagedKvCacheIO {
         }
     }
 
+    private static int usedBlockCount(int totalTokens, int blockSize, int availableBlocks) {
+        if (totalTokens <= 0) {
+            return 0;
+        }
+        int requiredBlocks = (totalTokens + blockSize - 1) / blockSize;
+        return Math.min(requiredBlocks, availableBlocks);
+    }
 }

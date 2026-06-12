@@ -28,16 +28,15 @@ public class FlashAttentionVectorAPI {
         long headDim = q.size(3);
         long numKVHeads = k.size(1);
         long seqLenKV = k.size(2);
+        int headDimInt = Math.toIntExact(headDim);
         int groupSize = (int) (numQHeads / numKVHeads);
 
         AccelTensor out = AccelTensor.zeros(batch, numQHeads, seqLenQ, headDim);
+        AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDimInt], headDimInt);
 
         for (int b = 0; b < batch; b++) {
             for (int hq = 0; hq < numQHeads; hq++) {
                 int hkv = hq / groupSize;
-                int headDimInt = Math.toIntExact(headDim);
-                AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDimInt], headDimInt);
-                
                 for (int i = 0; i < seqLenQ; i++) {
                     computeHeadQuery(b, hq, hkv, i, q, k, v, out, scale, seqLenKV, headDimInt, causal,
                             softmax);

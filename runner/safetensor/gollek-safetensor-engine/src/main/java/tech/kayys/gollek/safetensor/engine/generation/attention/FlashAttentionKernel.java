@@ -38,6 +38,7 @@ public class FlashAttentionKernel {
         AccelTensor q = prepared.query();
         AccelTensor k = prepared.key();
         AccelTensor v = prepared.value();
+        AccelTensor sharedOwner = prepared.sharedOwner();
         FlashAttentionKvCacheStage.CachedTensors cached = null;
         boolean queryReleased = false;
         boolean keyValueReleased = false;
@@ -54,7 +55,8 @@ public class FlashAttentionKernel {
             v = cached.value();
 
             // Dispatch after cache update because paged paths read key/value tensors from KV cache.
-            AccelTensor attnOut = stages.dispatch().compute(plan.dispatchRequest(q, k, v, kvSession, in.isCausal));
+            AccelTensor attnOut = stages.dispatch().compute(
+                    plan.dispatchRequest(q, k, v, kvSession, in.isCausal, in.attentionContextBuffer));
             q.close();
             queryReleased = true;
             kvCache.releaseKeyValueViews(plan.kvState(), cached);
@@ -71,6 +73,9 @@ public class FlashAttentionKernel {
                 } else {
                     kvCache.releasePreparedKeyValueTensors(plan.kvState(), k, v);
                 }
+            }
+            if (sharedOwner != null && !sharedOwner.isClosed()) {
+                sharedOwner.close();
             }
         }
     }

@@ -45,7 +45,7 @@ final class FlashAttentionMetalDenseSharedAttention {
     AccelTensor compute(AccelTensor q, AccelTensor k, AccelTensor v,
             SharedKvState sharedKvState, ModelConfig config, FlashAttentionModelPolicy modelPolicy,
             int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
-            float scale, boolean causal, float softCap) {
+            float scale, boolean causal, float softCap, MemorySegment attentionContextBuffer) {
         if (!canUseMetal.getAsBoolean()) {
             return null;
         }
@@ -75,8 +75,9 @@ final class FlashAttentionMetalDenseSharedAttention {
         AccelTensor qContiguous = q.contiguous();
         AccelTensor kContiguous = null;
         AccelTensor vContiguous = null;
+        AccelTensor out = null;
         try (Arena arena = Arena.ofConfined()) {
-            AccelTensor out = AccelTensor.zeros(q.shape());
+            out = FlashAttentionContextOutputBuffer.viewOrAllocate(attentionContextBuffer, q);
 
             if (useFa4) {
                 MetalFlashAttentionBinding fa4 = metalFa4();
@@ -162,6 +163,9 @@ final class FlashAttentionMetalDenseSharedAttention {
                 out.close();
             }
         } catch (RuntimeException e) {
+            if (out != null && !out.isClosed()) {
+                out.close();
+            }
             return null;
         } finally {
             if (qContiguous != null && qContiguous != q && !qContiguous.isClosed()) {

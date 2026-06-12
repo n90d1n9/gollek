@@ -382,6 +382,15 @@ public final class AccelOps {
      * Linear layer with optional bias: out = input @ weight^T + bias
      */
     public static AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias) {
+        return linear(input, weight, bias, null);
+    }
+
+    /**
+     * Linear layer with optional bias, reusing {@code outputBuffer} when it is a
+     * compatible contiguous float tensor for the projected output shape.
+     */
+    public static AccelTensor linear(AccelTensor input, AccelTensor weight, AccelTensor bias,
+            AccelTensor outputBuffer) {
         input = input.contiguous();
 
         long[] inputShape = input.shape();
@@ -391,12 +400,12 @@ public final class AccelOps {
         if (useExperimentalSingleTokenHalfLinear()
                 && M == 1
                 && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
-            return linearSingleTokenHalfWeight(input, weight, bias);
+            return linearSingleTokenHalfWeight(input, weight, bias, outputBuffer);
         }
         if (useExperimentalSmallBatchHalfLinear()
                 && M > 1 && M <= SMALL_BATCH_HALF_LINEAR_MAX_M
                 && (weight.quantType() == AccelTensor.QuantType.BF16 || weight.quantType() == AccelTensor.QuantType.F16)) {
-            return linearSmallBatchHalfWeight(input, weight, bias, Math.toIntExact(M));
+            return linearSmallBatchHalfWeight(input, weight, bias, Math.toIntExact(M), outputBuffer);
         }
 
         // Just-in-time dequantization if weight is quantized
@@ -404,7 +413,7 @@ public final class AccelOps {
             boolean cacheDequantized = weight.shouldCacheDequantized();
             AccelTensor dequantized = cacheDequantized ? weight.dequantize() : weight.dequantizeTransient();
             try {
-                return linear(input, dequantized, bias);
+                return linear(input, dequantized, bias, outputBuffer);
             } finally {
                 if (!cacheDequantized && dequantized != weight && !dequantized.isClosed()) {
                     dequantized.close();
@@ -420,10 +429,13 @@ public final class AccelOps {
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = N;
 
-        AccelTensor out = AccelTensor.zeros(outputShape);
+        AccelTensor out = reusableFloatOutput(outputBuffer, outputShape);
+        if (out == null) {
+            out = AccelTensor.zeros(outputShape);
+        }
         MemorySegment inputSeg = input.dataSegment();
         MemorySegment weightSeg = weight.dataSegment();
-        MemorySegment outSeg = out.dataSegment();
+        MemorySegment outSeg = out.dataPtr();
 
         try {
             if (useExperimentalSingleTokenSgemv() && M == 1) {
@@ -449,6 +461,25 @@ public final class AccelOps {
             throw new RuntimeException("Linear/sgemm failed", t);
         }
         return out;
+    }
+
+    private static AccelTensor reusableFloatOutput(AccelTensor outputBuffer, long[] outputShape) {
+        if (outputBuffer == null || outputBuffer.isClosed()
+                || outputBuffer.quantType() != AccelTensor.QuantType.F32
+                || !outputBuffer.isContiguous()
+                || !Arrays.equals(outputBuffer.shape(), outputShape)) {
+            return null;
+        }
+        long requiredOutputBytes = Math.multiplyExact(numElements(outputShape), (long) Float.BYTES);
+        return outputBuffer.dataPtr().byteSize() >= requiredOutputBytes ? outputBuffer : null;
+    }
+
+    private static long numElements(long[] shape) {
+        long elements = 1L;
+        for (long dim : shape) {
+            elements = Math.multiplyExact(elements, dim);
+        }
+        return elements;
     }
 
     /**
@@ -478,22 +509,15 @@ public final class AccelOps {
         int N = Math.toIntExact(gateWeight.shape()[0]);
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = N;
-        long requiredOutputBytes = 1L;
-        for (long dim : outputShape) {
-            requiredOutputBytes *= dim;
+        AccelTensor out = reusableFloatOutput(outputBuffer, outputShape);
+        if (out == null) {
+            out = AccelTensor.zeros(outputShape);
         }
-        requiredOutputBytes *= Float.BYTES;
-
-        if (outputBuffer != null && (!Arrays.equals(outputBuffer.shape(), outputShape)
-                || outputBuffer.dataSegment().byteSize() < requiredOutputBytes)) {
-            outputBuffer = null;
-        }
-        AccelTensor out = outputBuffer != null ? outputBuffer : AccelTensor.zeros(outputShape);
 
         MemorySegment inputSeg = input.dataSegment();
         MemorySegment gateWeightSeg = gateWeight.dataSegment();
         MemorySegment upWeightSeg = upWeight.dataSegment();
-        MemorySegment outSeg = out.dataSegment();
+        MemorySegment outSeg = out.dataPtr();
 
         boolean bf16 = gateWeight.quantType() == AccelTensor.QuantType.BF16;
         AccelTensor contiguousGateBias = null;
@@ -679,7 +703,8 @@ public final class AccelOps {
         return out;
     }
 
-    private static AccelTensor linearSingleTokenHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias) {
+    private static AccelTensor linearSingleTokenHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias,
+            AccelTensor outputBuffer) {
         weight = weight.contiguous();
 
         long[] inputShape = input.shape();
@@ -689,11 +714,14 @@ public final class AccelOps {
 
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = N;
-        AccelTensor out = AccelTensor.zeros(outputShape);
+        AccelTensor out = reusableFloatOutput(outputBuffer, outputShape);
+        if (out == null) {
+            out = AccelTensor.zeros(outputShape);
+        }
 
         MemorySegment inputSeg = input.dataSegment();
         MemorySegment weightSeg = weight.dataSegment();
-        MemorySegment outSeg = out.dataSegment();
+        MemorySegment outSeg = out.dataPtr();
         boolean bf16 = weight.quantType() == AccelTensor.QuantType.BF16;
         AccelTensor contiguousBias = null;
         MemorySegment biasSeg = null;
@@ -749,7 +777,8 @@ public final class AccelOps {
         return out;
     }
 
-    private static AccelTensor linearSmallBatchHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias, int rows) {
+    private static AccelTensor linearSmallBatchHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias,
+            int rows, AccelTensor outputBuffer) {
         weight = weight.contiguous();
 
         long[] inputShape = input.shape();
@@ -758,11 +787,14 @@ public final class AccelOps {
 
         long[] outputShape = inputShape.clone();
         outputShape[outputShape.length - 1] = N;
-        AccelTensor out = AccelTensor.zeros(outputShape);
+        AccelTensor out = reusableFloatOutput(outputBuffer, outputShape);
+        if (out == null) {
+            out = AccelTensor.zeros(outputShape);
+        }
 
         MemorySegment inputSeg = input.dataSegment();
         MemorySegment weightSeg = weight.dataSegment();
-        MemorySegment outSeg = out.dataSegment();
+        MemorySegment outSeg = out.dataPtr();
         boolean bf16 = weight.quantType() == AccelTensor.QuantType.BF16;
         AccelTensor contiguousBias = null;
         MemorySegment biasSeg = null;
@@ -1681,7 +1713,15 @@ public final class AccelOps {
      * RMS Normalization using Optimized Vector API.
      */
     public static AccelTensor rmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne) {
-        return addRmsNorm(null, x, weight, eps, addOne);
+        return rmsNorm(x, weight, eps, addOne, null);
+    }
+
+    /**
+     * RMS Normalization using a compatible reusable output tensor when provided.
+     */
+    public static AccelTensor rmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
+            AccelTensor outputBuffer) {
+        return addRmsNorm(null, x, weight, eps, addOne, outputBuffer);
     }
 
     /**
@@ -1690,6 +1730,15 @@ public final class AccelOps {
      * If residual is null, it's a standard rmsNorm.
      */
     public static AccelTensor addRmsNorm(AccelTensor residual, AccelTensor x, AccelTensor weight, double eps, boolean addOne) {
+        return addRmsNorm(residual, x, weight, eps, addOne, null);
+    }
+
+    /**
+     * Fused Residual Add + RMS Normalization using a compatible reusable output
+     * tensor when provided.
+     */
+    public static AccelTensor addRmsNorm(AccelTensor residual, AccelTensor x, AccelTensor weight, double eps,
+            boolean addOne, AccelTensor outputBuffer) {
         if (weight == null) return x.contiguous();
         x = x.contiguous();
         if (residual != null) residual = residual.contiguous();
@@ -1702,11 +1751,14 @@ public final class AccelOps {
         int hidden = (int) shape[shape.length - 1];
         int outer = (int) (x.numel() / hidden);
 
-        AccelTensor out = AccelTensor.zeros(shape);
+        AccelTensor out = reusableFloatOutput(outputBuffer, shape);
+        if (out == null) {
+            out = AccelTensor.zeros(shape);
+        }
         MemorySegment xSeg = x.dataSegment();
         MemorySegment rSeg = residual != null ? residual.dataSegment() : null;
         MemorySegment wSeg = weightView.dataSegment();
-        MemorySegment oSeg = out.dataSegment();
+        MemorySegment oSeg = out.dataPtr();
 
         try {
             for (int row = 0; row < outer; row++) {
@@ -1744,6 +1796,14 @@ public final class AccelOps {
      * x: [..., numHeads, headDim], weight: [numHeads * headDim]
      */
     public static AccelTensor perHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne) {
+        return perHeadRmsNorm(x, weight, eps, addOne, null);
+    }
+
+    /**
+     * Per-head RMS Normalization, reusing {@code outputBuffer} when compatible.
+     */
+    public static AccelTensor perHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
+            AccelTensor outputBuffer) {
         if (weight == null) return x.contiguous();
         x = x.contiguous();
         AccelTensor weightView = weight;
@@ -1755,10 +1815,13 @@ public final class AccelOps {
         int numHeads = (int) shape[shape.length - 2];
         int outer = (int) (x.numel() / (numHeads * headDim));
 
-        AccelTensor out = AccelTensor.zeros(shape);
+        AccelTensor out = reusableFloatOutput(outputBuffer, shape);
+        if (out == null) {
+            out = AccelTensor.zeros(shape);
+        }
         MemorySegment xSeg = x.dataSegment();
         MemorySegment wSeg = weightView.dataSegment();
-        MemorySegment oSeg = out.dataSegment();
+        MemorySegment oSeg = out.dataPtr();
 
         try {
             for (int b = 0; b < outer; b++) {

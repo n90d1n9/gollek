@@ -7,8 +7,18 @@ import java.util.Map;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 
+/**
+ * Adds canonical tensor-name aliases for common text-decoder wrapper prefixes.
+ */
 final class WeightAliasExpander {
     private static final List<Alias> COMMON_TEXT_MODEL_ALIASES = List.of(
+            new Alias("text_model.lm_head.", "lm_head."),
+            new Alias("model.text_model.lm_head.", "lm_head."),
+            new Alias("language_model.lm_head.", "lm_head."),
+            new Alias("model.language_model.lm_head.", "lm_head."),
+            new Alias("text_model.model.lm_head.", "lm_head."),
+            new Alias("model.text_model.model.lm_head.", "lm_head."),
+            new Alias("language_model.model.lm_head.", "lm_head."),
             new Alias("text_model.", "model."),
             new Alias("model.text_model.", "model."),
             new Alias("language_model.model.", "model."),

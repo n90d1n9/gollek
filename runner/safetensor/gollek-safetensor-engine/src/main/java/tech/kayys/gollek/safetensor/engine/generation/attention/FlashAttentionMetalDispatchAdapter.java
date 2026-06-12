@@ -22,7 +22,7 @@ final class FlashAttentionMetalDispatchAdapter implements FlashAttentionMetalDis
                 request.query(), request.key(), request.value(), request.sharedKvState(), request.config(),
                 request.modelPolicy(), request.layerIdx(), request.startPos(), request.numQueryHeads(),
                 request.numKeyValueHeads(), request.headDim(), request.scale(), request.causal(),
-                request.attentionSoftCap());
+                request.attentionSoftCap(), request.attentionContextBuffer());
     }
 
     @Override
@@ -31,7 +31,7 @@ final class FlashAttentionMetalDispatchAdapter implements FlashAttentionMetalDis
                 request.query(), request.kvSession(), request.kvLayerIdx(), request.startPos(),
                 request.numQueryHeads(), request.numKeyValueHeads(), request.headDim(), request.scale(),
                 request.causal(), request.attentionSoftCap(), request.config(), request.modelPolicy(),
-                request.layerIdx());
+                request.layerIdx(), request.attentionContextBuffer());
     }
 
     @Override
@@ -39,6 +39,7 @@ final class FlashAttentionMetalDispatchAdapter implements FlashAttentionMetalDis
         return metalAttention.slidingDecodeAttention(
                 request.query(), request.kvSession(), request.layerIdx(), request.kvLayerIdx(),
                 request.startPos(), request.numQueryHeads(), request.numKeyValueHeads(), request.headDim(),
-                request.scale(), request.attentionSoftCap(), request.config(), request.modelPolicy());
+                request.scale(), request.attentionSoftCap(), request.config(), request.modelPolicy(),
+                request.attentionContextBuffer());
     }
 }

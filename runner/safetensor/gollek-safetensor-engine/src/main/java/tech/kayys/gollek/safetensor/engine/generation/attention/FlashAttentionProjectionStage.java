@@ -8,6 +8,10 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
+/**
+ * Builds the query, key, and value tensors consumed by attention dispatch,
+ * preserving reusable workspaces whenever projection and normalization allow it.
+ */
 final class FlashAttentionProjectionStage {
     private final FlashAttentionProjector projector;
     private final FlashAttentionNormalizer normalizer;
@@ -23,12 +27,17 @@ final class FlashAttentionProjectionStage {
             boolean alternativeAttention) {
         boolean packedQkv = headLayout.packedQkvProjection();
         FlashAttentionProjector.ProjectionBuffers qkvBuffers = projector.attentionProjectionBuffers(in,
-                !packedQkv && !sharedKv && !useDenseSharedKvState && !alternativeAttention);
+                !packedQkv && !sharedKv && !useDenseSharedKvState,
+                !alternativeAttention);
+        AccelTensor packedQkvBuffer = projector.packedQkvProjectionBuffer(in,
+                packedQkv && !sharedKv && !useDenseSharedKvState && !alternativeAttention,
+                headLayout);
 
         FlashAttentionProjector.LinearTriple qkvTriple = packedQkv && !sharedKv && !useDenseSharedKvState
                 && !alternativeAttention
-                ? projector.projectPackedQkv(in, config, modelPolicy, headLayout)
+                ? projector.projectPackedQkv(in, config, modelPolicy, headLayout, packedQkvBuffer)
                 : null;
+        AccelTensor sharedProjectionOwner = qkvTriple == null ? null : qkvTriple.sharedOwner();
         if (qkvTriple == null
                 && !packedQkv
                 && !sharedKv
@@ -41,64 +50,116 @@ final class FlashAttentionProjectionStage {
                     qkvBuffers == null ? null : qkvBuffers.k(),
                     qkvBuffers == null ? null : qkvBuffers.v());
         }
-        FlashAttentionProjector.LinearPair qkPair = qkvTriple == null && !packedQkv
-                && (!sharedKv && !useDenseSharedKvState)
-                ? projector.tryMetalHalfLinearPairMixed(
-                        in.x, in.qW, in.qB, in.kW, in.kB, "attn_qk_proj_pair", config,
-                        modelPolicy,
-                        qkvBuffers == null ? null : qkvBuffers.q(),
-                        qkvBuffers == null ? null : qkvBuffers.k())
-                : null;
+        AccelTensor q = null;
+        AccelTensor k = null;
+        AccelTensor v = null;
+        try {
+            FlashAttentionProjector.LinearPair qkPair = qkvTriple == null && !packedQkv
+                    && (!sharedKv && !useDenseSharedKvState)
+                    ? projector.tryMetalHalfLinearPairMixed(
+                            in.x, in.qW, in.qB, in.kW, in.kB, "attn_qk_proj_pair", config,
+                            modelPolicy,
+                            qkvBuffers == null ? null : qkvBuffers.q(),
+                            qkvBuffers == null ? null : qkvBuffers.k())
+                    : null;
 
-        AccelTensor q = qkvTriple != null ? qkvTriple.first()
-                : (qkPair != null ? qkPair.first() : projector.project(
-                        in.x, in.qW, in.qB, "attn_q_proj", config,
-                        modelPolicy,
-                        qkvBuffers == null ? null : qkvBuffers.q()));
-        AccelTensor k = useDenseSharedKvState
-                ? sharedKvState.key()
-                : (sharedKv ? null : (qkvTriple != null ? qkvTriple.second()
-                        : (qkPair != null ? qkPair.second() : projector.project(
-                                in.x, in.kW, in.kB, "attn_k_proj", config,
-                                modelPolicy,
-                                qkvBuffers == null ? null : qkvBuffers.k()))));
-        AccelTensor v = projectValue(
-                in,
-                config,
-                modelPolicy,
-                sharedKvState,
-                sharedKv,
-                useDenseSharedKvState,
-                alternativeAttention,
-                qkvTriple,
-                qkvBuffers,
-                k);
+            q = qkvTriple != null ? qkvTriple.first()
+                    : (qkPair != null ? qkPair.first() : projector.project(
+                            in.x, in.qW, in.qB, "attn_q_proj", config,
+                            modelPolicy,
+                            qkvBuffers == null ? null : qkvBuffers.q()));
+            k = useDenseSharedKvState
+                    ? sharedKvState.key()
+                    : (sharedKv ? null : (qkvTriple != null ? qkvTriple.second()
+                            : (qkPair != null ? qkPair.second() : projector.project(
+                                    in.x, in.kW, in.kB, "attn_k_proj", config,
+                                    modelPolicy,
+                                    qkvBuffers == null ? null : qkvBuffers.k()))));
+            v = projectValue(
+                    in,
+                    config,
+                    modelPolicy,
+                    sharedKvState,
+                    sharedKv,
+                    useDenseSharedKvState,
+                    alternativeAttention,
+                    qkvTriple,
+                    qkvBuffers,
+                    k);
 
-        q = reshapeQuery(q, in, headLayout, config);
-        if (!sharedKv) {
-            k = reshapeKey(k, in, headLayout, config);
-            v = reshapeValue(v, in, headLayout, config);
-        }
+            q = reshapeQuery(q, in, headLayout, config);
+            if (!sharedKv) {
+                k = reshapeKey(k, in, headLayout, config);
+                v = reshapeValue(v, in, headLayout, config);
+            }
 
-        boolean addOneRmsNorm = normalizationPolicy.addOneToRmsNormWeight();
-        if (normalizationPolicy.qkNormEnabled() && in.qNormW != null) {
-            AccelTensor qNormed = normalizer.perHeadRmsNorm(q, in.qNormW, config.rmsNormEps(), addOneRmsNorm,
-                    modelPolicy);
-            q.close();
-            q = qNormed;
+            boolean addOneRmsNorm = normalizationPolicy.addOneToRmsNormWeight();
+            boolean keySeparatedFromValue = false;
+            if (normalizationPolicy.qkNormEnabled() && in.qNormW != null) {
+                AccelTensor qNormed = normalizer.perHeadRmsNormReusingInput(q, in.qNormW, config.rmsNormEps(),
+                        addOneRmsNorm, modelPolicy);
+                if (qNormed != q) {
+                    q.close();
+                }
+                q = qNormed;
+            }
+            if (normalizationPolicy.qkNormEnabled() && !sharedKv && in.kNormW != null) {
+                AccelTensor kNormed = normalizeKey(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm, modelPolicy,
+                        alternativeAttention);
+                if (kNormed != k) {
+                    k.close();
+                    keySeparatedFromValue = true;
+                }
+                k = kNormed;
+            }
+            if (!sharedKv && normalizationPolicy.valueNormEnabled()) {
+                AccelTensor vNormed = normalizeValue(v, config.rmsNormEps(), modelPolicy,
+                        alternativeAttention && !keySeparatedFromValue);
+                if (vNormed != v) {
+                    v.close();
+                }
+                v = vNormed;
+            }
+            return new PreparedTensors(q, k, v, sharedProjectionOwner);
+        } catch (RuntimeException | Error e) {
+            releasePreparedOnFailure(sharedKvState, useDenseSharedKvState, q, k, v, sharedProjectionOwner);
+            throw e;
         }
-        if (normalizationPolicy.qkNormEnabled() && !sharedKv && in.kNormW != null) {
-            AccelTensor kNormed = normalizer.perHeadRmsNorm(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm,
-                    modelPolicy);
-            k.close();
-            k = kNormed;
+    }
+
+    private void releasePreparedOnFailure(SharedKvState sharedKvState, boolean useDenseSharedKvState,
+            AccelTensor q, AccelTensor k, AccelTensor v, AccelTensor sharedProjectionOwner) {
+        closeIfOpen(q);
+        if (useDenseSharedKvState && sharedKvState != null) {
+            sharedKvState.releaseView(k);
+            sharedKvState.releaseView(v);
+        } else {
+            closeIfOpen(k);
+            closeIfOpen(v);
         }
-        if (!sharedKv && normalizationPolicy.valueNormEnabled()) {
-            AccelTensor vNormed = normalizer.perHeadRmsNormNoWeight(v, config.rmsNormEps(), modelPolicy);
-            v.close();
-            v = vNormed;
+        closeIfOpen(sharedProjectionOwner);
+    }
+
+    private void closeIfOpen(AccelTensor tensor) {
+        if (tensor != null && !tensor.isClosed()) {
+            tensor.close();
         }
-        return new PreparedTensors(q, k, v);
+    }
+
+    private AccelTensor normalizeKey(AccelTensor k, AccelTensor weight, double eps, boolean addOne,
+            FlashAttentionModelPolicy modelPolicy, boolean alternativeAttention) {
+        if (alternativeAttention) {
+            return normalizer.perHeadRmsNorm(k, weight, eps, addOne, modelPolicy);
+        }
+        return normalizer.perHeadRmsNormReusingInput(k, weight, eps, addOne, modelPolicy);
+    }
+
+    private AccelTensor normalizeValue(AccelTensor v, double eps, FlashAttentionModelPolicy modelPolicy,
+            boolean aliasesKey) {
+        if (aliasesKey) {
+            return normalizer.perHeadRmsNormNoWeight(v, eps, modelPolicy);
+        }
+        return normalizer.perHeadRmsNormNoWeightReusingInput(v, eps, modelPolicy);
     }
 
     private AccelTensor projectValue(AttentionInput in, ModelConfig config, FlashAttentionModelPolicy modelPolicy,
@@ -112,7 +173,7 @@ final class FlashAttentionProjectionStage {
             return null;
         }
         if (alternativeAttention) {
-            return copyKeyAsValueProjection(keyProjection, in.layerIdx);
+            return viewKeyAsValueProjection(keyProjection, in.layerIdx);
         }
         if (qkvTriple != null) {
             return qkvTriple.third();
@@ -122,13 +183,13 @@ final class FlashAttentionProjectionStage {
                 qkvBuffers == null ? null : qkvBuffers.v());
     }
 
-    private AccelTensor copyKeyAsValueProjection(AccelTensor keyProjection, int layerIdx) {
+    private AccelTensor viewKeyAsValueProjection(AccelTensor keyProjection, int layerIdx) {
         if (keyProjection == null) {
             throw new IllegalArgumentException(
                     "Missing attention key projection at layer " + layerIdx
                             + " while deriving Gemma 4 alternative value projection.");
         }
-        return AccelTensor.copyOf(keyProjection.dataPtr(), keyProjection.shape());
+        return AccelTensor.view(keyProjection.dataPtr(), keyProjection.shape(), keyProjection);
     }
 
     private AccelTensor reshapeQuery(AccelTensor q, AttentionInput in, FlashAttentionHeadLayout headLayout,
@@ -158,6 +219,20 @@ final class FlashAttentionProjectionStage {
         return reshaped;
     }
 
-    record PreparedTensors(AccelTensor query, AccelTensor key, AccelTensor value) {
+    record PreparedTensors(AccelTensor query, AccelTensor key, AccelTensor value,
+            AccelTensor sharedOwner) implements AutoCloseable {
+        @Override
+        public void close() {
+            closeIfOpen(query);
+            closeIfOpen(key);
+            closeIfOpen(value);
+            closeIfOpen(sharedOwner);
+        }
+
+        private static void closeIfOpen(AccelTensor tensor) {
+            if (tensor != null && !tensor.isClosed()) {
+                tensor.close();
+            }
+        }
     }
 }

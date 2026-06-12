@@ -76,6 +76,7 @@ class FlashAttentionDispatchRouterTest {
                 1.0f,
                 true,
                 0.0f,
+                null,
                 useDenseSharedKvState);
     }
 

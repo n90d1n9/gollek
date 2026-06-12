@@ -32,7 +32,7 @@ final class FlashAttentionMetalPagedAttention {
             BlockManager blockManager, List<Integer> blocks, int kvLayerIdx, int startPos, int numHeads,
             int numKVHeads, int headDim, float scale, boolean causal, float softCap, ModelConfig config, int layerIdx,
             int totalTokens, long batch, long seqLen, boolean slidingLayer, Arena arena,
-            FlashAttentionModelPolicy modelPolicy) {
+            FlashAttentionModelPolicy modelPolicy, MemorySegment attentionContextBuffer) {
         MetalBinding binding = metalBinding();
         if (!routingPolicy().allowPagedMetalAttentionBridge(modelPolicy, (int) seqLen, totalTokens)
                 || binding == null
@@ -44,7 +44,7 @@ final class FlashAttentionMetalPagedAttention {
         if (kvSession.isQuantized() && arena == null) {
             return null;
         }
-        AccelTensor out = AccelTensor.zeros(q.shape());
+        AccelTensor out = FlashAttentionContextOutputBuffer.viewOrAllocate(attentionContextBuffer, q);
         try {
             int maxBlocks = blocks.size();
             int batchInt = Math.toIntExact(batch);

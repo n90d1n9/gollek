@@ -9,6 +9,8 @@ import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
+import java.lang.foreign.MemorySegment;
+
 record FlashAttentionPlan(ModelConfig config,
         FlashAttentionModelPolicy modelPolicy,
         int layerIdx,
@@ -86,10 +88,10 @@ record FlashAttentionPlan(ModelConfig config,
     }
 
     FlashAttentionDispatchRequest dispatchRequest(AccelTensor query, AccelTensor key, AccelTensor value,
-            KVCacheManager.KVCacheSession kvSession, boolean causal) {
+            KVCacheManager.KVCacheSession kvSession, boolean causal, MemorySegment attentionContextBuffer) {
         return new FlashAttentionDispatchRequest(
                 query, key, value, kvSession, sharedKvState(), config, modelPolicy, layerIdx, kvLayerIdx, startPos,
                 seqLen, numQueryHeads(), numKeyValueHeads(), headDim(), attentionScale, causal, attentionSoftCap,
-                useDenseSharedKvState());
+                attentionContextBuffer, useDenseSharedKvState());
     }
 }

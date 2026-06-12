@@ -42,6 +42,7 @@ final class DirectForwardAttentionInputs {
                 weights.keyNormWeight(),
                 weights.postAttnNormWeight(),
                 sharedKvStates,
+                ctx.hiddenOut(),
                 ctx.workspace().getNormedFfnSeg());
     }
 }

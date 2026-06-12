@@ -119,6 +119,7 @@ class FlashAttentionDispatchExecutorTest {
                 0.0f,
                 false,
                 0.0f,
+                null,
                 false);
     }
 

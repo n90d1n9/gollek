@@ -10,9 +10,12 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.BlockManager;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
-import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 
+/**
+ * CPU fallback attention implementation used when a native direct attention
+ * backend is unavailable or declines a shape.
+ */
 final class FlashAttentionJavaFallback {
     private FlashAttentionJavaFallback() {
     }
@@ -20,6 +23,13 @@ final class FlashAttentionJavaFallback {
     static AccelTensor denseSharedAttention(AccelTensor q, AccelTensor k, AccelTensor v,
             ModelConfig config, int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
             float scale, boolean causal, float softCap) {
+        return denseSharedAttention(q, k, v, config, layerIdx, startPos, numQHeads, numKVHeads, headDim,
+                scale, causal, softCap, null);
+    }
+
+    static AccelTensor denseSharedAttention(AccelTensor q, AccelTensor k, AccelTensor v,
+            ModelConfig config, int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
+            float scale, boolean causal, float softCap, MemorySegment attentionContextBuffer) {
         FlashAttentionDenseFallbackLoop.KeyValueSource source = new StridedKeyValueSource(
                 k.dataSegment(),
                 v.dataSegment(),
@@ -31,34 +41,42 @@ final class FlashAttentionJavaFallback {
                 v.stride()[1],
                 v.stride()[2]);
         return FlashAttentionDenseFallbackLoop.compute(
-                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap);
+                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
+                attentionContextBuffer);
     }
 
     static AccelTensor denseCachedAttention(AccelTensor q, KVCacheManager.KVCacheSession kvSession, int kvLayerIdx,
             int startPos, int numHeads, int numKVHeads, int headDim, float scale, boolean causal, float softCap,
             ModelConfig config, int layerIdx) {
+        return denseCachedAttention(q, kvSession, kvLayerIdx, startPos, numHeads, numKVHeads, headDim,
+                scale, causal, softCap, config, layerIdx, null);
+    }
+
+    static AccelTensor denseCachedAttention(AccelTensor q, KVCacheManager.KVCacheSession kvSession, int kvLayerIdx,
+            int startPos, int numHeads, int numKVHeads, int headDim, float scale, boolean causal, float softCap,
+            ModelConfig config, int layerIdx, MemorySegment attentionContextBuffer) {
         BlockManager blockManager = kvSession.blockManager();
         long seqLen = q.size(1);
         int totalTokens = startPos + (int) seqLen;
-        long gatherBytes = (long) totalTokens * numKVHeads * headDim * Float.BYTES;
+        long gatherElements = (long) totalTokens * numKVHeads * headDim;
 
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment kGathered = arena.allocate(gatherBytes, 64);
-            MemorySegment vGathered = arena.allocate(gatherBytes, 64);
-            PagedKvCacheIO.gather(blockManager, kvSession, kvLayerIdx, totalTokens, numKVHeads, headDim,
-                    kGathered, vGathered);
-            return denseCachedAttention(q, kGathered, vGathered, startPos, numHeads, numKVHeads, headDim, scale,
-                    causal, softCap, config, layerIdx);
-        }
+        FlashAttentionKvScratch.KvPools gatheredPools =
+                FlashAttentionKvScratch.projectionScratchPools(kvSession, gatherElements,
+                        "Dense cached attention gathered KV scratch");
+        PagedKvCacheIO.gather(blockManager, kvSession, kvLayerIdx, totalTokens, numKVHeads, headDim,
+                gatheredPools.key(), gatheredPools.value());
+        return denseCachedAttention(q, gatheredPools.key(), gatheredPools.value(), startPos, numHeads, numKVHeads,
+                headDim, scale, causal, softCap, config, layerIdx, attentionContextBuffer);
     }
 
     private static AccelTensor denseCachedAttention(AccelTensor q, MemorySegment kSeg, MemorySegment vSeg,
             int startPos, int numQHeads, int numKVHeads, int headDim, float scale, boolean causal, float softCap,
-            ModelConfig config, int layerIdx) {
+            ModelConfig config, int layerIdx, MemorySegment attentionContextBuffer) {
         FlashAttentionDenseFallbackLoop.KeyValueSource source = new GatheredKeyValueSource(
                 kSeg, vSeg, startPos + Math.toIntExact(q.size(1)), numKVHeads, headDim);
         return FlashAttentionDenseFallbackLoop.compute(
-                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap);
+                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
+                attentionContextBuffer);
     }
 
     private record StridedKeyValueSource(

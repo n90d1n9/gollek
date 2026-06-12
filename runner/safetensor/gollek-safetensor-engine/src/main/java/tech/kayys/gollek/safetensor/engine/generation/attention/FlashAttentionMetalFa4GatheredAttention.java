@@ -32,12 +32,13 @@ final class FlashAttentionMetalFa4GatheredAttention {
 
     AccelTensor tryCompute(AccelTensor q, KVCacheManager.KVCacheSession kvSession, BlockManager blockManager,
             int kvLayerIdx, int totalTokens, int numHeads, int numKVHeads, int headDim, float scale, boolean causal,
-            float softCap, long batch, long seqLen, Arena arena, String successPath) {
+            float softCap, long batch, long seqLen, Arena arena, String successPath,
+            MemorySegment attentionContextBuffer) {
         MetalFlashAttentionBinding fa4 = metalFa4();
         if (fa4 == null || !fa4.isNativeAvailable()) {
             return null;
         }
-        AccelTensor out = AccelTensor.zeros(q.shape());
+        AccelTensor out = FlashAttentionContextOutputBuffer.viewOrAllocate(attentionContextBuffer, q);
         boolean success = false;
         try {
             long gatherBytes = (long) totalTokens * numKVHeads * headDim * Float.BYTES;

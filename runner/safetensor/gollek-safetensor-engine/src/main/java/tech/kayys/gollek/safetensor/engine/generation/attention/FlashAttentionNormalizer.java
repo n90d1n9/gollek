@@ -18,6 +18,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
+/**
+ * Applies attention-local normalization, preferring Metal kernels when available
+ * while still exposing in-place CPU fallbacks for reusable projection buffers.
+ */
 final class FlashAttentionNormalizer {
     private static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
 
@@ -43,6 +47,14 @@ final class FlashAttentionNormalizer {
         return AccelOps.perHeadRmsNorm(x, weight, eps, addOne);
     }
 
+    AccelTensor perHeadRmsNormReusingInput(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
+            FlashAttentionModelPolicy modelPolicy) {
+        if (canReuseInputForPerHeadRmsNorm(x, weight)) {
+            return AccelOps.perHeadRmsNorm(x, weight, eps, addOne, x);
+        }
+        return perHeadRmsNorm(x, weight, eps, addOne, modelPolicy);
+    }
+
     AccelTensor perHeadRmsNormNoWeight(AccelTensor x, double eps, FlashAttentionModelPolicy modelPolicy) {
         AccelTensor normed = tryMetalPerHeadRmsNormNoWeight(x, eps, modelPolicy);
         if (normed != null) {
@@ -51,8 +63,23 @@ final class FlashAttentionNormalizer {
         return perHeadRmsNormNoWeight(x, eps);
     }
 
+    AccelTensor perHeadRmsNormNoWeightReusingInput(AccelTensor x, double eps,
+            FlashAttentionModelPolicy modelPolicy) {
+        if (canReuseInputForPerHeadRmsNorm(x, null)) {
+            return perHeadRmsNormNoWeight(x, eps, x);
+        }
+        return perHeadRmsNormNoWeight(x, eps, modelPolicy);
+    }
+
     AccelTensor rmsNorm(AccelTensor x, AccelTensor w, double eps, boolean addOne) {
         return AccelOps.rmsNorm(x, w, eps, addOne);
+    }
+
+    AccelTensor rmsNormReusingInput(AccelTensor x, AccelTensor w, double eps, boolean addOne) {
+        if (canReuseInputForRmsNorm(x, w)) {
+            return AccelOps.rmsNorm(x, w, eps, addOne, x);
+        }
+        return rmsNorm(x, w, eps, addOne);
     }
 
     private AccelTensor tryMetalPerHeadRmsNorm(AccelTensor x, AccelTensor weight, double eps, boolean addOne,
@@ -164,7 +191,24 @@ final class FlashAttentionNormalizer {
         return normalizerPolicy.shouldUseMetalPerHeadRmsNorm(modelPolicy);
     }
 
+    private static boolean canReuseInputForPerHeadRmsNorm(AccelTensor x, AccelTensor weight) {
+        return canReuseInputForRmsNorm(x, weight);
+    }
+
+    private static boolean canReuseInputForRmsNorm(AccelTensor x, AccelTensor weight) {
+        return x != null
+                && !x.isClosed()
+                && x.rank() >= 2
+                && (weight == null || !weight.isClosed())
+                && x.quantType() == AccelTensor.QuantType.F32
+                && x.isContiguous();
+    }
+
     private AccelTensor perHeadRmsNormNoWeight(AccelTensor x, double eps) {
+        return perHeadRmsNormNoWeight(x, eps, (AccelTensor) null);
+    }
+
+    private AccelTensor perHeadRmsNormNoWeight(AccelTensor x, double eps, AccelTensor outputBuffer) {
         AccelTensor contiguousInput = x.contiguous();
         try {
             long[] shape = contiguousInput.shape();
@@ -172,9 +216,12 @@ final class FlashAttentionNormalizer {
             int numHeads = (int) shape[shape.length - 2];
             int outer = (int) (contiguousInput.numel() / (numHeads * headDim));
 
-            AccelTensor out = AccelTensor.zeros(shape);
+            AccelTensor out = reusableFloatOutput(outputBuffer, shape);
+            if (out == null) {
+                out = AccelTensor.zeros(shape);
+            }
             MemorySegment xSeg = contiguousInput.dataSegment();
-            MemorySegment oSeg = out.dataSegment();
+            MemorySegment oSeg = out.dataPtr();
 
             for (int b = 0; b < outer; b++) {
                 for (int h = 0; h < numHeads; h++) {
@@ -213,5 +260,17 @@ final class FlashAttentionNormalizer {
                 contiguousInput.close();
             }
         }
+    }
+
+    private static AccelTensor reusableFloatOutput(AccelTensor outputBuffer, long[] shape) {
+        if (outputBuffer == null
+                || outputBuffer.isClosed()
+                || outputBuffer.quantType() != AccelTensor.QuantType.F32
+                || !outputBuffer.isContiguous()
+                || !outputBuffer.hasShape(shape)) {
+            return null;
+        }
+        long requiredBytes = Math.multiplyExact(outputBuffer.numel(), (long) Float.BYTES);
+        return outputBuffer.dataPtr().byteSize() >= requiredBytes ? outputBuffer : null;
     }
 }

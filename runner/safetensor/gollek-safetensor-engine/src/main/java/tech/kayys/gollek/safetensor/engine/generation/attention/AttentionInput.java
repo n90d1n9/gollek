@@ -26,6 +26,7 @@ public class AttentionInput {
     public final AccelTensor qNormW, kNormW;
     public final AccelTensor postAttnNormW;
     public final Map<Integer, SharedKvState> sharedKvStates;
+    public final MemorySegment attentionContextBuffer;
     public final MemorySegment attentionOutputBuffer;
 
     public AttentionInput(AccelTensor x, AccelTensor qW, AccelTensor kW, AccelTensor vW, AccelTensor oW,
@@ -44,6 +45,18 @@ public class AttentionInput {
             int layerIdx, int startPos, boolean isCausal,
             AccelTensor qNormW, AccelTensor kNormW, AccelTensor postAttnNormW,
             Map<Integer, SharedKvState> sharedKvStates, MemorySegment attentionOutputBuffer) {
+        this(x, qW, kW, vW, oW, qB, kB, vB, oB, arch, config, kvCache,
+                layerIdx, startPos, isCausal, qNormW, kNormW, postAttnNormW, sharedKvStates,
+                null, attentionOutputBuffer);
+    }
+
+    public AttentionInput(AccelTensor x, AccelTensor qW, AccelTensor kW, AccelTensor vW, AccelTensor oW,
+            AccelTensor qB, AccelTensor kB, AccelTensor vB, AccelTensor oB,
+            ModelArchitecture arch, ModelConfig config, KVCacheManager.KVCacheSession kvCache,
+            int layerIdx, int startPos, boolean isCausal,
+            AccelTensor qNormW, AccelTensor kNormW, AccelTensor postAttnNormW,
+            Map<Integer, SharedKvState> sharedKvStates, MemorySegment attentionContextBuffer,
+            MemorySegment attentionOutputBuffer) {
         this.x = x;
         this.qW = qW;
         this.kW = kW;
@@ -63,6 +76,7 @@ public class AttentionInput {
         this.kNormW = kNormW;
         this.postAttnNormW = postAttnNormW;
         this.sharedKvStates = sharedKvStates;
+        this.attentionContextBuffer = attentionContextBuffer;
         this.attentionOutputBuffer = attentionOutputBuffer;
     }
 }

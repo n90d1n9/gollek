@@ -26,7 +26,7 @@ final class FlashAttentionJavaDispatchAdapter implements FlashAttentionJavaDispa
         return FlashAttentionJavaFallback.denseSharedAttention(
                 request.query(), request.key(), request.value(), request.config(), request.layerIdx(),
                 request.startPos(), request.numQueryHeads(), request.numKeyValueHeads(), request.headDim(),
-                request.scale(), request.causal(), request.attentionSoftCap());
+                request.scale(), request.causal(), request.attentionSoftCap(), request.attentionContextBuffer());
     }
 
     @Override
@@ -35,7 +35,8 @@ final class FlashAttentionJavaDispatchAdapter implements FlashAttentionJavaDispa
         return FlashAttentionJavaFallback.denseCachedAttention(
                 request.query(), request.kvSession(), request.kvLayerIdx(), request.startPos(),
                 request.numQueryHeads(), request.numKeyValueHeads(), request.headDim(), request.scale(),
-                request.causal(), request.attentionSoftCap(), request.config(), request.layerIdx());
+                request.causal(), request.attentionSoftCap(), request.config(), request.layerIdx(),
+                request.attentionContextBuffer());
     }
 
     @Override
@@ -44,6 +45,7 @@ final class FlashAttentionJavaDispatchAdapter implements FlashAttentionJavaDispa
         return PagedAttentionVectorAPI.compute(
                 request.query(), request.config(), request.kvSession(), request.layerIdx(), request.kvLayerIdx(),
                 request.startPos(), request.numQueryHeads(), request.numKeyValueHeads(), request.headDim(),
-                request.scale(), request.causal(), request.attentionSoftCap(), pagedAttentionOptions);
+                request.scale(), request.causal(), request.attentionSoftCap(), pagedAttentionOptions,
+                request.attentionContextBuffer());
     }
 }

@@ -13,6 +13,10 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.List;
 
+/**
+ * Materializes paged KV cache layouts into temporary dense or packed buffers
+ * expected by fallback and Metal attention kernels.
+ */
 final class PagedKvCacheMaterializer {
     private PagedKvCacheMaterializer() {
     }
@@ -83,38 +87,53 @@ final class PagedKvCacheMaterializer {
     static void packRangeIntoTemporaryPagedPool(BlockManager blockManager, KVCacheManager.KVCacheSession kvSession,
             int kvLayerIdx, int tokenStart, int tokenEnd, int numKVHeads, int headDim, int blockSize,
             MemorySegment packedK, MemorySegment packedV) {
+        if (tokenEnd <= tokenStart) {
+            return;
+        }
+        int sourceBlockSize = kvSession.tokensPerBlock();
         PagedKvCacheLayout sourceLayout = PagedKvCacheLayout.source(blockManager, numKVHeads, headDim,
-                kvSession.tokensPerBlock());
+                sourceBlockSize);
         PagedKvCacheLayout packedLayout = PagedKvCacheLayout.packed(numKVHeads, headDim, blockSize);
         BlockManager.KvStorageType storageType = blockManager.getStorageType();
 
-        for (int tok = tokenStart; tok < tokenEnd; tok++) {
-            int srcBlockIdx = kvSession.getBlockForToken(kvLayerIdx, tok);
-            int srcTokInBlock = sourceLayout.tokenIndexInBlock(tok);
-            int localTok = tok - tokenStart;
-            int dstBlockIdx = localTok / blockSize;
-            int dstTokInBlock = localTok % blockSize;
-
+        for (int runStart = tokenStart; runStart < tokenEnd;) {
+            int srcBlockIdx = kvSession.getBlockForToken(kvLayerIdx, runStart);
+            int runEnd = Math.min(tokenEnd, nextBlockStart(runStart, sourceBlockSize));
             MemorySegment srcKBlock = blockManager.getKBlock(srcBlockIdx);
             MemorySegment srcVBlock = blockManager.getVBlock(srcBlockIdx);
             MemorySegment srcKScaleBlock = blockManager.getKScaleBlock(srcBlockIdx);
             MemorySegment srcVScaleBlock = blockManager.getVScaleBlock(srcBlockIdx);
-            for (int h = 0; h < numKVHeads; h++) {
-                long srcElement = sourceLayout.sourceElement(h, srcTokInBlock);
-                long scaleIndex = sourceLayout.scaleIndex(h, srcTokInBlock);
-                long dstElement = packedLayout.blockMajorElement(dstBlockIdx, h, dstTokInBlock);
-                if (storageType == BlockManager.KvStorageType.FP32) {
-                    long bytes = (long) headDim * Float.BYTES;
-                    MemorySegment.copy(srcKBlock, srcElement * Float.BYTES, packedK, dstElement * Float.BYTES, bytes);
-                    MemorySegment.copy(srcVBlock, srcElement * Float.BYTES, packedV, dstElement * Float.BYTES, bytes);
-                } else {
-                    PagedKvCacheQuantization.writeVectorAsFloat(storageType, srcKBlock, srcKScaleBlock, srcElement,
-                            scaleIndex, packedK, dstElement, headDim);
-                    PagedKvCacheQuantization.writeVectorAsFloat(storageType, srcVBlock, srcVScaleBlock, srcElement,
-                            scaleIndex, packedV, dstElement, headDim);
+
+            for (int tok = runStart; tok < runEnd; tok++) {
+                int srcTokInBlock = sourceLayout.tokenIndexInBlock(tok);
+                int localTok = tok - tokenStart;
+                int dstBlockIdx = localTok / blockSize;
+                int dstTokInBlock = localTok % blockSize;
+
+                for (int h = 0; h < numKVHeads; h++) {
+                    long srcElement = sourceLayout.sourceElement(h, srcTokInBlock);
+                    long scaleIndex = sourceLayout.scaleIndex(h, srcTokInBlock);
+                    long dstElement = packedLayout.blockMajorElement(dstBlockIdx, h, dstTokInBlock);
+                    if (storageType == BlockManager.KvStorageType.FP32) {
+                        long bytes = (long) headDim * Float.BYTES;
+                        MemorySegment.copy(srcKBlock, srcElement * Float.BYTES, packedK,
+                                dstElement * Float.BYTES, bytes);
+                        MemorySegment.copy(srcVBlock, srcElement * Float.BYTES, packedV,
+                                dstElement * Float.BYTES, bytes);
+                    } else {
+                        PagedKvCacheQuantization.writeVectorAsFloat(storageType, srcKBlock, srcKScaleBlock,
+                                srcElement, scaleIndex, packedK, dstElement, headDim);
+                        PagedKvCacheQuantization.writeVectorAsFloat(storageType, srcVBlock, srcVScaleBlock,
+                                srcElement, scaleIndex, packedV, dstElement, headDim);
+                    }
                 }
             }
+            runStart = runEnd;
         }
+    }
+
+    private static int nextBlockStart(int token, int blockSize) {
+        return ((token / blockSize) + 1) * blockSize;
     }
 
     record MaterializedKvPools(MemorySegment kPool, MemorySegment vPool) {

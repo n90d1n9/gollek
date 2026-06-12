@@ -6,14 +6,20 @@
 package tech.kayys.gollek.safetensor.engine.generation.attention;
 
 import org.junit.jupiter.api.Test;
+import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelAttentionTraitsPolicy;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies policy decisions and reusable-buffer safety for attention
+ * normalization routes.
+ */
 class FlashAttentionNormalizerPolicyTest {
     private static final String ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY =
             "gollek.safetensor.enable_metal_per_head_rms_norm";
@@ -70,6 +76,23 @@ class FlashAttentionNormalizerPolicyTest {
         } finally {
             restoreProperty(ENABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY, previousEnable);
             restoreProperty(DISABLE_METAL_PER_HEAD_RMS_NORM_PROPERTY, previousDisable);
+        }
+    }
+
+    @Test
+    void reusableInputNormalizersBypassMetalEvenWhenModelPrefersMetal() {
+        FlashAttentionNormalizer normalizer = new FlashAttentionNormalizer(() -> {
+            throw new AssertionError("Reusable in-place normalization must not request Metal binding");
+        }, new FlashAttentionNormalizerOptions(false, "true"));
+        FlashAttentionModelPolicy modelPolicy = preferMetalPerHeadRmsNormPolicy();
+
+        try (AccelTensor x = AccelTensor.fromFloatArray(new float[] {
+                1.0f, 2.0f, 3.0f, 4.0f
+        }, 1, 1, 4);
+                AccelTensor weight = AccelTensor.ones(4)) {
+            assertSame(x, normalizer.rmsNormReusingInput(x, weight, 1e-6, false));
+            assertSame(x, normalizer.perHeadRmsNormReusingInput(x, weight, 1e-6, false, modelPolicy));
+            assertSame(x, normalizer.perHeadRmsNormNoWeightReusingInput(x, 1e-6, modelPolicy));
         }
     }
 

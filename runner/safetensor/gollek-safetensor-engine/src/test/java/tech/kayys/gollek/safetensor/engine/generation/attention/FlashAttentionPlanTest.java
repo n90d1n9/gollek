@@ -53,7 +53,7 @@ class FlashAttentionPlanTest {
         AccelTensor q = AccelTensor.view(MemorySegment.NULL, new long[] { 1, 9, 24, 128 });
         AccelTensor k = AccelTensor.view(MemorySegment.NULL, new long[] { 1, 9, 8, 128 });
         AccelTensor v = AccelTensor.view(MemorySegment.NULL, new long[] { 1, 9, 8, 128 });
-        FlashAttentionDispatchRequest request = plan.dispatchRequest(q, k, v, null, true);
+        FlashAttentionDispatchRequest request = plan.dispatchRequest(q, k, v, null, true, null);
 
         assertSame(q, request.query());
         assertSame(k, request.key());

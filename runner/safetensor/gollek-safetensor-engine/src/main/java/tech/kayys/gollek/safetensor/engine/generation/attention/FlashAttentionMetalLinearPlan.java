@@ -7,6 +7,10 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 
+/**
+ * Describes flattened matrix dimensions for Metal attention linear kernels and
+ * validates reusable output buffers before backend writes.
+ */
 final class FlashAttentionMetalLinearPlan {
     private final long[] inputShape;
     private final long rows;
@@ -100,7 +104,10 @@ final class FlashAttentionMetalLinearPlan {
         long[] outputShape = outputShape(index);
         if (outputBuffer != null
                 && !outputBuffer.isClosed()
-                && outputBuffer.hasShape(outputShape)) {
+                && outputBuffer.quantType() == AccelTensor.QuantType.F32
+                && outputBuffer.isContiguous()
+                && outputBuffer.hasShape(outputShape)
+                && outputBuffer.dataPtr().byteSize() >= Math.multiplyExact(outputBuffer.numel(), (long) Float.BYTES)) {
             return outputBuffer;
         }
         return AccelTensor.zeros(outputShape);

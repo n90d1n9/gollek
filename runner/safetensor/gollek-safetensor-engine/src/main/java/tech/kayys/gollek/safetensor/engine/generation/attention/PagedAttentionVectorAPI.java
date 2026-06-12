@@ -50,6 +50,28 @@ public class PagedAttentionVectorAPI {
             boolean causal,
             float softCap,
             PagedAttentionVectorOptions options) {
+        return compute(q, config, kvSession, layerIdx, kvLayerIdx, startPos, numQHeads, numKVHeads, headDim,
+                scale, causal, softCap, options, null);
+    }
+
+    /**
+     * Compute attention using the Paged Attention algorithm.
+     */
+    static AccelTensor compute(
+            AccelTensor q,
+            ModelConfig config,
+            KVCacheManager.KVCacheSession kvSession,
+            int layerIdx,
+            int kvLayerIdx,
+            int startPos,
+            int numQHeads,
+            int numKVHeads,
+            int headDim,
+            float scale,
+            boolean causal,
+            float softCap,
+            PagedAttentionVectorOptions options,
+            MemorySegment attentionContextBuffer) {
 
         long batch = q.size(0);
         long seqLenQ = q.size(1);
@@ -63,34 +85,42 @@ public class PagedAttentionVectorAPI {
         int slidingWindow = slidingLayer ? config.slidingWindowSize() : Integer.MAX_VALUE;
         boolean debugProbe = options != null && options.debugAttentionProbe();
 
-        AccelTensor out = AccelTensor.zeros(q.shape());
-        AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDim], headDim);
-        PagedAttentionVectorContext context = PagedAttentionVectorContext.create(
-                q,
-                out,
-                blockTable,
-                blockManager,
-                layout,
-                storageType,
-                tokensPerBlock,
-                totalTokens,
-                numKVHeads,
-                headDim,
-                scale,
-                causal,
-                softCap,
-                slidingWindow,
-                debugProbe,
-                layerIdx);
+        AccelTensor out = FlashAttentionContextOutputBuffer.viewOrAllocate(attentionContextBuffer, q);
+        boolean success = false;
+        try {
+            AttentionOnlineSoftmax softmax = new AttentionOnlineSoftmax(new float[headDim], headDim);
+            PagedAttentionVectorContext context = PagedAttentionVectorContext.create(
+                    q,
+                    out,
+                    blockTable,
+                    blockManager,
+                    layout,
+                    storageType,
+                    tokensPerBlock,
+                    totalTokens,
+                    numKVHeads,
+                    headDim,
+                    scale,
+                    causal,
+                    softCap,
+                    slidingWindow,
+                    debugProbe,
+                    layerIdx);
 
-        for (int b = 0; b < batch; b++) {
-            for (int h = 0; h < numQHeads; h++) {
-                for (int i = 0; i < seqLenQ; i++) {
-                    computePagedHeadQuery(context, context.queryAt(b, h, i), softmax);
+            for (int b = 0; b < batch; b++) {
+                for (int h = 0; h < numQHeads; h++) {
+                    for (int i = 0; i < seqLenQ; i++) {
+                        computePagedHeadQuery(context, context.queryAt(b, h, i), softmax);
+                    }
                 }
             }
+            success = true;
+            return out;
+        } finally {
+            if (!success && !out.isClosed()) {
+                out.close();
+            }
         }
-        return out;
     }
 
     private static void computePagedHeadQuery(PagedAttentionVectorContext context, PagedAttentionVectorQuery query,

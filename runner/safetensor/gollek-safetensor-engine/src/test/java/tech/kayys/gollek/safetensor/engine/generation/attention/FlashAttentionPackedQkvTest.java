@@ -20,9 +20,15 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Verifies packed QKV attention layout detection, projection splitting, and
+ * workspace reuse behavior.
+ */
 class FlashAttentionPackedQkvTest {
 
     @Test
@@ -143,12 +149,119 @@ class FlashAttentionPackedQkvTest {
         FlashAttentionProjector.LinearTriple qkv = projector.projectPackedQkv(input, config,
                 FlashAttentionModelPolicy.resolve(input.arch, config), layout);
 
-        assertEquals(4, qkv.first().size(-1));
-        assertEquals(2, qkv.second().size(-1));
-        assertEquals(2, qkv.third().size(-1));
-        assertTrue(qkv.first().isContiguous());
-        assertTrue(qkv.second().isContiguous());
-        assertTrue(qkv.third().isContiguous());
+        try {
+            assertEquals(4, qkv.first().size(-1));
+            assertEquals(2, qkv.second().size(-1));
+            assertEquals(2, qkv.third().size(-1));
+            assertTrue(qkv.first().isContiguous());
+            assertTrue(qkv.second().isContiguous());
+            assertTrue(qkv.third().isContiguous());
+            assertNull(qkv.sharedOwner());
+        } finally {
+            qkv.first().close();
+            qkv.second().close();
+            qkv.third().close();
+            x.close();
+            packedQkvWeight.close();
+        }
+    }
+
+    @Test
+    void aliasesSingleTokenPackedQkvProjectionSlices() throws Exception {
+        ModelConfig config = new ObjectMapper().readValue("""
+                {
+                  "model_type": "phi3",
+                  "architectures": ["Phi3ForCausalLM"],
+                  "hidden_size": 4,
+                  "num_attention_heads": 2,
+                  "num_key_value_heads": 1
+                }
+                """, ModelConfig.class);
+        AccelTensor x = AccelTensor.zeros(1, 1, 4);
+        AccelTensor packedQkvWeight = AccelTensor.zeros(8, 4);
+        AttentionInput input = new AttentionInput(
+                x, packedQkvWeight, packedQkvWeight, packedQkvWeight, null,
+                null, null, null, null,
+                new PackedQkvArchitecture(), config, null, 0, 0, true,
+                null, null, null, null);
+
+        FlashAttentionHeadLayout layout = FlashAttentionHeadLayout.resolve(input, config, 0);
+        FlashAttentionProjector projector = new FlashAttentionProjector(null, () -> false);
+        FlashAttentionProjector.LinearTriple qkv = projector.projectPackedQkv(input, config,
+                FlashAttentionModelPolicy.resolve(input.arch, config), layout);
+
+        try {
+            assertNotNull(qkv.sharedOwner());
+            assertTrue(qkv.first().hasShape(new long[] { 1, 1, 4 }));
+            assertTrue(qkv.second().hasShape(new long[] { 1, 1, 2 }));
+            assertTrue(qkv.third().hasShape(new long[] { 1, 1, 2 }));
+            assertTrue(qkv.first().isContiguous());
+            assertTrue(qkv.second().isContiguous());
+            assertTrue(qkv.third().isContiguous());
+
+            long qAddress = qkv.first().dataPtr().address();
+            long kAddress = qkv.second().dataPtr().address();
+            long vAddress = qkv.third().dataPtr().address();
+            assertEquals(qAddress + qkv.first().numel() * Float.BYTES, kAddress);
+            assertEquals(kAddress + qkv.second().numel() * Float.BYTES, vAddress);
+        } finally {
+            qkv.first().close();
+            qkv.second().close();
+            qkv.third().close();
+            qkv.closeSharedOwner();
+            assertTrue(qkv.sharedOwner().isClosed());
+            x.close();
+            packedQkvWeight.close();
+        }
+    }
+
+    @Test
+    void reusesWorkspaceForSingleTokenPackedQkvProjection() throws Exception {
+        ModelConfig config = new ObjectMapper().readValue("""
+                {
+                  "model_type": "phi3",
+                  "architectures": ["Phi3ForCausalLM"],
+                  "hidden_size": 4,
+                  "intermediate_size": 16,
+                  "num_hidden_layers": 1,
+                  "num_attention_heads": 2,
+                  "num_key_value_heads": 1
+                }
+                """, ModelConfig.class);
+        KVCacheManager.KVCacheSession session = new KVCacheManager.KVCacheSession(16, new BlockManager());
+        session.allocate(config, GenerationConfig.defaults());
+        AccelTensor x = AccelTensor.zeros(1, 1, 4);
+        AccelTensor packedQkvWeight = AccelTensor.zeros(8, 4);
+        AttentionInput input = new AttentionInput(
+                x, packedQkvWeight, packedQkvWeight, packedQkvWeight, null,
+                null, null, null, null,
+                new PackedQkvArchitecture(), config, session, 0, 0, true,
+                null, null, null, null);
+
+        FlashAttentionHeadLayout layout = FlashAttentionHeadLayout.resolve(input, config, 0);
+        FlashAttentionProjector projector = new FlashAttentionProjector(null, () -> false);
+        AccelTensor buffer = projector.packedQkvProjectionBuffer(input, true, layout);
+        FlashAttentionProjector.LinearTriple qkv = projector.projectPackedQkv(input, config,
+                FlashAttentionModelPolicy.resolve(input.arch, config), layout, buffer);
+
+        try {
+            assertNotNull(buffer);
+            assertSame(buffer, qkv.sharedOwner());
+            assertTrue(buffer.hasShape(new long[] { 1, 1, 8 }));
+
+            MemorySegment scratch = session.getWorkspace().getCombinedSeg();
+            assertEquals(scratch.address(), buffer.dataPtr().address());
+            qkv.first().setFlat(0, 6.5f);
+            assertEquals(6.5f, scratch.get(ValueLayout.JAVA_FLOAT, 0), 0.0001f);
+        } finally {
+            qkv.first().close();
+            qkv.second().close();
+            qkv.third().close();
+            qkv.closeSharedOwner();
+            x.close();
+            packedQkvWeight.close();
+            session.close();
+        }
     }
 
     @Test
@@ -205,6 +318,64 @@ class FlashAttentionPackedQkvTest {
             qWeight.close();
             kWeight.close();
             vWeight.close();
+            session.close();
+        }
+    }
+
+    @Test
+    void providesReusableWorkspaceBuffersForAlternativeQueryKeyProjections() throws Exception {
+        ModelConfig config = new ObjectMapper().readValue("""
+                {
+                  "model_type": "gemma4_text",
+                  "architectures": ["Gemma4ForCausalLM"],
+                  "hidden_size": 4,
+                  "intermediate_size": 16,
+                  "num_hidden_layers": 2,
+                  "num_attention_heads": 2,
+                  "num_key_value_heads": 1,
+                  "num_global_key_value_heads": 1,
+                  "head_dim": 2,
+                  "global_head_dim": 4,
+                  "attention_k_eq_v": true,
+                  "layer_types": ["sliding_attention", "full_attention"]
+                }
+                """, ModelConfig.class);
+        KVCacheManager.KVCacheSession session = new KVCacheManager.KVCacheSession(16, new BlockManager());
+        session.allocate(config, GenerationConfig.defaults());
+        AccelTensor x = AccelTensor.zeros(1, 2, 4);
+        AccelTensor qWeight = AccelTensor.zeros(8, 4);
+        AccelTensor kWeight = AccelTensor.zeros(4, 4);
+        AttentionInput input = new AttentionInput(
+                x, qWeight, kWeight, null, null,
+                null, null, null, null,
+                new NonPackedArchitecture(), config, session, 1, 0, true,
+                null, null, null, null);
+
+        FlashAttentionProjector projector = new FlashAttentionProjector(null, () -> false);
+        FlashAttentionProjector.ProjectionBuffers buffers =
+                projector.attentionProjectionBuffers(input, true, false);
+
+        try {
+            assertNotNull(buffers);
+            assertTrue(buffers.q().hasShape(new long[] { 1, 2, 8 }));
+            assertTrue(buffers.k().hasShape(new long[] { 1, 2, 4 }));
+            assertNull(buffers.v());
+
+            long qBytes = buffers.q().numel() * Float.BYTES;
+            MemorySegment scratch = session.getWorkspace().getCombinedSeg();
+            buffers.q().dataPtr().set(ValueLayout.JAVA_FLOAT, 0, 1.25f);
+            buffers.k().dataPtr().set(ValueLayout.JAVA_FLOAT, 0, 2.5f);
+
+            assertEquals(1.25f, scratch.get(ValueLayout.JAVA_FLOAT, 0), 0.0001f);
+            assertEquals(2.5f, scratch.get(ValueLayout.JAVA_FLOAT, qBytes), 0.0001f);
+        } finally {
+            if (buffers != null) {
+                buffers.q().close();
+                buffers.k().close();
+            }
+            x.close();
+            qWeight.close();
+            kWeight.close();
             session.close();
         }
     }
