@@ -44,6 +44,26 @@ public final class ProviderRequest {
     @Nullable
     private final String traceId;
 
+    /**
+     * W3C Trace Context traceparent header value.
+     * Format: {@code 00-<trace-id>-<parent-id>-<trace-flags>}
+     * See https://www.w3.org/TR/trace-context/
+     */
+    @Nullable
+    private final String traceparent;
+
+    /**
+     * W3C Trace Context tracestate header value for vendor-specific trace data.
+     */
+    @Nullable
+    private final String tracestate;
+
+    /**
+     * Current span ID for linking child spans created inside providers.
+     */
+    @Nullable
+    private final String spanId;
+
     @Nullable
     private final String apiKey;
 
@@ -66,6 +86,9 @@ public final class ProviderRequest {
             @JsonProperty("userId") String userId,
             @JsonProperty("sessionId") String sessionId,
             @JsonProperty("traceId") String traceId,
+            @JsonProperty("traceparent") String traceparent,
+            @JsonProperty("tracestate") String tracestate,
+            @JsonProperty("spanId") String spanId,
             @JsonProperty("apiKey") String apiKey,
             @JsonProperty("metadata") Map<String, Object> metadata,
             @JsonProperty("preferredProvider") String preferredProvider) {
@@ -86,11 +109,29 @@ public final class ProviderRequest {
         this.userId = userId;
         this.sessionId = sessionId;
         this.traceId = traceId;
+        this.traceparent = traceparent;
+        this.tracestate = tracestate;
+        this.spanId = spanId;
         this.apiKey = apiKey;
         this.metadata = metadata != null
                 ? Collections.unmodifiableMap(new HashMap<>(metadata))
                 : Collections.emptyMap();
         this.preferredProvider = preferredProvider;
+    }
+
+    /**
+     * Returns a map of W3C Trace Context headers suitable for injection into
+     * outbound HTTP requests to LLM providers.
+     */
+    public Map<String, String> getTraceContextHeaders() {
+        Map<String, String> headers = new java.util.LinkedHashMap<>();
+        if (traceparent != null) {
+            headers.put("traceparent", traceparent);
+        }
+        if (tracestate != null && !tracestate.isBlank()) {
+            headers.put("tracestate", tracestate);
+        }
+        return Collections.unmodifiableMap(headers);
     }
 
     // Getters
@@ -136,6 +177,18 @@ public final class ProviderRequest {
 
     public Optional<String> getTraceId() {
         return Optional.ofNullable(traceId);
+    }
+
+    public Optional<String> getTraceparent() {
+        return Optional.ofNullable(traceparent);
+    }
+
+    public Optional<String> getTracestate() {
+        return Optional.ofNullable(tracestate);
+    }
+
+    public Optional<String> getSpanId() {
+        return Optional.ofNullable(spanId);
     }
 
     public Optional<String> getApiKey() {
@@ -206,6 +259,9 @@ public final class ProviderRequest {
         private String userId;
         private String sessionId;
         private String traceId;
+        private String traceparent;
+        private String tracestate;
+        private String spanId;
         private String apiKey;
         private Map<String, Object> metadata = new HashMap<>();
         private String preferredProvider;
@@ -305,6 +361,30 @@ public final class ProviderRequest {
             return this;
         }
 
+        /**
+         * Sets the W3C traceparent header (format: 00-traceId-parentId-flags).
+         */
+        public Builder traceparent(String traceparent) {
+            this.traceparent = traceparent;
+            return this;
+        }
+
+        /**
+         * Sets the W3C tracestate header for vendor-specific propagation data.
+         */
+        public Builder tracestate(String tracestate) {
+            this.tracestate = tracestate;
+            return this;
+        }
+
+        /**
+         * Sets the current span ID so providers can link child spans.
+         */
+        public Builder spanId(String spanId) {
+            this.spanId = spanId;
+            return this;
+        }
+
         public Builder apiKey(String apiKey) {
             this.apiKey = apiKey;
             return this;
@@ -331,7 +411,8 @@ public final class ProviderRequest {
             Objects.requireNonNull(model, "model is required");
             return new ProviderRequest(
                     requestId, model, messages, parameters, tools, toolChoice, streaming, timeout,
-                    userId, sessionId, traceId, apiKey, metadata, preferredProvider);
+                    userId, sessionId, traceId, traceparent, tracestate, spanId,
+                    apiKey, metadata, preferredProvider);
         }
     }
 

@@ -30,6 +30,12 @@ public interface ModelRouterService {
     List<String> getAvailableProviders(String modelId);
 
     /**
+     * Select a compatible draft model provider for speculative decoding alongside the target model provider.
+     * @return Array where index 0 is draft provider ID, index 1 is target provider ID.
+     */
+    String[] selectDraftAndTargetProviders(String modelId, String requestId);
+
+    /**
      * Get routing score for a provider for a specific model
      */
     double getProviderScore(String modelId, String providerId, String requestId);

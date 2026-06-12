@@ -78,6 +78,12 @@ bash "$ROOT_DIR/scripts/compare-safetensor-benchmark-summary.sh" \
   --summary-dir "$COMPARE_DIR" \
   --case metal-deterministic > "$TMP_DIR/compare.out"
 
+if [[ ! -f "$COMPARE_DIR/summary.md" || ! -f "$COMPARE_DIR/decision.json" ]]; then
+  echo "Expected safetensor benchmark comparison Markdown and decision JSON" >&2
+  find "$COMPARE_DIR" -maxdepth 1 -type f -print >&2 || true
+  exit 1
+fi
+
 if ! grep -qx $'case\tmetric\tbaseline\tcurrent\tdelta\tdeltaPercent\tdirection\ttrend\tbaselineFfnStrategy\tcurrentFfnStrategy\tbaselineRowPrefill\tcurrentRowPrefill\tgateStatus\tgateReason' "$COMPARE_DIR/comparison.tsv" \
     || ! grep -qx $'metal-deterministic\tttftMs\t100.000\t80.000\t-20.000\t-20.000\tlower\tbetter\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tnot-configured\t' "$COMPARE_DIR/comparison.tsv" \
     || ! grep -qx $'metal-deterministic\tffnMs\t60.000\t40.000\t-20.000\t-33.333\tlower\tbetter\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tnot-configured\t' "$COMPARE_DIR/comparison.tsv" \
@@ -107,6 +113,8 @@ if ! grep -qx $'status\tpass' "$COMPARE_DIR/summary.tsv" \
     || ! grep -qx $'baselineRowPrefill\tn/a/n/a' "$COMPARE_DIR/summary.tsv" \
     || ! grep -qx $'currentRowPrefill\t12/x4' "$COMPARE_DIR/summary.tsv" \
     || ! grep -Fqx "artifacts.comparison=$COMPARE_DIR/comparison.tsv" "$TMP_DIR/compare.out" \
+    || ! grep -Fqx "artifacts.markdown=$COMPARE_DIR/summary.md" "$TMP_DIR/compare.out" \
+    || ! grep -Fqx "artifacts.decision=$COMPARE_DIR/decision.json" "$TMP_DIR/compare.out" \
     || ! grep -Fqx 'recommendation=promote-current-with-watchlist' "$TMP_DIR/compare.out" \
     || ! grep -Fqx 'largestImprovement=prefillMs:37.500%' "$TMP_DIR/compare.out" \
     || ! grep -Fqx 'largestRegression=argmaxMs:20.000%' "$TMP_DIR/compare.out" \
@@ -115,6 +123,51 @@ if ! grep -qx $'status\tpass' "$COMPARE_DIR/summary.tsv" \
   echo "Expected safetensor benchmark comparison summary and report" >&2
   cat "$COMPARE_DIR/summary.tsv" >&2
   cat "$TMP_DIR/compare.out" >&2
+  exit 1
+fi
+
+if ! grep -Fqx '# Gollek Safetensor Benchmark Comparison' "$COMPARE_DIR/summary.md" \
+    || ! grep -Fqx '| Status | pass |' "$COMPARE_DIR/summary.md" \
+    || ! grep -Fqx '| Recommendation | promote-current-with-watchlist |' "$COMPARE_DIR/summary.md" \
+    || ! grep -Fqx '| FFN Strategy Transition | fused_geglu_prefill_over_row_prefill->row_prefill_matvec_active |' "$COMPARE_DIR/summary.md" \
+    || ! grep -Fqx '| `metal-deterministic` | `ffnMs` | 60.000 | 40.000 | -20.000 | -33.333 | `better` | `not-configured` | n/a |' "$COMPARE_DIR/summary.md" \
+    || ! grep -Fqx -- "- Decision JSON: \`$COMPARE_DIR/decision.json\`" "$COMPARE_DIR/summary.md"; then
+  echo "Expected safetensor benchmark comparison Markdown summary" >&2
+  cat "$COMPARE_DIR/summary.md" >&2
+  exit 1
+fi
+
+if ! jq -e \
+    --arg baseline "$BASELINE_DIR/summary.json" \
+    --arg current "$CURRENT_DIR/summary.json" \
+    --arg markdown "$COMPARE_DIR/summary.md" \
+    --arg decision "$COMPARE_DIR/decision.json" \
+    '
+      .schemaVersion == 1
+      and .inputs.baseline == $baseline
+      and .inputs.current == $current
+      and .inputs.requestedCase == "metal-deterministic"
+      and .gates.configured == false
+      and .gates.metrics == ["default-latency"]
+      and .summary.status == "pass"
+      and .summary.reason == null
+      and .summary.recommendation == "promote-current-with-watchlist"
+      and .summary.counts.comparedCases == 1
+      and .summary.counts.failedMetrics == 0
+      and .summary.largestImprovement.metric == "prefillMs"
+      and .summary.largestImprovement.percent == 37.5
+      and .summary.largestRegression.metric == "argmaxMs"
+      and .summary.ffnStrategyTransition.baseline == "fused_geglu_prefill_over_row_prefill"
+      and .summary.ffnStrategyTransition.current == "row_prefill_matvec_active"
+      and .summary.rowPrefillTransition.current == "12/x4"
+      and .policy.canPromote == true
+      and .policy.action == "promote-with-watchlist"
+      and any(.metrics[]; .metric == "ffnMs" and .deltaPercent == -33.333 and .gateStatus == "not-configured")
+      and .artifacts.markdown == $markdown
+      and .artifacts.decision == $decision
+    ' "$COMPARE_DIR/decision.json" >/dev/null; then
+  echo "Expected safetensor benchmark comparison decision JSON" >&2
+  cat "$COMPARE_DIR/decision.json" >&2
   exit 1
 fi
 
@@ -134,6 +187,7 @@ if ! grep -qx $'status\tpass' "$PASS_GATE_DIR/summary.tsv" \
     || ! grep -qx $'failedMetrics\t0' "$PASS_GATE_DIR/summary.tsv" \
     || ! grep -qx $'metal-deterministic\tttftMs\t100.000\t80.000\t-20.000\t-20.000\tlower\tbetter\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tpass\t' "$PASS_GATE_DIR/comparison.tsv" \
     || ! grep -qx $'metal-deterministic\tffnMs\t60.000\t40.000\t-20.000\t-33.333\tlower\tbetter\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tpass\t' "$PASS_GATE_DIR/comparison.tsv" \
+    || ! jq -e '.gates.configured == true and .gates.metrics == ["ttftMs", "ffnMs"] and .summary.counts.gatedMetrics == 2 and .policy.canPromote == true' "$PASS_GATE_DIR/decision.json" >/dev/null \
     || ! grep -Fqx 'status=pass' "$TMP_DIR/pass-gate.out" \
     || ! grep -Fqx 'recommendation=promote-current-with-watchlist' "$TMP_DIR/pass-gate.out" \
     || ! grep -Fqx 'gatedMetrics=2' "$TMP_DIR/pass-gate.out"; then
@@ -164,6 +218,8 @@ if ! grep -qx $'status\tfail' "$FAIL_GATE_DIR/summary.tsv" \
     || ! grep -qx $'gatedMetrics\t1' "$FAIL_GATE_DIR/summary.tsv" \
     || ! grep -qx $'failedMetrics\t1' "$FAIL_GATE_DIR/summary.tsv" \
     || ! grep -qx $'metal-deterministic\tdecodeMs\t50.000\t52.000\t2.000\t4.000\tlower\tworse\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tfail\tdeltaMs=2.000 exceeded 1' "$FAIL_GATE_DIR/comparison.tsv" \
+    || ! grep -Fqx '| `metal-deterministic` | `decodeMs` | 50.000 | 52.000 | 2.000 | 4.000 | `worse` | `fail` | deltaMs=2.000 exceeded 1 |' "$FAIL_GATE_DIR/summary.md" \
+    || ! jq -e '.summary.status == "fail" and .summary.reason == "metric-regression" and .policy.canPromote == false and .policy.action == "reject" and any(.metrics[]; .metric == "decodeMs" and .gateStatus == "fail" and .gateReason == "deltaMs=2.000 exceeded 1")' "$FAIL_GATE_DIR/decision.json" >/dev/null \
     || ! grep -Fqx 'status=fail' "$TMP_DIR/fail-gate.out" \
     || ! grep -Fqx 'recommendation=reject-current' "$TMP_DIR/fail-gate.out" \
     || ! grep -Fqx 'failedMetrics=1' "$TMP_DIR/fail-gate.out"; then

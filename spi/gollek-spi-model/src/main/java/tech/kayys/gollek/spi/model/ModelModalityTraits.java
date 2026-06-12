@@ -52,7 +52,8 @@ public record ModelModalityTraits(
     }
 
     private static boolean isAudioModel(String modelType, String architecture) {
-        return modelType.contains("speecht5")
+        return isGemma4Unified(modelType, architecture)
+                || modelType.contains("speecht5")
                 || modelType.contains("speech_t5")
                 || modelType.contains("whisper")
                 || architecture.contains("speecht5")
@@ -61,7 +62,8 @@ public record ModelModalityTraits(
     }
 
     private static boolean isVisionModel(String modelType, String architecture) {
-        return modelType.contains("vision")
+        return isGemma4Unified(modelType, architecture)
+                || modelType.contains("vision")
                 || modelType.contains("video")
                 || modelType.contains("image")
                 || modelType.contains("multimodal")
@@ -91,6 +93,12 @@ public record ModelModalityTraits(
                 || architecture.contains("blip")
                 || architecture.contains("chameleon")
                 || architecture.contains("kosmos");
+    }
+
+    private static boolean isGemma4Unified(String modelType, String architecture) {
+        return "gemma4_unified".equals(modelType)
+                || architecture.contains("gemma4unified")
+                || architecture.contains("gemma4formultimodallm");
     }
 
     private static boolean isMultimodalModel(String modelType, String architecture, boolean audioModel,

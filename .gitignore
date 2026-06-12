@@ -17,11 +17,26 @@ build/
 # This ensures that the final packaged application (which includes lib/) is ignored.
 quarkus-app/
 
-# Quarkus native executable
-*-runner
-*-runner.exe
-*-runner.native
-*-runner.build-artifacts.zip
+# Quarkus native executable artifacts generated at the repository root.
+/*-runner
+/*-runner.exe
+/*-runner.native
+/*-runner.build-artifacts.zip
+
+# Source modules whose names overlap with generated native runner artifacts
+# or broad local excludes.
+!/core/gollek-model-runner/
+!/core/gollek-model-runner/**
+!/runtime/
+!/runtime/gollek-runtime/
+!/runtime/gollek-runtime/build.gradle.kts
+!/runtime/gollek-runtime-distributed/
+!/runtime/gollek-runtime-distributed/build.gradle.kts
+/core/gollek-model-runner/build/
+/runtime/gollek-runtime/build/
+/runtime/gollek-runtime-distributed/build/
+/runtime/gollek-runtime/src/
+/runtime/gollek-runtime-distributed/src/
 
 # Native Image specific build files
 **/*.graal.log

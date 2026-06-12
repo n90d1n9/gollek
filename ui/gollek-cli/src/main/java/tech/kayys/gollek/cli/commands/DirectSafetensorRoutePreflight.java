@@ -118,6 +118,9 @@ final class DirectSafetensorRoutePreflight {
         if (joinedMessages.contains("mobile qat")) {
             return ProblemCode.GEMMA4_MOBILE_QAT_LOADER_MISSING;
         }
+        if (joinedMessages.contains("multimodal safetensor runtime is not enabled")) {
+            return ProblemCode.GEMMA4_MULTIMODAL_RUNTIME_MISSING;
+        }
         if (joinedMessages.contains("packed moe") || joinedMessages.contains("packed expert")) {
             return ProblemCode.GEMMA4_PACKED_MOE_RUNTIME_MISSING;
         }
@@ -155,6 +158,9 @@ final class DirectSafetensorRoutePreflight {
             details.put(ProblemDetail.REQUEST_INPUT_MODE, requestInputMode);
         }
         details.put(ProblemDetail.MISSING_RUNTIME_CAPABILITY, missingCapability);
+        details.put(ProblemDetail.BLOCKED_CAPABILITY, missingCapability);
+        details.put(ProblemDetail.RECOMMENDED_RUNTIME, recommendedRuntime(problemCode));
+        details.putAll(validation.details());
         return details;
     }
 
@@ -185,6 +191,22 @@ final class DirectSafetensorRoutePreflight {
             return "gemma4_text";
         }
         return "gemma4_unified";
+    }
+
+    private static String recommendedRuntime(String problemCode) {
+        if (ProblemCode.GEMMA4_TEXT_HEADER_MISMATCH.equals(problemCode)) {
+            return "gemma4_text_safetensor_header_contract";
+        }
+        if (ProblemCode.GEMMA4_MULTIMODAL_RUNTIME_MISSING.equals(problemCode)) {
+            return "gemma4_unified_multimodal_embedder_runtime";
+        }
+        if (ProblemCode.GEMMA4_PACKED_MOE_RUNTIME_MISSING.equals(problemCode)) {
+            return "gemma4_packed_moe_router_runtime";
+        }
+        if (ProblemCode.GEMMA4_MOBILE_QAT_LOADER_MISSING.equals(problemCode)) {
+            return "gemma4_mobile_qat_loader";
+        }
+        return "safetensor_direct_runtime";
     }
 
     private static String requestInputMode(String joinedMessages) {

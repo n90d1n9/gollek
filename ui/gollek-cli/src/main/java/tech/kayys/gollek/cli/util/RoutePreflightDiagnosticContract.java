@@ -33,6 +33,12 @@ public final class RoutePreflightDiagnosticContract {
         schema.put(Schema.PROBLEM_FIELDS, RoutePreflightDiagnosticFields.problemFields());
         schema.put(Schema.REQUIRED_PROBLEM_FIELDS, RoutePreflightDiagnosticFields.requiredProblemFields());
         schema.put(Schema.PROBLEM_DETAIL_FIELDS, RoutePreflightDiagnosticFields.problemDetailFields());
+        schema.put(Schema.EXECUTION_PROFILE_FIELDS, RoutePreflightDiagnosticFields.executionProfileFields());
+        schema.put(Schema.HEADER_INSPECTION_FIELDS, RoutePreflightDiagnosticFields.headerInspectionFields());
+        schema.put(Schema.TENSOR_INVENTORY_FIELDS, RoutePreflightDiagnosticFields.tensorInventoryFields());
+        schema.put(Schema.COMPONENT_READINESS_FIELDS, RoutePreflightDiagnosticFields.componentReadinessFields());
+        schema.put(Schema.INPUT_MODES, RoutePreflightDiagnosticFields.inputModes());
+        schema.put(Schema.RUNTIME_CAPABILITIES, RoutePreflightDiagnosticFields.runtimeCapabilities());
         schema.put(Schema.MISSING_RUNTIME_CAPABILITIES, RoutePreflightDiagnosticFields.missingRuntimeCapabilities());
         schema.put(Schema.ACTION_FIELDS, RoutePreflightDiagnosticFields.actionFields());
         schema.put(Schema.REQUIRED_ACTION_FIELDS, RoutePreflightDiagnosticFields.requiredActionFields());
@@ -62,6 +68,19 @@ public final class RoutePreflightDiagnosticContract {
                 schema.get(Schema.REQUIRED_PROBLEM_FIELDS), RoutePreflightDiagnosticFields.requiredProblemFields());
         requireList(problems, Schema.PROBLEM_DETAIL_FIELDS,
                 schema.get(Schema.PROBLEM_DETAIL_FIELDS), RoutePreflightDiagnosticFields.problemDetailFields());
+        requireList(problems, Schema.EXECUTION_PROFILE_FIELDS,
+                schema.get(Schema.EXECUTION_PROFILE_FIELDS), RoutePreflightDiagnosticFields.executionProfileFields());
+        requireList(problems, Schema.HEADER_INSPECTION_FIELDS,
+                schema.get(Schema.HEADER_INSPECTION_FIELDS), RoutePreflightDiagnosticFields.headerInspectionFields());
+        requireList(problems, Schema.TENSOR_INVENTORY_FIELDS,
+                schema.get(Schema.TENSOR_INVENTORY_FIELDS), RoutePreflightDiagnosticFields.tensorInventoryFields());
+        requireList(problems, Schema.COMPONENT_READINESS_FIELDS,
+                schema.get(Schema.COMPONENT_READINESS_FIELDS),
+                RoutePreflightDiagnosticFields.componentReadinessFields());
+        requireList(problems, Schema.INPUT_MODES,
+                schema.get(Schema.INPUT_MODES), RoutePreflightDiagnosticFields.inputModes());
+        requireList(problems, Schema.RUNTIME_CAPABILITIES,
+                schema.get(Schema.RUNTIME_CAPABILITIES), RoutePreflightDiagnosticFields.runtimeCapabilities());
         requireList(problems, Schema.MISSING_RUNTIME_CAPABILITIES,
                 schema.get(Schema.MISSING_RUNTIME_CAPABILITIES),
                 RoutePreflightDiagnosticFields.missingRuntimeCapabilities());
@@ -250,6 +269,182 @@ public final class RoutePreflightDiagnosticContract {
                     + RoutePreflightDiagnosticFields.ProblemDetail.MISSING_RUNTIME_CAPABILITY
                     + " has unknown value: " + missingCapability);
         }
+        validateKnownStringList(
+                problems,
+                path,
+                details,
+                RoutePreflightDiagnosticFields.ProblemDetail.SUPPORTED_INPUT_MODES,
+                RoutePreflightDiagnosticFields.inputModes());
+        validateKnownStringList(
+                problems,
+                path,
+                details,
+                RoutePreflightDiagnosticFields.ProblemDetail.BLOCKED_INPUT_MODES,
+                RoutePreflightDiagnosticFields.inputModes());
+        validateKnownStringList(
+                problems,
+                path,
+                details,
+                RoutePreflightDiagnosticFields.ProblemDetail.BLOCKED_CAPABILITIES,
+                RoutePreflightDiagnosticFields.missingRuntimeCapabilities());
+        validateKnownStringList(
+                problems,
+                path,
+                details,
+                RoutePreflightDiagnosticFields.ProblemDetail.READY_RUNTIME_CAPABILITIES,
+                RoutePreflightDiagnosticFields.runtimeCapabilities());
+        validateKnownStringList(
+                problems,
+                path,
+                details,
+                RoutePreflightDiagnosticFields.ProblemDetail.MISSING_RUNTIME_CAPABILITIES,
+                RoutePreflightDiagnosticFields.missingRuntimeCapabilities());
+        validateHeaderInspection(
+                problems,
+                path + "." + RoutePreflightDiagnosticFields.ProblemDetail.HEADER_INSPECTION,
+                details.get(RoutePreflightDiagnosticFields.ProblemDetail.HEADER_INSPECTION));
+        validateTensorInventory(
+                problems,
+                path + "." + RoutePreflightDiagnosticFields.ProblemDetail.TENSOR_INVENTORY,
+                details.get(RoutePreflightDiagnosticFields.ProblemDetail.TENSOR_INVENTORY));
+        validateComponentReadiness(
+                problems,
+                path + "." + RoutePreflightDiagnosticFields.ProblemDetail.COMPONENT_READINESS,
+                details.get(RoutePreflightDiagnosticFields.ProblemDetail.COMPONENT_READINESS));
+        validateExecutionProfile(
+                problems,
+                path + "." + RoutePreflightDiagnosticFields.ProblemDetail.EXECUTION_PROFILE,
+                details.get(RoutePreflightDiagnosticFields.ProblemDetail.EXECUTION_PROFILE));
+    }
+
+    private static void validateExecutionProfile(
+            List<String> problems,
+            String path,
+            Object value) {
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof Map<?, ?> executionProfile)) {
+            problems.add(path + " must be an object");
+            return;
+        }
+        for (Object rawKey : executionProfile.keySet()) {
+            String key = String.valueOf(rawKey);
+            if (!RoutePreflightDiagnosticFields.executionProfileFields().contains(key)) {
+                problems.add(path + " contains unknown field: " + key);
+            }
+        }
+        for (String field : RoutePreflightDiagnosticFields.executionProfileFields()) {
+            requireBooleanAtPath(problems, path + "." + field, executionProfile.get(field));
+        }
+    }
+
+    private static void validateHeaderInspection(
+            List<String> problems,
+            String path,
+            Object value) {
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof Map<?, ?> headerInspection)) {
+            problems.add(path + " must be an object");
+            return;
+        }
+        for (Object rawKey : headerInspection.keySet()) {
+            String key = String.valueOf(rawKey);
+            if (!RoutePreflightDiagnosticFields.headerInspectionFields().contains(key)) {
+                problems.add(path + " contains unknown field: " + key);
+            }
+        }
+        for (String field : RoutePreflightDiagnosticFields.headerInspectionFields()) {
+            requireNonNegativeInteger(problems, path + "." + field, headerInspection.get(field));
+        }
+    }
+
+    private static void validateTensorInventory(
+            List<String> problems,
+            String path,
+            Object value) {
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof Map<?, ?> tensorInventory)) {
+            problems.add(path + " must be an object");
+            return;
+        }
+        for (Object rawKey : tensorInventory.keySet()) {
+            String key = String.valueOf(rawKey);
+            if (!RoutePreflightDiagnosticFields.tensorInventoryFields().contains(key)) {
+                problems.add(path + " contains unknown field: " + key);
+            }
+        }
+        for (String field : RoutePreflightDiagnosticFields.tensorInventoryFields()) {
+            requireNonNegativeInteger(problems, path + "." + field, tensorInventory.get(field));
+        }
+    }
+
+    private static void validateComponentReadiness(
+            List<String> problems,
+            String path,
+            Object value) {
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof Map<?, ?> componentReadiness)) {
+            problems.add(path + " must be an object");
+            return;
+        }
+        for (Object rawKey : componentReadiness.keySet()) {
+            String key = String.valueOf(rawKey);
+            if (!RoutePreflightDiagnosticFields.componentReadinessFields().contains(key)) {
+                problems.add(path + " contains unknown field: " + key);
+            }
+        }
+        for (String field : RoutePreflightDiagnosticFields.componentReadinessFields()) {
+            requireBooleanAtPath(problems, path + "." + field, componentReadiness.get(field));
+        }
+    }
+
+    private static void requireNonNegativeInteger(List<String> problems, String path, Object value) {
+        if (!isIntegerNumber(value)) {
+            problems.add(path + " must be a non-negative integer");
+            return;
+        }
+        if (((Number) value).longValue() < 0) {
+            problems.add(path + " must be a non-negative integer");
+        }
+    }
+
+    private static boolean isIntegerNumber(Object value) {
+        if (!(value instanceof Number number)) {
+            return false;
+        }
+        if (number instanceof Byte || number instanceof Short || number instanceof Integer || number instanceof Long) {
+            return true;
+        }
+        double doubleValue = number.doubleValue();
+        return Double.isFinite(doubleValue) && Math.rint(doubleValue) == doubleValue;
+    }
+
+    private static void validateKnownStringList(
+            List<String> problems,
+            String path,
+            Map<?, ?> details,
+            String field,
+            List<String> allowedValues) {
+        Object value = details.get(field);
+        if (value == null) {
+            return;
+        }
+        if (!(value instanceof List<?> entries)) {
+            problems.add(path + "." + field + " must be a list");
+            return;
+        }
+        for (Object entry : entries) {
+            if (!allowedValues.contains(String.valueOf(entry))) {
+                problems.add(path + "." + field + " has unknown value: " + entry);
+            }
+        }
     }
 
     private static Map<String, Object> validationReport(List<String> problems) {
@@ -295,6 +490,12 @@ public final class RoutePreflightDiagnosticContract {
     private static void requireBoolean(List<String> problems, String field, Object actual) {
         if (!(actual instanceof Boolean)) {
             problems.add(RoutePreflightDiagnosticFields.VALIDATION_ROOT + "." + field + " must be a boolean");
+        }
+    }
+
+    private static void requireBooleanAtPath(List<String> problems, String path, Object actual) {
+        if (!(actual instanceof Boolean)) {
+            problems.add(path + " must be a boolean");
         }
     }
 

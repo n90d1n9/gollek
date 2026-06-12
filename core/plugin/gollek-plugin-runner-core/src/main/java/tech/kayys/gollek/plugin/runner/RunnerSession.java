@@ -92,4 +92,16 @@ public interface RunnerSession {
      * @return Model metadata
      */
     ModelInfo getModelInfo();
+
+    /**
+     * Get the current state of the KV cache.
+     * 
+     * @return KV cache state
+     */
+    tech.kayys.gollek.spi.inference.KVCacheState getKVCacheState();
+
+    /**
+     * Offload a portion of the KV cache to CPU/NVMe to free VRAM.
+     */
+    void offloadCache();
 }

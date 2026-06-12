@@ -8,8 +8,10 @@ import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import java.util.List;
 
 /**
- * Base Gemma family (Google DeepMind).
- * Almost identical to LLaMA but uses GeGLU and different norm names.
+ * Base Gemma text architecture adapter owned by the core Gemma model-family module.
+ *
+ * <p>Gemma 4 variants are intentionally owned by the dedicated Gemma 4 module so
+ * direct SafeTensor resolution cannot depend on CDI or ServiceLoader ordering.</p>
  */
 @ApplicationScoped
 public class GemmaFamily implements ModelArchitecture {
@@ -31,16 +33,12 @@ public class GemmaFamily implements ModelArchitecture {
 
     @Override
     public List<String> supportedArchClassNames() {
-        return List.of(
-                "GemmaForCausalLM",
-                "Gemma4ForCausalLM",
-                "Gemma4ForConditionalGeneration",
-                "Gemma4UnifiedForConditionalGeneration");
+        return List.of("GemmaForCausalLM");
     }
 
     @Override
     public List<String> supportedModelTypes() {
-        return List.of("gemma", "gemma4", "gemma4_text", "gemma4_unified", "gemma4_unified_text");
+        return List.of("gemma");
     }
 
     @Override

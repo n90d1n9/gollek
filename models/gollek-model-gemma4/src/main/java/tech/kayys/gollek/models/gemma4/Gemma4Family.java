@@ -11,6 +11,9 @@ import java.util.List;
  * Google Gemma 4 text adapter. Multimodal wrappers stay guarded by runtime checks.
  */
 public class Gemma4Family implements ModelArchitecture {
+    private static final String TEXT_MODEL_PREFIX = "model.";
+    private static final String UNIFIED_TEXT_MODEL_PREFIX = "model.language_model.";
+
     @Override
     public String id() {
         return "gemma4";
@@ -29,7 +32,8 @@ public class Gemma4Family implements ModelArchitecture {
     @Override
     public List<String> supportedArchClassNames() {
         return List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration",
-                "Gemma4ForMultimodalLM", "Gemma4UnifiedForConditionalGeneration");
+                "Gemma4ForImageTextToText", "Gemma4ForMultimodalLM",
+                "Gemma4UnifiedForConditionalGeneration");
     }
 
     @Override
@@ -42,8 +46,18 @@ public class Gemma4Family implements ModelArchitecture {
         return "model.embed_tokens.weight";
     }
 
+    @Override
+    public List<String> embedTokensWeightCandidates() {
+        return textDecoderCandidates(embedTokensWeight());
+    }
+
     public String embedTokensPerLayerWeight() {
         return "model.embed_tokens_per_layer.weight";
+    }
+
+    @Override
+    public List<String> embedTokensPerLayerWeightCandidates() {
+        return textDecoderCandidates(embedTokensPerLayerWeight());
     }
 
     @Override
@@ -52,8 +66,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> perLayerModelProjectionWeightCandidates() {
+        return textDecoderCandidates(perLayerModelProjectionWeight());
+    }
+
+    @Override
     public String perLayerProjectionNormWeight() {
         return "model.per_layer_projection_norm.weight";
+    }
+
+    @Override
+    public List<String> perLayerProjectionNormWeightCandidates() {
+        return textDecoderCandidates(perLayerProjectionNormWeight());
     }
 
     @Override
@@ -62,8 +86,28 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> finalNormWeightCandidates() {
+        return textDecoderCandidates(finalNormWeight());
+    }
+
+    @Override
+    public String lmHeadWeight() {
+        return "lm_head.weight";
+    }
+
+    @Override
+    public List<String> lmHeadWeightCandidates() {
+        return List.of(lmHeadWeight(), "model.language_model.lm_head.weight", "language_model.lm_head.weight");
+    }
+
+    @Override
     public String layerQueryWeight(int i) {
         return "model.layers.%d.self_attn.q_proj.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerQueryWeightCandidates(int i) {
+        return textDecoderCandidates(layerQueryWeight(i));
     }
 
     @Override
@@ -72,8 +116,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerKeyWeightCandidates(int i) {
+        return textDecoderCandidates(layerKeyWeight(i));
+    }
+
+    @Override
     public String layerValueWeight(int i) {
         return "model.layers.%d.self_attn.v_proj.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerValueWeightCandidates(int i) {
+        return textDecoderCandidates(layerValueWeight(i));
     }
 
     @Override
@@ -82,8 +136,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerOutputWeightCandidates(int i) {
+        return textDecoderCandidates(layerOutputWeight(i));
+    }
+
+    @Override
     public String layerAttentionNormWeight(int i) {
         return "model.layers.%d.input_layernorm.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerAttentionNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerAttentionNormWeight(i));
     }
 
     @Override
@@ -92,8 +156,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerQueryNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerQueryNormWeight(i));
+    }
+
+    @Override
     public String layerKeyNormWeight(int i) {
         return "model.layers.%d.self_attn.k_norm.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerKeyNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerKeyNormWeight(i));
     }
 
     @Override
@@ -102,8 +176,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerPostAttnNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerPostAttnNormWeight(i));
+    }
+
+    @Override
     public String layerPreFfnNormWeight(int i) {
         return "model.layers.%d.pre_feedforward_layernorm.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerPreFfnNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerPreFfnNormWeight(i));
     }
 
     @Override
@@ -112,8 +196,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerPerLayerInputGateWeightCandidates(int i) {
+        return textDecoderCandidates(layerPerLayerInputGateWeight(i));
+    }
+
+    @Override
     public String layerPerLayerProjectionWeight(int i) {
         return "model.layers.%d.per_layer_projection.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerPerLayerProjectionWeightCandidates(int i) {
+        return textDecoderCandidates(layerPerLayerProjectionWeight(i));
     }
 
     @Override
@@ -122,8 +216,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerPostPerLayerInputNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerPostPerLayerInputNormWeight(i));
+    }
+
+    @Override
     public String layerScalarWeight(int i) {
         return "model.layers.%d.layer_scalar".formatted(i);
+    }
+
+    @Override
+    public List<String> layerScalarWeightCandidates(int i) {
+        return textDecoderCandidates(layerScalarWeight(i));
     }
 
     @Override
@@ -132,8 +236,18 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerFfnGateWeightCandidates(int i) {
+        return textDecoderCandidates(layerFfnGateWeight(i));
+    }
+
+    @Override
     public String layerFfnUpWeight(int i) {
         return "model.layers.%d.mlp.up_proj.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerFfnUpWeightCandidates(int i) {
+        return textDecoderCandidates(layerFfnUpWeight(i));
     }
 
     @Override
@@ -142,13 +256,68 @@ public class Gemma4Family implements ModelArchitecture {
     }
 
     @Override
+    public List<String> layerFfnDownWeightCandidates(int i) {
+        return textDecoderCandidates(layerFfnDownWeight(i));
+    }
+
+    @Override
     public String layerFfnNormWeight(int i) {
         return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
     }
 
     @Override
+    public List<String> layerFfnNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerFfnNormWeight(i));
+    }
+
+    @Override
     public String layerPostFfnNormWeight(int i) {
         return "model.layers.%d.post_feedforward_layernorm.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerPostFfnNormWeightCandidates(int i) {
+        return textDecoderCandidates(layerPostFfnNormWeight(i));
+    }
+
+    @Override
+    public String layerMoeGateWeight(int i) {
+        return "model.layers.%d.mlp.router.weight".formatted(i);
+    }
+
+    @Override
+    public List<String> layerMoeGateWeightCandidates(int i) {
+        return textDecoderCandidates(layerMoeGateWeight(i));
+    }
+
+    @Override
+    public String expertGateWeight(int layerIdx, int expertIdx) {
+        return "model.layers.%d.mlp.experts.%d.gate_proj.weight".formatted(layerIdx, expertIdx);
+    }
+
+    @Override
+    public List<String> expertGateWeightCandidates(int layerIdx, int expertIdx) {
+        return textDecoderCandidates(expertGateWeight(layerIdx, expertIdx));
+    }
+
+    @Override
+    public String expertUpWeight(int layerIdx, int expertIdx) {
+        return "model.layers.%d.mlp.experts.%d.up_proj.weight".formatted(layerIdx, expertIdx);
+    }
+
+    @Override
+    public List<String> expertUpWeightCandidates(int layerIdx, int expertIdx) {
+        return textDecoderCandidates(expertUpWeight(layerIdx, expertIdx));
+    }
+
+    @Override
+    public String expertDownWeight(int layerIdx, int expertIdx) {
+        return "model.layers.%d.mlp.experts.%d.down_proj.weight".formatted(layerIdx, expertIdx);
+    }
+
+    @Override
+    public List<String> expertDownWeightCandidates(int layerIdx, int expertIdx) {
+        return textDecoderCandidates(expertDownWeight(layerIdx, expertIdx));
     }
 
     @Override
@@ -174,5 +343,23 @@ public class Gemma4Family implements ModelArchitecture {
     @Override
     public float defaultFinalSoftCap() {
         return 0.0f;
+    }
+
+    private static List<String> textDecoderCandidates(String canonicalName) {
+        if (canonicalName == null || canonicalName.isBlank()) {
+            return List.of();
+        }
+        String unifiedName = unifiedTextName(canonicalName);
+        if (canonicalName.equals(unifiedName)) {
+            return List.of(canonicalName);
+        }
+        return List.of(canonicalName, unifiedName);
+    }
+
+    private static String unifiedTextName(String canonicalName) {
+        if (canonicalName.startsWith(TEXT_MODEL_PREFIX)) {
+            return UNIFIED_TEXT_MODEL_PREFIX + canonicalName.substring(TEXT_MODEL_PREFIX.length());
+        }
+        return canonicalName;
     }
 }

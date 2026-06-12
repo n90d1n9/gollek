@@ -53,6 +53,9 @@ class GemmaModelFamilyPluginTest {
                 .map(ModelArchitecture::id)
                 .toList());
         assertTrue(plugin.architectureAdapters().get(0) instanceof GemmaFamily);
+        assertEquals(List.of("gemma"), plugin.architectureAdapters().get(0).supportedModelTypes());
+        assertEquals(List.of("GemmaForCausalLM"),
+                plugin.architectureAdapters().get(0).supportedArchClassNames());
         assertTrue(plugin.descriptor().modelTypes().contains("gemma"));
         assertFalse(plugin.descriptor().modelTypes().contains("gemma4"));
         assertFalse(plugin.descriptor().modelTypes().contains("gemma4_text"));

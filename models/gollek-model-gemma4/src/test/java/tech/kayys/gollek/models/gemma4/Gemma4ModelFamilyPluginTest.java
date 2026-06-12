@@ -54,14 +54,16 @@ class Gemma4ModelFamilyPluginTest {
 
     @Test
     void gemma4Unified12bFixtureMatchesDescriptorTokenizerAndTextAdapter() throws Exception {
+        Path fixture = fixture("gemma4-12b-it");
         List<ModelFamilyContractViolation> violations = ModelFamilyFixtureValidator.validate(
                 new Gemma4ModelFamilyPlugin(),
-                fixture("gemma4-12b-it"));
+                fixture);
 
         assertEquals(List.of(), violations.stream()
                         .map(ModelFamilyContractViolation::summary)
                         .toList(),
                 "gemma4 unified fixture should match descriptor, tokenizer, and nested text adapter claims");
+        assertTrue(fixtureConfig(fixture).contains("\"Gemma4UnifiedForConditionalGeneration\""));
     }
 
     @Test
@@ -180,7 +182,8 @@ class Gemma4ModelFamilyPluginTest {
         Gemma4Family architecture = new Gemma4Family();
 
         assertEquals(List.of("Gemma4ForCausalLM", "Gemma4ForConditionalGeneration",
-                        "Gemma4ForMultimodalLM", "Gemma4UnifiedForConditionalGeneration"),
+                        "Gemma4ForImageTextToText", "Gemma4ForMultimodalLM",
+                        "Gemma4UnifiedForConditionalGeneration"),
                 architecture.supportedArchClassNames());
         assertEquals(List.of("gemma4", "gemma4_text", "gemma4_unified", "gemma4_unified_text"),
                 architecture.supportedModelTypes());
@@ -205,6 +208,72 @@ class Gemma4ModelFamilyPluginTest {
         assertEquals("model.layers.4.post_per_layer_input_norm.weight",
                 architecture.layerPostPerLayerInputNormWeight(4));
         assertEquals("model.layers.4.layer_scalar", architecture.layerScalarWeight(4));
+    }
+
+    @Test
+    void gemma4DirectWeightsExposeUnifiedTextWrapperCandidates() {
+        Gemma4Family architecture = new Gemma4Family();
+
+        assertEquals(List.of("model.embed_tokens.weight", "model.language_model.embed_tokens.weight"),
+                architecture.embedTokensWeightCandidates());
+        assertEquals(List.of("model.norm.weight", "model.language_model.norm.weight"),
+                architecture.finalNormWeightCandidates());
+        assertEquals(List.of("lm_head.weight", "model.language_model.lm_head.weight",
+                        "language_model.lm_head.weight"),
+                architecture.lmHeadWeightCandidates());
+        assertEquals(List.of("model.layers.4.self_attn.q_proj.weight",
+                        "model.language_model.layers.4.self_attn.q_proj.weight"),
+                architecture.layerQueryWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.self_attn.k_proj.weight",
+                        "model.language_model.layers.4.self_attn.k_proj.weight"),
+                architecture.layerKeyWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.self_attn.v_proj.weight",
+                        "model.language_model.layers.4.self_attn.v_proj.weight"),
+                architecture.layerValueWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.self_attn.o_proj.weight",
+                        "model.language_model.layers.4.self_attn.o_proj.weight"),
+                architecture.layerOutputWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.input_layernorm.weight",
+                        "model.language_model.layers.4.input_layernorm.weight"),
+                architecture.layerAttentionNormWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.self_attn.q_norm.weight",
+                        "model.language_model.layers.4.self_attn.q_norm.weight"),
+                architecture.layerQueryNormWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.self_attn.k_norm.weight",
+                        "model.language_model.layers.4.self_attn.k_norm.weight"),
+                architecture.layerKeyNormWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.mlp.gate_proj.weight",
+                        "model.language_model.layers.4.mlp.gate_proj.weight"),
+                architecture.layerFfnGateWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.mlp.up_proj.weight",
+                        "model.language_model.layers.4.mlp.up_proj.weight"),
+                architecture.layerFfnUpWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.mlp.down_proj.weight",
+                        "model.language_model.layers.4.mlp.down_proj.weight"),
+                architecture.layerFfnDownWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.post_feedforward_layernorm.weight",
+                        "model.language_model.layers.4.post_feedforward_layernorm.weight"),
+                architecture.layerPostFfnNormWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.layer_scalar", "model.language_model.layers.4.layer_scalar"),
+                architecture.layerScalarWeightCandidates(4));
+    }
+
+    @Test
+    void gemma4DirectWeightsExposeUnifiedPackedMoeCandidates() {
+        Gemma4Family architecture = new Gemma4Family();
+
+        assertEquals(List.of("model.layers.4.mlp.router.weight",
+                        "model.language_model.layers.4.mlp.router.weight"),
+                architecture.layerMoeGateWeightCandidates(4));
+        assertEquals(List.of("model.layers.4.mlp.experts.7.gate_proj.weight",
+                        "model.language_model.layers.4.mlp.experts.7.gate_proj.weight"),
+                architecture.expertGateWeightCandidates(4, 7));
+        assertEquals(List.of("model.layers.4.mlp.experts.7.up_proj.weight",
+                        "model.language_model.layers.4.mlp.experts.7.up_proj.weight"),
+                architecture.expertUpWeightCandidates(4, 7));
+        assertEquals(List.of("model.layers.4.mlp.experts.7.down_proj.weight",
+                        "model.language_model.layers.4.mlp.experts.7.down_proj.weight"),
+                architecture.expertDownWeightCandidates(4, 7));
     }
 
     @Test
@@ -302,6 +371,49 @@ class Gemma4ModelFamilyPluginTest {
         assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_direct_safetensor_not_ready"::equals));
         assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_architecture_adapter_unmatched"::equals));
         assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_not_found"::equals));
+    }
+
+    @Test
+    void gemma4UnifiedConditionalGenerationResolvesDirectSafetensorAdapter() {
+        Gemma4ModelFamilyPlugin plugin = new Gemma4ModelFamilyPlugin();
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(plugin);
+
+        ModelFamilyResolution resolution =
+                registry.resolve("gemma4_unified", "Gemma4UnifiedForConditionalGeneration");
+        ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(resolution);
+
+        assertEquals(ModelFamilyResolution.Status.RESOLVED, resolution.status());
+        assertEquals(List.of("gemma4"), resolution.familyIds());
+        assertEquals(ModelFamilyDirectSupport.READY,
+                resolution.primarySupportReport().orElseThrow().directSafetensorStatus());
+        assertTrue(compatibility.compatible());
+        assertEquals(List.of("gemma4"), compatibility.architectureAdapterIds());
+        assertEquals("gemma4", compatibility.selectedArchitectureAdapterId());
+        assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_not_found"::equals));
+        assertTrue(compatibility.problemCodes().stream()
+                .noneMatch("model_family_architecture_adapter_unmatched"::equals));
+    }
+
+    @Test
+    void gemma4ImageTextToTextResolvesDirectSafetensorAdapter() {
+        Gemma4ModelFamilyPlugin plugin = new Gemma4ModelFamilyPlugin();
+        ModelFamilyPluginRegistry registry = ModelFamilyPluginRegistry.create();
+        registry.register(plugin);
+
+        ModelFamilyResolution resolution = registry.resolve("gemma4_unified", "Gemma4ForImageTextToText");
+        ModelFamilyRuntimeCompatibility compatibility = registry.directSafetensorCompatibility(resolution);
+
+        assertEquals(ModelFamilyResolution.Status.RESOLVED, resolution.status());
+        assertEquals(List.of("gemma4"), resolution.familyIds());
+        assertEquals(ModelFamilyDirectSupport.READY,
+                resolution.primarySupportReport().orElseThrow().directSafetensorStatus());
+        assertTrue(compatibility.compatible());
+        assertEquals(List.of("gemma4"), compatibility.architectureAdapterIds());
+        assertEquals("gemma4", compatibility.selectedArchitectureAdapterId());
+        assertTrue(compatibility.problemCodes().stream().noneMatch("model_family_not_found"::equals));
+        assertTrue(compatibility.problemCodes().stream()
+                .noneMatch("model_family_architecture_adapter_unmatched"::equals));
     }
 
     @Test

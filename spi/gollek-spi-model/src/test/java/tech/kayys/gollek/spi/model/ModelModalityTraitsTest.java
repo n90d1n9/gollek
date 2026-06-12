@@ -48,4 +48,16 @@ class ModelModalityTraitsTest {
         assertFalse(traits.visionModel());
         assertTrue(traits.multimodalModel());
     }
+
+    @Test
+    void gemma4UnifiedConfigIsAudioVisionAndMultimodal() throws Exception {
+        ModelConfig config = new ObjectMapper().readValue("""
+                {"model_type":"gemma4_unified","architectures":["Gemma4UnifiedForConditionalGeneration"]}
+                """, ModelConfig.class);
+        ModelModalityTraits traits = ModelModalityTraits.fromConfig(config);
+
+        assertTrue(traits.audioModel());
+        assertTrue(traits.visionModel());
+        assertTrue(traits.multimodalModel());
+    }
 }

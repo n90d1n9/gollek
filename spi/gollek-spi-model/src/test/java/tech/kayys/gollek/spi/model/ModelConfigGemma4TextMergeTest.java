@@ -78,22 +78,27 @@ class ModelConfigGemma4TextMergeTest {
                   "architectures": ["Gemma4ForMultimodalLM"],
                   "processor_class": "Gemma4Processor",
                   "text_config": {
-                    "model_type": "gemma4_text",
+                    "model_type": "gemma4_unified_text",
                     "architectures": ["Gemma4ForCausalLM"],
-                    "hidden_size": 5120,
+                    "hidden_size": 3840,
                     "num_hidden_layers": 48,
-                    "num_attention_heads": 32,
-                    "num_key_value_heads": 16,
-                    "intermediate_size": 20480,
+                    "num_attention_heads": 16,
+                    "num_key_value_heads": 8,
+                    "num_global_key_value_heads": 1,
+                    "head_dim": 256,
+                    "global_head_dim": 512,
+                    "attention_k_eq_v": true,
+                    "intermediate_size": 15360,
                     "vocab_size": 262144,
+                    "vocab_size_per_layer_input": 262144,
                     "sliding_window": 1024,
-                    "max_position_embeddings": 262144,
-                    "layer_types": ["sliding_attention", "full_attention"]
+                    "max_position_embeddings": 131072,
+                    "layer_types": [%s]
                   },
-                  "vision_config": {"model_type": "gemma4_vision"},
-                  "audio_config": {"model_type": "gemma4_audio"}
+                  "vision_config": {"model_type": "gemma4_unified_vision"},
+                  "audio_config": {"model_type": "gemma4_unified_audio"}
                 }
-                """;
+                """.formatted(gemma4TwelveBLayerTypesJson());
         Path dir = Files.createTempDirectory("gollek-modelconfig-unified-test");
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
@@ -101,12 +106,16 @@ class ModelConfigGemma4TextMergeTest {
             ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
             assertEquals("gemma4_unified", cfg.modelType());
             assertEquals("Gemma4ForMultimodalLM", cfg.primaryArchitecture());
-            assertEquals(5120, cfg.hiddenSize());
+            assertEquals(3840, cfg.hiddenSize());
             assertEquals(48, cfg.numHiddenLayers());
-            assertEquals(32, cfg.numAttentionHeads());
-            assertEquals(16, cfg.numKeyValueHeads());
+            assertEquals(16, cfg.numAttentionHeads());
+            assertEquals(8, cfg.numKeyValueHeads());
+            assertEquals(8, cfg.resolvedNumKvHeadsForLayer(0));
+            assertEquals(1, cfg.resolvedNumKvHeadsForLayer(5));
+            assertEquals(256, cfg.resolvedHeadDimForLayer(0));
+            assertEquals(512, cfg.resolvedHeadDimForLayer(5));
             assertEquals(1024, cfg.slidingWindowSize());
-            assertEquals(262144, cfg.maxPositionEmbeddings());
+            assertEquals(131072, cfg.maxPositionEmbeddings());
             assertTrue(ModelRuntimeTraits.fallbackFromConfig(cfg).gemma4Text());
         } finally {
             Files.deleteIfExists(cfgPath);
@@ -149,8 +158,52 @@ class ModelConfigGemma4TextMergeTest {
         }
     }
 
+    @Test
+    void parsesGemma4RootMoeAliasesWithoutTextConfigMerge() throws IOException {
+        String json = """
+                {
+                  "model_type": "gemma4_unified",
+                  "architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                  "enable_moe_block": true,
+                  "num_experts": 128,
+                  "top_k_experts": 8,
+                  "moe_intermediate_size": 704
+                }
+                """;
+        Path dir = Files.createTempDirectory("gollek-modelconfig-root-moe-test");
+        Path cfgPath = dir.resolve("config.json");
+        Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
+        try {
+            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
+            assertTrue(cfg.enableMoeBlock());
+            assertEquals(128, cfg.numLocalExperts());
+            assertEquals(8, cfg.numExpertsPerTok());
+            assertEquals(704, cfg.moeIntermediateSize());
+            assertTrue(cfg.isMoe());
+            assertTrue(cfg.requiresGemma4PackedMoeRuntime());
+        } finally {
+            Files.deleteIfExists(cfgPath);
+            Files.deleteIfExists(dir);
+        }
+    }
+
     private static String ggufPrimaryArchitecture(String architecture) {
         return ModelConfig.fromGgufMetadata(Map.of("general.architecture", architecture))
                 .primaryArchitecture();
+    }
+
+    private static String gemma4TwelveBLayerTypesJson() {
+        StringBuilder json = new StringBuilder();
+        for (int layer = 0; layer < 48; layer++) {
+            if (layer > 0) {
+                json.append(", ");
+            }
+            json.append('"')
+                    .append(layer > 0 && (layer + 1) % 6 == 0
+                            ? "full_attention"
+                            : "sliding_attention")
+                    .append('"');
+        }
+        return json.toString();
     }
 }

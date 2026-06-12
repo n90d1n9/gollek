@@ -1903,6 +1903,13 @@ public class ModelConfig {
         return headDim != null ? headDim : (numAttentionHeads > 0 ? hiddenSize / numAttentionHeads : 0);
     }
 
+    /** Per-head dimension for a specific layer, including Gemma-4 global-attention overrides. */
+    public int resolvedHeadDimForLayer(int layerIdx) {
+        return usesAlternativeAttentionForLayer(layerIdx) && globalHeadDim != null
+                ? globalHeadDim
+                : resolvedHeadDim();
+    }
+
     /** Maximum head dimension across all layers (for heterogeneous architectures like Gemma 4). */
     public int resolvedMaxHeadDim() {
         int base = resolvedHeadDim();

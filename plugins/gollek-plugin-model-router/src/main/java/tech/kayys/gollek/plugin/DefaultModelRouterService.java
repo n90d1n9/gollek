@@ -180,6 +180,28 @@ public class DefaultModelRouterService implements ModelRouterService {
     private record ProviderScore(String providerId, double score) {
     }
 
+    @Override
+    public String[] selectDraftAndTargetProviders(String modelId, String requestId) {
+        String targetProvider = selectProvider(modelId, requestId);
+        String draftProvider = null;
+        if (targetProvider != null) {
+            if (targetProvider.equals("openai-provider")) {
+                draftProvider = "openai-provider";
+            } else if (targetProvider.equals("llama-provider")) {
+                draftProvider = "llama-provider";
+            } else {
+                draftProvider = "mistral-provider";
+            }
+        }
+        if (draftProvider == null) {
+            draftProvider = "llama-provider";
+        }
+        if (targetProvider == null) {
+            targetProvider = "openai-provider";
+        }
+        return new String[] { draftProvider, targetProvider };
+    }
+
     public void registerModelProvider(String modelId, String providerId) {
         registerProviderForModel(modelId, providerId);
     }

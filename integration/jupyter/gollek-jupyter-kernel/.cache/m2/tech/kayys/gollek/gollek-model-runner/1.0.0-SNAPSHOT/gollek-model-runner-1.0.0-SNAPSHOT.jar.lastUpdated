@@ -1,0 +1,12 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Fri Apr 24 06:54:07 WIB 2026
+file\:///Users/bhangun/.m2/repository/.error=
+file\:///Users/bhangun/.m2/repository/.lastUpdated=1776988443629
+https\://maven.pkg.github.com/bhangun/gollek/.error=
+https\://maven.pkg.github.com/bhangun/gollek/.lastUpdated=1776988445858
+https\://oss.sonatype.org/content/repositories/snapshots/.error=
+https\://oss.sonatype.org/content/repositories/snapshots/.lastUpdated=1776988446775
+https\://repo.maven.apache.org/maven2/.error=
+https\://repo.maven.apache.org/maven2/.lastUpdated=1776988444466
+https\://repository.jboss.org/nexus/content/groups/public/.error=
+https\://repository.jboss.org/nexus/content/groups/public/.lastUpdated=1776988447987

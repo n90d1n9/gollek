@@ -19,7 +19,8 @@ repositories {
 
 dependencies {
     implementation(project(":spi:gollek-spi-inference"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-multimodal"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "com.github.ben-manes.caffeine", name = "caffeine", version = "3.1.8")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")

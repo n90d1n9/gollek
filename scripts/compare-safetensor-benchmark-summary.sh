@@ -150,12 +150,14 @@ fi
 OUT="${OUT:-${SUMMARY_DIR}/comparison.tsv}"
 SUMMARY_OUT="${SUMMARY_OUT:-${SUMMARY_DIR}/summary.tsv}"
 TABLE_OUT="${TABLE_OUT:-${SUMMARY_DIR}/comparison-table.txt}"
+SUMMARY_MD="${SUMMARY_DIR}/summary.md"
+DECISION_JSON="${SUMMARY_DIR}/decision.json"
 CONFIG="${SUMMARY_DIR}/config.tsv"
 REPORT="${SUMMARY_DIR}/report.txt"
 BASELINE_TSV="${SUMMARY_DIR}/baseline-runs.tsv"
 CURRENT_TSV="${SUMMARY_DIR}/current-runs.tsv"
 
-for artifact in "$OUT" "$SUMMARY_OUT" "$TABLE_OUT" "$BASELINE_TSV" "$CURRENT_TSV"; do
+for artifact in "$OUT" "$SUMMARY_OUT" "$TABLE_OUT" "$SUMMARY_MD" "$DECISION_JSON" "$BASELINE_TSV" "$CURRENT_TSV"; do
   parent="${artifact%/*}"
   if [[ "$parent" != "$artifact" ]]; then
     mkdir -p "$parent"
@@ -184,6 +186,8 @@ config_row summaryDir "$SUMMARY_DIR"
 config_row comparison "$OUT"
 config_row summary "$SUMMARY_OUT"
 config_row table "$TABLE_OUT"
+config_row markdown "$SUMMARY_MD"
+config_row decision "$DECISION_JSON"
 config_row baselineRuns "$BASELINE_TSV"
 config_row currentRuns "$CURRENT_TSV"
 config_row maxRegressionPercent "$MAX_REGRESSION_PERCENT"
@@ -564,12 +568,221 @@ BASELINE_ROW="$(awk 'BEGIN { FS = "\t" } $1 == "baselineRowPrefill" { print $2; 
 CURRENT_ROW="$(awk 'BEGIN { FS = "\t" } $1 == "currentRowPrefill" { print $2; exit }' "$SUMMARY_OUT")"
 
 {
+  echo "# Gollek Safetensor Benchmark Comparison"
+  echo
+  echo "| Field | Value |"
+  echo "| --- | --- |"
+  echo "| Status | ${STATUS} |"
+  echo "| Recommendation | ${RECOMMENDATION} |"
+  echo "| Reason | ${REASON:-n/a} |"
+  echo "| Compared Cases | ${COMPARED_CASES} |"
+  echo "| Compared Metrics | ${COMPARED_METRICS} |"
+  echo "| Better Metrics | ${BETTER_METRICS} |"
+  echo "| Worse Metrics | ${WORSE_METRICS} |"
+  echo "| Gated Metrics | ${GATED_METRICS} |"
+  echo "| Failed Metrics | ${FAILED_METRICS} |"
+  echo "| Largest Improvement | ${LARGEST_IMPROVEMENT_METRIC:-n/a}:${LARGEST_IMPROVEMENT_PERCENT:-n/a}% |"
+  echo "| Largest Regression | ${LARGEST_REGRESSION_METRIC:-n/a}:${LARGEST_REGRESSION_PERCENT:-n/a}% |"
+  echo "| FFN Strategy Transition | ${BASELINE_STRATEGY:-unknown}->${CURRENT_STRATEGY:-unknown} |"
+  echo "| Row-Prefill Transition | ${BASELINE_ROW:-unknown}->${CURRENT_ROW:-unknown} |"
+  echo
+  echo "## Metrics"
+  echo
+  awk '
+    BEGIN {
+      FS = "\t"
+      print "| Case | Metric | Baseline | Current | Delta | Delta % | Trend | Gate | Reason |"
+      print "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |"
+    }
+    function esc(value) {
+      gsub(/\|/, "\\|", value)
+      return value
+    }
+    NR == 1 {
+      for (i = 1; i <= NF; i++) {
+        col[$i] = i
+      }
+      next
+    }
+    {
+      reason = $(col["gateReason"]) == "" ? "n/a" : $(col["gateReason"])
+      printf "| `%s` | `%s` | %s | %s | %s | %s | `%s` | `%s` | %s |\n", \
+        esc($(col["case"])), esc($(col["metric"])), $(col["baseline"]), $(col["current"]), \
+        $(col["delta"]), $(col["deltaPercent"]), esc($(col["trend"])), esc($(col["gateStatus"])), esc(reason)
+    }
+  ' "$OUT"
+  echo
+  echo "## Artifacts"
+  echo
+  echo "- Config: \`${CONFIG}\`"
+  echo "- Comparison TSV: \`${OUT}\`"
+  echo "- Summary TSV: \`${SUMMARY_OUT}\`"
+  echo "- Table: \`${TABLE_OUT}\`"
+  echo "- Decision JSON: \`${DECISION_JSON}\`"
+} > "$SUMMARY_MD"
+
+jq -n \
+  --arg baseline "$BASELINE_SUMMARY" \
+  --arg current "$CURRENT_SUMMARY" \
+  --arg baselineLabel "$BASELINE_LABEL" \
+  --arg currentLabel "$CURRENT_LABEL" \
+  --arg requestedCase "$CASE_NAME" \
+  --arg summaryDir "$SUMMARY_DIR" \
+  --arg comparisonPath "$OUT" \
+  --arg summaryPath "$SUMMARY_OUT" \
+  --arg tablePath "$TABLE_OUT" \
+  --arg markdownPath "$SUMMARY_MD" \
+  --arg decisionPath "$DECISION_JSON" \
+  --arg configPath "$CONFIG" \
+  --arg reportPath "$REPORT" \
+  --arg baselineRunsPath "$BASELINE_TSV" \
+  --arg currentRunsPath "$CURRENT_TSV" \
+  --arg maxRegressionPercent "$MAX_REGRESSION_PERCENT" \
+  --arg maxRegressionMs "$MAX_REGRESSION_MS" \
+  --arg minBaselineValue "$MIN_BASELINE_VALUE" \
+  --arg gateMetrics "$GATE_METRICS" \
+  --rawfile config "$CONFIG" \
+  --rawfile summary "$SUMMARY_OUT" \
+  --rawfile comparison "$OUT" '
+    def rows($raw):
+      ($raw | split("\n") | map(select(length > 0) | split("\t"))) as $lines
+      | if ($lines | length) == 0 then
+          []
+        else
+          ($lines[0]) as $header
+          | $lines[1:] | map(. as $row | reduce range(0; $header | length) as $index ({}; . + {($header[$index]): ($row[$index] // "")}))
+        end;
+    def kv($raw):
+      reduce rows($raw)[] as $row ({}; . + {($row.key): $row.value});
+    def n:
+      if . == null or . == "" then 0 else tonumber end;
+    def maybe_n:
+      if . == null or . == "" then null
+      elif test("^-?[0-9]+([.][0-9]+)?$") then tonumber
+      else .
+      end;
+    def maybe_s:
+      if . == null or . == "" then null else . end;
+    def gate_metric_list($value):
+      if $value == "" then ["default-latency"]
+      elif $value == "all" then ["all"]
+      else ($value | split(","))
+      end;
+    def action($status; $recommendation):
+      if $status == "fail" or $recommendation == "reject-current" then "reject"
+      elif $recommendation == "promote-current" then "promote"
+      elif $recommendation == "promote-current-with-watchlist" then "promote-with-watchlist"
+      elif $recommendation == "hold-current" then "hold"
+      else "collect-more-samples"
+      end;
+
+    kv($config) as $cfg
+    | kv($summary) as $sum
+    | (rows($comparison)) as $metricRows
+    | ($sum.status // "") as $status
+    | ($sum.recommendation // "") as $recommendation
+    | {
+        schemaVersion: 1,
+        generatedAt: ($cfg.generatedAt // ""),
+        inputs: {
+          baseline: $baseline,
+          current: $current,
+          baselineLabel: $baselineLabel,
+          currentLabel: $currentLabel,
+          requestedCase: ($requestedCase | maybe_s)
+        },
+        gates: {
+          configured: (($maxRegressionPercent != "") or ($maxRegressionMs != "")),
+          maxRegressionPercent: ($maxRegressionPercent | maybe_n),
+          maxRegressionMs: ($maxRegressionMs | maybe_n),
+          minBaselineValue: ($minBaselineValue | maybe_n),
+          metrics: gate_metric_list($gateMetrics)
+        },
+        summary: {
+          status: $status,
+          reason: (($sum.reason // "") | maybe_s),
+          recommendation: $recommendation,
+          labels: {
+            baseline: ($sum.baselineLabel // $baselineLabel),
+            current: ($sum.currentLabel // $currentLabel)
+          },
+          case: (($sum.case // "") | maybe_s),
+          counts: {
+            comparedCases: (($sum.comparedCases // "0") | n),
+            skippedCases: (($sum.skippedCases // "0") | n),
+            comparedMetrics: (($sum.comparedMetrics // "0") | n),
+            betterMetrics: (($sum.betterMetrics // "0") | n),
+            worseMetrics: (($sum.worseMetrics // "0") | n),
+            sameMetrics: (($sum.sameMetrics // "0") | n),
+            skippedMetrics: (($sum.skippedMetrics // "0") | n),
+            gatedMetrics: (($sum.gatedMetrics // "0") | n),
+            failedMetrics: (($sum.failedMetrics // "0") | n)
+          },
+          largestImprovement: {
+            case: (($sum.largestImprovementCase // "") | maybe_s),
+            metric: (($sum.largestImprovementMetric // "") | maybe_s),
+            delta: (($sum.largestImprovementDelta // "") | maybe_n),
+            percent: (($sum.largestImprovementPercent // "") | maybe_n)
+          },
+          largestRegression: {
+            case: (($sum.largestRegressionCase // "") | maybe_s),
+            metric: (($sum.largestRegressionMetric // "") | maybe_s),
+            delta: (($sum.largestRegressionDelta // "") | maybe_n),
+            percent: (($sum.largestRegressionPercent // "") | maybe_n)
+          },
+          ffnStrategyTransition: {
+            baseline: (($sum.baselineFfnStrategy // "") | maybe_s),
+            current: (($sum.currentFfnStrategy // "") | maybe_s)
+          },
+          rowPrefillTransition: {
+            baseline: (($sum.baselineRowPrefill // "") | maybe_s),
+            current: (($sum.currentRowPrefill // "") | maybe_s)
+          }
+        },
+        policy: {
+          canPromote: ($status == "pass" and ($recommendation == "promote-current" or $recommendation == "promote-current-with-watchlist")),
+          action: action($status; $recommendation)
+        },
+        metrics: ($metricRows | map({
+          case: .case,
+          metric,
+          baseline: (.baseline | maybe_n),
+          current: (.current | maybe_n),
+          delta: (.delta | maybe_n),
+          deltaPercent: (.deltaPercent | maybe_n),
+          direction,
+          trend,
+          baselineFfnStrategy: (.baselineFfnStrategy | maybe_s),
+          currentFfnStrategy: (.currentFfnStrategy | maybe_s),
+          baselineRowPrefill: (.baselineRowPrefill | maybe_s),
+          currentRowPrefill: (.currentRowPrefill | maybe_s),
+          gateStatus,
+          gateReason: (.gateReason | maybe_s)
+        })),
+        artifacts: {
+          summaryDir: $summaryDir,
+          config: $configPath,
+          comparison: $comparisonPath,
+          summary: $summaryPath,
+          table: $tablePath,
+          markdown: $markdownPath,
+          decision: $decisionPath,
+          report: $reportPath,
+          baselineRuns: $baselineRunsPath,
+          currentRuns: $currentRunsPath
+        }
+      }
+  ' > "$DECISION_JSON"
+
+{
   echo "Gollek safetensor benchmark comparison"
   echo "summaryDir=$SUMMARY_DIR"
   echo "artifacts.config=$CONFIG"
   echo "artifacts.comparison=$OUT"
   echo "artifacts.summary=$SUMMARY_OUT"
   echo "artifacts.table=$TABLE_OUT"
+  echo "artifacts.markdown=$SUMMARY_MD"
+  echo "artifacts.decision=$DECISION_JSON"
   echo "status=$STATUS"
   echo "reason=$REASON"
   echo "recommendation=$RECOMMENDATION"

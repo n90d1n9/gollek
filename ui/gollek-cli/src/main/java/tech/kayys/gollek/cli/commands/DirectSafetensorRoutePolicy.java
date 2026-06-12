@@ -5,6 +5,8 @@
  */
 package tech.kayys.gollek.cli.commands;
 
+import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelFamilyQuantizedLoaderProfile;
 
 import java.nio.charset.StandardCharsets;
@@ -12,9 +14,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -86,13 +90,22 @@ final class DirectSafetensorRoutePolicy {
         }
     }
 
-    record RouteValidation(boolean allowed, List<String> messages) {
+    record RouteValidation(boolean allowed, List<String> messages, Map<String, Object> details) {
+        RouteValidation {
+            messages = messages == null ? List.of() : List.copyOf(messages);
+            details = details == null ? Map.of() : Map.copyOf(details);
+        }
+
         static RouteValidation pass() {
-            return new RouteValidation(true, List.of());
+            return new RouteValidation(true, List.of(), Map.of());
         }
 
         static RouteValidation invalid(List<String> messages) {
-            return new RouteValidation(false, List.copyOf(messages));
+            return invalid(messages, Map.of());
+        }
+
+        static RouteValidation invalid(List<String> messages, Map<String, Object> details) {
+            return new RouteValidation(false, messages, details);
         }
     }
 
@@ -524,16 +537,22 @@ final class DirectSafetensorRoutePolicy {
                 return RouteValidation.pass();
             }
             DirectSafetensorRunProfile profile = DirectSafetensorRunProfile.load(modelDir.get());
-            if (isGemma4MobileQat(modelDir.get())) {
-                return validateGemma4MobileQatExecutionRoute(requestedModelId, modelDir.get());
+            Gemma4SafetensorExecutionProfile executionProfile =
+                    Gemma4SafetensorExecutionProfile.from(profile, isGemma4MobileQat(modelDir.get()));
+            if (executionProfile.mobileQatCheckpoint()) {
+                return validateGemma4MobileQatExecutionRoute(requestedModelId, modelDir.get(), executionProfile);
             }
-            if (!isGemma4Unified(profile)) {
-                return validateGemma4MobileQatExecutionRoute(requestedModelId, modelDir.get());
+            if (!executionProfile.gemma4Unified()) {
+                return RouteValidation.pass();
             }
-            if (requiresGemma4PackedMoeRuntime(profile)) {
-                return validateGemma4PackedMoeExecutionRoute(requestedModelId, modelDir.get());
+            if (executionProfile.packedMoeCheckpoint()) {
+                return validateGemma4PackedMoeExecutionRoute(
+                        requestedModelId,
+                        modelDir.get(),
+                        profile.config(),
+                        executionProfile);
             }
-            if (profile.gemma4Text()) {
+            if (executionProfile.guardedTextDecoderReady()) {
                 Gemma4UnifiedSafetensorPreflight.Result preflight =
                         Gemma4UnifiedSafetensorPreflight.validate(
                                 modelDir.get(),
@@ -542,7 +561,9 @@ final class DirectSafetensorRoutePolicy {
                                         ? requestedModelId
                                         : modelDir.get().getFileName().toString());
                 if (!preflight.allowed()) {
-                    return RouteValidation.invalid(preflight.messages());
+                    return RouteValidation.invalid(
+                            preflight.messages(),
+                            mergeDetails(executionProfile.diagnosticDetails(), preflight.diagnosticDetails()));
                 }
                 return RouteValidation.pass();
             }
@@ -553,7 +574,8 @@ final class DirectSafetensorRoutePolicy {
                     "Error: Gemma 4 unified safetensor runtime is not enabled in this build.",
                     "Checkpoint " + modelLabel
                             + " is recognized as gemma4_unified, but the local direct safetensor path only covers the guarded dense Gemma 4 text adapter.",
-                    "Use a runtime plugin with Gemma 4 unified multimodal embedder support, convert to a supported artifact, or detach Gemma 4 unified from production direct bundles."));
+                    "Use a runtime plugin with Gemma 4 unified multimodal embedder support, convert to a supported artifact, or detach Gemma 4 unified from production direct bundles."),
+                    executionProfile.diagnosticDetails());
         } catch (Exception ignored) {
             return RouteValidation.pass();
         }
@@ -574,51 +596,83 @@ final class DirectSafetensorRoutePolicy {
                 return RouteValidation.pass();
             }
             DirectSafetensorRunProfile profile = DirectSafetensorRunProfile.load(modelDir.get());
-            if (isGemma4MobileQat(modelDir.get())) {
-                return validateGemma4MobileQatExecutionRoute(requestedModelId, modelDir.get());
+            Gemma4SafetensorExecutionProfile executionProfile =
+                    Gemma4SafetensorExecutionProfile.from(profile, isGemma4MobileQat(modelDir.get()));
+            if (executionProfile.mobileQatCheckpoint()) {
+                return validateGemma4MobileQatExecutionRoute(requestedModelId, modelDir.get(), executionProfile);
             }
-            if (!isGemma4Unified(profile)) {
+            if (!executionProfile.gemma4Unified()) {
                 return RouteValidation.pass();
             }
-            if (requiresGemma4PackedMoeRuntime(profile)) {
-                return validateGemma4PackedMoeExecutionRoute(requestedModelId, modelDir.get());
+            if (executionProfile.packedMoeCheckpoint()) {
+                return validateGemma4PackedMoeExecutionRoute(
+                        requestedModelId,
+                        modelDir.get(),
+                        profile.config(),
+                        executionProfile);
             }
             String modelLabel = hasText(requestedModelId)
                     ? requestedModelId
                     : modelDir.get().getFileName().toString();
             String requestMode = ocrMode ? "--ocr" : "--image";
-            Gemma4UnifiedSafetensorPreflight.ProjectorSummary projectors =
+            Gemma4UnifiedSafetensorPreflight.Inspection inspection =
                     Gemma4UnifiedSafetensorPreflight.inspect(
                             modelDir.get(),
                             profile.config(),
-                            modelLabel)
-                            .projectors();
+                            modelLabel);
+            Gemma4UnifiedSafetensorPreflight.ProjectorSummary projectors = inspection.projectors();
             return RouteValidation.invalid(List.of(
                     "Error: Gemma 4 unified multimodal safetensor runtime is not enabled in this build.",
                     "Checkpoint " + modelLabel
                             + " is a gemma4_unified checkpoint and the request includes " + requestMode
                             + " input, but the local direct safetensor path only runs the guarded dense text decoder.",
                     "Header preflight: " + projectors.display() + "; no 12B weight payload was loaded.",
-                    "Implement or enable the Gemma 4 vision/audio/video embedder and projector path before routing multimodal requests to the safetensor runner."));
+                    "Implement or enable the Gemma 4 vision/audio/video embedder and projector path before routing multimodal requests to the safetensor runner."),
+                    mergeDetails(executionProfile.diagnosticDetails(), Map.of(
+                            ProblemDetail.HEADER_PREFLIGHT, projectors.display(),
+                            ProblemDetail.HEADER_INSPECTION, inspection.header().diagnosticDetails(),
+                            ProblemDetail.TENSOR_INVENTORY, inspection.inventory().diagnosticDetails(),
+                            ProblemDetail.COMPONENT_READINESS, inspection.readiness().diagnosticDetails(),
+                            ProblemDetail.DETECTED_PROJECTORS, projectors.detectedProjectors(),
+                            ProblemDetail.DETECTED_PACKED_MOE, projectors.detectedPackedMoe())));
         } catch (Exception ignored) {
             return RouteValidation.pass();
         }
     }
 
-    private static RouteValidation validateGemma4PackedMoeExecutionRoute(String requestedModelId, Path modelDir) {
+    private static RouteValidation validateGemma4PackedMoeExecutionRoute(
+            String requestedModelId,
+            Path modelDir,
+            ModelConfig config,
+            Gemma4SafetensorExecutionProfile executionProfile) {
         String modelLabel = hasText(requestedModelId)
                 ? requestedModelId
                 : modelDir.getFileName().toString();
+        Map<String, Object> details = new LinkedHashMap<>(executionProfile.diagnosticDetails());
+        Gemma4UnifiedSafetensorPreflight.Inspection inspection =
+                Gemma4UnifiedSafetensorPreflight.inspect(modelDir, config, modelLabel);
+        details = mergeDetails(details, Map.of(
+                ProblemDetail.HEADER_PREFLIGHT, inspection.projectors().display(),
+                ProblemDetail.HEADER_INSPECTION, inspection.header().diagnosticDetails(),
+                ProblemDetail.TENSOR_INVENTORY, inspection.inventory().diagnosticDetails(),
+                ProblemDetail.COMPONENT_READINESS, inspection.readiness().diagnosticDetails(),
+                ProblemDetail.DETECTED_PROJECTORS, inspection.projectors().detectedProjectors(),
+                ProblemDetail.DETECTED_PACKED_MOE, inspection.projectors().detectedPackedMoe()));
         return RouteValidation.invalid(List.of(
                 "Error: Gemma 4 packed MoE safetensor runtime is not enabled in this build.",
                 "Checkpoint " + modelLabel
                         + " declares Gemma 4 packed expert routing, but the local direct safetensor path only covers the guarded dense Gemma 4 text adapter.",
-                "Use a runtime plugin with Gemma 4 packed-expert routing support, convert to a supported artifact, or keep packed MoE checkpoints out of direct safetensor production bundles."));
+                "Header preflight: " + inspection.projectors().display() + "; no 12B weight payload was loaded.",
+                "Use a runtime plugin with Gemma 4 packed-expert routing support, convert to a supported artifact, or keep packed MoE checkpoints out of direct safetensor production bundles."),
+                details);
     }
 
-    private static RouteValidation validateGemma4MobileQatExecutionRoute(String requestedModelId, Path modelDir) {
+    private static RouteValidation validateGemma4MobileQatExecutionRoute(
+            String requestedModelId,
+            Path modelDir,
+            Gemma4SafetensorExecutionProfile executionProfile) {
         try {
-            if (!isGemma4MobileQat(modelDir)) {
+            if (executionProfile == null || !executionProfile.mobileQatCheckpoint()) {
                 return RouteValidation.pass();
             }
             String modelLabel = hasText(requestedModelId)
@@ -628,7 +682,8 @@ final class DirectSafetensorRoutePolicy {
                     "Error: Gemma 4 mobile QAT safetensor runtime is not enabled in this build.",
                     "Checkpoint " + modelLabel
                             + " uses Google Gemma quantization with mobile audio/vision/text towers, but the local direct safetensor path does not have the mobile QAT loader yet.",
-                    "Use a LiteRT-LM/mobile runtime artifact, a supported quantized runner, or install a build with Gemma 4 mobile QAT loader support."));
+                    "Use a LiteRT-LM/mobile runtime artifact, a supported quantized runner, or install a build with Gemma 4 mobile QAT loader support."),
+                    executionProfile.diagnosticDetails());
         } catch (Exception ignored) {
             return RouteValidation.pass();
         }
@@ -1410,10 +1465,17 @@ final class DirectSafetensorRoutePolicy {
         return profile != null && profile.gemma4Unified();
     }
 
-    private static boolean requiresGemma4PackedMoeRuntime(DirectSafetensorRunProfile profile) {
-        return profile != null
-                && profile.config() != null
-                && profile.config().requiresGemma4PackedMoeRuntime();
+    private static Map<String, Object> mergeDetails(
+            Map<String, Object> base,
+            Map<String, Object> additions) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (base != null) {
+            merged.putAll(base);
+        }
+        if (additions != null) {
+            merged.putAll(additions);
+        }
+        return Map.copyOf(merged);
     }
 
     private static Optional<Path> findPreferredAlternateArtifact(Path dir, String requestedModelId, String... suffixes) {

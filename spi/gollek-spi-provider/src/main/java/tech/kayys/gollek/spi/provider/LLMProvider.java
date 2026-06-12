@@ -84,6 +84,13 @@ public interface LLMProvider {
     }
 
     /**
+     * Verify proposed tokens for speculative decoding.
+     */
+    default Uni<tech.kayys.gollek.spi.inference.VerificationResponse> verifyTokens(tech.kayys.gollek.spi.inference.VerificationRequest request) {
+        return Uni.createFrom().failure(new ProviderException("Speculative decoding not supported by this provider"));
+    }
+
+    /**
      * Check if provider is available
      */
     default Uni<Boolean> isAvailable() {

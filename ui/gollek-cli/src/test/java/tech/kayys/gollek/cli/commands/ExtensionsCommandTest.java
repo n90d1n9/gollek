@@ -309,6 +309,30 @@ class ExtensionsCommandTest {
                 routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.ACTION_FIELDS),
                 RoutePreflightDiagnosticFields.Action.ARGV));
         assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.PROBLEM_DETAIL_FIELDS),
+                RoutePreflightDiagnosticFields.ProblemDetail.READY_RUNTIME_CAPABILITIES));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.PROBLEM_DETAIL_FIELDS),
+                RoutePreflightDiagnosticFields.ProblemDetail.HEADER_INSPECTION));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.EXECUTION_PROFILE_FIELDS),
+                RoutePreflightDiagnosticFields.ExecutionProfile.GUARDED_TEXT_DECODER_READY));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.HEADER_INSPECTION_FIELDS),
+                RoutePreflightDiagnosticFields.HeaderInspection.PAYLOAD_BYTES_LOADED));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.TENSOR_INVENTORY_FIELDS),
+                RoutePreflightDiagnosticFields.TensorInventory.PACKED_MOE_EXPERT_TENSORS));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.COMPONENT_READINESS_FIELDS),
+                RoutePreflightDiagnosticFields.ComponentReadiness.TEXT_DECODER_READY));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.INPUT_MODES),
+                RoutePreflightDiagnosticFields.InputMode.TEXT));
+        assertTrue(containsTextValue(
+                routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.RUNTIME_CAPABILITIES),
+                RoutePreflightDiagnosticFields.RuntimeCapability.GEMMA4_GUARDED_TEXT_DECODER));
+        assertTrue(containsTextValue(
                 routePreflightDiagnosticSchema.path(RoutePreflightDiagnosticFields.Schema.VALIDATION_FIELDS),
                 RoutePreflightDiagnosticFields.Validation.PASSED));
         assertTrue(containsTextValue(

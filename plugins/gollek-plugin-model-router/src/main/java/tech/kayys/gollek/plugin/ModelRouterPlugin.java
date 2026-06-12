@@ -1,10 +1,10 @@
 package tech.kayys.gollek.plugin;
 
-import tech.kayys.gollek.spi.plugin.InferencePhasePlugin;
+import tech.kayys.gollek.spi.inference.InferencePhasePlugin;
 import tech.kayys.gollek.spi.plugin.PluginContext;
 import tech.kayys.gollek.spi.exception.PluginException;
 import tech.kayys.gollek.spi.plugin.PhasePluginException;
-import tech.kayys.gollek.spi.plugin.InferencePhase;
+import tech.kayys.gollek.spi.inference.InferencePhase;
 import tech.kayys.gollek.spi.context.EngineContext;
 import tech.kayys.gollek.spi.execution.ExecutionContext;
 

@@ -46,9 +46,11 @@ BASELINE_JSON="$OUT_DIR/runs/gemma4-12b-fused/summary.json"
 CURRENT_JSON="$OUT_DIR/runs/gemma4-12b-row-prefill/summary.json"
 COMPARE_SUMMARY="$OUT_DIR/compare/summary.tsv"
 COMPARE_TSV="$OUT_DIR/compare/comparison.tsv"
+COMPARE_MD="$OUT_DIR/compare/summary.md"
+COMPARE_DECISION="$OUT_DIR/compare/decision.json"
 REPORT="$OUT_DIR/report.txt"
 
-if [[ ! -f "$BASELINE_JSON" || ! -f "$CURRENT_JSON" || ! -f "$COMPARE_SUMMARY" || ! -f "$COMPARE_TSV" || ! -f "$REPORT" ]]; then
+if [[ ! -f "$BASELINE_JSON" || ! -f "$CURRENT_JSON" || ! -f "$COMPARE_SUMMARY" || ! -f "$COMPARE_TSV" || ! -f "$COMPARE_MD" || ! -f "$COMPARE_DECISION" || ! -f "$REPORT" ]]; then
   echo "Expected Gemma4 row-prefill A/B artifacts" >&2
   find "$OUT_DIR" -maxdepth 3 -type f -print >&2 || true
   exit 1
@@ -94,8 +96,31 @@ if ! grep -qx $'status\tpass' "$COMPARE_SUMMARY" \
   exit 1
 fi
 
+if ! jq -e '
+  .summary.status == "pass"
+  and .summary.recommendation == "promote-current-with-watchlist"
+  and .summary.counts.gatedMetrics == 2
+  and .policy.canPromote == true
+  and .policy.action == "promote-with-watchlist"
+  and any(.metrics[]; .metric == "ttftMs" and .gateStatus == "pass")
+  and any(.metrics[]; .metric == "ffnMs" and .deltaPercent == -33.333)
+' "$COMPARE_DECISION" >/dev/null; then
+  echo "Expected A/B comparison decision JSON to preserve pass decision" >&2
+  cat "$COMPARE_DECISION" >&2
+  exit 1
+fi
+
+if ! grep -Fqx '| Status | pass |' "$COMPARE_MD" \
+    || ! grep -Fqx '| `metal-deterministic` | `ffnMs` | 60.000 | 40.000 | -20.000 | -33.333 | `better` | `pass` | n/a |' "$COMPARE_MD"; then
+  echo "Expected A/B comparison Markdown summary to preserve pass decision" >&2
+  cat "$COMPARE_MD" >&2
+  exit 1
+fi
+
 if ! grep -Fqx "artifacts.baselineSummary=$BASELINE_JSON" "$TMP_DIR/ab.out" \
     || ! grep -Fqx "artifacts.currentSummary=$CURRENT_JSON" "$TMP_DIR/ab.out" \
+    || ! grep -Fqx "artifacts.compareMarkdown=$COMPARE_MD" "$TMP_DIR/ab.out" \
+    || ! grep -Fqx "artifacts.compareDecision=$COMPARE_DECISION" "$TMP_DIR/ab.out" \
     || ! grep -Fqx 'status=pass' "$TMP_DIR/ab.out" \
     || ! grep -Fqx 'recommendation=promote-current-with-watchlist' "$TMP_DIR/ab.out" \
     || ! grep -Fqx 'gatedMetrics=2' "$TMP_DIR/ab.out" \
@@ -127,6 +152,7 @@ if ! grep -qx $'status\tfail' "$FAIL_OUT_DIR/compare/summary.tsv" \
     || ! grep -qx $'recommendation\treject-current' "$FAIL_OUT_DIR/compare/summary.tsv" \
     || ! grep -qx $'failedMetrics\t1' "$FAIL_OUT_DIR/compare/summary.tsv" \
     || ! grep -qx $'metal-deterministic\tdecodeMs\t50.000\t52.000\t2.000\t4.000\tlower\tworse\tfused_geglu_prefill_over_row_prefill\trow_prefill_matvec_active\tn/a/n/a\t12/x4\tfail\tdeltaMs=2.000 exceeded 1' "$FAIL_OUT_DIR/compare/comparison.tsv" \
+    || ! jq -e '.summary.status == "fail" and .policy.action == "reject" and any(.metrics[]; .metric == "decodeMs" and .gateStatus == "fail")' "$FAIL_OUT_DIR/compare/decision.json" >/dev/null \
     || ! grep -Fqx 'status=fail' "$TMP_DIR/ab-fail.out" \
     || ! grep -Fqx 'recommendation=reject-current' "$TMP_DIR/ab-fail.out" \
     || ! grep -Fqx 'failedMetrics=1' "$TMP_DIR/ab-fail.out"; then

@@ -16,7 +16,7 @@ import java.util.List;
  */
 public final class RoutePreflightDiagnosticFields {
     public static final String CONTRACT_ID = "gollek.route-preflight.diagnostics";
-    public static final int SCHEMA_VERSION = 7;
+    public static final int SCHEMA_VERSION = 16;
     public static final String VALIDATION_ROOT = "route_preflight_diagnostics_validation";
 
     private RoutePreflightDiagnosticFields() {
@@ -30,6 +30,12 @@ public final class RoutePreflightDiagnosticFields {
         public static final String PROBLEM_FIELDS = "problemFields";
         public static final String REQUIRED_PROBLEM_FIELDS = "requiredProblemFields";
         public static final String PROBLEM_DETAIL_FIELDS = "problemDetailFields";
+        public static final String EXECUTION_PROFILE_FIELDS = "executionProfileFields";
+        public static final String HEADER_INSPECTION_FIELDS = "headerInspectionFields";
+        public static final String TENSOR_INVENTORY_FIELDS = "tensorInventoryFields";
+        public static final String COMPONENT_READINESS_FIELDS = "componentReadinessFields";
+        public static final String INPUT_MODES = "inputModes";
+        public static final String RUNTIME_CAPABILITIES = "runtimeCapabilities";
         public static final String MISSING_RUNTIME_CAPABILITIES = "missingRuntimeCapabilities";
         public static final String ACTION_FIELDS = "actionFields";
         public static final String REQUIRED_ACTION_FIELDS = "requiredActionFields";
@@ -74,8 +80,100 @@ public final class RoutePreflightDiagnosticFields {
         public static final String CHECKPOINT_PROFILE = "checkpointProfile";
         public static final String REQUEST_INPUT_MODE = "requestInputMode";
         public static final String MISSING_RUNTIME_CAPABILITY = "missingRuntimeCapability";
+        public static final String BLOCKED_CAPABILITY = "blockedCapability";
+        public static final String RECOMMENDED_RUNTIME = "recommendedRuntime";
+        public static final String HEADER_PREFLIGHT = "headerPreflight";
+        public static final String HEADER_INSPECTION = "headerInspection";
+        public static final String TENSOR_INVENTORY = "tensorInventory";
+        public static final String COMPONENT_READINESS = "componentReadiness";
+        public static final String DETECTED_PROJECTORS = "detectedProjectors";
+        public static final String DETECTED_PACKED_MOE = "detectedPackedMoe";
+        public static final String EXECUTION_PROFILE = "executionProfile";
+        public static final String SUPPORTED_INPUT_MODES = "supportedInputModes";
+        public static final String BLOCKED_INPUT_MODES = "blockedInputModes";
+        public static final String BLOCKED_CAPABILITIES = "blockedCapabilities";
+        public static final String READY_RUNTIME_CAPABILITIES = "readyRuntimeCapabilities";
+        public static final String MISSING_RUNTIME_CAPABILITIES = "missingRuntimeCapabilities";
 
         private ProblemDetail() {
+        }
+    }
+
+    /**
+     * Stable fields inside the header-only SafeTensors inspection detail object.
+     */
+    public static final class HeaderInspection {
+        public static final String SAFETENSOR_FILE_COUNT = "safetensorFileCount";
+        public static final String TENSOR_COUNT = "tensorCount";
+        public static final String HEADER_BYTES_READ = "headerBytesRead";
+        public static final String PAYLOAD_BYTES_LOADED = "payloadBytesLoaded";
+
+        private HeaderInspection() {
+        }
+    }
+
+    /**
+     * Stable fields inside the Gemma 4 SafeTensor tensor-inventory summary.
+     */
+    public static final class TensorInventory {
+        public static final String TEXT_DECODER_TENSORS = "textDecoderTensors";
+        public static final String EMBEDDING_TENSORS = "embeddingTensors";
+        public static final String LOGITS_HEAD_TENSORS = "logitsHeadTensors";
+        public static final String MULTIMODAL_PROJECTOR_TENSORS = "multimodalProjectorTensors";
+        public static final String VISION_TOWER_TENSORS = "visionTowerTensors";
+        public static final String AUDIO_TOWER_TENSORS = "audioTowerTensors";
+        public static final String VIDEO_TOWER_TENSORS = "videoTowerTensors";
+        public static final String PACKED_MOE_ROUTER_TENSORS = "packedMoeRouterTensors";
+        public static final String PACKED_MOE_EXPERT_TENSORS = "packedMoeExpertTensors";
+        public static final String UNCLASSIFIED_TENSORS = "unclassifiedTensors";
+
+        private TensorInventory() {
+        }
+    }
+
+    /**
+     * Stable fields inside the Gemma 4 header-only component readiness summary.
+     */
+    public static final class ComponentReadiness {
+        public static final String TEXT_DECODER_READY = "textDecoderReady";
+        public static final String VISION_PROJECTOR_READY = "visionProjectorReady";
+        public static final String AUDIO_PROJECTOR_READY = "audioProjectorReady";
+        public static final String VIDEO_PROJECTOR_READY = "videoProjectorReady";
+        public static final String MULTIMODAL_PROJECTOR_READY = "multimodalProjectorReady";
+        public static final String PACKED_MOE_ROUTER_READY = "packedMoeRouterReady";
+        public static final String PACKED_MOE_EXPERTS_READY = "packedMoeExpertsReady";
+        public static final String PACKED_MOE_HEADER_READY = "packedMoeHeaderReady";
+
+        private ComponentReadiness() {
+        }
+    }
+
+    /**
+     * Stable fields inside the Gemma 4 direct SafeTensor execution-profile object.
+     */
+    public static final class ExecutionProfile {
+        public static final String GEMMA4_UNIFIED = "gemma4Unified";
+        public static final String GUARDED_TEXT_DECODER_READY = "guardedTextDecoderReady";
+        public static final String MULTIMODAL_EMBEDDER_READY = "multimodalEmbedderReady";
+        public static final String PACKED_MOE_ROUTER_READY = "packedMoeRouterReady";
+        public static final String MOBILE_QAT_LOADER_READY = "mobileQatLoaderReady";
+        public static final String PACKED_MOE_CHECKPOINT = "packedMoeCheckpoint";
+        public static final String MOBILE_QAT_CHECKPOINT = "mobileQatCheckpoint";
+
+        private ExecutionProfile() {
+        }
+    }
+
+    /**
+     * Stable input-mode identifiers used by route support matrices.
+     */
+    public static final class InputMode {
+        public static final String TEXT = "text";
+        public static final String IMAGE = "image";
+        public static final String AUDIO = "audio";
+        public static final String VIDEO = "video";
+
+        private InputMode() {
         }
     }
 
@@ -89,6 +187,16 @@ public final class RoutePreflightDiagnosticFields {
         public static final String GEMMA4_MOBILE_QAT_LOADER = "gemma4_mobile_qat_loader";
 
         private MissingRuntimeCapability() {
+        }
+    }
+
+    /**
+     * Stable identifiers for concrete runtime capabilities exposed by direct runners.
+     */
+    public static final class RuntimeCapability {
+        public static final String GEMMA4_GUARDED_TEXT_DECODER = "gemma4_guarded_text_decoder";
+
+        private RuntimeCapability() {
         }
     }
 
@@ -140,7 +248,74 @@ public final class RoutePreflightDiagnosticFields {
                 ProblemDetail.RUNTIME_ROUTE,
                 ProblemDetail.CHECKPOINT_PROFILE,
                 ProblemDetail.REQUEST_INPUT_MODE,
-                ProblemDetail.MISSING_RUNTIME_CAPABILITY);
+                ProblemDetail.MISSING_RUNTIME_CAPABILITY,
+                ProblemDetail.BLOCKED_CAPABILITY,
+                ProblemDetail.RECOMMENDED_RUNTIME,
+                ProblemDetail.HEADER_PREFLIGHT,
+                ProblemDetail.HEADER_INSPECTION,
+                ProblemDetail.TENSOR_INVENTORY,
+                ProblemDetail.COMPONENT_READINESS,
+                ProblemDetail.DETECTED_PROJECTORS,
+                ProblemDetail.DETECTED_PACKED_MOE,
+                ProblemDetail.EXECUTION_PROFILE,
+                ProblemDetail.SUPPORTED_INPUT_MODES,
+                ProblemDetail.BLOCKED_INPUT_MODES,
+                ProblemDetail.BLOCKED_CAPABILITIES,
+                ProblemDetail.READY_RUNTIME_CAPABILITIES,
+                ProblemDetail.MISSING_RUNTIME_CAPABILITIES);
+    }
+
+    public static List<String> headerInspectionFields() {
+        return List.of(
+                HeaderInspection.SAFETENSOR_FILE_COUNT,
+                HeaderInspection.TENSOR_COUNT,
+                HeaderInspection.HEADER_BYTES_READ,
+                HeaderInspection.PAYLOAD_BYTES_LOADED);
+    }
+
+    public static List<String> tensorInventoryFields() {
+        return List.of(
+                TensorInventory.TEXT_DECODER_TENSORS,
+                TensorInventory.EMBEDDING_TENSORS,
+                TensorInventory.LOGITS_HEAD_TENSORS,
+                TensorInventory.MULTIMODAL_PROJECTOR_TENSORS,
+                TensorInventory.VISION_TOWER_TENSORS,
+                TensorInventory.AUDIO_TOWER_TENSORS,
+                TensorInventory.VIDEO_TOWER_TENSORS,
+                TensorInventory.PACKED_MOE_ROUTER_TENSORS,
+                TensorInventory.PACKED_MOE_EXPERT_TENSORS,
+                TensorInventory.UNCLASSIFIED_TENSORS);
+    }
+
+    public static List<String> componentReadinessFields() {
+        return List.of(
+                ComponentReadiness.TEXT_DECODER_READY,
+                ComponentReadiness.VISION_PROJECTOR_READY,
+                ComponentReadiness.AUDIO_PROJECTOR_READY,
+                ComponentReadiness.VIDEO_PROJECTOR_READY,
+                ComponentReadiness.MULTIMODAL_PROJECTOR_READY,
+                ComponentReadiness.PACKED_MOE_ROUTER_READY,
+                ComponentReadiness.PACKED_MOE_EXPERTS_READY,
+                ComponentReadiness.PACKED_MOE_HEADER_READY);
+    }
+
+    public static List<String> executionProfileFields() {
+        return List.of(
+                ExecutionProfile.GEMMA4_UNIFIED,
+                ExecutionProfile.GUARDED_TEXT_DECODER_READY,
+                ExecutionProfile.MULTIMODAL_EMBEDDER_READY,
+                ExecutionProfile.PACKED_MOE_ROUTER_READY,
+                ExecutionProfile.MOBILE_QAT_LOADER_READY,
+                ExecutionProfile.PACKED_MOE_CHECKPOINT,
+                ExecutionProfile.MOBILE_QAT_CHECKPOINT);
+    }
+
+    public static List<String> inputModes() {
+        return List.of(
+                InputMode.TEXT,
+                InputMode.IMAGE,
+                InputMode.AUDIO,
+                InputMode.VIDEO);
     }
 
     public static List<String> missingRuntimeCapabilities() {
@@ -149,6 +324,10 @@ public final class RoutePreflightDiagnosticFields {
                 MissingRuntimeCapability.GEMMA4_UNIFIED_MULTIMODAL_EMBEDDER,
                 MissingRuntimeCapability.GEMMA4_PACKED_MOE_ROUTER,
                 MissingRuntimeCapability.GEMMA4_MOBILE_QAT_LOADER);
+    }
+
+    public static List<String> runtimeCapabilities() {
+        return List.of(RuntimeCapability.GEMMA4_GUARDED_TEXT_DECODER);
     }
 
     public static List<String> actionFields() {
@@ -201,6 +380,12 @@ public final class RoutePreflightDiagnosticFields {
                 "problemFields=" + String.join(",", problemFields()),
                 "requiredProblemFields=" + String.join(",", requiredProblemFields()),
                 "problemDetailFields=" + String.join(",", problemDetailFields()),
+                "executionProfileFields=" + String.join(",", executionProfileFields()),
+                "headerInspectionFields=" + String.join(",", headerInspectionFields()),
+                "tensorInventoryFields=" + String.join(",", tensorInventoryFields()),
+                "componentReadinessFields=" + String.join(",", componentReadinessFields()),
+                "inputModes=" + String.join(",", inputModes()),
+                "runtimeCapabilities=" + String.join(",", runtimeCapabilities()),
                 "missingRuntimeCapabilities=" + String.join(",", missingRuntimeCapabilities()),
                 "actionFields=" + String.join(",", actionFields()),
                 "requiredActionFields=" + String.join(",", requiredActionFields()),
