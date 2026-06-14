@@ -76,6 +76,11 @@ append_java_tool_option() {
 append_java_tool_option "--enable-native-access=ALL-UNNAMED"
 append_java_tool_option "--add-modules=jdk.incubator.vector"
 export JAVA_TOOL_OPTIONS
+# Force CPU backend for fast inference (disable Metal)
+export GOLLEK_BACKEND=cpu
+# Do not require Metal for fast-path verification/build
+export GOLLEK_INSTALL_VERIFY_FAST_REQUIRE_METAL=false
+export GOLLEK_ALLOW_METAL_BUILD_FAILURE=true
 
 # --- Visuals ---
 RED='\033[0;31m'

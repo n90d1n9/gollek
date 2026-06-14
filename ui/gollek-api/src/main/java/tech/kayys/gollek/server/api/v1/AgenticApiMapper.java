@@ -89,7 +89,7 @@ final class AgenticApiMapper {
             builder.apiKey(apiKey);
         }
         if (!isBlank(text(root, "instructions", null))) {
-            builder.message(new Message(Message.Role.SYSTEM, root.path("instructions").asText(), null, null, null));
+            builder.message(new Message(Message.Role.SYSTEM, root.path("instructions").asText(), null, null, null, null));
         }
         RagContextMapper.apply(builder, root);
         appendResponsesInput(builder, root.path("input"));
@@ -629,7 +629,7 @@ final class AgenticApiMapper {
                 .type("function")
                 .arguments(arguments(args))
                 .build();
-        return new Message(Message.Role.ASSISTANT, "", null, List.of(call), null);
+        return new Message(Message.Role.ASSISTANT, "", null, null, List.of(call), null);
     }
 
     private static Message responsesToolOutputMessage(JsonNode item) {
@@ -641,11 +641,11 @@ final class AgenticApiMapper {
     private static Message message(String role, String content, String name, String toolCallId, List<ToolCall> toolCalls) {
         String normalized = role == null ? "user" : role.toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "system", "developer" -> new Message(Message.Role.SYSTEM, content, name, null, null);
-            case "assistant" -> new Message(Message.Role.ASSISTANT, content, name, toolCalls, null);
+            case "system", "developer" -> new Message(Message.Role.SYSTEM, content, null, name, null, null);
+            case "assistant" -> new Message(Message.Role.ASSISTANT, content, null, name, toolCalls, null);
             case "tool" -> Message.tool(toolCallId != null ? toolCallId : "tool_call", content);
-            case "function" -> new Message(Message.Role.FUNCTION, content, name, null, null);
-            default -> new Message(Message.Role.USER, content, name, null, null);
+            case "function" -> new Message(Message.Role.FUNCTION, content, null, name, null, null);
+            default -> new Message(Message.Role.USER, content, null, name, null, null);
         };
     }
 

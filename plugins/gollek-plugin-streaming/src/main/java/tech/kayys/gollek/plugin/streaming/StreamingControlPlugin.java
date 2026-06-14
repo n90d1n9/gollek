@@ -8,6 +8,7 @@
 
 package tech.kayys.gollek.plugin.streaming;
 
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -49,24 +50,25 @@ public class StreamingControlPlugin implements StreamingPlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
+    public Uni<Void> initialize(PluginContext context) {
         context.getConfig("enabled").ifPresent(v -> this.enabled = Boolean.parseBoolean(v));
         context.getConfig("timeoutSeconds").ifPresent(v -> this.timeout = Duration.ofSeconds(Integer.parseInt(v)));
         context.getConfig("backpressureMode").ifPresent(v -> this.backpressureMode = BackpressureMode.valueOf(v));
         context.getConfig("maxBufferSize").ifPresent(v -> this.maxBufferSize = Integer.parseInt(v));
         LOG.infof("Initialized %s (timeout: %ds, backpressure: %s)",
                 PLUGIN_ID, timeout.getSeconds(), backpressureMode);
+        return Uni.createFrom().voidItem();
     }
 
     @Override
-    public StreamingInferenceChunk onChunk(StreamingInferenceChunk chunk) {
+    public Uni<StreamingInferenceChunk> onChunk(StreamingInferenceChunk chunk) {
         chunkCount.incrementAndGet();
         if (chunk.getDelta() != null) {
             totalBytes.addAndGet(chunk.getDelta().length());
         }
 
         // Transform the chunk (detect partial tool calls, etc.)
-        return transformer.transform(chunk);
+        return Uni.createFrom().item(() -> transformer.transform(chunk));
     }
 
     @Override

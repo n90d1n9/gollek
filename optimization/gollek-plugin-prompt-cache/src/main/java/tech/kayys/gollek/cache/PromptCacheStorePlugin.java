@@ -105,7 +105,8 @@ public class PromptCacheStorePlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(PluginContext ctx) {
+    public io.smallrye.mutiny.Uni<Void> initialize(PluginContext ctx) {
+        return io.smallrye.mutiny.Uni.createFrom().voidItem();
         this.enabled = Boolean.parseBoolean(ctx.getConfig("enabled", "true"));
         LOG.infof("[PromptCacheStore] initialized, asyncStore=%s", config.asyncStore());
     }

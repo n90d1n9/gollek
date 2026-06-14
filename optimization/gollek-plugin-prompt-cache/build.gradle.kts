@@ -18,9 +18,14 @@ repositories {
 }
 
 dependencies {
+
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-plugin"))
+    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
+
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
+    
     implementation(project(":spi:gollek-spi-provider"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "io.quarkus", name = "quarkus-config-yaml")

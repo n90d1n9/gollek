@@ -11,6 +11,7 @@ import tech.kayys.gollek.spi.inference.InferencePhasePlugin;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 
+import io.smallrye.mutiny.Uni;
 import java.util.Optional;
 
 /**
@@ -52,9 +53,10 @@ public class SemanticCacheStorePlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(tech.kayys.gollek.spi.plugin.PluginContext context) {
+    public Uni<Void> initialize(tech.kayys.gollek.spi.plugin.PluginContext context) {
         this.enabled = Boolean.parseBoolean(context.getConfig("enabled", "true"));
         LOG.infof("Initialized %s plugin (enabled: %b)", PLUGIN_ID, enabled);
+        return Uni.createFrom().voidItem();
     }
 
     @Override

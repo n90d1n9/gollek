@@ -48,7 +48,7 @@ public class ContentSafetyPlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
+    public io.smallrye.mutiny.Uni<Void> initialize(PluginContext context) {
         this.enabled = Boolean.parseBoolean(context.getConfig("enabled", "true"));
 
         LOG.infof("Initialized %s (enabled: %s)", PLUGIN_ID, enabled);

@@ -109,8 +109,7 @@ public class PluginLoader {
         LOG.info("Initializing all plugins...");
 
         List<Uni<Void>> initializations = registry.all().stream()
-                .map(plugin -> Uni.createFrom().voidItem()
-                        .onItem().invoke(() -> plugin.initialize(context))
+                .map(plugin -> plugin.initialize(context)
                         .onItem().invoke(() -> LOG.debugf("Initialized plugin: %s", plugin.id()))
                         .onFailure().invoke(error -> LOG.errorf(error, "Failed to initialize plugin: %s", plugin.id())))
                 .toList();
@@ -127,11 +126,8 @@ public class PluginLoader {
         LOG.info("Shutting down all plugins...");
 
         List<Uni<Void>> shutdowns = registry.all().stream()
-                .map(plugin -> Uni.createFrom().voidItem()
-                        .onItem().invoke(() -> {
-                            plugin.shutdown();
-                            LOG.debugf("Shutdown plugin: %s", plugin.id());
-                        })
+                .map(plugin -> plugin.shutdown()
+                        .onItem().invoke(() -> LOG.debugf("Shutdown plugin: %s", plugin.id()))
                         .onFailure().invoke(error -> LOG.errorf(error, "Failed to shutdown plugin: %s", plugin.id())))
                 .toList();
 

@@ -1,7 +1,7 @@
 package tech.kayys.gollek.inference.libtorch.nn;
 
 import tech.kayys.gollek.inference.libtorch.core.TorchTensor;
-import tech.kayys.gollek.runtime.tensor.Tensor;
+import tech.kayys.gollek.core.tensor.Tensor;
 
 /**
  * Flatten layer — reshapes input to [batch_size, -1].
@@ -28,7 +28,7 @@ public class Flatten extends Module {
 
     @Override
     public TorchTensor forward(TorchTensor input) {
-        long[] shape = input.shape();
+        long[] shape = input.shape().dims();
         int ndim = shape.length;
 
         // Resolve negative dims

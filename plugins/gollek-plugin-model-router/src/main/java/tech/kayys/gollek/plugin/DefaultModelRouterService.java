@@ -38,13 +38,13 @@ public class DefaultModelRouterService implements ModelRouterService {
 
         // Set capabilities for each provider
         providerCapabilities.put("openai-provider", new ProviderCapabilities(
-                "openai-provider", 99.9, 120, 0.05, "high"));
+                "openai-provider", 99.9, 120, 0.05, "high", true));
         providerCapabilities.put("anthropic-provider", new ProviderCapabilities(
-                "anthropic-provider", 99.8, 150, 0.07, "medium"));
+                "anthropic-provider", 99.8, 150, 0.07, "medium", true));
         providerCapabilities.put("llama-provider", new ProviderCapabilities(
-                "llama-provider", 99.5, 80, 0.02, "low"));
+                "llama-provider", 99.5, 80, 0.02, "low", false));
         providerCapabilities.put("mistral-provider", new ProviderCapabilities(
-                "mistral-provider", 99.7, 90, 0.03, "low"));
+                "mistral-provider", 99.7, 90, 0.03, "low", false));
     }
 
     private void registerProviderForModel(String modelId, String providerId) {
@@ -129,6 +129,11 @@ public class DefaultModelRouterService implements ModelRouterService {
         ProviderCapabilities caps = providerCapabilities.get(providerId);
         if (caps == null) {
             return 0.0; // Invalid provider
+        }
+
+        // Multi-modal routing support
+        if (Boolean.TRUE.equals(requestContext.get("multimodal")) && !caps.multimodal()) {
+            return 0.0; // Filter out non-multimodal providers
         }
 
         // Get individual factor scores (normalized to 0-1 range)

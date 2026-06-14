@@ -160,7 +160,11 @@ public class PhysicalBlockPool implements AutoCloseable {
 
     @Override
     public void close() {
-        arena.close();
+        try {
+            arena.close();
+        } catch (UnsupportedOperationException e) {
+            // Ignore for auto arenas
+        }
     }
 
     @Override

@@ -1,11 +1,33 @@
 plugins {
     java
+    `maven-publish`
+}
+
+group = "tech.kayys.gollek"
+version = "0.1.0-SNAPSHOT"
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            artifactId = "gollek-sdk-java-local"
+            from(components["java"])
+        }
+    }
+    repositories {
+        mavenLocal()
+    }
 }
 
 dependencies {
     implementation(project(":sdk:gollek-sdk-core"))
+    implementation(project(":sdk:gollek-sdk-api"))
     implementation(project(":core:gollek-core"))
     implementation(project(":core:gollek-model-repository"))
+    implementation(project(":core:gollek-observability"))
+    implementation(project(":core:gollek-tensor"))
+    implementation("tech.kayys.gollek:gollek-engine:0.1.0-SNAPSHOT")
+    implementation(project(":plugins:gollek-plugin-mcp"))
+    implementation(project(":runner:gguf:gollek-gguf-converter"))
     implementation(project(":core:gollek-model-repo-hf"))
     implementation(project(":core:gollek-model-repo-local"))
     implementation(project(":core:gollek-tokenizer-core"))
@@ -20,6 +42,8 @@ dependencies {
     implementation(project(":runner:safetensor:gollek-safetensor-engine"))
     implementation(project(":runner:safetensor:gollek-safetensor-spi"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
+    implementation(project(":models:gollek-model-llama"))
+    implementation(project(":models:gollek-model-gemma"))
     
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("io.opentelemetry:opentelemetry-api:1.34.1")

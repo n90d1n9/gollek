@@ -1,5 +1,6 @@
 package tech.kayys.gollek.spi.model;
 
+import io.smallrye.mutiny.Uni;
 import tech.kayys.gollek.spi.plugin.GollekPlugin;
 import tech.kayys.gollek.spi.plugin.PluginContext;
 
@@ -56,17 +57,21 @@ public interface ModelFamilyPlugin extends GollekPlugin, ModelFamilyRuntimeAdapt
     }
 
     @Override
-    default void initialize(PluginContext context) {
+    default Uni<Void> initialize(PluginContext context) {
         ModelFamilyPluginRegistry.global().register(this);
+        return Uni.createFrom().voidItem();
     }
 
     @Override
-    default void stop() {
+    default Uni<Void> stop() {
         ModelFamilyPluginRegistry.global().unregister(id());
+        return Uni.createFrom().voidItem();
     }
 
     @Override
-    default void shutdown() {
+    default Uni<Void> shutdown() {
         ModelFamilyPluginRegistry.global().unregister(id());
+        return Uni.createFrom().voidItem();
     }
 }
+

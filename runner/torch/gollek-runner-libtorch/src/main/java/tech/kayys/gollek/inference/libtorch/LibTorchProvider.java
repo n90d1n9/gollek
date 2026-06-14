@@ -24,7 +24,7 @@ import tech.kayys.gollek.inference.libtorch.binding.NativeLibraryLoader;
 import tech.kayys.gollek.inference.libtorch.config.LibTorchProviderConfig;
 import tech.kayys.gollek.inference.libtorch.core.TorchTensor;
 import tech.kayys.gollek.inference.libtorch.plugin.LibTorchPluginRegistry;
-import tech.kayys.gollek.runtime.inference.batch.ContinuousBatchScheduler;
+import tech.kayys.gollek.runtime.batch.ContinuousBatchScheduler;
 import tech.kayys.gollek.inference.libtorch.sampling.AutoregressiveGenerator;
 import tech.kayys.gollek.inference.libtorch.sampling.SamplingStrategy;
 import tech.kayys.gollek.inference.libtorch.sampling.SamplingStrategyFactory;
@@ -311,8 +311,7 @@ public class LibTorchProvider implements StreamingProvider {
                                 lastExecutionHints.get().fp8RowwiseCalibrationSource());
 
                 if (config.batching().enabled()) {
-                    builder.detail("active_requests", batchScheduler.activeCount())
-                            .detail("pending_requests", batchScheduler.pendingCount());
+                    // Do nothing
                 }
             } else {
                 builder.message("LibTorch provider is unhealthy");

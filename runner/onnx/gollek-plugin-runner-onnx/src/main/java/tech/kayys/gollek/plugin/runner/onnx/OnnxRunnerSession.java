@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -176,6 +177,33 @@ public class OnnxRunnerSession implements RunnerSession {
         return modelInfo;
     }
 
+    @Override
+    public tech.kayys.gollek.spi.inference.KVCacheState getKVCacheState() {
+        // ONNX runner does not expose a KV-cache API; return null (no cache state).
+        return null;
+    }
+
+    @Override
+    public void offloadCache() {
+        // ONNX runner does not support cache offloading; no-op.
+    }
+
+    @Override
+    public void loadAdapter(String adapterId, String adapterPath) {
+        throw new UnsupportedOperationException(
+                "OnnxRunnerSession does not support LoRA adapter hot-swapping");
+    }
+
+    @Override
+    public void unloadAdapter() {
+        // No adapter loaded; no-op.
+    }
+
+    @Override
+    public Optional<String> getLoadedAdapterId() {
+        return Optional.empty();
+    }
+
     private ModelInfo loadModelInfo(String modelPath) {
         Path path = Paths.get(modelPath);
         String modelName = path.getFileName().toString();
@@ -189,6 +217,7 @@ public class OnnxRunnerSession implements RunnerSession {
                 .metadata(Map.of("session_id", sessionId))
                 .build();
     }
+
 
     private Tokenizer loadTokenizer(String modelPath) {
         Path path = Paths.get(modelPath);

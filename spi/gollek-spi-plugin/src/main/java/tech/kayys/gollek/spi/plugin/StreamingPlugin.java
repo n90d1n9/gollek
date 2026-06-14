@@ -16,6 +16,7 @@
 
 package tech.kayys.gollek.spi.plugin;
 
+import io.smallrye.mutiny.Uni;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 
 import java.time.Duration;
@@ -43,7 +44,7 @@ public interface StreamingPlugin extends GollekPlugin {
      * @param chunk the incoming stream chunk
      * @return the processed chunk (may be modified, enriched, or filtered)
      */
-    StreamingInferenceChunk onChunk(StreamingInferenceChunk chunk);
+    Uni<StreamingInferenceChunk> onChunk(StreamingInferenceChunk chunk);
 
     /**
      * Handle a partial tool call detection during streaming.

@@ -20,7 +20,7 @@ repositories {
 dependencies {
     implementation(project(":runner:safetensor:gollek-safetensor-api"))
     implementation(project(":runner:safetensor:gollek-safetensor-core"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-model-core")
+    
 }
 
 publishing {

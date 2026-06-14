@@ -1,6 +1,7 @@
 package tech.kayys.gollek.plugin;
 
 import tech.kayys.gollek.spi.inference.InferencePhasePlugin;
+import io.smallrye.mutiny.Uni;
 import tech.kayys.gollek.spi.plugin.PluginContext;
 import tech.kayys.gollek.spi.exception.PluginException;
 import tech.kayys.gollek.spi.plugin.PhasePluginException;
@@ -39,13 +40,15 @@ public class ModelRouterPlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
+    public Uni<Void> initialize(PluginContext context) {
         System.out.println("Model Router Plugin initialized");
+        return Uni.createFrom().voidItem();
     }
 
     @Override
-    public void shutdown() {
+    public Uni<Void> shutdown() {
         System.out.println("Model Router Plugin shut down");
+        return Uni.createFrom().voidItem();
     }
 
     @Override

@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -170,6 +171,33 @@ public class SafetensorRunnerSession implements RunnerSession {
     @Override
     public ModelInfo getModelInfo() {
         return modelInfo;
+    }
+
+    @Override
+    public tech.kayys.gollek.spi.inference.KVCacheState getKVCacheState() {
+        // Safetensor backend does not expose a KV-cache API; return null.
+        return null;
+    }
+
+    @Override
+    public void offloadCache() {
+        // Safetensor backend does not support cache offloading; no-op.
+    }
+
+    @Override
+    public void loadAdapter(String adapterId, String adapterPath) {
+        throw new UnsupportedOperationException(
+                "SafetensorRunnerSession does not support LoRA adapter hot-swapping");
+    }
+
+    @Override
+    public void unloadAdapter() {
+        // No adapter loaded; no-op.
+    }
+
+    @Override
+    public Optional<String> getLoadedAdapterId() {
+        return Optional.empty();
     }
 
     // ───────────────────────────────────────────────────────────────────────

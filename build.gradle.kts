@@ -60,10 +60,11 @@ subprojects {
 
     dependencies {
         // Common logging and util dependencies can go here
-        if (path.startsWith(":models:gollek-model-")) {
-            add("testImplementation", "org.junit.jupiter:junit-jupiter")
-            add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:$junitPlatformVersion")
-        }
+        add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:$junitPlatformVersion")
+        // Make JUnit Jupiter + AssertJ available to every subproject test classpath
+        add("testImplementation", platform("org.junit:junit-bom:$junitJupiterVersion"))
+        add("testImplementation", "org.junit.jupiter:junit-jupiter")
+        add("testImplementation", "org.assertj:assertj-core:3.25.3")
     }
 
     tasks.withType<JavaCompile> {
@@ -79,9 +80,7 @@ subprojects {
             "--add-modules=jdk.incubator.vector",
             "--enable-native-access=ALL-UNNAMED",
         )
-        if (project.path.startsWith(":models:gollek-model-")) {
-            useJUnitPlatform()
-        }
+        useJUnitPlatform()
     }
 
     tasks.withType<JavaExec>().configureEach {

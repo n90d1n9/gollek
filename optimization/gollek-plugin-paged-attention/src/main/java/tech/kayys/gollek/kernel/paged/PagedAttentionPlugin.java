@@ -1,5 +1,6 @@
 package tech.kayys.gollek.kernel.paged;
 
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -60,7 +61,7 @@ public class PagedAttentionPlugin implements GollekPlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
+    public io.smallrye.mutiny.Uni<Void> initialize(PluginContext context) {
         // Load configuration
         this.config = OptimizationRegistry.getInstance().getConfig(PLUGIN_ID);
         
@@ -72,7 +73,7 @@ public class PagedAttentionPlugin implements GollekPlugin {
 
         if (!config.enabled()) {
             LOG.infof("PagedAttentionPlugin is DISABLED by configuration");
-            return;
+            return Uni.createFrom().voidItem();
         }
 
         // Get custom properties
@@ -81,14 +82,16 @@ public class PagedAttentionPlugin implements GollekPlugin {
         
         LOG.infof("PagedAttentionPlugin initialized: blockSize=%d, totalBlocks=%d",
             blockSize, totalBlocks);
+        return Uni.createFrom().voidItem();
     }
 
     @Override
-    public void shutdown() {
+    public io.smallrye.mutiny.Uni<Void> shutdown() {
         if (kvCacheManager != null) {
             kvCacheManager.close();
         }
         LOG.info("PagedAttentionPlugin destroyed");
+        return Uni.createFrom().voidItem();
     }
 
     @Override

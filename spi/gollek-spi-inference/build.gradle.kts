@@ -12,4 +12,10 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.16.1")
     implementation("jakarta.validation:jakarta.validation-api:3.0.2")
     implementation("org.jetbrains:annotations:24.0.1")
+    
+    testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
 }

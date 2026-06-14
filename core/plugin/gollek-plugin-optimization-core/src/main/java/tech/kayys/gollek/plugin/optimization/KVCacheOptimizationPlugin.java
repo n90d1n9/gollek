@@ -38,18 +38,18 @@ public class KVCacheOptimizationPlugin implements OptimizationPlugin {
     @Override
     public boolean apply(ExecutionContext context) {
         // Since ExecutionContext does not expose RunnerSession directly in this mock implementation,
-        // we assume we can fetch it or it's passed via context metadata.
-        Object sessionObj = context.getMetadata("runnerSession");
-        if (sessionObj instanceof RunnerSession) {
-            RunnerSession session = (RunnerSession) sessionObj;
-            if (session.getKVCacheState() != null) {
-                double utilization = session.getKVCacheState().getVramUtilization();
-                if (utilization >= VRAM_OFFLOAD_THRESHOLD) {
-                    session.offloadCache();
-                    return true;
-                }
-            }
-        }
-        return false;
+        // we retrieve it from context attributes.
+        return context.getAttribute("runnerSession", RunnerSession.class)
+                .map(session -> {
+                    if (session.getKVCacheState() != null) {
+                        double utilization = session.getKVCacheState().getVramUtilization();
+                        if (utilization >= VRAM_OFFLOAD_THRESHOLD) {
+                            session.offloadCache();
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+                .orElse(false);
     }
 }

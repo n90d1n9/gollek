@@ -17,6 +17,7 @@
 
 package tech.kayys.gollek.plugin.core;
 
+import io.smallrye.mutiny.Uni;
 import tech.kayys.gollek.spi.plugin.GollekPlugin;
 import tech.kayys.gollek.spi.plugin.PluginContext;
 
@@ -50,23 +51,43 @@ public abstract class AbstractPlugin implements GollekPlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
-        onInitialize(context);
+    public Uni<Void> initialize(PluginContext context) {
+        try {
+            onInitialize(context);
+            return Uni.createFrom().voidItem();
+        } catch (Throwable t) {
+            return Uni.createFrom().failure(t);
+        }
     }
 
     @Override
-    public void start() {
-        onStart();
+    public Uni<Void> start() {
+        try {
+            onStart();
+            return Uni.createFrom().voidItem();
+        } catch (Throwable t) {
+            return Uni.createFrom().failure(t);
+        }
     }
 
     @Override
-    public void stop() {
-        onStop();
+    public Uni<Void> stop() {
+        try {
+            onStop();
+            return Uni.createFrom().voidItem();
+        } catch (Throwable t) {
+            return Uni.createFrom().failure(t);
+        }
     }
 
     @Override
-    public void shutdown() {
-        onDestroy();
+    public Uni<Void> shutdown() {
+        try {
+            onDestroy();
+            return Uni.createFrom().voidItem();
+        } catch (Throwable t) {
+            return Uni.createFrom().failure(t);
+        }
     }
 
     /**

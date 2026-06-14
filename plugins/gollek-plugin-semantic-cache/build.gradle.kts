@@ -25,7 +25,9 @@ dependencies {
     implementation(group = "com.github.ben-manes.caffeine", name = "caffeine", version = "3.1.8")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     testImplementation(group = "io.quarkus", name = "quarkus-junit5")
-    testImplementation(group = "org.assertj", name = "assertj-core")
+    testImplementation(group = "org.assertj", name = "assertj-core", version = "3.25.3")
+    testImplementation(group = "org.mockito", name = "mockito-core")
+    testImplementation(group = "org.mockito", name = "mockito-junit-jupiter")
 }
 
 publishing {

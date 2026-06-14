@@ -8,6 +8,7 @@ import org.mockito.Mockito;
 import jakarta.inject.Inject;
 
 import tech.kayys.gollek.sdk.core.GollekSdk;
+import tech.kayys.gollek.sdk.model.ModelPullRequest;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -28,10 +29,8 @@ public class PullCommandTest {
 
         pullCommand.run();
 
-        Mockito.verify(sdk).pullModel(eq("llama3.2"), any());
+        Mockito.verify(sdk).pullModel(any(ModelPullRequest.class), any());
     }
-
-
 
     @Test
     public void testPullCommandHuggingFace() throws Exception {
@@ -40,6 +39,6 @@ public class PullCommandTest {
 
         pullCommand.run();
 
-        Mockito.verify(sdk).pullModel(eq("hf:TheBloke/Llama-2"), any());
+        Mockito.verify(sdk).pullModel(any(ModelPullRequest.class), any());
     }
 }

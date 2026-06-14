@@ -25,6 +25,10 @@ dependencies {
     implementation(group = "io.quarkus", name = "quarkus-arc")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
+    implementation(project(":core:gollek-model-runner"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":core:gollek-tensor"))
+    implementation(project(":core:gollek-core"))
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
 }
 

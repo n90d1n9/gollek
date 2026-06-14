@@ -20,6 +20,8 @@ sourceSets {
                 "tech/kayys/gollek/gguf/loader/GGUFTensorInfo.java",
                 "tech/kayys/gollek/gguf/loader/GGUFParser.java",
                 "tech/kayys/gollek/gguf/loader/GGUFReader.java",
+                "tech/kayys/gollek/gguf/loader/gguf/*.java",
+                "tech/kayys/gollek/gguf/loader/quant/*.java",
                 "tech/kayys/gollek/gguf/runtime/*.java",
                 "tech/kayys/gollek/gguf/tokenizer/GGUFTokenizer.java",
                 "tech/kayys/gollek/gguf/writer/GGUFWriter.java",

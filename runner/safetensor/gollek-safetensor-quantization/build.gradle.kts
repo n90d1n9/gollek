@@ -19,6 +19,13 @@ dependencies {
     implementation(project(":quantizer:gollek-quantizer-awq"))
     implementation(project(":quantizer:gollek-quantizer-autoround"))
     implementation(project(":quantizer:gollek-quantizer-turboquant"))
+    // quantization tests use awaitility
+    testImplementation("org.awaitility:awaitility:4.2.1")
+    testImplementation("io.quarkus:quarkus-junit5")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.named("compileJava") {

@@ -95,7 +95,8 @@ public class PromptCacheLookupPlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(PluginContext ctx) {
+    public io.smallrye.mutiny.Uni<Void> initialize(PluginContext ctx) {
+        return io.smallrye.mutiny.Uni.createFrom().voidItem();
         this.enabled = Boolean.parseBoolean(ctx.getConfig("enabled", "true"));
         LOG.infof("[PromptCacheLookup] initialized, enabled=%s strategy=%s",
                 enabled, config.strategy());

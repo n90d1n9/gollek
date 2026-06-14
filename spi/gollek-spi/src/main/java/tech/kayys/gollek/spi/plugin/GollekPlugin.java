@@ -1,5 +1,7 @@
 package tech.kayys.gollek.spi.plugin;
 
+import io.smallrye.mutiny.Uni;
+
 /**
  * Base interface for all plugins in the inference kernel.
  * Plugins extend the kernel's behavior without modifying core logic.
@@ -31,29 +33,29 @@ public interface GollekPlugin {
      * Initialize plugin with context.
      * Called once during engine startup.
      */
-    default void initialize(PluginContext context) {
-        // Default: no-op
+    default Uni<Void> initialize(PluginContext context) {
+        return Uni.createFrom().voidItem();
     }
 
     /**
      * Start the plugin operations.
      */
-    default void start() {
-        // Default: no-op
+    default Uni<Void> start() {
+        return Uni.createFrom().voidItem();
     }
 
     /**
      * Stop the plugin operations.
      */
-    default void stop() {
-        // Default: no-op
+    default Uni<Void> stop() {
+        return Uni.createFrom().voidItem();
     }
 
     /**
      * Shutdown plugin and release resources.
      */
-    default void shutdown() {
-        // Default: no-op
+    default Uni<Void> shutdown() {
+        return Uni.createFrom().voidItem();
     }
 
     /**

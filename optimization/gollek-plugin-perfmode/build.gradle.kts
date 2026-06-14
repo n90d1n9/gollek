@@ -18,10 +18,19 @@ repositories {
 }
 
 dependencies {
+
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation("io.smallrye.reactive:mutiny:2.5.5")
+
+
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-plugin"))
+    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
+
     implementation(project(":spi:gollek-spi-provider"))
     implementation(project(":core:gollek-model-runner"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
+    
     implementation(group = "io.quarkus", name = "quarkus-rest")
     implementation(group = "io.quarkus", name = "quarkus-arc")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")

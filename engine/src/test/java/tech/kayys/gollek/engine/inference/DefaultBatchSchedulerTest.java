@@ -113,5 +113,14 @@ class DefaultBatchSchedulerTest {
 
         @Override
         public void offloadCache() {}
+
+        @Override
+        public void loadAdapter(String adapterId, String adapterPath) {}
+
+        @Override
+        public void unloadAdapter() {}
+
+        @Override
+        public java.util.Optional<String> getLoadedAdapterId() { return java.util.Optional.empty(); }
     }
 }

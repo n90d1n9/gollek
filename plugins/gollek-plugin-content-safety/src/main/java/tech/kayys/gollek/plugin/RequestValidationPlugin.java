@@ -55,7 +55,7 @@ public class RequestValidationPlugin implements InferencePhasePlugin {
     }
 
     @Override
-    public void initialize(PluginContext context) {
+    public io.smallrye.mutiny.Uni<Void> initialize(PluginContext context) {
         this.maxMessageLength = Integer.parseInt(context.getConfig("maxMessageLength", "10000"));
         this.maxMessages = Integer.parseInt(context.getConfig("maxMessages", "100"));
 

@@ -19,7 +19,7 @@ repositories {
 
 dependencies {
     implementation(project(":spi:gollek-spi"))
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
+    
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "jakarta.enterprise", name = "jakarta.enterprise.cdi-api")
     implementation(group = "jakarta.inject", name = "jakarta.inject-api")

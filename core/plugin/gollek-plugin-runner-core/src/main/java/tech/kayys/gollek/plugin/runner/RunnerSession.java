@@ -19,9 +19,11 @@ import io.smallrye.mutiny.Uni;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
+import tech.kayys.gollek.spi.inference.KVCacheState;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Runner session for model inference.
@@ -98,10 +100,56 @@ public interface RunnerSession {
      * 
      * @return KV cache state
      */
-    tech.kayys.gollek.spi.inference.KVCacheState getKVCacheState();
+    KVCacheState getKVCacheState();
 
     /**
      * Offload a portion of the KV cache to CPU/NVMe to free VRAM.
      */
     void offloadCache();
+
+    // -----------------------------------------------------------------------
+    // LoRA / Adapter Hot-Swapping
+    // -----------------------------------------------------------------------
+
+    /**
+     * Loads a LoRA adapter into the currently running model session.
+     *
+     * <p>The adapter is identified by an {@code adapterId} that maps to a
+     * weights file registered in the adapter registry.  If an adapter is
+     * already loaded, it is automatically unloaded before loading the new one
+     * (i.e., only one adapter can be active at a time per session).
+     *
+     * <p>Implementations must be thread-safe: concurrent inference requests
+     * using the session should be drained or paused before swapping the adapter.
+     *
+     * @param adapterId  unique ID of the adapter (e.g. "finance-lora-v2")
+     * @param adapterPath file-system path or URI to the adapter weights
+     * @throws UnsupportedOperationException if the underlying runner does not
+     *         support LoRA hot-swapping
+     */
+    void loadAdapter(String adapterId, String adapterPath);
+
+    /**
+     * Unloads the currently active LoRA adapter, reverting the session to
+     * the base model weights.
+     *
+     * <p>A no-op if no adapter is currently loaded.
+     */
+    void unloadAdapter();
+
+    /**
+     * Returns the ID of the currently loaded LoRA adapter, if any.
+     *
+     * @return adapter ID, or {@link Optional#empty()} if the base model
+     *         is active with no adapter
+     */
+    Optional<String> getLoadedAdapterId();
+
+    /**
+     * Returns {@code true} if this runner session supports LoRA adapter
+     * hot-swapping without session restart.
+     */
+    default boolean supportsAdapterHotSwap() {
+        return false;
+    }
 }

@@ -10,15 +10,17 @@ public class ProviderCapabilities {
     private final double avgLatencyMs; // Average latency in milliseconds
     private final double costPerThousand; // Cost per thousand tokens/units
     private final String performanceTier; // "low", "medium", "high"
+    private final boolean multimodal;
 
     public ProviderCapabilities(String providerId, double reliability,
             double avgLatencyMs, double costPerThousand,
-            String performanceTier) {
+            String performanceTier, boolean multimodal) {
         this.providerId = providerId;
         this.reliability = reliability;
         this.avgLatencyMs = avgLatencyMs;
         this.costPerThousand = costPerThousand;
         this.performanceTier = performanceTier;
+        this.multimodal = multimodal;
     }
 
     public String providerId() {
@@ -39,6 +41,10 @@ public class ProviderCapabilities {
 
     public String performanceTier() {
         return performanceTier;
+    }
+
+    public boolean multimodal() {
+        return multimodal;
     }
 
     public double performance() {
@@ -73,6 +79,7 @@ public class ProviderCapabilities {
         private double avgLatencyMs = 100.0;
         private double costPerThousand = 0.05;
         private String performanceTier = "medium";
+        private boolean multimodal = false;
 
         public ProviderCapabilitiesBuilder providerId(String providerId) {
             this.providerId = providerId;
@@ -99,9 +106,14 @@ public class ProviderCapabilities {
             return this;
         }
 
+        public ProviderCapabilitiesBuilder multimodal(boolean multimodal) {
+            this.multimodal = multimodal;
+            return this;
+        }
+
         public ProviderCapabilities build() {
             return new ProviderCapabilities(providerId, reliability, avgLatencyMs,
-                    costPerThousand, performanceTier);
+                    costPerThousand, performanceTier, multimodal);
         }
     }
 }

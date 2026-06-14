@@ -62,6 +62,21 @@ public record ModelManifest(
         return path;
     }
 
+    /**
+     * Helper to retrieve evaluation scores from the metadata map.
+     * Stored under the key {@code "evaluationScores"}.
+     *
+     * @return map of benchmark name to score, or an empty map if not present
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> evaluationScores() {
+        Object scores = metadata.get("evaluationScores");
+        if (scores instanceof Map) {
+            return (Map<String, Object>) scores;
+        }
+        return Map.of();
+    }
+
     public static class Builder {
         private String modelId;
         private String name;

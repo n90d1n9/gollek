@@ -24,8 +24,16 @@ dependencies {
     implementation(project(":optimization:gollek-plugin-paged-attention"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
-    implementation(group = "io.smallrye.reactive", name = "mutiny")
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":core:gollek-tensor"))
+    // Added missing SPI modules required by QLoraAdapterRunner
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi"))
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
+
+    // duplicate dependencies removed
+
 }
 
 publishing {

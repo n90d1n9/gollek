@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
+    
     implementation(project(":spi:gollek-spi-provider"))
     implementation(project(":core:gollek-observability"))
     implementation(group = "io.quarkus", name = "quarkus-vertx")

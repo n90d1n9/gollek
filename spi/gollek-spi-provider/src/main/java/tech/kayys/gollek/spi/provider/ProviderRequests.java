@@ -97,6 +97,10 @@ public final class ProviderRequests {
             metadata.putAll(metadataOverrides);
         }
 
+        String traceparent = (String) metadata.get("w3c.traceparent");
+        String tracestate = (String) metadata.get("w3c.tracestate");
+        String spanId = (String) metadata.get("w3c.spanId");
+
         return ProviderRequest.builder()
                 .requestId(request.getRequestId())
                 .model(providerModel != null ? providerModel : request.getModel())
@@ -109,6 +113,9 @@ public final class ProviderRequests {
                 .userId(request.getUserId().orElse(null))
                 .sessionId(request.getSessionId().orElse(null))
                 .traceId(request.getTraceId().orElse(null))
+                .traceparent(traceparent)
+                .tracestate(tracestate)
+                .spanId(spanId)
                 .metadata(metadata)
                 .preferredProvider(request.getPreferredProvider().orElse(preferredProvider))
                 .build();
@@ -132,6 +139,9 @@ public final class ProviderRequests {
         private String userId;
         private String sessionId;
         private String traceId;
+        private String traceparent;
+        private String tracestate;
+        private String spanId;
         private String apiKey;
         private Map<String, Object> metadata;
 
@@ -147,6 +157,9 @@ public final class ProviderRequests {
             this.userId = src.getUserId().orElse(null);
             this.sessionId = src.getSessionId().orElse(null);
             this.traceId = src.getTraceId().orElse(null);
+            this.traceparent = src.getTraceparent().orElse(null);
+            this.tracestate = src.getTracestate().orElse(null);
+            this.spanId = src.getSpanId().orElse(null);
             this.apiKey = src.getApiKey().orElse(null);
             this.metadata = src.getMetadata();
         }
@@ -186,6 +199,21 @@ public final class ProviderRequests {
             return this;
         }
 
+        public CopyBuilder traceparent(String tp) {
+            this.traceparent = tp;
+            return this;
+        }
+
+        public CopyBuilder tracestate(String ts) {
+            this.tracestate = ts;
+            return this;
+        }
+
+        public CopyBuilder spanId(String sp) {
+            this.spanId = sp;
+            return this;
+        }
+
         public CopyBuilder apiKey(String key) {
             this.apiKey = key;
             return this;
@@ -214,6 +242,9 @@ public final class ProviderRequests {
                     .userId(userId)
                     .sessionId(sessionId)
                     .traceId(traceId)
+                    .traceparent(traceparent)
+                    .tracestate(tracestate)
+                    .spanId(spanId)
                     .apiKey(apiKey)
                     .metadata(metadata)
                     .build();

@@ -117,7 +117,7 @@ public class AutoregressiveGenerator {
                     // Extract logits for the last token position
                     // logits shape: [1, seq_len, vocab_size] or [1, vocab_size]
                     float[] allLogits = logits.toFloatArray();
-                    long[] logitsShape = logits.shape();
+                    long[] logitsShape = logits.shape().dims();
 
                     float[] lastTokenLogits;
                     int vocabSize;
@@ -244,7 +244,7 @@ public class AutoregressiveGenerator {
     }
 
     private int inferVocabSize(TorchTensor tensor) {
-        long[] shape = tensor.shape();
+        long[] shape = tensor.shape().dims();
         if (shape == null || shape.length == 0) {
             return -1;
         }

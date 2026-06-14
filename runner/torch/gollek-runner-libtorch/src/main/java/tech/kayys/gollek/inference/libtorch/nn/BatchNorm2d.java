@@ -3,7 +3,7 @@ package tech.kayys.gollek.inference.libtorch.nn;
 import tech.kayys.gollek.inference.libtorch.core.Device;
 import tech.kayys.gollek.inference.libtorch.core.ScalarType;
 import tech.kayys.gollek.inference.libtorch.core.TorchTensor;
-import tech.kayys.gollek.runtime.tensor.Tensor;
+import tech.kayys.gollek.core.tensor.Tensor;
 
 /**
  * 2D Batch Normalization layer.

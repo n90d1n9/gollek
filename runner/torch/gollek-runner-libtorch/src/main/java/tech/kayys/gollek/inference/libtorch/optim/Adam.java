@@ -2,7 +2,7 @@ package tech.kayys.gollek.inference.libtorch.optim;
 
 import tech.kayys.gollek.inference.libtorch.binding.LibTorchBinding;
 import tech.kayys.gollek.inference.libtorch.core.TorchTensor;
-import tech.kayys.gollek.runtime.tensor.Tensor;
+import tech.kayys.gollek.core.tensor.Tensor;
 
 import java.lang.invoke.MethodHandle;
 import java.util.List;
@@ -56,7 +56,7 @@ public class Adam extends Optimizer {
             if (!(param instanceof TorchTensor torchParam)) {
                 continue;
             }
-            try (Tensor grad = torchParam.grad()) {
+            try (TorchTensor grad = (TorchTensor) torchParam.grad()) {
                 if (!(grad instanceof TorchTensor torchGrad))
                     continue;
 

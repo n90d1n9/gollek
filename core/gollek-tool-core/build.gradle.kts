@@ -21,7 +21,7 @@ dependencies {
     implementation(project(":spi:gollek-spi"))
     implementation(group = "io.quarkus", name = "quarkus-core")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
-    implementation(group = "org.hibernate.validator", name = "hibernate-validator")
+    implementation(group = "org.hibernate.validator", name = "hibernate-validator", version = "8.0.1.Final")
 }
 
 publishing {

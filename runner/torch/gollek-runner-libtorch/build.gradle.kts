@@ -26,18 +26,21 @@ sourceSets {
             include("tech/kayys/gollek/inference/libtorch/config/**")
             include("tech/kayys/gollek/inference/libtorch/plugin/**")
             include("tech/kayys/gollek/inference/libtorch/util/SafetensorsHeaderParser.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchAdvancedModeResolver.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchBeanProducer.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchChatTemplateService.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchDeviceSupport.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchExecutionHints.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchFp8CalibrationLoader.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchFp8CalibrationValidator.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchFp8RowwisePlanner.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchFp8RowwiseTransformer.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchGenerationParams.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchMetrics.java")
-            include("tech/kayys/gollek/inference/libtorch/LibTorchTokenizerManager.java")
+            // Temporarily disable LibTorchProvider and related classes from compilation until they migrate to core.tensor APIs
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchAdapterApplier.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchAdvancedModeResolver.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchBeanProducer.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchChatTemplateService.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchDeviceSupport.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchExecutionHints.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchFp8CalibrationLoader.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchFp8CalibrationValidator.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchFp8RowwisePlanner.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchFp8RowwiseTransformer.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchGenerationParams.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchMetrics.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchProvider.java")
+            // include("tech/kayys/gollek/inference/libtorch/LibTorchTokenizerManager.java")
             include("tech/kayys/gollek/inference/libtorch/core/Device.java")
         }
     }
@@ -58,6 +61,8 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.14.2")
+    testImplementation("org.assertj:assertj-core:3.25.3")
 }
 
 publishing {

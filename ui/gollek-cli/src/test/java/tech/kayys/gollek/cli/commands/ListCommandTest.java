@@ -9,6 +9,7 @@ import tech.kayys.gollek.cli.commands.ListCommand;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.spi.context.RequestContext;
+import tech.kayys.gollek.sdk.model.ModelListRequest;
 
 import java.util.Collections;
 import java.util.List;
@@ -27,7 +28,7 @@ public class ListCommandTest {
 
         @Test
         public void testListCommandEmpty() throws Exception {
-                Mockito.when(sdk.listModels(any(Integer.class), any(Integer.class)))
+                Mockito.when(sdk.listModels(any(ModelListRequest.class)))
                                 .thenReturn(Collections.emptyList());
 
                 listCommand.format = "table";
@@ -35,7 +36,7 @@ public class ListCommandTest {
 
                 listCommand.run();
 
-                Mockito.verify(sdk).listModels(eq(0), eq(50));
+                Mockito.verify(sdk).listModels(any(ModelListRequest.class));
         }
 
         @Test
@@ -47,7 +48,7 @@ public class ListCommandTest {
                                 .requestContext(RequestContext.of("community", "community"))
                                 .build();
 
-                Mockito.when(sdk.listModels(any(Integer.class), any(Integer.class)))
+                Mockito.when(sdk.listModels(any(ModelListRequest.class)))
                                 .thenReturn(List.of(model));
 
                 listCommand.format = "table";
@@ -55,7 +56,7 @@ public class ListCommandTest {
 
                 listCommand.run();
 
-                Mockito.verify(sdk).listModels(eq(0), eq(50));
+                Mockito.verify(sdk).listModels(any(ModelListRequest.class));
         }
 
         @Test
@@ -67,7 +68,7 @@ public class ListCommandTest {
                                 .requestContext(RequestContext.of("community", "community"))
                                 .build();
 
-                Mockito.when(sdk.listModels(any(Integer.class), any(Integer.class)))
+                Mockito.when(sdk.listModels(any(ModelListRequest.class)))
                                 .thenReturn(List.of(model));
 
                 listCommand.format = "json";
@@ -75,6 +76,6 @@ public class ListCommandTest {
 
                 listCommand.run();
 
-                Mockito.verify(sdk).listModels(eq(0), eq(50));
+                Mockito.verify(sdk).listModels(any(ModelListRequest.class));
         }
 }

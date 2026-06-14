@@ -21,7 +21,7 @@ class ModelRouterPluginTest {
 
     @Test
     void testPluginPhase() {
-        assertEquals(InferencePhase.ROUTE, plugin.phase());
+        assertEquals(InferencePhase.PRE_PROCESSING, plugin.phase());
     }
 
     @Test

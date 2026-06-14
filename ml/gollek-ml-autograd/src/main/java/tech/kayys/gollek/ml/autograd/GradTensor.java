@@ -308,6 +308,12 @@ public final class GradTensor {
         return shape.clone();
     }
 
+    /** Return the number of dimensions (rank) of the tensor. */
+    public int ndim() {
+        return shape.length;
+    }
+
+
     public long numel() {
         return numel(shape);
     }

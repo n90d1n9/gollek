@@ -18,6 +18,8 @@ repositories {
 }
 
 dependencies {
+    implementation("io.smallrye.reactive:mutiny:2.5.5")
+    implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":spi:gollek-spi"))
     implementation(group = "jakarta.enterprise", name = "jakarta.enterprise.cdi-api")

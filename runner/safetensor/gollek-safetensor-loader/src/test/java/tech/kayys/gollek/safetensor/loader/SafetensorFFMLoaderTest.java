@@ -414,7 +414,7 @@ class SafetensorFFMLoaderTest {
         float[] floats = { 1.5f, 2.5f };
         byte[] payload = buildSafetensors(json, floatsToBytes(floats));
 
-        try (Arena arena = Arena.ofAuto()) {
+        try (Arena arena = Arena.ofConfined()) {
             MemorySegment seg = toSegment(payload, arena);
             SafetensorHeader header = PARSER.parse(seg, Path.of("r.safetensors"));
 
@@ -425,8 +425,6 @@ class SafetensorFFMLoaderTest {
             SafetensorTensor t = result.tensor("embed");
             assertThat(t.name()).isEqualTo("embed");
             assertThat(t.toFloatArray()).isEqualTo(floats);
-
-            result.close();
         }
     }
 
@@ -530,7 +528,7 @@ class SafetensorFFMLoaderTest {
         Files.write(filePath, payload);
 
         // Use header parser directly with a file-based loader
-        try (Arena arena = Arena.ofAuto()) {
+        try (Arena arena = Arena.ofConfined()) {
             java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(filePath,
                     java.nio.file.StandardOpenOption.READ);
             long size = ch.size();
@@ -545,8 +543,6 @@ class SafetensorFFMLoaderTest {
             SafetensorTensor tensor = result.tensor("layer.weight");
             assertThat(tensor.shape()).isEqualTo(new long[] { 2, 4 });
             assertThat(tensor.toFloatArray()).isEqualTo(weights);
-
-            result.close();
         }
     }
 

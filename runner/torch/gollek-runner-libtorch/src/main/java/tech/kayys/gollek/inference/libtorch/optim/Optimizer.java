@@ -1,6 +1,6 @@
 package tech.kayys.gollek.inference.libtorch.optim;
 
-import tech.kayys.gollek.runtime.tensor.Tensor;
+import tech.kayys.gollek.core.tensor.Tensor;
 
 import java.util.Collections;
 import java.util.List;

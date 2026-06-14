@@ -20,6 +20,7 @@ repositories {
 dependencies {
     implementation(project(":ml:gollek-ml-api"))
     implementation(project(":sdk:gollek-sdk"))
+    implementation(project(":sdk:gollek-sdk-api"))
     implementation(group = "dev.langchain4j", name = "langchain4j-core", version = "0.35.0")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testImplementation(group = "org.mockito", name = "mockito-core", version = "5.14.2")

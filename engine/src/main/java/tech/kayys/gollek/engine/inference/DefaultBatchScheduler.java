@@ -3,6 +3,9 @@ package tech.kayys.gollek.engine.inference;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.inference.KVCacheState;
 import tech.kayys.gollek.plugin.runner.RunnerSession;
+import tech.kayys.gollek.plugin.optimization.DefaultExecutionContext;
+import tech.kayys.gollek.plugin.optimization.OptimizationPluginManager;
+import tech.kayys.gollek.plugin.optimization.ExecutionContext;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -33,6 +36,9 @@ public class DefaultBatchScheduler {
      */
     public void runContinuous() {
         while (!pendingRequests.isEmpty()) {
+            // Apply optimization plugins (e.g., KV cache offloading) before checking VRAM
+            ExecutionContext optContext = new DefaultExecutionContext(runnerSession);
+            OptimizationPluginManager.getInstance().applyOptimizations(optContext);
             KVCacheState cacheState = runnerSession.getKVCacheState();
             if (cacheState != null && cacheState.getVramUtilization() >= MAX_VRAM_UTILIZATION) {
                 // VRAM is full, delay admission of new sequences

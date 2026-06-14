@@ -48,7 +48,7 @@ public class Linear extends Module {
     public TorchTensor forward(TorchTensor input) {
         // y = x @ W^T
         TorchTensor weight = parameters.get("weight");
-        TorchTensor output = input.matmul(weight.transpose(0, 1));
+        TorchTensor output = (TorchTensor) input.matmul(weight.transpose(0, 1));
 
         if (hasBias) {
             TorchTensor bias = parameters.get("bias");

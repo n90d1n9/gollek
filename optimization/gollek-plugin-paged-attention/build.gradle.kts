@@ -18,6 +18,8 @@ repositories {
 }
 
 dependencies {
+    implementation("io.smallrye.reactive:mutiny:2.5.5")
+    implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
     implementation(project(":optimization:gollek-plugin-kv-cache"))
     implementation(project(":core:plugin:gollek-plugin-optimization-core"))
     implementation(project(":spi:gollek-spi"))
