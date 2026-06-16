@@ -58,7 +58,7 @@ public class GgufRunnerPlugin implements RunnerPlugin {
     @Override
     public Set<String> supportedArchitectures() {
         // llama.cpp supports many, but we'll advertise the core ones
-        return Set.of("llama", "mistral", "mixtral", "phi", "gemma", "qwen");
+        return Set.of("llama", "mistral", "mixtral", "phi", "gemma", "gemma4", "qwen");
     }
 
     @Override

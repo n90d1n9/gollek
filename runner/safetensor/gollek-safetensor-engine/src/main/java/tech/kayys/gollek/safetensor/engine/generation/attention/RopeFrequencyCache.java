@@ -11,8 +11,6 @@ import java.lang.foreign.ValueLayout;
 import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorSpecies;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -34,8 +32,6 @@ public class RopeFrequencyCache {
         return cache.computeIfAbsent(key,
                 k -> new RopeFrequencies(rotaryDim, maxSeqLen, theta, scaling, exponentDenominator, rotatedDim));
     }
-
-    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
 
     public static class RopeFrequencies {
         private final float[] cos;

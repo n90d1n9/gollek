@@ -24,7 +24,6 @@ public class InferenceModelPathResolver {
 
     Path resolve(ProviderRequest request, SafetensorProviderConfig config) {
         Objects.requireNonNull(request, "request");
-        Objects.requireNonNull(config, "config");
 
         java.util.Optional<String> fromParam = request.getParameter("model_path", String.class);
         if (fromParam.isPresent() && !fromParam.get().isBlank()) {
@@ -52,7 +51,11 @@ public class InferenceModelPathResolver {
             return asPath;
         }
 
-        Path resolved = Path.of(config.basePath(), modelId);
+        // Use config basePath if available, otherwise fall back to Gollek home default
+        String base = (config != null) ? config.basePath()
+                : System.getProperty("user.home") + "/.gollek/models/safetensors";
+
+        Path resolved = Path.of(base, modelId);
         if (Files.exists(resolved)) {
             log.debugf("Resolved model '%s' to path: %s", modelId, resolved);
             return resolved;

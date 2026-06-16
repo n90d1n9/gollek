@@ -61,6 +61,8 @@ public class RequestValidationPlugin implements InferencePhasePlugin {
 
         LOG.infof("Initialized %s (maxMessageLength: %d, maxMessages: %d)",
                 name(), maxMessageLength, maxMessages);
+
+        return io.smallrye.mutiny.Uni.createFrom().voidItem();
     }
 
     @Override

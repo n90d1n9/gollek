@@ -241,7 +241,7 @@ public class SafetensorRunnerPlugin implements RunnerPlugin {
                 "llama", "llama2", "llama3", "llama3.1",
                 "mistral", "mixtral",
                 "qwen", "qwen2",
-                "gemma", "gemma2",
+                "gemma", "gemma2", "gemma3", "gemma4",
                 "phi", "phi2", "phi3",
                 "falcon",
                 "bert", "vit", "whisper");

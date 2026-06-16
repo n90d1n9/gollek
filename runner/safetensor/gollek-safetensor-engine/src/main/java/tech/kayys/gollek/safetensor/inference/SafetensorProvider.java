@@ -27,6 +27,8 @@ import tech.kayys.gollek.spi.provider.AdapterCapabilityProfile;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.registry.LocalModelRegistry;
+import tech.kayys.gollek.spi.registry.ModelEntry;
 import org.jboss.logging.Logger;
 
 import java.nio.file.Files;
@@ -61,6 +63,9 @@ public class SafetensorProvider implements StreamingProvider {
 
     @Inject
     ModelConverterService modelConverterService;
+
+    @Inject
+    LocalModelRegistry localModelRegistry;
 
     @Inject
     AdapterMetricsRecorder adapterMetricsRecorder = new NoopAdapterMetricsRecorder();
@@ -149,9 +154,30 @@ public class SafetensorProvider implements StreamingProvider {
         if (!config.enabled() || modelId == null || modelId.isBlank()) {
             return false;
         }
+        // Fast-path: if the local model registry already knows this model as
+        // SAFETENSORS format, trust it rather than repeating file-path heuristics.
+        if (localModelRegistry != null) {
+            boolean registryKnows = localModelRegistry.resolveAll(modelId).stream()
+                    .anyMatch(e -> e.format() == tech.kayys.gollek.core.model.ModelFormat.SAFETENSORS);
+            if (registryKnows) {
+                return true;
+            }
+        }
+        // Fall back to direct file-system resolution.
         Path modelPath = resolveModelPath(modelId);
-        if (modelPath == null || !Files.exists(modelPath) || Files.isDirectory(modelPath)) {
+        if (modelPath == null || !Files.exists(modelPath)) {
             return false;
+        }
+        if (Files.isDirectory(modelPath)) {
+            // The directory itself was returned by resolveToSafetensorFile when no
+            // single canonical file could be identified. Accept it if it contains
+            // at least one safetensor shard at any depth.
+            try (var walk = Files.walk(modelPath)) {
+                return walk.filter(Files::isRegularFile).anyMatch(this::isSafetensorFilePath);
+            } catch (Exception e) {
+                log.debugf("supports() directory walk failed for %s: %s", modelPath, e.getMessage());
+                return false;
+            }
         }
         String name = modelPath.getFileName().toString().toLowerCase(Locale.ROOT);
         return configuredExtensions().stream().anyMatch(name::endsWith);
@@ -319,6 +345,18 @@ public class SafetensorProvider implements StreamingProvider {
     }
 
     private Path resolveModelPath(String modelId) {
+        // 1. Registry lookup — honours aliases, HuggingFace Hub IDs, etc.
+        if (localModelRegistry != null) {
+            java.util.Optional<ModelEntry> entry = localModelRegistry.resolve(modelId);
+            if (entry.isPresent()) {
+                Path physicalPath = entry.get().physicalPath();
+                if (physicalPath != null) {
+                    return resolveToSafetensorFile(physicalPath);
+                }
+            }
+        }
+
+        // 2. Absolute path given directly.
         Path asGiven = Path.of(modelId);
         if (asGiven.isAbsolute()) {
             if (Files.exists(asGiven)) {
@@ -333,6 +371,7 @@ public class SafetensorProvider implements StreamingProvider {
             return resolveToSafetensorFile(asGiven);
         }
 
+        // 3. Relative path resolved against configured basePath.
         Path fromBase = Path.of(config.basePath(), modelId);
         if (Files.exists(fromBase)) {
             return resolveToSafetensorFile(fromBase);

@@ -88,9 +88,9 @@ public class QuipQuantizerService implements AutoCloseable {
         java.nio.file.Files.createDirectories(outputDir);
 
         // Load via SafetensorReader (reuse existing infrastructure)
-        tech.kayys.gollek.ml.safetensors.SafetensorReader reader =
-                new tech.kayys.gollek.ml.safetensors.SafetensorReader();
-        Map<String, float[]> raw = tech.kayys.gollek.ml.safetensors.SafetensorReader.read(inputSafetensors);
+        tech.kayys.gollek.safetensor.utils.SafetensorReader reader =
+                new tech.kayys.gollek.safetensor.utils.SafetensorReader();
+        Map<String, float[]> raw = tech.kayys.gollek.safetensor.utils.SafetensorReader.read(inputSafetensors);
 
         Map<String, int[]> shapes = new LinkedHashMap<>();
         raw.forEach((name, data) -> shapes.put(name, new int[]{1, data.length}));

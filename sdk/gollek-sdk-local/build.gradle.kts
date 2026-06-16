@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":runner:safetensor:gollek-safetensor-core"))
     implementation(project(":runner:safetensor:gollek-safetensor-engine"))
     implementation(project(":runner:safetensor:gollek-safetensor-spi"))
+    implementation(project(":core:gollek-runtime-config"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
     implementation(project(":models:gollek-model-llama"))
     implementation(project(":models:gollek-model-gemma"))
