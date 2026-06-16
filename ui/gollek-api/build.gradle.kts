@@ -10,7 +10,7 @@ configurations.configureEach {
 }
 
 dependencies {
-    implementation(project(":core:gollek-tensor"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation(project(":core:gollek-ir"))
     implementation(project(":core:gollek-core"))
     implementation(platform("io.quarkus.platform:quarkus-bom:$quarkusVersion"))

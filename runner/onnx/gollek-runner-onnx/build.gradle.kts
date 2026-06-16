@@ -40,7 +40,7 @@ dependencies {
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher")
     testImplementation(project(":core:gollek-model-repo-hf"))
-    testImplementation(project(":core:gollek-model-repository"))
+    testImplementation("tech.kayys.aljabr:aljabr-model-repository:0.1.0-SNAPSHOT")
     testImplementation(project(":core:gollek-runtime-config"))
 }
 

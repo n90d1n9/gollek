@@ -8,7 +8,7 @@ dependencies {
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":core:gollek-error-code"))
     implementation(project(":spi:gollek-spi"))
-    implementation(project(":core:gollek-tensor"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-vertx")
     implementation("io.quarkus:quarkus-mutiny")

@@ -70,7 +70,7 @@ if [ "$PLAN" != "$EXPECTED" ]; then
     exit 1
 fi
 
-WRAPPER_PLAN="$("$ROOT_DIR/scripts/run-install-local-macos.sh" --prewarm-plan auto)"
+WRAPPER_PLAN="$("$ROOT_DIR/scripts/install-local-macos.sh" --prewarm-plan auto)"
 if [ "$WRAPPER_PLAN" != "$EXPECTED" ]; then
     echo "Unexpected macOS wrapper auto prewarm plan" >&2
     echo "Expected:" >&2

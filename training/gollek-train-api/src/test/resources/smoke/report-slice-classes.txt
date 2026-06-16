@@ -1,2 +1,0 @@
-tech.kayys.gollek.ml.train.ReportSliceSmoke
-tech.kayys.gollek.ml.train.SnapshotSliceSmoke

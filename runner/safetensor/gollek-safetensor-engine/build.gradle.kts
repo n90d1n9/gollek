@@ -36,7 +36,7 @@ dependencies {
     implementation(platform("io.quarkus.platform:quarkus-bom:$quarkusVersion"))
 
     implementation(project(":core:gollek-runtime-config"))
-    implementation(project(":core:gollek-model-repository"))
+    implementation("tech.kayys.aljabr:aljabr-model-repository:0.1.0-SNAPSHOT")
     implementation(project(":core:gollek-tensor"))
     implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":sdk:gollek-sdk-core"))

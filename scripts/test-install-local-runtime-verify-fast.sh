@@ -339,7 +339,7 @@ GOLLEK_INSTALL_VERIFY_GGUF_BENCH="$TMP_DIR/fake-gguf-bench.sh" \
 GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_BENCH="$TMP_DIR/fake-gguf-compare-bench.sh" \
 GOLLEK_INSTALL_VERIFY_SAFETENSOR_BENCH="$TMP_DIR/fake-safetensor-bench.sh" \
 GOLLEK_INSTALL_VERIFY_FAST_KEEP_DAEMON=true \
-    bash "$ROOT_DIR/scripts/run-install-local-macos.sh" --verify-fast-only=gguf >/dev/null
+    bash "$ROOT_DIR/scripts/install-local-macos.sh" --verify-fast-only=gguf >/dev/null
 
 if grep -q '^litert ' "$VERIFY_FAST_LOG"; then
     echo "Expected macOS wrapper verify-fast-only=gguf to skip LiteRT benchmark" >&2
@@ -421,7 +421,7 @@ GOLLEK_INSTALL_VERIFY_GGUF_BENCH="$TMP_DIR/fake-gguf-bench.sh" \
 GOLLEK_INSTALL_VERIFY_GGUF_COMPARE_BENCH="$TMP_DIR/fake-gguf-compare-bench.sh" \
 GOLLEK_INSTALL_VERIFY_SAFETENSOR_BENCH="$TMP_DIR/fake-safetensor-bench.sh" \
 GOLLEK_INSTALL_VERIFY_FAST_AGGREGATE_BENCH="$TMP_DIR/fake-aggregate-bench.sh" \
-    bash "$ROOT_DIR/scripts/run-install-local-macos.sh" --verify-fast-m4-smoke-only >/dev/null
+    bash "$ROOT_DIR/scripts/install-local-macos.sh" --verify-fast-m4-smoke-only >/dev/null
 
 if ! grep -q "^aggregate --only safetensor --gollek-bin .*/bin/gollek --litert-model 7c51c9 --gguf-model b71c9d --safetensor-model 6f469a --require-metal --keep-daemon$" "$VERIFY_FAST_LOG"; then
     echo "Expected macOS wrapper to forward m4-smoke verify-only shortcut without running the full install wrapper" >&2

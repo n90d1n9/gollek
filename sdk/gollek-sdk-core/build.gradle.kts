@@ -5,7 +5,7 @@ plugins {
 dependencies {
     implementation(project(":core:gollek-tensor"))
     implementation(project(":sdk:gollek-sdk-api"))
-    implementation(project(":core:gollek-model-repository"))
+    implementation("tech.kayys.aljabr:aljabr-model-repository:0.1.0-SNAPSHOT")
     implementation(project(":core:plugin:gollek-plugin-kernel-core"))
     implementation(project(":spi:gollek-spi"))
     implementation(project(":spi:gollek-spi-provider"))

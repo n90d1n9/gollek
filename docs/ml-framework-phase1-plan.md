@@ -15,7 +15,7 @@ one-shot refactor.
 ## Status Update (May 13, 2026)
 
 - Local installer default path is now Gradle-only via
-  `./scripts/run-install-local-macos.sh`.
+  `./scripts/install-local-macos.sh`.
 - Maven command fallback has been removed from
   `scripts/install-local-runtime.sh`.
 - Optional compatibility publishing still exists behind

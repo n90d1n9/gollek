@@ -4,19 +4,20 @@ plugins {
 
 // Read Feature Flags from gradle.properties or command line
 val backends: List<String> = project.findProperty("gollek.backend")?.toString()?.split(",") ?: listOf("cpu")
-val enableTraining: Boolean = project.findProperty("gollek.training")?.toString()?.toBoolean() ?: false
+
 val enableInference: Boolean = project.findProperty("gollek.inference")?.toString()?.toBoolean() ?: true
 
 println("⚙️ Configuring gollek-core build:")
 println("   - Backends: $backends")
-println("   - Training Enabled: $enableTraining")
 println("   - Inference Enabled: $enableInference")
 
 dependencies {
-    implementation(project(":core:gollek-tensor"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation(project(":core:gollek-ir"))
     implementation(project(":spi:gollek-spi"))
     implementation(project(":spi:gollek-spi-model"))
+    // Depend on published aljabr core aggregator for shared math/tensor/tokenizer foundations
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
@@ -26,12 +27,7 @@ dependencies {
 sourceSets {
     main {
         java {
-            // Exclude training modules if not needed
-            if (!enableTraining) {
-                println("   [Optimizer] Excluded 'train' and 'autograd' packages.")
-                exclude("tech/kayys/gollek/train/**")
-                exclude("tech/kayys/gollek/autograd/**")
-            }
+
 
             // Exclude inference/runner modules if not needed
             if (!enableInference) {

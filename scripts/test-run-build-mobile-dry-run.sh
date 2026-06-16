@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-test-run-build-mobile-dry-run.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-test-build-mobile-dry-run.XXXXXX")"
 OUTPUT="$TMP_DIR/output.txt"
 CLI_OUTPUT="$TMP_DIR/cli-output.txt"
 VERIFY_ONLY_OUTPUT="$TMP_DIR/verify-only-output.txt"
@@ -65,7 +65,7 @@ MOBILE_FORMAT_TARGETS="litert,onnx" \
 MOBILE_FEATURES="text,vision" \
 GOLLEK_EDGE_DIR="$EDGE_DIR" \
 GOLLEK_EDGE_VERIFY_EDGE_MODELS=true \
-  bash "$ROOT_DIR/scripts/run-build-mobile.sh" >"$OUTPUT"
+  bash "$ROOT_DIR/scripts/build-mobile.sh" >"$OUTPUT"
 
 require_env_output_contains "commands will be printed instead of executed"
 require_env_output_contains "dry-run: native-runtime [bash] [$ROOT_DIR/scripts/build-mobile-runtime.sh]"
@@ -83,7 +83,7 @@ RUNTIME_TARGET=mobile \
 MOBILE_PLUGIN_DIR="$CLI_PLUGIN_DIR" \
 MOBILE_FORMAT_TARGETS="litert,onnx" \
 MOBILE_FEATURES="text,vision" \
-  bash "$ROOT_DIR/scripts/run-build-mobile.sh" \
+  bash "$ROOT_DIR/scripts/build-mobile.sh" \
     --dry-run \
     --edge-model-dir "$CLI_EDGE_DIR" \
     --require-edge-models \
@@ -105,7 +105,7 @@ RUNTIME_TARGET=mobile \
 MOBILE_PLUGIN_DIR="$VERIFY_ONLY_PLUGIN_DIR" \
 MOBILE_FORMAT_TARGETS="litert,onnx" \
 MOBILE_FEATURES="text,vision" \
-  bash "$ROOT_DIR/scripts/run-build-mobile.sh" \
+  bash "$ROOT_DIR/scripts/build-mobile.sh" \
     --verify-only \
     --dry-run \
     --edge-model-dir "$VERIFY_ONLY_EDGE_DIR" \

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-test-run-build-mobile-verify-only.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gollek-test-build-mobile-verify-only.XXXXXX")"
 TMP_DIR="$(cd "$TMP_DIR" && pwd -P)"
 OUTPUT="$TMP_DIR/output.txt"
 CAPTURE="$TMP_DIR/dart-capture.txt"
@@ -64,7 +64,7 @@ RUNTIME_TARGET=mobile \
 MOBILE_PLUGIN_DIR="$PLUGIN_DIR" \
 MOBILE_FORMAT_TARGETS="litert,onnx" \
 MOBILE_FEATURES="text,vision" \
-  bash "$ROOT_DIR/scripts/run-build-mobile.sh" \
+  bash "$ROOT_DIR/scripts/build-mobile.sh" \
     --verify-only \
     --edge-model-dir "$EDGE_DIR" \
     --require-edge-models \

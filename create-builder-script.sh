@@ -507,8 +507,8 @@ ARCHITECTURE_SLUG="$(join_by "-" "${ARCHITECTURE_TARGETS_SORTED[@]}")"
 SCRIPT_SLUG="$(join_by "-" "$BACKEND_SLUG" "$FORMAT_SLUG" "$LLM_SLUG" "$ARCHITECTURE_SLUG")"
 
 SELECTION_FILE="$SCRIPTS_DIR/module-selection-current.env"
-BUILD_SCRIPT="$SCRIPTS_DIR/run-build-macos.sh"
-INSTALL_SCRIPT="$SCRIPTS_DIR/run-install-local-macos.sh"
+BUILD_SCRIPT="$SCRIPTS_DIR/build-macos.sh"
+INSTALL_SCRIPT="$SCRIPTS_DIR/install-local-macos.sh"
 
 {
   printf 'BACKEND_TARGETS="%s"\n' "$(join_by "," "${BACKEND_TARGETS_SORTED[@]}")"

@@ -35,7 +35,7 @@ For source builds, run the builder UI and choose an install preference profile:
 
 ```bash
 ./create-builder-script.sh
-./scripts/run-install-local-macos.sh
+./scripts/install-local-macos.sh
 ```
 
 The builder writes the resolved module selection to:

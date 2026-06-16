@@ -22,7 +22,7 @@ dependencies {
     implementation(project(":sdk:gollek-sdk-core"))
     implementation(project(":sdk:gollek-sdk-api"))
     implementation(project(":core:gollek-core"))
-    implementation(project(":core:gollek-model-repository"))
+    implementation("tech.kayys.aljabr:aljabr-model-repository:0.1.0-SNAPSHOT")
     implementation(project(":core:gollek-observability"))
     implementation(project(":core:gollek-tensor"))
     implementation("tech.kayys.gollek:gollek-engine:0.1.0-SNAPSHOT")

@@ -239,6 +239,5 @@ subprojects {
     }
 }
 
-apply(from = "gradle/training-module-checks.gradle.kts")
 apply(from = "gradle/model-family-direct-fixtures.gradle.kts")
-apply(from = "gradle/jbang-trainer-examples.gradle.kts")
+
