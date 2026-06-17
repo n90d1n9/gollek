@@ -19,10 +19,10 @@ repositories {
 
 dependencies {
     implementation(group = "org.slf4j", name = "slf4j-api")
-    implementation(project(":spi:gollek-spi-model"))
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-inference"))
-    implementation("tech.kayys.aljabr:aljabr-model-repository:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation("jakarta.validation:jakarta.validation-api:3.0.2")
     implementation(group = "io.quarkus", name = "quarkus-micrometer")
     implementation(group = "io.quarkus", name = "quarkus-micrometer-registry-prometheus")

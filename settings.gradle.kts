@@ -1,7 +1,7 @@
 rootProject.name = "gollek-engine"
 
 // Include aljabr as a composite build so gollek can depend on aljabr projects during development
-includeBuild("../aljabr")
+includeBuild("../aljabr")  // enabled: include local aljabr composite build as source-of-truth for model modules
 
 
 fun includeOptionalProject(projectPath: String, vararg candidatePaths: String) {
@@ -51,27 +51,29 @@ val staticallyIncludedModelProjects = setOf(
     "gollek-model-yii",
 )
 
-// Include statically listed ones only if their directories exist
+// Include statically listed ones only if their directories exist (also check aljabr/models)
 staticallyIncludedModelProjects.forEach { name ->
-    val candidate = file("models/$name")
-    if (candidate.isDirectory && (candidate.resolve("build.gradle.kts").isFile || candidate.resolve("build.gradle").isFile)) {
-        include("models:$name")
-        project(":models:$name").projectDir = candidate
+    val aljabrAlt = "aljabr/models/aljabr-model-${name.removePrefix("gollek-model-")}"
+    includeOptionalProject("models:$name", "models/$name", "aljabr/models/$name", aljabrAlt)
+}
+
+// Auto-include any additional model projects present under any 'models' directories in the repository
+val discoveredModelDirs = mutableSetOf<java.io.File>()
+file(".").walkTopDown().maxDepth(5).forEach { f ->
+    if (f.isDirectory && f.name == "models") {
+        f.listFiles { candidate ->
+            candidate.isDirectory &&
+                    candidate.name.startsWith("gollek-model-") &&
+                    candidate.name !in staticallyIncludedModelProjects &&
+                    (candidate.resolve("build.gradle.kts").isFile || candidate.resolve("build.gradle").isFile)
+        }?.forEach { discoveredModelDirs.add(it.absoluteFile) }
     }
 }
 
-// Auto-include any additional model projects present in the models/ directory
-file("models")
-    .listFiles { candidate ->
-        candidate.isDirectory &&
-                candidate.name.startsWith("gollek-model-") &&
-                candidate.name !in staticallyIncludedModelProjects &&
-                (candidate.resolve("build.gradle.kts").isFile || candidate.resolve("build.gradle").isFile)
-    }
-    ?.sortedBy { it.name }
-    ?.forEach { modelProject ->
-        includeOptionalProject("models:${modelProject.name}", "models/${modelProject.name}")
-    }
+discoveredModelDirs.sortedBy { it.name }.forEach { modelProject ->
+    val logicalPath = "models:${modelProject.name}"
+    includeOptionalProject(logicalPath, modelProject.absolutePath)
+}
 includeOptionalProject("suling", "../extensions/audio/suling", "stubs/suling")
 
 // Optional optimization plugins

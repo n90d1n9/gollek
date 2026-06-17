@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":spi:gollek-spi"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "jakarta.enterprise", name = "jakarta.enterprise.cdi-api")

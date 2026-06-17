@@ -12,10 +12,10 @@ println("   - Backends: $backends")
 println("   - Inference Enabled: $enableInference")
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
-    implementation(project(":core:gollek-ir"))
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-model"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     // Depend on published aljabr core aggregator for shared math/tensor/tokenizer foundations
     implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     

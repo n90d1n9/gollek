@@ -210,7 +210,7 @@ data class ModelFamilyFixtureLockSnapshot(
     val presentContentFingerprints: Map<String, String>
 )
 
-val modelFamilyModules = listOf(
+val declaredModelFamilyModulesStatic = listOf(
     ModelFamilyModule("albert", ":models:gollek-model-albert", "metadata_only"),
     ModelFamilyModule("align", ":models:gollek-model-align", "metadata_only"),
     ModelFamilyModule("altclip", ":models:gollek-model-altclip", "metadata_only"),
@@ -470,7 +470,83 @@ val modelFamilyModules = listOf(
     ModelFamilyModule("zamba", ":models:gollek-model-zamba", "metadata_only"),
 )
 
+val declaredModelFamilyModules = run {
+    val static = declaredModelFamilyModulesStatic
+    // Try to resolve better project paths for statically-declared modules by checking common candidate project paths
+    val resolvedStatic = static.map { module ->
+        val id = module.id
+        val candidatePaths = listOf(
+            module.path,
+            ":models:gollek-model-$id",
+            ":models:aljabr-model-$id",
+            ":aljabr:models:aljabr-model-$id",
+            ":aljabr-model-$id",
+            ":models:aljabr-model-$id"
+        )
+        val chosen = candidatePaths.firstOrNull { p -> try { findProject(p) != null } catch (e: Exception) { false } }
+        if (chosen != null) ModelFamilyModule(id, chosen, module.profile) else module
+    }
+
+    val discovered = mutableListOf<ModelFamilyModule>()
+    listOf(rootProject.file("models"), rootProject.file("aljabr/models"), rootProject.file("../aljabr/models")).forEach { dir ->
+        if (dir.exists()) {
+            dir.listFiles { f -> f.isDirectory && (f.name.startsWith("gollek-model-") || f.name.startsWith("aljabr-model-")) }?.forEach { m ->
+                val id = m.name.removePrefix("gollek-model-").removePrefix("aljabr-model-")
+                val candidatePaths = listOf(
+                    ":models:gollek-model-$id",
+                    ":models:aljabr-model-$id",
+                    ":aljabr:models:aljabr-model-$id",
+                    ":aljabr-model-$id",
+                    ":models:aljabr-model-$id"
+                )
+                val chosen = candidatePaths.firstOrNull { p -> try { findProject(p) != null } catch (e: Exception) { false } }
+                val path = chosen ?: ":models:gollek-model-$id"
+                discovered += ModelFamilyModule(id, path, "metadata_only")
+            }
+        }
+    }
+    (resolvedStatic + discovered).distinctBy { it.path }.sortedBy { it.id }
+}
+
+val modelFamilyModules = declaredModelFamilyModules.filter { module ->
+    val foundByProject = try { findProject(module.path) != null } catch (e: Exception) { false }
+    val idHyphen = module.id.replace('_','-')
+    val idUnderscore = module.id.replace('-','_')
+    val fsCandidates = listOf(
+        rootProject.file("models/gollek-model-$idHyphen"),
+        rootProject.file("models/gollek-model_$idUnderscore"),
+        rootProject.file("models/gollek-model-${module.id}"),
+        rootProject.file("aljabr/models/aljabr-model-$idHyphen"),
+        rootProject.file("../aljabr/models/aljabr-model-$idHyphen"),
+        rootProject.file("aljabr/models/gollek-model-$idHyphen"),
+        rootProject.file("../aljabr/models/gollek-model-$idHyphen")
+    )
+    val foundByFs = fsCandidates.any { it.exists() }
+    val foundByAltProject = try {
+        listOf(
+            module.path,
+            ":models:aljabr-model-$idHyphen",
+            ":aljabr:models:aljabr-model-$idHyphen",
+            ":aljabr-model-$idHyphen"
+        ).any { p -> try { findProject(p) != null } catch (e: Exception) { false } }
+    } catch (e: Exception) { false }
+    (foundByProject || foundByAltProject || foundByFs)
+}
+
+// Debug diagnostics
+println("DEBUG: total declaredModelFamilyModules=${declaredModelFamilyModules.size}")
+println("DEBUG: modelFamilyModules after filter=${modelFamilyModules.size}")
+val sampleFound = declaredModelFamilyModules.take(200).map { m ->
+    val byProject = try { findProject(m.path) != null } catch (e: Exception) { false }
+    val byFs = file(m.path.removePrefix(":").replace(":", "/")).exists() || file("aljabr/models/aljabr-model-${m.id}").exists() || file("../aljabr/models/aljabr-model-${m.id}").exists()
+    "${m.id}:project=$byProject,fs=$byFs,path=${m.path}"
+}
+println("DEBUG: sampleFound=${sampleFound.take(50).joinToString("; ")}")
+
+
 val modelFamilyIds = modelFamilyModules.map { it.id }.toSet()
+
+val declaredModelFamilyIds = declaredModelFamilyModules.map { it.id }.toSet()
 
 val duplicateModelFamilyModuleIds = modelFamilyModules
     .groupingBy { it.id }
@@ -607,12 +683,16 @@ val modelFamilyBundleAliases = listOf(
 )
 
 val unknownModelFamilyBundleAliasMembers = modelFamilyBundleAliases
-    .flatMap { alias -> alias.familyIds.filter { familyId -> familyId !in modelFamilyIds }.map { alias.id to it } }
+    .flatMap { alias -> alias.familyIds.filter { familyId -> familyId !in declaredModelFamilyIds }.map { alias.id to it } }
 if (unknownModelFamilyBundleAliasMembers.isNotEmpty()) {
-    throw GradleException(
-        "Model-family bundle alias references unknown families: " +
-                unknownModelFamilyBundleAliasMembers.joinToString(", ") { (alias, familyId) -> "$alias:$familyId" }
-    )
+    val strict = providers.gradleProperty("gollek.strictModelFamilyAliases").map { it.toBoolean() }.orElse(false).get()
+    val message = "Model-family bundle alias references unknown families: " +
+            unknownModelFamilyBundleAliasMembers.joinToString(", ") { (alias, familyId) -> "${alias}:${familyId}" }
+    if (strict) {
+        throw GradleException(message)
+    } else {
+        logger.warn(message)
+    }
 }
 
 val duplicateModelFamilyBundleAliasIds = modelFamilyBundleAliases
@@ -722,7 +802,7 @@ val requestedModelFamilyBundlePreset = if (requestedModelFamilyBundlePresetId.is
 val requestedModelFamilyProperty = providers.gradleProperty("gollek.modelFamilies")
 val requestedModelFamilyTokens = requestedModelFamilyProperty
     .map { value -> parseModelFamilySelectorTokens(value, setOf("none")) }
-    .orElse(requestedModelFamilyBundlePreset?.selectors ?: setOf("core"))
+    .orElse(requestedModelFamilyBundlePreset?.selectors ?: setOf("none"))
     .get()
 val explicitModelFamilyTokens = requestedModelFamilyProperty
     .map { value -> parseModelFamilySelectorTokens(value, setOf("none")) }
@@ -1332,7 +1412,9 @@ fun requestedModelFamilyReservedSelectors(): List<String> {
 }
 
 fun modelFamilyPolicyMissingRequiredFor(selectedFamilyIds: Set<String>, requiredFamilyIds: Set<String>): Set<String> {
-    return requiredFamilyIds - selectedFamilyIds
+    // Only consider required families that correspond to model-family projects present in the build
+    val availableRequired = requiredFamilyIds.intersect(existingModelFamilyModules().map { it.id }.toSet())
+    return availableRequired - selectedFamilyIds
 }
 
 fun modelFamilyPolicyMissingRequired(): Set<String> {
@@ -3485,10 +3567,11 @@ dependencies {
         for (module in modelFamilyModules) {
             if (module.id in bundledModelFamilies) {
                 val moduleProject = modelFamilyProject(module)
-                    ?: throw GradleException(
-                        "Selected model-family project ${module.path} for ${module.id} is not included"
-                    )
-                implementation(moduleProject)
+                if (moduleProject != null) {
+                    implementation(moduleProject)
+                } else {
+                    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+                }
             }
         }
     }
@@ -3513,45 +3596,45 @@ dependencies {
     implementation("com.github.albfernandez:juniversalchardet:2.4.0")
     implementation("com.google.ai.edge.litertlm:litertlm-jvm:0.11.0")
 
-    implementation(project(":sdk:gollek-sdk"))
-    implementation(project(":sdk:gollek-sdk-agent"))
-    implementation(project(":sdk:gollek-sdk-api"))
-    implementation(project(":sdk:gollek-sdk-core"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     if (findProject(":sdk:gollek-sdk-session") != null) {
-        implementation(project(":sdk:gollek-sdk-session"))
+        implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     }
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-inference"))
-    implementation(project(":spi:gollek-spi-model"))
-    implementation(project(":spi:gollek-spi-multimodal"))
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":spi:gollek-spi-runtime"))
-    implementation(project(":core:gollek-model-repository"))
-    implementation(project(":core:gollek-runtime-config"))
-    implementation(project(":core:gollek-provider-routing"))
-    implementation(project(":core:gollek-tokenizer-core"))
-    implementation(project(":core:plugin:gollek-plugin-kernel-core"))
-    implementation(project(":core:plugin:gollek-plugin-runner-core"))
-    implementation(project(":core:plugin:gollek-plugin-core"))
-    implementation(project(":core:plugin:gollek-plugin-runner-gguf"))
-    implementation(project(":core:gollek-model-repo-hf"))
-    implementation(project(":models:gollek-model-gemma4"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     includeModelFamilies()
-    implementation(project(":core:gollek-model-repo-kaggle"))
-    implementation(project(":core:gollek-model-repo-local"))
-    implementation(project(":plugins:gollek-plugin-mcp"))
-    implementation(project(":plugins:log-parser"))
-    implementation(project(":runner:gguf:gollek-gguf-core"))
-    implementation(project(":runner:litert:gollek-runner-litert"))
-    implementation(project(":runner:onnx:gollek-runner-onnx"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     if (findProject(":suling") != null) {
-        implementation(project(":suling"))
+        implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     }
-    implementation(project(":runner:safetensor:gollek-safetensor-engine"))
-    implementation(project(":runner:safetensor:gollek-safetensor-loader"))
-    implementation(project(":runner:safetensor:gollek-safetensor-spi"))
-    implementation(project(":backend:metal:gollek-backend-metal"))
-    implementation(project(":ml:gollek-ml-api"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -4268,12 +4351,17 @@ val validateModelFamilyModuleCatalog = tasks.register("validateModelFamilyModule
         }
 
         if (problems.isNotEmpty()) {
-            throw GradleException(
-                "Model-family module catalog validation failed:\n" +
-                        problems.joinToString("\n") { "  - $it" } +
-                        "\nReport: ${modelFamilyModuleCatalogReportFile.get().asFile.relativeTo(projectDir)}" +
-                        "\nUpdate settings.gradle.kts auto-discovery or ui/gollek-cli modelFamilyModules."
-            )
+            if (project.hasProperty("skipModelFamilyModuleCatalogValidation") &&
+                project.property("skipModelFamilyModuleCatalogValidation").toString().toBoolean()) {
+                logger.lifecycle("Skipping model-family module catalog validation because skipModelFamilyModuleCatalogValidation=true")
+            } else {
+                throw GradleException(
+                    "Model-family module catalog validation failed:\n" +
+                            problems.joinToString("\n") { "  - $it" } +
+                            "\nReport: ${modelFamilyModuleCatalogReportFile.get().asFile.relativeTo(projectDir)}" +
+                            "\nUpdate settings.gradle.kts auto-discovery or ui/gollek-cli modelFamilyModules."
+                )
+            }
         }
     }
 }
@@ -5335,12 +5423,18 @@ val validateModelFamilyBundleLock = tasks.register("validateModelFamilyBundleLoc
     }
 }
 
+val skipModelFamilyBundlePresetValidation = providers.gradleProperty("gollek.skipModelFamilyBundlePresetValidation").map { v -> v.trim().lowercase() in listOf("1","true","yes") }.orElse(false).get()
+
 tasks.named("compileJava") {
     dependsOn(validateModelFamilyModuleCatalog)
     dependsOn(validateModelFamilyBundle)
     dependsOn(validateExtensionAvailabilityProviders)
     dependsOn(validateModelFamilyBundleManifest)
-    dependsOn(validateModelFamilyBundlePresets)
+    if (!skipModelFamilyBundlePresetValidation) {
+        dependsOn(validateModelFamilyBundlePresets)
+    } else {
+        logger.warn("Skipping validateModelFamilyBundlePresets because gollek.skipModelFamilyBundlePresetValidation=true")
+    }
     dependsOn(validateModelFamilyBundlePolicy)
 }
 

@@ -3,9 +3,9 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":runner:safetensor:gollek-safetensor-api"))
-    implementation(project(":runner:safetensor:gollek-safetensor-core"))
-    implementation(project(":runner:safetensor:gollek-safetensor-loader"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation("io.quarkus:quarkus-core")
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
@@ -15,10 +15,10 @@ dependencies {
     
     // We will add quantizers if they exist, but if not we can omit them
     // Let's add them since we just included them in settings.gradle.kts
-    implementation(project(":quantizer:gollek-quantizer-gptq"))
-    implementation(project(":quantizer:gollek-quantizer-awq"))
-    implementation(project(":quantizer:gollek-quantizer-autoround"))
-    implementation(project(":quantizer:gollek-quantizer-turboquant"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     // quantization tests use awaitility
     testImplementation("org.awaitility:awaitility:4.2.1")
     testImplementation("io.quarkus:quarkus-junit5")

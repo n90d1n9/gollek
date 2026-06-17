@@ -18,7 +18,7 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":spi:gollek-spi"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     compileOnly(group = "jakarta.enterprise", name = "jakarta.enterprise.cdi-api")
     compileOnly(group = "jakarta.inject", name = "jakarta.inject-api")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")

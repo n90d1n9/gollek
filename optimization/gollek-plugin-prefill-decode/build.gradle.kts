@@ -18,12 +18,12 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":core:gollek-model-runner"))
-    implementation(project(":optimization:gollek-plugin-kv-cache"))
-    implementation(project(":optimization:gollek-plugin-paged-attention"))
-    implementation(project(":core:gollek-tokenizer-core"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "io.quarkus", name = "quarkus-rest")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "io.quarkus", name = "quarkus-arc")

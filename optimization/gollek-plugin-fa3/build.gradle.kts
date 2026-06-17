@@ -18,9 +18,9 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "net.java.dev.jna", name = "jna", version = "5.14.0")
-    implementation(project(":spi:gollek-spi-provider"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "io.quarkus", name = "quarkus-arc", version = "3.32.2")
     implementation(group = "io.smallrye.reactive", name = "mutiny", version = "2.9.4")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging", version = "3.6.1.Final")

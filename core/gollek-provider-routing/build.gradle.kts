@@ -18,12 +18,12 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":spi:gollek-spi-model"))
-    implementation(project(":spi:gollek-spi-inference"))
-    implementation(project(":core:gollek-error-code"))
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-runtime"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "io.quarkus", name = "quarkus-mutiny")
     implementation(group = "io.quarkus", name = "quarkus-vertx")

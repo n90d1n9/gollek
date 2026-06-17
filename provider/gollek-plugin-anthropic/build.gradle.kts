@@ -19,8 +19,8 @@ repositories {
 
 dependencies {
     
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":core:gollek-observability"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "io.quarkus", name = "quarkus-vertx")
     implementation(group = "io.quarkus", name = "quarkus-rest-jackson")
     implementation(group = "io.smallrye.reactive", name = "mutiny")

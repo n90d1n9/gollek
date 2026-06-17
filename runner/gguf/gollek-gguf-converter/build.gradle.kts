@@ -3,11 +3,11 @@ plugins {
 }
 
 dependencies {
-    implementation(project(":runner:gguf:gollek-gguf-core"))
-    implementation(project(":core:gollek-core"))
-    implementation(project(":core:gollek-tensor"))
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":runner:safetensor:gollek-safetensor-loader"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.16.1")

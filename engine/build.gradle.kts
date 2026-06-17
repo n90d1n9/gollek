@@ -19,12 +19,12 @@ publishing {
 
 
 dependencies {
-    implementation(project(":spi:gollek-spi-inference"))
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":core:plugin:gollek-plugin-runner-core"))
-    implementation(project(":plugins:gollek-plugin-model-router"))
-    implementation(project(":core:gollek-provider-core"))
-    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation("io.smallrye.reactive:mutiny")
     
     // GraalVM annotations for NativeImageFeature
@@ -32,7 +32,7 @@ dependencies {
     implementation("io.quarkus:quarkus-core")
 
     // Cache plugin required for SemanticCachePlugin
-    implementation(project(":plugins:gollek-plugin-semantic-cache"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
 
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

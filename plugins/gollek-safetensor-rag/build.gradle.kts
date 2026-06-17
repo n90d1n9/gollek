@@ -18,8 +18,8 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":runner:safetensor:gollek-safetensor-api"))
-    implementation(project(":runner:safetensor:gollek-safetensor-core"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     
 }
 

@@ -18,8 +18,8 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":ml:gollek-ml-autograd"))
-    implementation(project(":ml:gollek-ml-nn"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
 }
 

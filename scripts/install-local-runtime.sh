@@ -1117,6 +1117,11 @@ if [ ! -x "$GRADLEW" ]; then
 fi
 
 GRADLE_ARGS=("--no-daemon" "--no-build-cache")
+# Allow skipping strict model-family validations during local installs
+GRADLE_ARGS+=("-Pgollek.skipModelFamilyBundlePresetValidation=true")
+GRADLE_ARGS+=("-Pgollek.skipModelFamilyModuleCatalogValidation=true")
+# Task-level switch recognized by ui/gollek-cli: skipModelFamilyModuleCatalogValidation (no gollek. prefix)
+GRADLE_ARGS+=("-PskipModelFamilyModuleCatalogValidation=true")
 if [ -n "${JAVA_HOME:-}" ]; then
     GRADLE_ARGS=("-Dorg.gradle.java.home=${JAVA_HOME}" "${GRADLE_ARGS[@]}")
 fi

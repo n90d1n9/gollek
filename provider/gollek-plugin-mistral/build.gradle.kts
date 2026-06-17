@@ -19,8 +19,8 @@ repositories {
 
 dependencies {
     
-    implementation(project(":spi:gollek-spi-provider"))
-    implementation(project(":core:gollek-observability"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     implementation(group = "com.fasterxml.jackson.datatype", name = "jackson-datatype-jsr310")

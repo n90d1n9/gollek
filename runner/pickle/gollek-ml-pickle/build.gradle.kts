@@ -18,13 +18,13 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":ml:gollek-ml-autograd"))
-    implementation(project(":ml:gollek-ml-nn"))
-    implementation(project(":core:gollek-tensor"))
-    implementation(project(":ml:gollek-ml-core"))
-    implementation(project(":ml:gollek-ml-estimator"))
-    implementation(project(":ml:gollek-ml-preprocessing"))
-    implementation(project(":ml:gollek-ml-persistence"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     implementation(group = "org.slf4j", name = "slf4j-api", version = "2.0.12")
     compileOnly(group = "io.quarkus", name = "quarkus-core")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter", version = "5.10.2")

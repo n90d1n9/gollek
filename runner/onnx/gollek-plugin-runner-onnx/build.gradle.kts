@@ -18,11 +18,11 @@ repositories {
 }
 
 dependencies {
-    implementation(project(":core:plugin:gollek-plugin-runner-core"))
-    implementation(project(":runner:onnx:gollek-runner-onnx"))
-    implementation(project(":core:gollek-tokenizer-core"))
-    implementation(project(":spi:gollek-spi-inference"))
-    implementation(project(":spi:gollek-spi-multimodal"))
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     compileOnly(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime", version = "1.20.0")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
