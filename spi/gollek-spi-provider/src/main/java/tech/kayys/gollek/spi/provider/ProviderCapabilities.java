@@ -3,8 +3,8 @@ package tech.kayys.gollek.spi.provider;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;

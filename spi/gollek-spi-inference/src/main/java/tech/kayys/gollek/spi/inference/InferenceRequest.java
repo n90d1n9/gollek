@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.lang.foreign.MemorySegment;
 
 /**
  * Immutable inference request.
@@ -71,6 +72,9 @@ public final class InferenceRequest {
 
     @NotNull
     private final List<Attachment> attachments;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private final transient MemorySegment nativeContextSegment;
 
     @JsonCreator
     public InferenceRequest(
@@ -143,6 +147,81 @@ public final class InferenceRequest {
         this.attachments = attachments != null
                 ? Collections.unmodifiableList(new ArrayList<>(attachments))
                 : Collections.emptyList();
+        this.nativeContextSegment = null;
+    }
+
+    private InferenceRequest(
+            String requestId,
+            String apiKey,
+            String model,
+            List<Message> messages,
+            Map<String, Object> parameters,
+            List<ToolDefinition> tools,
+            Object toolChoice,
+            boolean streaming,
+            String preferredProvider,
+            String plugin,
+            Duration timeout,
+            Priority priority,
+            boolean cacheBypass,
+            String userId,
+            String sessionId,
+            String traceId,
+            InferenceStage inferenceStage,
+            int promptTokenCount,
+            Map<String, Object> metadata,
+            List<Attachment> attachments,
+            MemorySegment nativeContextSegment) {
+        this.requestId = Objects.requireNonNull(requestId, "requestId");
+        this.requestContext = new RequestContext() {
+            @Override
+            public String apiKey() {
+                return apiKey;
+            }
+
+            @Override
+            public String getRequestId() {
+                return requestId;
+            }
+
+            @Override
+            public String userId() {
+                return userId;
+            }
+
+            @Override
+            public String sessionId() {
+                return sessionId;
+            }
+
+            @Override
+            public String traceId() {
+                return traceId;
+            }
+        };
+        this.model = Objects.requireNonNull(model, "model");
+        this.messages = Collections.unmodifiableList(new ArrayList<>(
+                Objects.requireNonNull(messages, "messages")));
+        this.tools = tools != null ? Collections.unmodifiableList(new ArrayList<>(tools)) : null;
+        this.toolChoice = toolChoice;
+        this.parameters = parameters != null
+                ? Collections.unmodifiableMap(new HashMap<>(parameters))
+                : Collections.emptyMap();
+        this.streaming = streaming;
+        this.preferredProvider = preferredProvider;
+        this.plugin = plugin;
+        this.timeout = timeout;
+        this.priority = priority;
+        this.cacheBypass = cacheBypass;
+        this.inferenceStage = inferenceStage;
+        this.promptTokenCount = promptTokenCount;
+        this.metadata = metadata != null
+                ? Collections.unmodifiableMap(new HashMap<>(metadata))
+                : Collections.emptyMap();
+        this.attachments = attachments != null
+                ? Collections.unmodifiableList(new ArrayList<>(attachments))
+                : Collections.emptyList();
+        this.nativeContextSegment = nativeContextSegment;
     }
 
     // Getters
@@ -264,6 +343,10 @@ public final class InferenceRequest {
         return attachments;
     }
 
+    public Optional<MemorySegment> getNativeContextSegment() {
+        return Optional.ofNullable(nativeContextSegment);
+    }
+
     // Parameter accessors
     public double getTemperature() {
         Object val = parameters.get("temperature");
@@ -329,7 +412,8 @@ public final class InferenceRequest {
                 .inferenceStage(inferenceStage)
                 .promptTokenCount(promptTokenCount)
                 .metadata(metadata)
-                .attachments(attachments);
+                .attachments(attachments)
+                .nativeContextSegment(nativeContextSegment);
 
         if (tools != null) {
             builder.tools(tools);
@@ -367,6 +451,7 @@ public final class InferenceRequest {
         private int promptTokenCount = -1;
         private final Map<String, Object> metadata = new HashMap<>();
         private final List<Attachment> attachments = new ArrayList<>();
+        private MemorySegment nativeContextSegment;
 
         public Builder requestId(String requestId) {
             this.requestId = requestId;
@@ -576,6 +661,11 @@ public final class InferenceRequest {
             return this;
         }
 
+        public Builder nativeContextSegment(MemorySegment nativeContextSegment) {
+            this.nativeContextSegment = nativeContextSegment;
+            return this;
+        }
+
         public InferenceRequest build() {
             Objects.requireNonNull(model, "model is required");
             if (messages.isEmpty()) {
@@ -584,7 +674,7 @@ public final class InferenceRequest {
             return new InferenceRequest(
                     requestId, apiKey, model, messages, parameters, tools, toolChoice, streaming,
                     preferredProvider, plugin, timeout, priority, cacheBypass, userId, sessionId, traceId,
-                    inferenceStage, promptTokenCount, metadata, attachments);
+                    inferenceStage, promptTokenCount, metadata, attachments, nativeContextSegment);
         }
     }
 

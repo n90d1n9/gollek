@@ -19,17 +19,17 @@ repositories {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-runtime-config"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-multimodal"))
+    implementation(project(":core:gollek-error-code"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-provider-core"))
+    implementation("tech.kayys.aljabr:aljabr-backend-metal:0.1.0-SNAPSHOT")
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("io.smallrye.config:smallrye-config:3.10.1")
     implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
@@ -43,7 +43,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-engine:5.10.2")
     testImplementation("org.junit.platform:junit-platform-launcher:1.10.2")
     testImplementation("org.slf4j:slf4j-simple:2.0.12")
-    testImplementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    testImplementation(project(":runner:safetensor:gollek-safetensor-loader"))
 }
 
 sourceSets {

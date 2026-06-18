@@ -31,11 +31,11 @@ sourceSets {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-ml-autograd:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-ml-nn:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-model"))
     implementation("com.google.code.gson:gson:2.10.1")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
     implementation("io.quarkus:quarkus-core")
     implementation("org.jboss.logging:jboss-logging:3.6.1.Final")
     testImplementation("org.junit.jupiter:junit-jupiter")

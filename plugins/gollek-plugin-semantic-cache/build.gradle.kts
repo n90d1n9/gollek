@@ -18,9 +18,9 @@ repositories {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-multimodal"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "com.github.ben-manes.caffeine", name = "caffeine", version = "3.1.8")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")

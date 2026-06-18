@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import tech.kayys.gollek.provider.core.registry.DefaultLocalModelRegistry;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.registry.LocalModelRegistry;
 import tech.kayys.gollek.spi.registry.ModelEntry;
 

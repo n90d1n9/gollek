@@ -18,10 +18,15 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":spi:gollek-spi-model"))
     implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation(group = "tech.kayys.gollek", name = "gollek-engine")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":core:gollek-model-runner"))
+    implementation(project(":optimization:gollek-plugin-kv-cache"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")

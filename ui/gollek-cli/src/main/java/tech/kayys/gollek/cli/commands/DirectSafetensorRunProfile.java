@@ -6,7 +6,7 @@
 package tech.kayys.gollek.cli.commands;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import tech.kayys.gollek.models.gemma4.Gemma4RuntimeProfile;
+
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
@@ -85,18 +85,6 @@ record DirectSafetensorRunProfile(
     }
 
     private static ModelRuntimeTraits runtimeTraits(ModelConfig config) {
-        if (isGemma4Config(config)) {
-            return Gemma4RuntimeProfile.text(config).withDetectedModalities(config);
-        }
         return ModelRuntimeTraits.fallbackFromConfig(config);
-    }
-
-    private static boolean isGemma4Config(ModelConfig config) {
-        if (config == null) {
-            return false;
-        }
-        String modelType = normalize(config.modelType());
-        String architecture = normalize(config.primaryArchitecture());
-        return modelType.startsWith("gemma4") || architecture.startsWith("gemma4");
     }
 }

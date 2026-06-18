@@ -2,10 +2,10 @@ package tech.kayys.gollek.inference.libtorch.core;
 
 import tech.kayys.gollek.inference.libtorch.binding.LibTorchBinding;
 import tech.kayys.gollek.core.backend.ComputeBackendType;
-import tech.kayys.gollek.core.tensor.DType;
+import tech.kayys.aljabr.core.tensor.DType;
 import tech.kayys.gollek.inference.libtorch.core.Device;
 import tech.kayys.gollek.core.graph.ExecutionContext;
-import tech.kayys.gollek.core.tensor.Tensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -65,21 +65,21 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TorchTensor implements Tensor, AutoCloseable {
 
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor add(tech.kayys.gollek.core.tensor.Tensor other) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor add(tech.kayys.aljabr.core.tensor.Tensor other) { return this; }
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor sub(tech.kayys.gollek.core.tensor.Tensor other) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor sub(tech.kayys.aljabr.core.tensor.Tensor other) { return this; }
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor mul(tech.kayys.gollek.core.tensor.Tensor other) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor mul(tech.kayys.aljabr.core.tensor.Tensor other) { return this; }
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor mul(float scalar) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor mul(float scalar) { return this; }
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor div(float scalar) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor div(float scalar) { return this; }
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor matmul(tech.kayys.gollek.core.tensor.Tensor other) { return this; }
+    public tech.kayys.aljabr.core.tensor.Tensor matmul(tech.kayys.aljabr.core.tensor.Tensor other) { return this; }
 
     @Override
-    public tech.kayys.gollek.core.tensor.Shape shape() {
-        return new tech.kayys.gollek.core.tensor.Shape(shapeArray());
+    public tech.kayys.aljabr.core.tensor.Shape shape() {
+        return new tech.kayys.aljabr.core.tensor.Shape(shapeArray());
     }
 
     @Override
@@ -563,14 +563,14 @@ public class TorchTensor implements Tensor, AutoCloseable {
     }
 
     @Override
-    public tech.kayys.gollek.core.tensor.DeviceType device() {
+    public tech.kayys.aljabr.core.tensor.DeviceType device() {
         return switch (deviceType()) {
-            case CPU -> tech.kayys.gollek.core.tensor.DeviceType.CPU;
-            case CUDA -> tech.kayys.gollek.core.tensor.DeviceType.CUDA;
-            case MPS -> tech.kayys.gollek.core.tensor.DeviceType.METAL;
-            case HIP -> tech.kayys.gollek.core.tensor.DeviceType.ROCM;
-            case XLA -> tech.kayys.gollek.core.tensor.DeviceType.TPU;
-            default -> tech.kayys.gollek.core.tensor.DeviceType.CPU;
+            case CPU -> tech.kayys.aljabr.core.tensor.DeviceType.CPU;
+            case CUDA -> tech.kayys.aljabr.core.tensor.DeviceType.CUDA;
+            case MPS -> tech.kayys.aljabr.core.tensor.DeviceType.METAL;
+            case HIP -> tech.kayys.aljabr.core.tensor.DeviceType.ROCM;
+            case XLA -> tech.kayys.aljabr.core.tensor.DeviceType.TPU;
+            default -> tech.kayys.aljabr.core.tensor.DeviceType.CPU;
         };
     }
 
@@ -609,7 +609,7 @@ public class TorchTensor implements Tensor, AutoCloseable {
     }
 
     @Override
-    public tech.kayys.gollek.core.tensor.Tensor slice(int dim, long start, long end) {
+    public tech.kayys.aljabr.core.tensor.Tensor slice(int dim, long start, long end) {
         checkClosed();
         Arena opArena = Arena.ofConfined();
         try {

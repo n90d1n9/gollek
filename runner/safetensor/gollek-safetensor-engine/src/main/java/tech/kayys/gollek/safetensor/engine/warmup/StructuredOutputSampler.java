@@ -71,8 +71,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
 
 import org.jboss.logging.Logger;
 

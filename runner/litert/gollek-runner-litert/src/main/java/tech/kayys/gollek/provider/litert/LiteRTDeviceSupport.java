@@ -1,6 +1,6 @@
 package tech.kayys.gollek.provider.litert;
 
-import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.tensor.DeviceType;
 
 import java.util.LinkedHashSet;
 import java.util.Locale;

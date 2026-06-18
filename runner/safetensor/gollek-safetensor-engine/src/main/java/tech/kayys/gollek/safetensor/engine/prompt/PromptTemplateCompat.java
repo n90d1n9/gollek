@@ -20,6 +20,6 @@ public final class PromptTemplateCompat {
     }
 
     public static String format(List<Message> messages, String modelType, ModelRuntimeTraits runtimeTraits) {
-        return ChatTemplateFormatter.format(messages, modelType, runtimeTraits);
+        return ChatTemplateFormatter.format(messages, modelType);
     }
 }

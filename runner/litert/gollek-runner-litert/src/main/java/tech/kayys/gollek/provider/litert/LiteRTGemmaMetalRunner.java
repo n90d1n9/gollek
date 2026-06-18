@@ -1,6 +1,6 @@
 package tech.kayys.gollek.provider.litert;
 
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;

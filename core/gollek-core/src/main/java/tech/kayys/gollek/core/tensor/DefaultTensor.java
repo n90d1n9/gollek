@@ -1,7 +1,7 @@
-package tech.kayys.gollek.core.tensor;
+package tech.kayys.aljabr.core.tensor;
 
 import tech.kayys.gollek.core.memory.Buffer;
-import tech.kayys.gollek.core.backend.ComputeBackend;
+import tech.kayys.aljabr.core.backend.ComputeBackend;
 
 public final class DefaultTensor implements Tensor {
     private final Shape shape;

@@ -10,8 +10,8 @@ import static tech.kayys.gollek.safetensor.engine.generation.GenerationTokenPoli
 
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
-import tech.kayys.gollek.tokenizer.spi.StreamingDecoder;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.StreamingDecoder;
 
 import java.util.ArrayList;
 import java.util.Collections;

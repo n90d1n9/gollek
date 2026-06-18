@@ -2,7 +2,7 @@ package tech.kayys.gollek.diffusion.graph;
 import tech.kayys.gollek.core.graph.ExecutionContext;
 import tech.kayys.gollek.core.graph.Node;
 import tech.kayys.gollek.core.graph.AbstractNode;
-import tech.kayys.gollek.core.tensor.Tensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 
 /**
  * CLASSIFIER-FREE GUIDANCE (CFG)

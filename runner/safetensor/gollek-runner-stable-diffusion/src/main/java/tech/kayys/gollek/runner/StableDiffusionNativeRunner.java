@@ -6,7 +6,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.core.model.ModelFormat;
 import tech.kayys.gollek.core.random.GaussianNoise;
-import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.tensor.DeviceType;
 import tech.kayys.gollek.extension.AbstractGollekRunner;
 import tech.kayys.gollek.runner.RunnerCapabilities;
 import tech.kayys.gollek.runner.RunnerConfiguration;

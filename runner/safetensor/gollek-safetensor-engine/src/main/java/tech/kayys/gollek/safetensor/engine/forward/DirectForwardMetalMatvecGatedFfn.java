@@ -10,7 +10,7 @@ import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps
 import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardTensorOps.reusableOutputTensor;
 
 import org.jboss.logging.Logger;
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.generation.DirectInferenceProfiler;
 import tech.kayys.gollek.spi.model.FFNActivationType;

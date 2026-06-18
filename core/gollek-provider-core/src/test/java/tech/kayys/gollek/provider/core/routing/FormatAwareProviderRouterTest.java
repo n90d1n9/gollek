@@ -9,7 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.Message;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.provider.*;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.provider.StreamingProvider;

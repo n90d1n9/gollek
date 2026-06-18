@@ -18,11 +18,11 @@ repositories {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-ml-autograd:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-ml-nn:0.1.0-SNAPSHOT")
+    implementation(project(":sdk:gollek-sdk-api"))
+    implementation(project(":runner:litert:gollek-runner-litert"))
+    implementation(project(":spi:gollek-spi-inference"))
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
 }

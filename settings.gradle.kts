@@ -38,23 +38,12 @@ includeOptionalProject("core:gollek-tensor", "core/gollek-tensor")
 includeOptionalProject("core:gollek-tokenizer-core", "core/gollek-tokenizer-core")
 includeOptionalProject("core:gollek-tool-core", "core/gollek-tool-core")
 // Dynamically include model projects if they exist (avoid hard failure when some model dirs are missing)
-val staticallyIncludedModelProjects = setOf(
-    "gollek-model-cohere",
-    "gollek-model-common",
-    "gollek-model-deepseek",
-    "gollek-model-gemma",
-    "gollek-model-kimi",
-    "gollek-model-llama",
-    "gollek-model-mistral",
-    "gollek-model-phi",
-    "gollek-model-qwen",
-    "gollek-model-yii",
-)
+val staticallyIncludedModelProjects = setOf<String>()
 
 // Include statically listed ones only if their directories exist (also check aljabr/models)
 staticallyIncludedModelProjects.forEach { name ->
-    val aljabrAlt = "aljabr/models/aljabr-model-${name.removePrefix("gollek-model-")}"
-    includeOptionalProject("models:$name", "models/$name", "aljabr/models/$name", aljabrAlt)
+    val aljabrAlt = "../aljabr/models/aljabr-model-${name.removePrefix("gollek-model-")}"
+    includeOptionalProject("models:$name", "models/$name", "../aljabr/models/$name", aljabrAlt)
 }
 
 // Auto-include any additional model projects present under any 'models' directories in the repository
@@ -195,3 +184,9 @@ includeOptionalProject("runner:tensorrt:gollek-runner-tensorrt", "runner/tensorr
 includeOptionalProject("runner:tensorrt:gollek-plugin-runner-tensorrt", "runner/tensorrt/gollek-plugin-runner-tensorrt")
 includeOptionalProject("runner:torch:gollek-runner-libtorch", "runner/torch/gollek-runner-libtorch")
 includeOptionalProject("engine", "engine")
+
+include("core:gollek-model-repo-hf")
+include("core:gollek-model-repo-kaggle")
+include("core:gollek-model-repo-local")
+include("core:gollek-model-database")
+include("core:gollek-tokenizer-core")

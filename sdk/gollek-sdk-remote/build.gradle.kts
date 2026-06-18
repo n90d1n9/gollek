@@ -22,13 +22,13 @@ val mutinyVersion = "2.5.5"
 val jakartaValidationVersion = "3.0.2"
 
 dependencies {
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    api(project(":sdk:gollek-sdk-agent"))
+    api(project(":sdk:gollek-sdk-core"))
+    api(project(":spi:gollek-spi"))
+    api(project(":spi:gollek-spi-inference"))
+    api(project(":spi:gollek-spi-model"))
+    api(project(":spi:gollek-spi-multimodal"))
+    api(project(":spi:gollek-spi-provider"))
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind", version = jacksonVersion)
     implementation(group = "io.smallrye.reactive", name = "mutiny", version = mutinyVersion)
     implementation(group = "io.reactivex.rxjava3", name = "rxjava", version = "3.1.8")

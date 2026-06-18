@@ -1,7 +1,7 @@
 package tech.kayys.gollek.onnx.runner;
 
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import java.util.Arrays;
 import java.util.Objects;

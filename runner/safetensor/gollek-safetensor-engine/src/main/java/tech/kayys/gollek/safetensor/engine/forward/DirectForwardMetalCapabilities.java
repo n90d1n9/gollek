@@ -5,7 +5,7 @@
  */
 package tech.kayys.gollek.safetensor.engine.forward;
 
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 
 record DirectForwardMetalCapabilities(
         boolean nativeElementwiseKernelsAvailable,

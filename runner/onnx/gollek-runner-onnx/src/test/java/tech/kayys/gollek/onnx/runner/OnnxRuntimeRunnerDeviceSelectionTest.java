@@ -10,9 +10,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
-import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -107,10 +107,10 @@ class OnnxRuntimeRunnerDeviceSelectionTest {
         Method method = OnnxRuntimeRunner.class.getDeclaredMethod("resolveSupportedDevices");
         method.setAccessible(true);
         @SuppressWarnings("unchecked")
-        List<tech.kayys.gollek.core.tensor.DeviceType> devices =
-                (List<tech.kayys.gollek.core.tensor.DeviceType>) method.invoke(runner);
+        List<tech.kayys.aljabr.core.tensor.DeviceType> devices =
+                (List<tech.kayys.aljabr.core.tensor.DeviceType>) method.invoke(runner);
 
-        assertTrue(devices.contains(tech.kayys.gollek.core.tensor.DeviceType.METAL));
+        assertTrue(devices.contains(tech.kayys.aljabr.core.tensor.DeviceType.METAL));
     }
 
     @Test
@@ -118,10 +118,10 @@ class OnnxRuntimeRunnerDeviceSelectionTest {
         OnnxRuntimeRunner runner = new OnnxRuntimeRunner();
         setField(runner, "executionProvider", "metal");
 
-        assertEquals(tech.kayys.gollek.core.tensor.DeviceType.METAL, runner.deviceType());
+        assertEquals(tech.kayys.aljabr.core.tensor.DeviceType.METAL, runner.deviceType());
 
         setField(runner, "executionProvider", "mps");
-        assertEquals(tech.kayys.gollek.core.tensor.DeviceType.METAL, runner.deviceType());
+        assertEquals(tech.kayys.aljabr.core.tensor.DeviceType.METAL, runner.deviceType());
     }
 
     @Test

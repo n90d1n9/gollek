@@ -51,6 +51,7 @@ public class DefaultContentModerator implements ContentModerator {
     public io.smallrye.mutiny.Uni<Void> initialize(PluginContext context) {
         LOG.info("Initializing default content moderator");
         loadDefaultPatterns();
+        return io.smallrye.mutiny.Uni.createFrom().voidItem();
     }
 
     @Override
@@ -116,5 +117,6 @@ public class DefaultContentModerator implements ContentModerator {
     @Override
     public io.smallrye.mutiny.Uni<Void> shutdown() {
         LOG.info("Shutting down default content moderator");
+        return io.smallrye.mutiny.Uni.createFrom().voidItem();
     }
 }

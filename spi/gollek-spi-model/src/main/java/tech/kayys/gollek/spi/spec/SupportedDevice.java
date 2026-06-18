@@ -1,5 +1,5 @@
 package tech.kayys.gollek.spi.spec;
-import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.tensor.DeviceType;
 
 /**
  * Represents a device that is supported by a model, including minimum

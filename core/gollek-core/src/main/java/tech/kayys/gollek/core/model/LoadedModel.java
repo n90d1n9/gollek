@@ -2,8 +2,8 @@ package tech.kayys.gollek.core.model;
 import tech.kayys.gollek.ir.GGraph;
 import tech.kayys.gollek.core.weight.WeightStore;
 import tech.kayys.gollek.spi.spec.*;
-import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
 
 public final class LoadedModel {
     public final GGraph graph;

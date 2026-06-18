@@ -5,7 +5,7 @@
  */
 package tech.kayys.gollek.safetensor.engine.generation;
 
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;

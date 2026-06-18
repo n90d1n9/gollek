@@ -2,7 +2,7 @@ package tech.kayys.gollek.provider.core.registry;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModelFormatDetector;
 import tech.kayys.gollek.spi.registry.LocalModelRegistry;
 import tech.kayys.gollek.spi.registry.ModelEntry;

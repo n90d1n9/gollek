@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.export.litert;
 
 import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.nn.NNModule;
+import tech.kayys.aljabr.ml.nn.NNModule;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

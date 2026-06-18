@@ -6,7 +6,7 @@
 package tech.kayys.gollek.safetensor.engine.forward;
 
 import org.jboss.logging.Logger;
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 
 record DirectForwardRuntimeContext(
         Logger log,

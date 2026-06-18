@@ -3,12 +3,12 @@ plugins {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":spi:gollek-spi"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-vertx")
     implementation("io.quarkus:quarkus-mutiny")

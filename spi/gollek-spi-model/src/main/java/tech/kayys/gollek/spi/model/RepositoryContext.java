@@ -16,8 +16,8 @@
 
 package tech.kayys.gollek.spi.model;
 import tech.kayys.gollek.spi.spec.*;
-import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
 
 import java.nio.file.Path;
 import java.time.Duration;

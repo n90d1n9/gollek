@@ -1,7 +1,7 @@
 package tech.kayys.gollek.gguf.core;
 
-import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.gollek.ml.nn.NNModule;
+import tech.kayys.aljabr.ml.autograd.GradTensor;
+import tech.kayys.aljabr.ml.nn.NNModule;
 import tech.kayys.gollek.gguf.writer.GGUFWriter;
 
 import java.io.IOException;

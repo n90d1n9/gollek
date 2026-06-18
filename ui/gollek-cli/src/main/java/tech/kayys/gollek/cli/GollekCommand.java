@@ -28,7 +28,6 @@ import tech.kayys.gollek.cli.commands.BatchCommand;
 import tech.kayys.gollek.cli.commands.JobsCommand;
 import tech.kayys.gollek.cli.commands.StatsCommand;
 import tech.kayys.gollek.cli.commands.LogsCommand;
-import tech.kayys.gollek.cli.commands.TrainCommand;
 import tech.kayys.gollek.cli.commands.RegisterCommand;
 import tech.kayys.gollek.cli.commands.RouteBenchmarksCommand;
 import tech.kayys.gollek.cli.commands.MultimodalCommand;
@@ -65,7 +64,6 @@ import picocli.CommandLine.Option;
         StatsCommand.class,
         LogsCommand.class,
         RouteBenchmarksCommand.class,
-        TrainCommand.class,
         RegisterCommand.class,
         MultimodalCommand.class,
         LiteRTCommand.class,

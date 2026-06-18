@@ -9,6 +9,7 @@ import java.util.Objects;
 import tech.kayys.gollek.spi.Message;
 import tech.kayys.gollek.spi.inference.InferenceRequest;
 import tech.kayys.gollek.spi.tool.ToolDefinition;
+import java.lang.foreign.MemorySegment;
 
 /**
  * Utility methods for immutable {@link ProviderRequest} manipulation.
@@ -118,6 +119,7 @@ public final class ProviderRequests {
                 .spanId(spanId)
                 .metadata(metadata)
                 .preferredProvider(request.getPreferredProvider().orElse(preferredProvider))
+                .nativeContextSegment(request.getNativeContextSegment().orElse(null))
                 .build();
     }
 
@@ -144,6 +146,7 @@ public final class ProviderRequests {
         private String spanId;
         private String apiKey;
         private Map<String, Object> metadata;
+        private MemorySegment nativeContextSegment;
 
         private CopyBuilder(ProviderRequest src) {
             this.requestId = src.getRequestId();
@@ -162,6 +165,7 @@ public final class ProviderRequests {
             this.spanId = src.getSpanId().orElse(null);
             this.apiKey = src.getApiKey().orElse(null);
             this.metadata = src.getMetadata();
+            this.nativeContextSegment = src.getNativeContextSegment().orElse(null);
         }
 
         public CopyBuilder model(String model) {
@@ -229,6 +233,11 @@ public final class ProviderRequests {
             return this;
         }
 
+        public CopyBuilder nativeContextSegment(MemorySegment s) {
+            this.nativeContextSegment = s;
+            return this;
+        }
+
         public ProviderRequest build() {
             return ProviderRequest.builder()
                     .requestId(requestId)
@@ -247,6 +256,7 @@ public final class ProviderRequests {
                     .spanId(spanId)
                     .apiKey(apiKey)
                     .metadata(metadata)
+                    .nativeContextSegment(nativeContextSegment)
                     .build();
         }
     }

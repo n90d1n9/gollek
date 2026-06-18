@@ -49,9 +49,9 @@ sourceSets {
 dependencies {
     implementation(platform("io.quarkus.platform:quarkus-bom:$quarkusVersion"))
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
 
     implementation("io.quarkus:quarkus-arc")
     implementation("jakarta.json:jakarta.json-api")

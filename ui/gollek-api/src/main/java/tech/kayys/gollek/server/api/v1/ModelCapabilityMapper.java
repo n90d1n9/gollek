@@ -1,7 +1,7 @@
 package tech.kayys.gollek.server.api.v1;
 
-import tech.kayys.gollek.core.model.ModelFormat;
-import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.spi.provider.ProviderCapabilities;
 import tech.kayys.gollek.spi.provider.ProviderInfo;

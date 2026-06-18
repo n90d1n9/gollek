@@ -18,9 +18,9 @@ import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
-// import tech.kayys.gollek.quantizer.gptq.GPTQConfig;
-// import tech.kayys.gollek.quantizer.gptq.GPTQQuantizerService;
-// import tech.kayys.gollek.quantizer.gptq.GPTQSafetensorConverter;
+// import tech.kayys.tafkir.quantizer.gptq.GPTQConfig;
+// import tech.kayys.tafkir.quantizer.gptq.GPTQQuantizerService;
+// import tech.kayys.tafkir.quantizer.gptq.GPTQSafetensorConverter;
 import tech.kayys.gollek.safetensor.api.dto.QuantizationResponse;
 import tech.kayys.gollek.safetensor.api.dto.QuantizationRequest;
 

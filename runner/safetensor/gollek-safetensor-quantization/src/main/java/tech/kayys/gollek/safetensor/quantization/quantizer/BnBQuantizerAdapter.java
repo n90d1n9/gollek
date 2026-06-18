@@ -2,7 +2,7 @@ package tech.kayys.gollek.safetensor.quantization.quantizer;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.quantization.QuantConfig;
-import tech.kayys.gollek.quantizer.turboquant.BnBDequantizer;
+import tech.kayys.tafkir.quantizer.turboquant.BnBDequantizer;
 import org.jboss.logging.Logger;
 
 /**

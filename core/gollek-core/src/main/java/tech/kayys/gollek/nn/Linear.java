@@ -1,6 +1,6 @@
 package tech.kayys.gollek.nn;
 
-import tech.kayys.gollek.core.tensor.Tensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 import java.util.List;
 
 public final class Linear extends Module {

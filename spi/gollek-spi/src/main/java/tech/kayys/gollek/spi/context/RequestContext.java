@@ -133,8 +133,8 @@ public interface RequestContext {
     }
 
     /** Get preferred device type. */
-    default java.util.Optional<tech.kayys.gollek.core.tensor.DeviceType> preferredDevice() {
-        return getPreferredDevice().map(tech.kayys.gollek.core.tensor.DeviceType::fromId);
+    default java.util.Optional<tech.kayys.aljabr.core.tensor.DeviceType> preferredDevice() {
+        return getPreferredDevice().map(tech.kayys.aljabr.core.tensor.DeviceType::fromId);
     }
 
     /** Create a new context with a preferred device. */

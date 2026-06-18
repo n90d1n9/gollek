@@ -43,13 +43,11 @@ final class DirectSafetensorTextPolicy {
             if (systemPrompt != null && !systemPrompt.isBlank()) {
                 return ChatTemplateFormatter.format(
                         List.of(Message.system(systemPrompt), Message.user(userPrompt)),
-                        profile.modelType(),
-                        profile.runtimeTraits());
+                        profile.modelType());
             }
             return ChatTemplateFormatter.format(
                     List.of(Message.user(userPrompt)),
-                    profile.modelType(),
-                    profile.runtimeTraits());
+                    profile.modelType());
         } catch (Exception ignored) {
             return userPrompt;
         }

@@ -17,8 +17,8 @@ import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;

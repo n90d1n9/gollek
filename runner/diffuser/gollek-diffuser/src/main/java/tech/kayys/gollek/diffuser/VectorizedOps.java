@@ -1,4 +1,5 @@
 package tech.kayys.gollek.diffuser;
+import java.nio.ByteOrder;
 
 import jdk.incubator.vector.*;
 

@@ -19,7 +19,7 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;
 import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
 import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelArchitecture;

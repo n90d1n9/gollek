@@ -26,11 +26,11 @@ package tech.kayys.gollek.plugin.runner.safetensor;
 
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.plugin.runner.*;
-import tech.kayys.gollek.quantizer.gptq.GPTQConfig;
-import tech.kayys.gollek.quantizer.gptq.GPTQQuantizerService;
-import tech.kayys.gollek.quantizer.gptq.QuantizationResult;
-import tech.kayys.gollek.quantizer.gptq.ModelInspectionResult;
-import tech.kayys.gollek.quantizer.gptq.GPTQSafetensorConverter;
+import tech.kayys.tafkir.quantizer.gptq.GPTQConfig;
+import tech.kayys.tafkir.quantizer.gptq.GPTQQuantizerService;
+import tech.kayys.tafkir.quantizer.gptq.QuantizationResult;
+import tech.kayys.tafkir.quantizer.gptq.ModelInspectionResult;
+import tech.kayys.tafkir.quantizer.gptq.GPTQSafetensorConverter;
 import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
 import tech.kayys.gollek.safetensor.engine.warmup.DirectSafetensorBackend;
 

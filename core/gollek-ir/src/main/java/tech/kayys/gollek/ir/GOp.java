@@ -1,9 +1,9 @@
 package tech.kayys.gollek.ir;
-import tech.kayys.gollek.core.tensor.*;
+import tech.kayys.aljabr.core.tensor.*;
 import tech.kayys.gollek.ir.*;
 
 
-import tech.kayys.gollek.core.tensor.*;
+import tech.kayys.aljabr.core.tensor.*;
 import java.util.*;
 
 public final class GOp {

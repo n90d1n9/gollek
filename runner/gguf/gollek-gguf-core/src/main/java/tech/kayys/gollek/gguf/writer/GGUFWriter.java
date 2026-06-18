@@ -4,7 +4,7 @@ import tech.kayys.gollek.gguf.core.GgmlType;
 import tech.kayys.gollek.gguf.core.GgufMetaType;
 import tech.kayys.gollek.gguf.core.GgufMetaValue;
 import tech.kayys.gollek.gguf.core.GgufModel;
-import tech.kayys.gollek.ml.autograd.GradTensor;
+import tech.kayys.aljabr.ml.autograd.GradTensor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

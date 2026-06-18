@@ -3,10 +3,10 @@ plugins {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-multimodal"))
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("org.reactivestreams:reactive-streams:1.0.4")
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.16.1")

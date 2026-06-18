@@ -139,7 +139,7 @@ public final class OnnxRuntimeBridge implements AutoCloseable {
                         ValueLayout.ADDRESS)); // void** out
 
         mhReleaseValue = resolveVtableSlot(62,
-                FunctionDescriptor.of(ValueLayout.JAVA_VOID,
+                FunctionDescriptor.ofVoid(
                         ValueLayout.ADDRESS)); // OrtValue*
     }
 
@@ -213,6 +213,27 @@ public final class OnnxRuntimeBridge implements AutoCloseable {
                 cpuMemInfo, data, dataBytes,
                 shapeSeg, (long) shape.length,
                 ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+                ppValue);
+        checkStatus(status, "CreateTensorWithData");
+
+        return ppValue.get(ValueLayout.ADDRESS, 0).reinterpret(Long.MAX_VALUE);
+    }
+
+    public MemorySegment createInt64Tensor(MemorySegment data, long[] shape) throws Throwable {
+        MemorySegment shapeSeg = arena.allocate(shape.length * Long.BYTES, 8);
+        for (int i = 0; i < shape.length; i++) {
+            shapeSeg.setAtIndex(ValueLayout.JAVA_LONG, i, shape[i]);
+        }
+
+        MemorySegment cpuMemInfo = getCpuMemoryInfo();
+        MemorySegment ppValue = arena.allocate(ValueLayout.ADDRESS);
+        long dataBytes = data.byteSize();
+        int ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64 = 7;
+
+        int status = (int) mhCreateTensorWithDataAsOrtValue.invoke(
+                cpuMemInfo, data, dataBytes,
+                shapeSeg, (long) shape.length,
+                ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64,
                 ppValue);
         checkStatus(status, "CreateTensorWithData");
 

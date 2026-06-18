@@ -19,18 +19,20 @@ repositories {
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-error-code"))
+    implementation("tech.kayys.aljabr:aljabr-error-code:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-spi-model:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-multimodal"))
+    implementation(project(":core:gollek-model-runner"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":optimization:gollek-plugin-kv-cache"))
     if (findProject(":suling") != null) {
-        implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+        implementation(project(":suling"))
     }
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     implementation(group = "com.microsoft.onnxruntime", name = "onnxruntime", version = "1.19.2")
@@ -39,9 +41,9 @@ dependencies {
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
     testImplementation(group = "org.junit.jupiter", name = "junit-jupiter")
     testRuntimeOnly(group = "org.junit.platform", name = "junit-platform-launcher")
-    testImplementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    testImplementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    testImplementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    testImplementation("tech.kayys.aljabr:aljabr-model-repo-hf:0.1.0-SNAPSHOT")
+    testImplementation(project(":core:gollek-model-repository"))
+    testImplementation(project(":core:gollek-runtime-config"))
 }
 
 publishing {

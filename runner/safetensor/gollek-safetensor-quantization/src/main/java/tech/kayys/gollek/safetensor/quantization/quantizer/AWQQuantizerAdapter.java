@@ -2,8 +2,8 @@ package tech.kayys.gollek.safetensor.quantization.quantizer;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.quantization.QuantConfig;
-import tech.kayys.gollek.quantizer.awq.AWQDequantizer;
-import tech.kayys.gollek.quantizer.awq.AWQConfig;
+import tech.kayys.tafkir.quantizer.awq.AWQDequantizer;
+import tech.kayys.tafkir.quantizer.awq.AWQConfig;
 import org.jboss.logging.Logger;
 
 import java.lang.foreign.Arena;

@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
-import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 class OnnxGeneratedTokensTest {
 

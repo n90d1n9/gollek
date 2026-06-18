@@ -136,7 +136,7 @@ if [[ -n "${ALJABR_DIR}" && -d "${ALJABR_DIR}" ]]; then
   echo "${BOLD}${CYAN}:) Found aljabr at ${ALJABR_DIR}${RESET}"
   if [[ -f "${ALJABR_DIR}/gradlew" || -x "${ALJABR_DIR}/gradlew" ]]; then
     echo "${BOLD}${GREEN}:) Publishing aljabr to mavenLocal for local development${RESET}"
-    (cd "${ALJABR_DIR}" && ./gradlew :core:aljabr-core:publishToMavenLocal :core:aljabr-model-repository:publishToMavenLocal --no-parallel -x test "${GRADLE_JAVA_HOME_ARG[@]}" "${GRADLE_MAX_WORKERS_ARG[@]}" ) || echo "${YELLOW}⚠ aljabr publish failed; continuing without it${RESET}"
+    (cd "${ALJABR_DIR}" && ./gradlew :core:aljabr-core:publishToMavenLocal --no-parallel -x test "${GRADLE_JAVA_HOME_ARG[@]}" "${GRADLE_MAX_WORKERS_ARG[@]}" ) || echo "${YELLOW}⚠ aljabr publish failed; continuing without it${RESET}"
   else
     echo "${YELLOW}⚠ No gradle wrapper in aljabr; skipping publish.${RESET}"
   fi

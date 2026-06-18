@@ -141,19 +141,19 @@ class QuantizerIntegrationTest {
     @DisplayName("All quantizer modules are on classpath")
     void testQuantizerModulesOnClasspath() {
         // Verify GPTQ module
-        assertDoesNotThrow(() -> Class.forName("tech.kayys.gollek.quantizer.gptq.GPTQQuantizerService"),
+        assertDoesNotThrow(() -> Class.forName("tech.kayys.tafkir.quantizer.gptq.GPTQQuantizerService"),
                 "GPTQ module should be on classpath");
 
         // Verify AWQ module
-        assertDoesNotThrow(() -> Class.forName("tech.kayys.gollek.quantizer.awq.AWQDequantizer"),
+        assertDoesNotThrow(() -> Class.forName("tech.kayys.tafkir.quantizer.awq.AWQDequantizer"),
                 "AWQ module should be on classpath");
 
         // Verify AutoRound module
-        assertDoesNotThrow(() -> Class.forName("tech.kayys.gollek.quantizer.autoround.AutoRoundDequantizer"),
+        assertDoesNotThrow(() -> Class.forName("tech.kayys.tafkir.quantizer.autoround.AutoRoundDequantizer"),
                 "AutoRound module should be on classpath");
 
         // Verify TurboQuant module
-        assertDoesNotThrow(() -> Class.forName("tech.kayys.gollek.quantizer.turboquant.TurboQuantEngine"),
+        assertDoesNotThrow(() -> Class.forName("tech.kayys.tafkir.quantizer.turboquant.TurboQuantEngine"),
                 "TurboQuant module should be on classpath");
     }
 

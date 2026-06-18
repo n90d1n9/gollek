@@ -1,5 +1,5 @@
 package tech.kayys.gollek.core.params;
-import tech.kayys.gollek.core.tensor.Tensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 import java.util.*;
 
 /**

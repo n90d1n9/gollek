@@ -20,11 +20,12 @@ import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.pipeline.ModelPipeline;
 import tech.kayys.gollek.spi.pipeline.ModelPipelineRegistry;
 import tech.kayys.gollek.spi.pipeline.ModelPipelineRequest;
-import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModalityType;
 import tech.kayys.gollek.spi.model.ModelManifest;
 import tech.kayys.gollek.spi.model.ArtifactLocation;
+import tech.kayys.gollek.spi.model.ModelFormatDetector;
 import tech.kayys.gollek.spi.provider.*;
 
 import java.time.Instant;
@@ -51,10 +52,9 @@ public class OnnxProvider implements StreamingProvider {
     private static final Logger LOG = Logger.getLogger(OnnxProvider.class);
     private static final String PROVIDER_ID = "onnx";
     private static final String PROVIDER_VERSION = "1.0.0";
-    private static final String MOSS_AUDIO_TOKENIZER_REPOSITORY =
-            "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX";
-    private static final List<String> MOSS_CODEC_PARAMETER_KEYS =
-            List.of("tts_codec", "tts_codec_path", "codec", "codec_path", "moss_codec", "moss_codec_path");
+    private static final String MOSS_AUDIO_TOKENIZER_REPOSITORY = "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX";
+    private static final List<String> MOSS_CODEC_PARAMETER_KEYS = List.of("tts_codec", "tts_codec_path", "codec",
+            "codec_path", "moss_codec", "moss_codec_path");
 
     @Inject
     OnnxProviderConfig config;
@@ -166,12 +166,13 @@ public class OnnxProvider implements StreamingProvider {
                 InferenceRequest inferenceRequest = InferenceRequest.builder()
                         .requestId(request.getRequestId())
                         .model(request.getModel())
-                        .messages(request.getMessages())
+                        .messages(convertMessages(request.getMessages()))
                         .parameters(request.getParameters())
                         .streaming(request.isStreaming())
                         .build();
 
-                return runner.infer(inferenceRequest);
+                tech.kayys.gollek.spi.inference.InferenceResponse runnerResponse = runner.infer(inferenceRequest);
+                return convertResponse(runnerResponse);
             } catch (Exception e) {
                 LOG.error("ONNX Inference failed: " + e.getMessage(), e);
                 throw new RuntimeException(cleanErrorMessage(e), e);
@@ -185,7 +186,7 @@ public class OnnxProvider implements StreamingProvider {
             try {
                 ensureComponents();
                 Path modelPath = resolveModelPath(request.getModel(), request);
-                
+
                 if (modelPath == null || !Files.exists(modelPath)) {
                     emitter.fail(new RuntimeException("Model path not found: " + request.getModel()));
                     return;
@@ -214,18 +215,17 @@ public class OnnxProvider implements StreamingProvider {
                 ensureInitialized(request, modelPath);
 
                 var activeRunner = isStableDiffusion(modelPath) ? sdRunner : runner;
-                
+
                 activeRunner.stream(InferenceRequest.builder()
                         .requestId(request.getRequestId())
                         .model(request.getModel())
-                        .messages(request.getMessages())
+                        .messages(convertMessages(request.getMessages()))
                         .parameters(request.getParameters())
                         .streaming(true)
                         .build()).subscribe().with(
-                            emitter::emit,
-                            emitter::fail,
-                            emitter::complete
-                        );
+                                chunk -> emitter.emit(convertChunk(chunk)),
+                                emitter::fail,
+                                emitter::complete);
 
             } catch (Exception e) {
                 emitter.fail(new RuntimeException(cleanErrorMessage(e), e));
@@ -282,7 +282,7 @@ public class OnnxProvider implements StreamingProvider {
                 effectivePath = resolveOnnxBaseDir(modelPath);
             }
             LOG.infof("Initializing ONNX runner %s with path: %s", activeRunner.name(), effectivePath);
-            ModelManifest manifest = ModelManifest.builder()
+            tech.kayys.gollek.spi.model.ModelManifest manifest = tech.kayys.gollek.spi.model.ModelManifest.builder()
                     .modelId(request.getModel())
                     .name(request.getModel())
                     .version("latest")
@@ -290,9 +290,10 @@ public class OnnxProvider implements StreamingProvider {
                     .apiKey("none")
                     .requestId(request.getRequestId())
                     .artifacts(Map.of(ModelFormat.ONNX,
-                            new ArtifactLocation(effectivePath.toUri().toString(), null, null, null)))
+                            new tech.kayys.gollek.spi.model.ArtifactLocation(effectivePath.toUri().toString(), null,
+                                    null, null)))
                     .build();
-            
+
             RunnerConfiguration runnerCfg = RunnerConfiguration.builder()
                     .putParameter("intra_op_threads", config.threads())
                     .build();
@@ -348,8 +349,8 @@ public class OnnxProvider implements StreamingProvider {
             throw missingMossCodecException(null);
         }
         InferenceRequest inferenceRequest = toInferenceRequest(request, false);
-        MossTtsOnnxRunner.MossTtsAudio audio =
-                mossTtsRunner.synthesize(modelPath, codecDir, inferenceRequest, config.threads());
+        MossTtsOnnxRunner.MossTtsAudio audio = mossTtsRunner.synthesize(modelPath, codecDir, inferenceRequest,
+                config.threads());
         String base64 = mossTtsRunner.encodeAudioBase64(audio);
         Map<String, Object> metadata = new LinkedHashMap<>(audio.metadata());
         metadata.put("audio", base64);
@@ -388,19 +389,17 @@ public class OnnxProvider implements StreamingProvider {
         int imageTokenLimit = requestedImageTokens == null ? 0 : Math.max(0, requestedImageTokens);
         int maxNewTokens = Math.max(1, request.getMaxTokens());
         long started = System.nanoTime();
-        PaddleOcrVlOnnxProbe.PromptDecodeProbeResult result =
-                PaddleOcrVlOnnxProbe.runPromptDecode(
-                        diagnostics.modelDir(),
-                        Path.of(imagePath),
-                        prompt,
-                        variant,
-                        imageTokenLimit,
-                        maxNewTokens,
-                        config.threads());
-        PaddleOcrVlOnnxProbe.OcrPostProcessResult postProcess =
-                PaddleOcrVlOnnxProbe.postProcessOcrText(
-                        result.decodedText(),
-                        result.imageTensor() == null ? null : result.imageTensor().image());
+        PaddleOcrVlOnnxProbe.PromptDecodeProbeResult result = PaddleOcrVlOnnxProbe.runPromptDecode(
+                diagnostics.modelDir(),
+                Path.of(imagePath),
+                prompt,
+                variant,
+                imageTokenLimit,
+                maxNewTokens,
+                config.threads());
+        PaddleOcrVlOnnxProbe.OcrPostProcessResult postProcess = PaddleOcrVlOnnxProbe.postProcessOcrText(
+                result.decodedText(),
+                result.imageTensor() == null ? null : result.imageTensor().image());
         String content = booleanParameter(request, "ocr_raw_output", "onnx_ocr_raw_output")
                 ? postProcess.rawText().trim()
                 : postProcess.displayText().trim();
@@ -490,14 +489,13 @@ public class OnnxProvider implements StreamingProvider {
                             index.getAndIncrement(),
                             chunk))
                     : null;
-            MossTtsOnnxRunner.MossTtsAudio audio =
-                    mossTtsRunner.synthesize(
-                            modelPath,
-                            codecDir,
-                            inferenceRequest,
-                            config.threads(),
-                            progressListener,
-                            pcmChunkListener);
+            MossTtsOnnxRunner.MossTtsAudio audio = mossTtsRunner.synthesize(
+                    modelPath,
+                    codecDir,
+                    inferenceRequest,
+                    config.threads(),
+                    progressListener,
+                    pcmChunkListener);
             Map<String, Object> metadata = new LinkedHashMap<>(audio.metadata());
             metadata.put("audio_bytes", audio.bytes().length);
             metadata.put("audio_stream_payload", "encoded");
@@ -890,7 +888,8 @@ public class OnnxProvider implements StreamingProvider {
                 .append(". This repository is a multi-session OCR/VL pipeline, not a single text-generation ONNX graph. ");
         message.append("Gollek inspected the ONNX files, but OCR execution still needs image preprocessing, ")
                 .append("vision_encoder, embedding, decoder orchestration, and tokenizer postprocessing. ");
-        message.append("Current ONNX runtime support covers MOSS TTS, Stable Diffusion, and single text-generation-style graphs.");
+        message.append(
+                "Current ONNX runtime support covers MOSS TTS, Stable Diffusion, and single text-generation-style graphs.");
 
         List<String> graphSummary = report.graphs().stream()
                 .map(graph -> graph.role() + "=" + graph.relativePath())
@@ -938,8 +937,7 @@ public class OnnxProvider implements StreamingProvider {
         try {
             String variant = firstStringParameter(request, "onnx_variant", "onnx_precision");
             List<Path> images = imagePath == null ? List.of() : List.of(Path.of(imagePath));
-            PaddleOcrVlOnnxPlanner.Plan plan =
-                    PaddleOcrVlOnnxPlanner.plan(report.modelDir(), images, variant);
+            PaddleOcrVlOnnxPlanner.Plan plan = PaddleOcrVlOnnxPlanner.plan(report.modelDir(), images, variant);
             message.append(" Planned graph variant: ")
                     .append(plan.graphs().variant())
                     .append(" (vision=")
@@ -1186,26 +1184,29 @@ public class OnnxProvider implements StreamingProvider {
     }
 
     /**
-     * For SD pipelines, locates the directory that contains the actual ONNX model files.
-     * The safetensors path may not contain .onnx files — the blobs path typically does.
+     * For SD pipelines, locates the directory that contains the actual ONNX model
+     * files.
+     * The safetensors path may not contain .onnx files — the blobs path typically
+     * does.
      */
     private Path resolveOnnxBaseDir(Path modelPath) {
         // If the path already has unet/model.onnx, use it directly
         if (Files.exists(modelPath.resolve("unet/model.onnx"))) {
             return modelPath;
         }
-        
+
         // Try the local model registry's resolve for the blob path
         if (localModelRegistry != null) {
             try {
                 var entries = localModelRegistry.listAll(ModelFormat.ONNX);
                 for (var entry : entries) {
-                    if (entry.physicalPath() != null 
+                    if (entry.physicalPath() != null
                             && Files.exists(entry.physicalPath().resolve("unet/model.onnx"))) {
                         return entry.physicalPath();
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         // Fallback: search for unet/model.onnx in common model storage paths
@@ -1213,21 +1214,22 @@ public class OnnxProvider implements StreamingProvider {
         if (Files.isDirectory(gollekModels)) {
             try (var walk = Files.walk(gollekModels, 2)) {
                 return walk.filter(p -> Files.isDirectory(p) && Files.exists(p.resolve("unet/model.onnx")))
-                           .findFirst()
-                           .orElse(modelPath);
-            } catch (Exception ignored) {}
+                        .findFirst()
+                        .orElse(modelPath);
+            } catch (Exception ignored) {
+            }
         }
 
         return modelPath;
     }
 
-
     private Path resolveModelPath(String modelId, ProviderRequest request) {
         ensureComponents();
-        if (modelId == null) return null;
+        if (modelId == null)
+            return null;
 
         Path targetPath = null;
-        
+
         // Try metadata first (provided by ModelRouterService)
         if (request != null && request.getMetadata() != null) {
             Object pathObj = request.getMetadata().get("model_path");
@@ -1238,7 +1240,7 @@ public class OnnxProvider implements StreamingProvider {
                 }
             }
         }
-        
+
         // Try registry next
         if (targetPath == null && localModelRegistry != null) {
             java.util.Optional<tech.kayys.gollek.spi.registry.ModelEntry> entry = localModelRegistry.resolve(modelId);
@@ -1286,7 +1288,8 @@ public class OnnxProvider implements StreamingProvider {
                 return targetPath;
             }
 
-            // Otherwise, look for a single .onnx file (legacy behavior for simple models in dirs)
+            // Otherwise, look for a single .onnx file (legacy behavior for simple models in
+            // dirs)
             try (var stream = Files.walk(targetPath, 3)) {
                 return stream.filter(p -> p.toString().endsWith(".onnx"))
                         .findFirst()
@@ -1333,5 +1336,69 @@ public class OnnxProvider implements StreamingProvider {
         }
         initialized = false;
         LOG.info("ONNX Provider shutdown complete");
+    }
+
+    private List<tech.kayys.gollek.spi.Message> convertMessages(List<tech.kayys.gollek.spi.Message> messages) {
+        if (messages == null)
+            return List.of();
+        return messages.stream()
+                .map(m -> new tech.kayys.gollek.spi.Message(
+                        tech.kayys.gollek.spi.Message.Role.valueOf(m.getRole().name()),
+                        m.getContent()))
+                .toList();
+    }
+
+    private InferenceResponse convertResponse(tech.kayys.gollek.spi.inference.InferenceResponse response) {
+        if (response == null)
+            return null;
+        return InferenceResponse.builder()
+                .requestId(response.getRequestId())
+                .content(response.getContent())
+                .model(response.getModel())
+                .durationMs(response.getDurationMs())
+                .inputTokens(response.getInputTokens())
+                .outputTokens(response.getOutputTokens())
+                .finishReason(convertFinishReason(response.getFinishReason()))
+                .metadata(response.getMetadata())
+                .build();
+    }
+
+    private InferenceResponse.FinishReason convertFinishReason(
+            tech.kayys.gollek.spi.inference.InferenceResponse.FinishReason reason) {
+        if (reason == null)
+            return null;
+        try {
+            return InferenceResponse.FinishReason.valueOf(reason.name());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private StreamingInferenceChunk convertChunk(tech.kayys.gollek.spi.inference.StreamingInferenceChunk chunk) {
+        if (chunk == null)
+            return null;
+        return new StreamingInferenceChunk(
+                chunk.requestId(),
+                chunk.index(),
+                convertModality(chunk.modality()),
+                chunk.delta(),
+                null,
+                chunk.finished(),
+                chunk.finishReason(),
+                chunk.usage() != null
+                        ? new StreamingInferenceChunk.ChunkUsage(chunk.usage().inputTokens(), chunk.usage().outputTokens(), 0)
+                        : null,
+                chunk.emittedAt(),
+                chunk.metadata());
+    }
+
+    private ModalityType convertModality(tech.kayys.gollek.spi.model.ModalityType modality) {
+        if (modality == null)
+            return null;
+        try {
+            return ModalityType.valueOf(modality.name());
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

@@ -7,7 +7,7 @@ package tech.kayys.gollek.safetensor.spi;
 
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import java.nio.file.Path;
 import java.util.Map;

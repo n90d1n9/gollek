@@ -1,8 +1,8 @@
 package tech.kayys.gollek.core.graph;
 
 import tech.kayys.gollek.core.data.GData;
-import tech.kayys.gollek.core.tensor.Tensor;
-import tech.kayys.gollek.core.backend.ComputeBackend;
+import tech.kayys.aljabr.core.tensor.Tensor;
+import tech.kayys.aljabr.core.backend.ComputeBackend;
 import java.util.HashMap;
 import java.util.Map;
 

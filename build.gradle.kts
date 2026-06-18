@@ -239,5 +239,4 @@ subprojects {
     }
 }
 
-apply(from = "gradle/model-family-direct-fixtures.gradle.kts")
 

@@ -1,4 +1,5 @@
 package tech.kayys.gollek.spi.provider;
+import java.time.Duration;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -9,8 +10,8 @@ import tech.kayys.gollek.spi.Message;
 import tech.kayys.gollek.spi.tool.ToolDefinition;
 // import tech.kayys.gollek.spi.context.RequestContext; // Temporarily commented out due to missing dependency
 
-import java.time.Duration;
 import java.util.*;
+import java.lang.foreign.MemorySegment;
 
 /**
  * Normalized provider request.
@@ -73,6 +74,9 @@ public final class ProviderRequest {
     @Nullable
     private final String preferredProvider;
 
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private final transient MemorySegment nativeContextSegment;
+
     @JsonCreator
     public ProviderRequest(
             @JsonProperty("requestId") String requestId,
@@ -117,6 +121,54 @@ public final class ProviderRequest {
                 ? Collections.unmodifiableMap(new HashMap<>(metadata))
                 : Collections.emptyMap();
         this.preferredProvider = preferredProvider;
+        this.nativeContextSegment = null;
+    }
+
+    private ProviderRequest(
+            String requestId,
+            String model,
+            List<Message> messages,
+            Map<String, Object> parameters,
+            List<ToolDefinition> tools,
+            Object toolChoice,
+            boolean streaming,
+            Duration timeout,
+            String userId,
+            String sessionId,
+            String traceId,
+            String traceparent,
+            String tracestate,
+            String spanId,
+            String apiKey,
+            Map<String, Object> metadata,
+            String preferredProvider,
+            MemorySegment nativeContextSegment) {
+        this.requestId = Objects.requireNonNull(requestId, "requestId");
+        this.model = Objects.requireNonNull(model, "model");
+        this.messages = Collections.unmodifiableList(new ArrayList<>(
+                Objects.requireNonNull(messages, "messages")));
+
+        this.tools = tools != null
+                ? Collections.unmodifiableList(new ArrayList<>(tools))
+                : Collections.emptyList();
+        this.toolChoice = toolChoice;
+        this.parameters = parameters != null
+                ? Collections.unmodifiableMap(new HashMap<>(parameters))
+                : Collections.emptyMap();
+        this.streaming = streaming;
+        this.timeout = timeout != null ? timeout : Duration.ofSeconds(30);
+        this.userId = userId;
+        this.sessionId = sessionId;
+        this.traceId = traceId;
+        this.traceparent = traceparent;
+        this.tracestate = tracestate;
+        this.spanId = spanId;
+        this.apiKey = apiKey;
+        this.metadata = metadata != null
+                ? Collections.unmodifiableMap(new HashMap<>(metadata))
+                : Collections.emptyMap();
+        this.preferredProvider = preferredProvider;
+        this.nativeContextSegment = nativeContextSegment;
     }
 
     /**
@@ -203,6 +255,10 @@ public final class ProviderRequest {
         return Optional.ofNullable(preferredProvider);
     }
 
+    public Optional<MemorySegment> getNativeContextSegment() {
+        return Optional.ofNullable(nativeContextSegment);
+    }
+
     // Parameter helpers
     public <T> Optional<T> getParameter(String key, Class<T> type) {
         Object value = parameters.get(key);
@@ -265,6 +321,7 @@ public final class ProviderRequest {
         private String apiKey;
         private Map<String, Object> metadata = new HashMap<>();
         private String preferredProvider;
+        private MemorySegment nativeContextSegment;
 
         public Builder requestId(String requestId) {
             this.requestId = requestId;
@@ -407,12 +464,17 @@ public final class ProviderRequest {
             return this;
         }
 
+        public Builder nativeContextSegment(MemorySegment nativeContextSegment) {
+            this.nativeContextSegment = nativeContextSegment;
+            return this;
+        }
+
         public ProviderRequest build() {
             Objects.requireNonNull(model, "model is required");
             return new ProviderRequest(
                     requestId, model, messages, parameters, tools, toolChoice, streaming, timeout,
                     userId, sessionId, traceId, traceparent, tracestate, spanId,
-                    apiKey, metadata, preferredProvider);
+                    apiKey, metadata, preferredProvider, nativeContextSegment);
         }
     }
 

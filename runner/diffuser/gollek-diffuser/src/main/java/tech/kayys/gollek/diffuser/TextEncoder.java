@@ -1,6 +1,5 @@
 package tech.kayys.gollek.diffuser;
 
-import sd.ffm.OnnxRuntimeBridge;
 
 import java.lang.foreign.*;
 import java.nio.file.Path;
@@ -69,7 +68,7 @@ public final class TextEncoder {
         MemorySegment owned = arena.allocate(embedFloats * Float.BYTES, 8);
         owned.copyFrom(embedding);
 
-        ort.releaseValue(inputs[0]);
+        ort.releaseValue(inputTensor);
         ort.releaseValue(outputs[0]);
 
         return owned;

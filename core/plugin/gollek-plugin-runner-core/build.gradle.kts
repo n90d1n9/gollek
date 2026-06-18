@@ -18,9 +18,9 @@ repositories {
 }
 
 dependencies {
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    api("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    api(project(":spi:gollek-spi"))
+    api(project(":spi:gollek-spi-inference"))
+    api(project(":spi:gollek-spi-model"))
     implementation("org.jboss.logging:jboss-logging:3.6.0.Final")
     implementation("io.smallrye.reactive:mutiny:2.5.5")
 }

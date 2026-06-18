@@ -29,7 +29,7 @@ import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.spi.provider.ProviderRequest;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

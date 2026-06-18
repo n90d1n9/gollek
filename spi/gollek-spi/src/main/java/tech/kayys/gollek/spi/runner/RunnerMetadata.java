@@ -3,8 +3,8 @@ package tech.kayys.gollek.spi.runner;
 import java.util.List;
 import java.util.Map;
 
-import tech.kayys.gollek.core.tensor.DeviceType;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
 
 /**
  * Runner metadata for selection and diagnostics

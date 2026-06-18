@@ -1,7 +1,7 @@
 package tech.kayys.gollek.spi.model;
 
-import tech.kayys.gollek.core.model.ModelFormat;
-import tech.kayys.gollek.core.tensor.DeviceType;
+import tech.kayys.aljabr.core.model.ModelFormat;
+import tech.kayys.aljabr.core.tensor.DeviceType;
 import java.util.List;
 import java.util.Map;
 

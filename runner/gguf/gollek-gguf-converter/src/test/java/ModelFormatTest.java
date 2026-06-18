@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
 
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 
 import org.junit.jupiter.api.DisplayName;
 

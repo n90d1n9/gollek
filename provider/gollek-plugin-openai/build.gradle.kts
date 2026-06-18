@@ -18,10 +18,13 @@ repositories {
 }
 
 dependencies {
-    compileOnly("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    compileOnly("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    compileOnly("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    compileOnly("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-plugin"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(group = "io.quarkus", name = "quarkus-arc")
+    implementation(group = "io.smallrye.config", name = "smallrye-config", version = "3.8.0")
     compileOnly(group = "io.smallrye.reactive", name = "mutiny")
     compileOnly(group = "org.jboss.logging", name = "jboss-logging")
     compileOnly(group = "com.fasterxml.jackson.core", name = "jackson-databind")

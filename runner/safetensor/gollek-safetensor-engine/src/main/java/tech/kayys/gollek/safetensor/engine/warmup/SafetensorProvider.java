@@ -34,7 +34,7 @@ import tech.kayys.gollek.safetensor.spi.SafetensorFeature;
 import tech.kayys.gollek.spi.exception.ProviderException;
 
 import tech.kayys.gollek.spi.inference.InferenceResponse;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.observability.AdapterMetricTagResolver;
 import tech.kayys.gollek.spi.observability.AdapterMetricsRecorder;
 import tech.kayys.gollek.spi.observability.NoopAdapterMetricsRecorder;
@@ -149,7 +149,7 @@ public class SafetensorProvider implements StreamingProvider {
                 .toolCalling(false)
                 .structuredOutputs(false)
                 .supportedFormats(Set.of(ModelFormat.SAFETENSORS))
-                .supportedDevices(Set.of(tech.kayys.gollek.core.tensor.DeviceType.CPU))
+                .supportedDevices(Set.of(tech.kayys.aljabr.core.tensor.DeviceType.CPU))
                 .features(Set.copyOf(features))
                 .build();
     }

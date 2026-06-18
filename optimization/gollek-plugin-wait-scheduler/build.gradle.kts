@@ -19,17 +19,24 @@ repositories {
 
 dependencies {
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-inference"))
     implementation("io.smallrye.reactive:mutiny:2.5.5")
 
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-plugin"))
+    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
+
+    implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":core:gollek-model-runner"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":core:gollek-error-code"))
+    implementation(project(":core:gollek-core"))
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-model"))
+    implementation(project(":optimization:gollek-plugin-kv-cache"))
     
     implementation(group = "io.quarkus", name = "quarkus-rest")
     implementation(group = "io.quarkus", name = "quarkus-arc")

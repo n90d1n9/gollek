@@ -43,6 +43,7 @@ final class LlamaCppGgufBackend implements GgufBackend {
                 .apiKey(inferenceRequest.getApiKey())
                 .metadata(inferenceRequest.getMetadata())
                 .preferredProvider(inferenceRequest.getPreferredProvider().orElse(null))
+                .nativeContextSegment(inferenceRequest.getNativeContextSegment().orElse(null))
                 .build();
 
         try {

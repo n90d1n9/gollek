@@ -1,6 +1,6 @@
 package tech.kayys.gollek.ir;
 
-import tech.kayys.gollek.core.tensor.*;
+import tech.kayys.aljabr.core.tensor.*;
 import java.util.*;
 import java.util.stream.Collectors;
 

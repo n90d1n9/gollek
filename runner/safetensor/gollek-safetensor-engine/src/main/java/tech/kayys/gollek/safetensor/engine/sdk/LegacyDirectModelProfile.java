@@ -65,6 +65,17 @@ record LegacyDirectModelProfile(
         if (runtimeTraits.gemma4Text() || runtimeTraits.gemma3Text() || runtimeTraits.qwenText()) {
             return true;
         }
-        return ChatTemplateFormatter.supportsModelType(modelType);
+        if (modelType == null || modelType.isBlank()) {
+            return false;
+        }
+        String normalized = modelType.trim().toLowerCase(java.util.Locale.ROOT)
+                                     .replace("-", "").replace("_", "");
+        return normalized.startsWith("llama3") ||
+               normalized.startsWith("mistral") ||
+               normalized.startsWith("mixtral") ||
+               normalized.startsWith("phi") ||
+               normalized.startsWith("gemma") ||
+               normalized.startsWith("qwen") ||
+               normalized.equals("chatml");
     }
 }

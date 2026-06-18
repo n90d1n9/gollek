@@ -1,6 +1,6 @@
 package tech.kayys.gollek.ml.gguf;
 
-import tech.kayys.gollek.ml.autograd.GradTensor;
+import tech.kayys.aljabr.ml.autograd.GradTensor;
 
 import java.io.FileOutputStream;
 import java.io.IOException;

@@ -19,14 +19,14 @@ repositories {
 
 dependencies {
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-plugin"))
+    implementation(project(":core:plugin:gollek-plugin-optimization-core"))
 
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":optimization:gollek-plugin-kv-cache"))
     
-    implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
+    implementation(project(":spi:gollek-spi-provider"))
     implementation(group = "io.quarkus", name = "quarkus-arc")
     implementation(group = "io.quarkus", name = "quarkus-config-yaml")
     implementation(group = "io.smallrye.config", name = "smallrye-config")

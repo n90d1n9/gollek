@@ -10,10 +10,10 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.TensorInfo;
 import ai.onnxruntime.ValueInfo;
-import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
-import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
-import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
-import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
+import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
 
 import java.io.IOException;
 import java.nio.FloatBuffer;

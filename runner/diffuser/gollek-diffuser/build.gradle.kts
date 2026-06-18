@@ -18,7 +18,6 @@ repositories {
 }
 
 dependencies {
-    implementation(group = "tech.kayys.gollek", name = "gollek-model")
 }
 
 publishing {

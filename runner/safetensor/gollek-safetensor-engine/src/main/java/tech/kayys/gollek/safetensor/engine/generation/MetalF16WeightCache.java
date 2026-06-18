@@ -6,7 +6,7 @@
 package tech.kayys.gollek.safetensor.engine.generation;
 
 import org.jboss.logging.Logger;
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.safetensor.loader.SafetensorLoaderFacade;

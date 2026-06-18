@@ -3,7 +3,7 @@ package tech.kayys.gollek.safetensor.engine.generation;
 import java.util.Map;
 
 import jakarta.enterprise.inject.Instance;
-import tech.kayys.gollek.metal.binding.MetalBinding;
+import tech.kayys.aljabr.metal.binding.MetalBinding;
 
 public final class DirectInferenceProfiler {
     private static final String PROFILE_PROPERTY = "gollek.profile";
