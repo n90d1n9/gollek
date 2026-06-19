@@ -45,7 +45,7 @@ public class PullCommand implements Runnable {
     @Inject
     Instance<ManifestStore> manifestStore;
 
-    @Parameters(index = "0", description = "Model name to pull (e.g. llama3, hf:user/repo)")
+    @Parameters(index = "0", arity = "0..1", description = "Model name to pull (e.g. llama3, hf:user/repo)")
     public String modelSpec;
 
     @Option(names = { "--insecure" }, description = "Allow insecure connections", defaultValue = "false")
@@ -58,11 +58,22 @@ public class PullCommand implements Runnable {
     @Option(names = { "--gguf-outtype" }, description = "GGUF converter outtype (e.g. f16, q8_0, f32)")
     String ggufOutType;
 
+    @Option(names = { "-f", "--file" }, description = "Copy model from local file path to internal model repo")
+    String file;
+
+    @Option(names = { "-m", "--move" }, description = "Move model from local file path instead of copying")
+    boolean move;
+
     @Override
     public void run() {
         try {
             boolean convert = !"off".equalsIgnoreCase(convertMode);
             String effectiveModelSpec = normalizeModelSpec(modelSpec);
+
+            if (file != null && !file.isBlank()) {
+                handleLocalFileCopy(effectiveModelSpec);
+                return;
+            }
             
             ModelPullRequest request = ModelPullRequest.builder()
                     .modelSpec(effectiveModelSpec)
@@ -275,6 +286,38 @@ public class PullCommand implements Runnable {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private void handleLocalFileCopy(String effectiveModelSpec) throws Exception {
+        Path sourcePath = Path.of(file);
+        if (!Files.exists(sourcePath)) {
+            throw new RuntimeException("Source file does not exist: " + file);
+        }
+
+        String repoId = effectiveModelSpec != null && effectiveModelSpec.startsWith("hf:")
+                ? effectiveModelSpec.substring("hf:".length()).trim()
+                : (effectiveModelSpec != null ? effectiveModelSpec.trim() : sourcePath.getFileName().toString());
+        
+        String manifestName = GollekManifest.computeName(repoId, "main");
+        Path targetDir = ManifestStore.resolveBlobDir(repoId, manifestName);
+        Files.createDirectories(targetDir);
+        Path targetPath = targetDir.resolve(sourcePath.getFileName());
+
+        if (move) {
+            System.out.println("Moving " + sourcePath + " to " + targetPath + " ...");
+            Files.move(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            System.out.println("Copying " + sourcePath + " to " + targetPath + " ...");
+            Files.copy(sourcePath, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        ManifestStore store = manifestStore != null && !manifestStore.isUnsatisfied()
+                ? manifestStore.get()
+                : new ManifestStore();
+        store.registerLocal(repoId, targetPath);
+        LocalModelIndex.refreshFromDisk();
+
+        System.out.println("\nPull complete: " + repoId + " (imported from local file)");
     }
 
     private static final class HfProgressRenderer implements DownloadProgressListener, AutoCloseable {

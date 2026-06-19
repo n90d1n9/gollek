@@ -303,6 +303,11 @@ public class ChatCommand implements Runnable {
                     var indexed = LocalModelIndex.find(modelId);
                     if (indexed.isPresent()) {
                         var entry = indexed.get();
+                        if (!entry.enabled) {
+                            System.err.println("\n\u001B[31mError: Model '" + entry.id + "' is disabled.\u001B[0m");
+                            System.err.println("\u001B[33mUse 'gollek model enable " + entry.shortId + "' to enable it for chat.\u001B[0m\n");
+                            return;
+                        }
                         if (entry.path != null && !entry.path.isBlank()) {
                             java.nio.file.Path indexedPath = java.nio.file.Path.of(entry.path);
                             if (java.nio.file.Files.exists(indexedPath)) {

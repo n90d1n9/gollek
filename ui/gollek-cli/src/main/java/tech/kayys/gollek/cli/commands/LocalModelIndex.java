@@ -41,8 +41,9 @@ final class LocalModelIndex {
         public int quantBits;
         /** Group size for block quantization, 0 if not quantized */
         public int quantGroupSize;
-        /** Original (unquantized) model ID this was derived from, null if original */
         public String quantSourceModel;
+        /** Whether the model is enabled for inference */
+        public boolean enabled = true;
     }
 
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
@@ -367,6 +368,7 @@ final class LocalModelIndex {
                             e.source = text(node, "source");
                             e.updatedAt = text(node, "updatedAt");
                             e.runnable = isRunnableFormat(e.format);
+                            e.enabled = node.path("enabled").asBoolean(true);
 
                             long sizeBytes = node.path("sizeBytes").asLong(0L);
                             if (sizeBytes <= 0L) {

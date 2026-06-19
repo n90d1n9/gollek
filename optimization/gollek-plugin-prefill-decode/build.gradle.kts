@@ -30,7 +30,7 @@ dependencies {
     implementation(project(":spi:gollek-spi-model"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
     implementation(project(":optimization:gollek-plugin-paged-attention"))
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(group = "io.quarkus", name = "quarkus-rest")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "io.quarkus", name = "quarkus-arc")

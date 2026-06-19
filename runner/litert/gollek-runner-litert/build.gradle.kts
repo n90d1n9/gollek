@@ -26,7 +26,7 @@ dependencies {
     implementation(project(":spi:gollek-spi-multimodal"))
     implementation(project(":core:gollek-error-code"))
     implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":core:gollek-provider-core"))
     implementation("tech.kayys.aljabr:aljabr-backend-metal:0.1.0-SNAPSHOT")

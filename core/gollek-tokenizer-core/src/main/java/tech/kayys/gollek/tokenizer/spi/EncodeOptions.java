@@ -1,4 +1,4 @@
-package tech.kayys.aljabr.tokenizer.spi;
+package tech.kayys.gollek.tokenizer.spi;
 
 public class EncodeOptions {
     public boolean addBos = false;

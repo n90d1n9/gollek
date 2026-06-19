@@ -1,4 +1,4 @@
-package tech.kayys.aljabr.tokenizer.spi;
+package tech.kayys.gollek.tokenizer.spi;
 
 import java.nio.file.Path;
 

@@ -41,7 +41,7 @@ record FlashAttentionMatvecOptions(
             "gollek.safetensor.disable_metal_mixed_half_linear_triple_matvec";
     private static final String METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT_PROPERTY =
             "gollek.safetensor.metal_mixed_half_linear_triple_matvec_max_output";
-    private static final int DEFAULT_METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT = 4096;
+    private static final int DEFAULT_METAL_MIXED_HALF_LINEAR_TRIPLE_MATVEC_MAX_OUTPUT = 8192;
 
     static FlashAttentionMatvecOptions fromSystemProperties() {
         return new FlashAttentionMatvecOptions(

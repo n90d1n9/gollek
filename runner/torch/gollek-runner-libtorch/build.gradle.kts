@@ -51,7 +51,7 @@ dependencies {
 
     implementation(project(":spi:gollek-spi"))
     implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
 
     implementation("io.quarkus:quarkus-arc")
     implementation("jakarta.json:jakarta.json-api")

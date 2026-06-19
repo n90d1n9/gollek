@@ -1,13 +1,13 @@
-package tech.kayys.aljabr.tokenizer.runtime;
+package tech.kayys.gollek.tokenizer.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import tech.kayys.aljabr.tokenizer.impl.FastSentencePieceTokenizer;
-import tech.kayys.aljabr.tokenizer.impl.Gpt2PreTokenizer;
-import tech.kayys.aljabr.tokenizer.impl.HuggingFaceBpeTokenizer;
-import tech.kayys.aljabr.tokenizer.impl.SentencePiecePreTokenizer;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
-import tech.kayys.aljabr.tokenizer.spi.TokenizerType;
+import tech.kayys.gollek.tokenizer.impl.FastSentencePieceTokenizer;
+import tech.kayys.gollek.tokenizer.impl.Gpt2PreTokenizer;
+import tech.kayys.gollek.tokenizer.impl.HuggingFaceBpeTokenizer;
+import tech.kayys.gollek.tokenizer.impl.SentencePiecePreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.TokenizerType;
 
 import java.io.IOException;
 import java.nio.file.Files;

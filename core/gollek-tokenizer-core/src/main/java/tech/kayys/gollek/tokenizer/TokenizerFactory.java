@@ -1,7 +1,7 @@
 package tech.kayys.gollek.tokenizer;
 
-import tech.kayys.aljabr.tokenizer.loader.HuggingFaceBpeLoader;
-import tech.kayys.aljabr.tokenizer.spi.*;
+import tech.kayys.gollek.tokenizer.loader.HuggingFaceBpeLoader;
+import tech.kayys.gollek.tokenizer.spi.*;
 
 public class TokenizerFactory {
 

@@ -1,4 +1,4 @@
-package tech.kayys.aljabr.tokenizer.runtime;
+package tech.kayys.gollek.tokenizer.runtime;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

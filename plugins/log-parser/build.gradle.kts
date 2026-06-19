@@ -38,3 +38,7 @@ publishing {
         mavenLocal()
     }
 }
+
+tasks.withType<GenerateModuleMetadata> {
+    suppressedValidationErrors.add("dependencies-without-versions")
+}

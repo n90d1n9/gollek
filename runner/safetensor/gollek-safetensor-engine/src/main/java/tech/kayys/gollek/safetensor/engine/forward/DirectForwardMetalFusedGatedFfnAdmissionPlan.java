@@ -90,6 +90,9 @@ record DirectForwardMetalFusedGatedFfnAdmissionPlan(
                     rows,
                     rows == 1L ? "gemma4_decode_flag_disabled" : "gemma4_prefill_flag_disabled");
         }
+        if (rows == 1L && !gemma4PolicyTarget && !traits.qwenText()) {
+            return reject(activation, rows, "decode_not_optimized_for_model");
+        }
         if (rows != 1L && !DirectForwardFfnFastPathPolicy.shouldUseMetalFusedFfnPrefill(traits)) {
             return reject(activation, rows, "prefill_flag_disabled:rows=" + rows);
         }

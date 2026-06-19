@@ -1,7 +1,7 @@
-package tech.kayys.aljabr.tokenizer.impl;
+package tech.kayys.gollek.tokenizer.impl;
 
-import tech.kayys.aljabr.tokenizer.nativeffi.SentencePieceNative;
-import tech.kayys.aljabr.tokenizer.spi.*;
+import tech.kayys.gollek.tokenizer.nativeffi.SentencePieceNative;
+import tech.kayys.gollek.tokenizer.spi.*;
 
 import java.lang.foreign.*;
 import java.nio.file.Path;

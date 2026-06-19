@@ -1,4 +1,4 @@
-package tech.kayys.aljabr.tokenizer.nativeffi;
+package tech.kayys.gollek.tokenizer.nativeffi;
 
 import java.lang.foreign.*;
 

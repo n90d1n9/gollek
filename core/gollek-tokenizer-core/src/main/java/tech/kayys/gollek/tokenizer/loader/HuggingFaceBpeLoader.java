@@ -1,9 +1,9 @@
-package tech.kayys.aljabr.tokenizer.loader;
+package tech.kayys.gollek.tokenizer.loader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import tech.kayys.aljabr.tokenizer.impl.BpeTokenizer;
-import tech.kayys.aljabr.tokenizer.impl.Gpt2PreTokenizer;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.impl.BpeTokenizer;
+import tech.kayys.gollek.tokenizer.impl.Gpt2PreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.io.File;
 import java.nio.file.Path;

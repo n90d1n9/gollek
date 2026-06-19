@@ -1,6 +1,6 @@
-package tech.kayys.aljabr.tokenizer.runtime;
+package tech.kayys.gollek.tokenizer.runtime;
 
-import tech.kayys.aljabr.tokenizer.impl.FastSentencePieceTokenizer;
+import tech.kayys.gollek.tokenizer.impl.FastSentencePieceTokenizer;
 
 import java.nio.file.Path;
 

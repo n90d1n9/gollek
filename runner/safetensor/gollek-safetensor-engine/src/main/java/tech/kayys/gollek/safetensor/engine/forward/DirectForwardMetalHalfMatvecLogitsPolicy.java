@@ -47,7 +47,7 @@ record DirectForwardMetalHalfMatvecLogitsPolicy(DirectForwardMetalHalfMatvecLogi
         if (traits.gemma3Text()) {
             return options.gemma3LogitsMetalHalfMatvecMaxOutput();
         }
-        if (traits.qwenText()) {
+        if (traits.qwenText() || traits.siluGated()) {
             return options.qwenLogitsMetalHalfMatvecMaxOutput();
         }
         return defaultMaxOutput;

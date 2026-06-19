@@ -11,7 +11,7 @@ GRADLEW="${PROJECT_ROOT}/gradlew"
 CLI_MODULE="ui/gollek-cli"
 SDK_MODULE="sdk/gollek-sdk-local"
 SAFETENSOR_ENGINE_MODULE="runner/safetensor/gollek-safetensor-engine"
-METAL_MODULE="backend/metal/gollek-backend-metal"
+METAL_MODULE="../aljabr/backend/metal/aljabr-backend-metal"
 BIN_DIR="${GOLLEK_BIN_DIR:-${HOME}/.local/bin}"
 LIB_DIR="${GOLLEK_LIB_DIR:-${HOME}/.gollek/libs}"
 RUNTIME_DIR="${GOLLEK_RUNTIME_DIR:-${HOME}/.gollek/runtime}"
@@ -1739,10 +1739,10 @@ fi
 mkdir -p "\$HOME/.gollek/logs"
 
 # Give native GGUF runs enough direct-memory headroom by default.
-: "\${GOLLEK_MAX_DIRECT_MEMORY:=24g}"
+: "\${GOLLEK_MAX_DIRECT_MEMORY:=4g}"
 # Gemma LiteRT-LM CPU fallback moves large KV-cache tensors through Java.
 # A 4 GiB default heap can trigger GC pressure on Apple Silicon.
-: "\${GOLLEK_JAVA_HEAP:=8g}"
+: "\${GOLLEK_JAVA_HEAP:=2g}"
 # Keep the official LiteRT-LM engine warm between repeated local run calls.
 # Set GOLLEK_LITERT_FAST_DAEMON=false to force one-shot process behavior.
 : "\${GOLLEK_LITERT_FAST_DAEMON:=true}"

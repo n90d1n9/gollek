@@ -212,4 +212,22 @@ public final class DefaultTensor implements Tensor {
             buffer.release();
         }
     }
+
+    @Override public Tensor eval() { return this; }
+    @Override public Tensor gelu() { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor softmax(int dim) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor logSoftmax(int dim) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor mean(int dim, boolean keepDim) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor sum() { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor sum(int dim, boolean keepDim) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public java.util.List<Tensor> split(int axis, int parts) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor layerNorm(long[] normalizedShape, Tensor weight, Tensor bias, float eps) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor rmsNorm(Tensor weight, float eps) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor batchNorm(Tensor weight, Tensor bias, Tensor runningMean, Tensor runningVar, boolean training, float momentum, float eps) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor conv2d(Tensor weight, Tensor bias, int stride, int padding, int dilation, int groups) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor maxPool2d(int kernelSize, int stride, int padding) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor adaptiveAvgPool2d(int outputH, int outputW) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor dropout(float p, boolean training) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor attention(Tensor K, Tensor V) { throw new UnsupportedOperationException("Not implemented yet"); }
+    @Override public Tensor embedding(Tensor weight, long paddingIdx) { throw new UnsupportedOperationException("Not implemented yet"); }
 }

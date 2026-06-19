@@ -23,6 +23,16 @@ record ModelConfigTraits(
     static final ModelConfigTraits EMPTY =
             new ModelConfigTraits(null, "", 0, 0, false, false, false, false);
 
+    /**
+     * Returns true for models that use SwiGLU (SILU activation) with gated FFNs.
+     *
+     * <p>This lets the inference engine route models like Qwen and Granite to the native
+     * Metal SwiGLU matvec FFN fast path dynamically, without needing hardcoded model checks.
+     */
+    boolean siluGated() {
+        return source != null && "silu".equalsIgnoreCase(source.hiddenAct());
+    }
+
     static ModelConfigTraits create(ModelConfig config) {
         return create(config, null);
     }

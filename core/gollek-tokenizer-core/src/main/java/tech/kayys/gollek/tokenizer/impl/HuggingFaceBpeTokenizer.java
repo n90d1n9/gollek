@@ -1,14 +1,14 @@
-package tech.kayys.aljabr.tokenizer.impl;
+package tech.kayys.gollek.tokenizer.impl;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.PreTokenizer;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.PreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.io.IOException;
 import java.nio.file.Files;

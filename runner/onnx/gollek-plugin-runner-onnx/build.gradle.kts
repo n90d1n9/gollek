@@ -20,7 +20,7 @@ repositories {
 dependencies {
     implementation(project(":core:plugin:gollek-plugin-runner-core"))
     implementation(project(":runner:onnx:gollek-runner-onnx"))
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":spi:gollek-spi-multimodal"))
     compileOnly(group = "io.smallrye.reactive", name = "mutiny")

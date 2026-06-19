@@ -1,7 +1,7 @@
 package tech.kayys.gollek.tokenizer;
 
 import java.nio.file.Path;
-import tech.kayys.aljabr.tokenizer.impl.SentencePieceTokenizer;
+import tech.kayys.gollek.tokenizer.impl.SentencePieceTokenizer;
 
 public class SentencePieceTokenizerPool {
 

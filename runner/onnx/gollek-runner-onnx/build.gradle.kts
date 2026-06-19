@@ -29,7 +29,7 @@ dependencies {
     implementation(project(":spi:gollek-spi-multimodal"))
     implementation(project(":core:gollek-model-runner"))
     implementation(project(":spi:gollek-spi-inference"))
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
     if (findProject(":suling") != null) {
         implementation(project(":suling"))

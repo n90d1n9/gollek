@@ -146,9 +146,49 @@ public class HuggingFaceClient {
 
         LOG.infof("Downloading: %s from %s", filename, modelId);
 
-        // First, get content length
+        // First, check total size using a HEAD request to verify existing files without keeping connections open
+        HttpRequest headRequest = buildRequestBuilder(url, true, 600)
+                .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<Void> headResponse = httpClient.send(headRequest, HttpResponse.BodyHandlers.discarding());
+
+        if (headResponse.statusCode() == 401 && hasUsableToken()) {
+            headResponse = httpClient.send(headRequest, HttpResponse.BodyHandlers.discarding());
+        }
+
+        long totalSize = headResponse.headers().firstValueAsLong("Content-Length").orElse(-1L);
+
+        // Check if fully downloaded file already exists and matches size
+        if (Files.exists(targetPath) && totalSize > 0) {
+            long existingSize = Files.size(targetPath);
+            if (existingSize == totalSize) {
+                LOG.infof("File already exists and matches size (%d bytes), skipping download.", existingSize);
+                if (progressListener != null) {
+                    // Report 100% progress immediately
+                    progressListener.onProgress(totalSize, totalSize, 1.0);
+                }
+                return;
+            } else {
+                LOG.infof("File exists but size mismatch (expected %d, found %d), re-downloading.", totalSize,
+                        existingSize);
+            }
+        }
+
+        // Check for partial download
+        java.nio.file.Path tempPath = targetPath.resolveSibling(targetPath.getFileName() + ".part");
+        long existingPartSize = Files.exists(tempPath) ? Files.size(tempPath) : 0;
+
+        HttpRequest.Builder getBuilder = buildRequestBuilder(url, true, 600).GET();
+        if (existingPartSize > 0 && totalSize > 0 && existingPartSize < totalSize) {
+            getBuilder.header("Range", "bytes=" + existingPartSize + "-");
+        } else if (existingPartSize >= totalSize && totalSize > 0) {
+            // Part file is larger than total size (maybe corrupted or changed on server)
+            existingPartSize = 0;
+            Files.deleteIfExists(tempPath);
+        }
+
         HttpResponse<InputStream> response = httpClient.send(
-                buildGetRequest(url, true, 600),
+                getBuilder.build(),
                 HttpResponse.BodyHandlers.ofInputStream());
 
         if (response.statusCode() == 401 && hasUsableToken()) {
@@ -157,11 +197,11 @@ public class HuggingFaceClient {
             } catch (Exception ignored) {
             }
             response = httpClient.send(
-                    buildGetRequest(url, true, 600),
+                    getBuilder.build(),
                     HttpResponse.BodyHandlers.ofInputStream());
         }
 
-        if (response.statusCode() != 200) {
+        if (response.statusCode() != 200 && response.statusCode() != 206) {
             String detail = "";
             try (InputStream errorBody = response.body()) {
                 byte[] bytes = errorBody.readNBytes(512);
@@ -177,29 +217,15 @@ public class HuggingFaceClient {
                     detail));
         }
 
-        long contentLength = response.headers()
-                .firstValueAsLong("Content-Length")
-                .orElse(-1L);
-
-        // Check if file already exists and matches size
-        if (Files.exists(targetPath) && contentLength > 0) {
-            long existingSize = Files.size(targetPath);
-            if (existingSize == contentLength) {
-                LOG.infof("File already exists and matches size (%d bytes), skipping download.", existingSize);
-                if (progressListener != null) {
-                    // Report 100% progress immediately
-                    progressListener.onProgress(contentLength, contentLength, 1.0);
-                }
-                return;
-            } else {
-                LOG.infof("File exists but size mismatch (expected %d, found %d), re-downloading.", contentLength,
-                        existingSize);
-            }
+        boolean append = (response.statusCode() == 206);
+        if (!append) {
+            existingPartSize = 0;
         }
+        long resolvedTotalSize = totalSize > 0 ? totalSize : response.headers().firstValueAsLong("Content-Length").orElse(-1L);
 
         // Download with progress tracking
         try (InputStream is = response.body()) {
-            downloadWithProgress(is, targetPath, contentLength, progressListener);
+            downloadWithProgress(is, targetPath, tempPath, existingPartSize, resolvedTotalSize, append, progressListener);
         }
 
         LOG.infof("Downloaded: %s (%d bytes)", filename, Files.size(targetPath));
@@ -237,16 +263,16 @@ public class HuggingFaceClient {
     private void downloadWithProgress(
             InputStream inputStream,
             java.nio.file.Path targetPath,
+            java.nio.file.Path tempPath,
+            long existingPartSize,
             long totalBytes,
+            boolean append,
             DownloadProgressListener progressListener) throws IOException, InterruptedException {
 
         Files.createDirectories(targetPath.getParent());
 
-        // Use a temporary file for download to avoid partial files corrupting state
-        java.nio.file.Path tempPath = targetPath.resolveSibling(targetPath.getFileName() + ".part");
-
         byte[] buffer = new byte[8192];
-        long downloadedBytes = 0;
+        long downloadedBytes = existingPartSize;
         int bytesRead;
 
         // Register shutdown hook to interrupt download on Ctrl+C
@@ -255,15 +281,17 @@ public class HuggingFaceClient {
             try {
                 // Interrupt the download thread to stop the loop/IO
                 currentThread.interrupt();
-                // Force immediate exit with standard Ctrl+C exit code
-                System.exit(130);
             } catch (Exception e) {
                 // Best effort
             }
         });
         Runtime.getRuntime().addShutdownHook(shutdownHook);
 
-        try (var outputStream = Files.newOutputStream(tempPath)) {
+        java.nio.file.OpenOption[] options = append ?
+                new java.nio.file.OpenOption[]{java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND} :
+                new java.nio.file.OpenOption[]{java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING, java.nio.file.StandardOpenOption.WRITE};
+
+        try (var outputStream = Files.newOutputStream(tempPath, options)) {
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new InterruptedException("Download interrupted");
@@ -277,11 +305,7 @@ public class HuggingFaceClient {
                 }
             }
         } catch (IOException | InterruptedException e) {
-            // Clean up partial file on error or interruption
-            try {
-                Files.deleteIfExists(tempPath);
-            } catch (IOException ignored) {
-            }
+            // We do NOT delete the partial file here anymore so it can be resumed later.
             throw e;
         } finally {
             // Remove hook if finished normally
@@ -313,15 +337,18 @@ public class HuggingFaceClient {
     }
 
     private HttpRequest buildGetRequest(String url, boolean withAuth, int timeoutSeconds) {
+        return buildRequestBuilder(url, withAuth, timeoutSeconds).GET().build();
+    }
+
+    private HttpRequest.Builder buildRequestBuilder(String url, boolean withAuth, int timeoutSeconds) {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .timeout(Duration.ofSeconds(timeoutSeconds))
-                .header("User-Agent", config.userAgent())
-                .GET();
+                .header("User-Agent", config.userAgent());
         if (withAuth) {
             configuredToken().ifPresent(token -> requestBuilder.header("Authorization", "Bearer " + token));
         }
-        return requestBuilder.build();
+        return requestBuilder;
     }
 
     private java.util.Optional<String> configuredToken() {

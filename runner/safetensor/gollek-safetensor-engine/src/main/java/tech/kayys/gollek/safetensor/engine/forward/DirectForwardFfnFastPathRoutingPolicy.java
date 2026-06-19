@@ -90,10 +90,11 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         if (explicit != null) {
             return explicit;
         }
-        // Qwen decode benefits from the native single-token SWIGLU FFN path:
-        // one Metal dispatch replaces gate/up projection, activation, and down
-        // projection orchestration. The caller still rejects prefill rows.
-        return traits.qwenText();
+        // Qwen and IBM Granite decode benefit from the native single-token SwiGLU
+        // FFN path: one Metal dispatch replaces gate/up projection, activation, and
+        // down projection orchestration. Both architectures use SILU activation and
+        // the same gated FFN weight layout. The caller still rejects prefill rows.
+        return traits.qwenText() || traits.siluGated();
     }
 
     boolean shouldUseMetalGateUpMatvecFfn() {

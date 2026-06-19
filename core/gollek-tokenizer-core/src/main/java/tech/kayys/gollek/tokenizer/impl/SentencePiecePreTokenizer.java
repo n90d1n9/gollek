@@ -1,7 +1,7 @@
-package tech.kayys.aljabr.tokenizer.impl;
+package tech.kayys.gollek.tokenizer.impl;
 
 import java.util.List;
-import tech.kayys.aljabr.tokenizer.spi.PreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.PreTokenizer;
 
 /**
  * SentencePiece-style pretokenizer.

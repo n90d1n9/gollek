@@ -38,7 +38,7 @@ dependencies {
     implementation(project(":core:gollek-runtime-config"))
     implementation(project(":core:gollek-model-repository"))
     implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
-    implementation("tech.kayys.aljabr:aljabr-tokenizer-core:0.1.0-SNAPSHOT")
+    implementation(project(":core:gollek-tokenizer-core"))
     implementation(project(":sdk:gollek-sdk-core"))
     implementation(project(":spi:gollek-spi"))
     implementation(project(":suling"))

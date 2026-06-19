@@ -1,8 +1,8 @@
-package tech.kayys.aljabr.tokenizer.impl;
+package tech.kayys.gollek.tokenizer.impl;
 
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;

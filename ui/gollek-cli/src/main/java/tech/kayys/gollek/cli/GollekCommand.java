@@ -19,6 +19,7 @@ import tech.kayys.gollek.cli.commands.ListCommand;
 import tech.kayys.gollek.cli.commands.McpCommand;
 import tech.kayys.gollek.cli.commands.ProvidersCommand;
 import tech.kayys.gollek.cli.commands.PullCommand;
+import tech.kayys.gollek.cli.commands.ModelCommand;
 import tech.kayys.gollek.cli.commands.PrewarmCommand;
 import tech.kayys.gollek.cli.commands.RunCommand;
 import tech.kayys.gollek.cli.commands.SafetensorsCommand;
@@ -46,6 +47,7 @@ import picocli.CommandLine.Option;
         RunCommand.class,
         ChatCommand.class,
         PullCommand.class,
+        ModelCommand.class,
         PrepareCommand.class,
         PrewarmCommand.class,
         ListCommand.class,

@@ -1,4 +1,4 @@
-package tech.kayys.aljabr.tokenizer.spi;
+package tech.kayys.gollek.tokenizer.spi;
 
 import java.util.ArrayList;
 import java.util.List;

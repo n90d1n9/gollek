@@ -777,6 +777,11 @@ public class RunCommand implements Runnable {
                             : LocalModelIndex.find(modelId, preferredIndexFormat);
                     if (indexed.isPresent()) {
                         var entry = indexed.get();
+                        if (!entry.enabled) {
+                            System.err.println("\n\u001B[31mError: Model '" + entry.id + "' is disabled.\u001B[0m");
+                            System.err.println("\u001B[33mUse 'gollek model enable " + entry.shortId + "' to enable it for inference.\u001B[0m\n");
+                            return;
+                        }
                         if (entry.path != null && !entry.path.isBlank() && Files.exists(Path.of(entry.path))) {
                             finalLocalPath = Path.of(entry.path).toAbsolutePath().toString();
                             modelId = finalLocalPath;

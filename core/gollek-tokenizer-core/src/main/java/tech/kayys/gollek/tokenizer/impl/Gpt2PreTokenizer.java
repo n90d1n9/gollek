@@ -1,6 +1,6 @@
-package tech.kayys.aljabr.tokenizer.impl;
+package tech.kayys.gollek.tokenizer.impl;
 
-import tech.kayys.aljabr.tokenizer.spi.PreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.PreTokenizer;
 
 import java.util.ArrayList;
 import java.util.List;
