@@ -3,9 +3,10 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
+import tech.kayys.gollek.sdk.route.*;
 
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemDetail;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelFamilyQuantizedLoaderProfile;
 
@@ -29,27 +30,30 @@ import java.util.function.Predicate;
  * Route policy for legacy direct safetensor execution and its local fallback
  * artifacts.
  */
-final class DirectSafetensorRoutePolicy {
+public final class DirectSafetensorRoutePolicy {
+
+    public static LocalModelResolver resolver;
+
     private static final String DEFAULT_RUN_SYSTEM_PROMPT = "Answer directly and briefly.";
     private static final String QWEN_SAFETENSOR_RUN_SYSTEM_PROMPT = "You are a helpful assistant.";
     private static final String DISABLE_DEFAULT_RUN_SYSTEM_PROPERTY = "gollek.cli.disable_default_run_system";
     private static final String ENABLE_GEMMA3_ALTERNATE_RUNTIME_PROPERTY =
             "gollek.cli.enable_gemma3_alternate_runtime";
-    static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_DIR_PROPERTY =
+    public static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_DIR_PROPERTY =
             "gollek.cli.gemma4_mobile_qat_litert_cache_dir";
-    static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_ENABLED_PROPERTY =
+    public static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_ENABLED_PROPERTY =
             "gollek.cli.gemma4_mobile_qat_litert_cache_enabled";
-    static final String GEMMA4_TEXT_GGUF_CACHE_DIR_PROPERTY =
+    public static final String GEMMA4_TEXT_GGUF_CACHE_DIR_PROPERTY =
             "gollek.cli.gemma4_text_gguf_cache_dir";
-    static final String GEMMA4_TEXT_GGUF_CACHE_ENABLED_PROPERTY =
+    public static final String GEMMA4_TEXT_GGUF_CACHE_ENABLED_PROPERTY =
             "gollek.cli.gemma4_text_gguf_cache_enabled";
-    static final String COMMUNITY_TEXT_GGUF_CACHE_DIR_PROPERTY =
+    public static final String COMMUNITY_TEXT_GGUF_CACHE_DIR_PROPERTY =
             "gollek.cli.community_text_gguf_cache_dir";
-    static final String COMMUNITY_TEXT_GGUF_CACHE_ENABLED_PROPERTY =
+    public static final String COMMUNITY_TEXT_GGUF_CACHE_ENABLED_PROPERTY =
             "gollek.cli.community_text_gguf_cache_enabled";
-    static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_KIND = "gemma4_mobile_qat_litert";
-    static final String GEMMA4_TEXT_GGUF_CACHE_KIND = "gemma4_text_gguf";
-    static final String COMMUNITY_TEXT_GGUF_CACHE_KIND = "community_text_gguf";
+    public static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_KIND = "gemma4_mobile_qat_litert";
+    public static final String GEMMA4_TEXT_GGUF_CACHE_KIND = "gemma4_text_gguf";
+    public static final String COMMUNITY_TEXT_GGUF_CACHE_KIND = "community_text_gguf";
     private static final String GEMMA4_MOBILE_QAT_LITERT_CACHE_FILE = "gemma4-mobile-qat-litert-routes.tsv";
     private static final String GEMMA4_TEXT_GGUF_CACHE_FILE = "gemma4-text-gguf-routes.tsv";
     private static final String COMMUNITY_TEXT_GGUF_CACHE_FILE = "community-text-gguf-routes.tsv";
@@ -59,27 +63,27 @@ final class DirectSafetensorRoutePolicy {
     private DirectSafetensorRoutePolicy() {
     }
 
-    record AlternateRuntimeSelection(
+    public record AlternateRuntimeSelection(
             String provider,
             String localPath,
             String format,
             String notice,
             boolean cacheHit,
             String cacheKind) {
-        static AlternateRuntimeSelection none() {
+        public static AlternateRuntimeSelection none() {
             return new AlternateRuntimeSelection(null, null, null, null, false, null);
         }
 
-        boolean selected() {
+        public boolean selected() {
             return provider != null && !provider.isBlank()
                     && localPath != null && !localPath.isBlank();
         }
 
-        boolean hasNotice() {
+        public boolean hasNotice() {
             return notice != null && !notice.isBlank();
         }
 
-        String reason() {
+        public String reason() {
             if (hasNotice()) {
                 return notice;
             }
@@ -90,26 +94,26 @@ final class DirectSafetensorRoutePolicy {
         }
     }
 
-    record RouteValidation(boolean allowed, List<String> messages, Map<String, Object> details) {
-        RouteValidation {
+    public record RouteValidation(boolean allowed, List<String> messages, Map<String, Object> details) {
+        public RouteValidation {
             messages = messages == null ? List.of() : List.copyOf(messages);
             details = details == null ? Map.of() : Map.copyOf(details);
         }
 
-        static RouteValidation pass() {
+        public static RouteValidation pass() {
             return new RouteValidation(true, List.of(), Map.of());
         }
 
-        static RouteValidation invalid(List<String> messages) {
+        public static RouteValidation invalid(List<String> messages) {
             return invalid(messages, Map.of());
         }
 
-        static RouteValidation invalid(List<String> messages, Map<String, Object> details) {
+        public static RouteValidation invalid(List<String> messages, Map<String, Object> details) {
             return new RouteValidation(false, messages, details);
         }
     }
 
-    static boolean shouldUseDirectRun(String currentProvider, Path checkpointPath, boolean safetensorCheckpointDir,
+    public static boolean shouldUseDirectRun(String currentProvider, Path checkpointPath, boolean safetensorCheckpointDir,
             String sessionId, String grammar, String prompt, boolean directInferenceEngineAvailable) {
         if (!"safetensor".equalsIgnoreCase(currentProvider)) {
             return false;
@@ -127,7 +131,7 @@ final class DirectSafetensorRoutePolicy {
         return hasText(prompt) && directInferenceEngineAvailable;
     }
 
-    static DirectSafetensorRunProfile profileForProvider(String providerId, Path checkpointPath) {
+    public static DirectSafetensorRunProfile profileForProvider(String providerId, Path checkpointPath) {
         if (!"safetensor".equalsIgnoreCase(providerId) || checkpointPath == null) {
             return DirectSafetensorRunProfile.unresolved();
         }
@@ -147,7 +151,7 @@ final class DirectSafetensorRoutePolicy {
                 checkpointPath.toString()).allowed();
     }
 
-    static String effectiveSystemPrompt(String explicitSystemPrompt, DirectSafetensorRunProfile profile) {
+    public static String effectiveSystemPrompt(String explicitSystemPrompt, DirectSafetensorRunProfile profile) {
         if (hasText(explicitSystemPrompt)) {
             return explicitSystemPrompt;
         }
@@ -160,11 +164,11 @@ final class DirectSafetensorRoutePolicy {
         return DEFAULT_RUN_SYSTEM_PROMPT;
     }
 
-    static boolean shouldForwardSystemPromptToDirectPath(String explicitSystemPrompt, DirectSafetensorRunProfile profile) {
+    public static boolean shouldForwardSystemPromptToDirectPath(String explicitSystemPrompt, DirectSafetensorRunProfile profile) {
         return hasText(explicitSystemPrompt) || profile.qwenText();
     }
 
-    static boolean shouldUseDirectLiteRtStreamPath(String currentProvider, String localPath) {
+    public static boolean shouldUseDirectLiteRtStreamPath(String currentProvider, String localPath) {
         if (!"litert".equalsIgnoreCase(currentProvider) || !hasText(localPath)) {
             return false;
         }
@@ -174,7 +178,7 @@ final class DirectSafetensorRoutePolicy {
         return looksLikeLiteRtArtifactOrDirectory(localPath);
     }
 
-    static AlternateRuntimeSelection selectGemma3AlternateRuntime(String currentProvider, String requestedModelId,
+    public static AlternateRuntimeSelection selectGemma3AlternateRuntime(String currentProvider, String requestedModelId,
             String localPath, boolean providerExplicit, boolean preferAlternateRuntime,
             Predicate<String> providerActive) {
         if (!allowGemma3AlternateRuntime(providerExplicit, preferAlternateRuntime)) {
@@ -229,7 +233,7 @@ final class DirectSafetensorRoutePolicy {
         return AlternateRuntimeSelection.none();
     }
 
-    static AlternateRuntimeSelection selectGemma4MobileQatAlternateRuntime(
+    public static AlternateRuntimeSelection selectGemma4MobileQatAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -243,10 +247,10 @@ final class DirectSafetensorRoutePolicy {
                 providerExplicit,
                 preferAlternateRuntime,
                 providerActive,
-                LiteRtLmFastRun::findIndexedLiteRtModelPath);
+                resolver::resolveLiteRtModel);
     }
 
-    static AlternateRuntimeSelection selectGemma4MobileQatAlternateRuntime(
+    public static AlternateRuntimeSelection selectGemma4MobileQatAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -297,7 +301,7 @@ final class DirectSafetensorRoutePolicy {
         return AlternateRuntimeSelection.none();
     }
 
-    static AlternateRuntimeSelection selectCachedGemma4MobileQatLiteRtAlternateRuntime(
+    public static AlternateRuntimeSelection selectCachedGemma4MobileQatLiteRtAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -328,7 +332,7 @@ final class DirectSafetensorRoutePolicy {
         }
     }
 
-    static AlternateRuntimeSelection selectGemma4TextAlternateRuntime(
+    public static AlternateRuntimeSelection selectGemma4TextAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -345,7 +349,7 @@ final class DirectSafetensorRoutePolicy {
                 DirectSafetensorRoutePolicy::findLocalGemma4GgufEquivalent);
     }
 
-    static AlternateRuntimeSelection selectGemma4TextAlternateRuntime(
+    public static AlternateRuntimeSelection selectGemma4TextAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -409,7 +413,7 @@ final class DirectSafetensorRoutePolicy {
         return AlternateRuntimeSelection.none();
     }
 
-    static AlternateRuntimeSelection selectCommunityTextGgufAlternateRuntime(
+    public static AlternateRuntimeSelection selectCommunityTextGgufAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -426,7 +430,7 @@ final class DirectSafetensorRoutePolicy {
                 DirectSafetensorRoutePolicy::findLocalCommunityTextGgufEquivalent);
     }
 
-    static AlternateRuntimeSelection selectCommunityTextGgufAlternateRuntime(
+    public static AlternateRuntimeSelection selectCommunityTextGgufAlternateRuntime(
             String currentProvider,
             String requestedModelId,
             String localPath,
@@ -493,7 +497,7 @@ final class DirectSafetensorRoutePolicy {
         return AlternateRuntimeSelection.none();
     }
 
-    static RouteValidation validateGemma3ExecutionRoute(String provider, String requestedModelId, String localPath) {
+    public static RouteValidation validateGemma3ExecutionRoute(String provider, String requestedModelId, String localPath) {
         if (!"safetensor".equalsIgnoreCase(provider) || !hasText(localPath)) {
             return RouteValidation.pass();
         }
@@ -524,7 +528,7 @@ final class DirectSafetensorRoutePolicy {
         }
     }
 
-    static RouteValidation validateGemma4UnifiedExecutionRoute(
+    public static RouteValidation validateGemma4UnifiedExecutionRoute(
             String provider,
             String requestedModelId,
             String localPath) {
@@ -581,7 +585,7 @@ final class DirectSafetensorRoutePolicy {
         }
     }
 
-    static RouteValidation validateGemma4UnifiedMultimodalExecutionRoute(
+    public static RouteValidation validateGemma4UnifiedMultimodalExecutionRoute(
             String provider,
             String requestedModelId,
             String localPath,
@@ -781,10 +785,10 @@ final class DirectSafetensorRoutePolicy {
         if (requestedKeys.isEmpty()) {
             return Optional.empty();
         }
-        return LocalModelIndex.entries().stream()
-                .filter(entry -> entry != null && "gguf".equalsIgnoreCase(entry.format))
-                .filter(entry -> entry.path != null && !entry.path.isBlank())
-                .map(entry -> new Gemma4GgufCandidate(entry, Path.of(entry.path)))
+        return resolver.localModels()
+                .filter(entry -> entry != null && "gguf".equalsIgnoreCase(entry.format()))
+                .filter(entry -> entry.path() != null && !entry.path().toString().isBlank())
+                .map(entry -> new Gemma4GgufCandidate(entry, entry.path()))
                 .filter(candidate -> Files.isRegularFile(candidate.path()))
                 .filter(candidate -> gemma4GgufMatches(requestedKeys, candidate.entry()))
                 .min(Comparator.comparingInt(DirectSafetensorRoutePolicy::gemma4GgufPreference))
@@ -792,13 +796,13 @@ final class DirectSafetensorRoutePolicy {
                 .map(path -> path.toAbsolutePath().normalize());
     }
 
-    private record Gemma4GgufCandidate(LocalModelIndex.Entry entry, Path path) {
+    private record Gemma4GgufCandidate(LocalModelResolver.LocalModelCandidate entry, Path path) {
     }
 
     private record CommunityTextGgufFamily(String id, String label) {
     }
 
-    private record CommunityTextGgufCandidate(LocalModelIndex.Entry entry, Path path) {
+    private record CommunityTextGgufCandidate(LocalModelResolver.LocalModelCandidate entry, Path path) {
     }
 
     private static Optional<CommunityTextGgufFamily> communityTextGgufFamily(
@@ -942,10 +946,10 @@ final class DirectSafetensorRoutePolicy {
         if (requestedKeys.isEmpty()) {
             return Optional.empty();
         }
-        return LocalModelIndex.entries().stream()
-                .filter(entry -> entry != null && "gguf".equalsIgnoreCase(entry.format))
-                .filter(entry -> entry.path != null && !entry.path.isBlank())
-                .map(entry -> new CommunityTextGgufCandidate(entry, Path.of(entry.path)))
+        return resolver.localModels()
+                .filter(entry -> entry != null && "gguf".equalsIgnoreCase(entry.format()))
+                .filter(entry -> entry.path() != null && !entry.path().toString().isBlank())
+                .map(entry -> new CommunityTextGgufCandidate(entry, entry.path()))
                 .filter(candidate -> Files.isRegularFile(candidate.path()))
                 .filter(candidate -> communityTextGgufMatches(requestedKeys, candidate.entry()))
                 .min(Comparator.comparingInt(DirectSafetensorRoutePolicy::communityTextGgufPreference))
@@ -972,14 +976,16 @@ final class DirectSafetensorRoutePolicy {
         return keys;
     }
 
-    private static boolean communityTextGgufMatches(Set<String> requestedKeys, LocalModelIndex.Entry entry) {
+    private static boolean communityTextGgufMatches(Set<String> requestedKeys, LocalModelResolver.LocalModelCandidate entry) {
         Set<String> candidateKeys = new LinkedHashSet<>();
-        addCommunityTextGgufKey(candidateKeys, entry.id);
-        addCommunityTextGgufKey(candidateKeys, entry.name);
+        addCommunityTextGgufKey(candidateKeys, entry.id());
+        addCommunityTextGgufKey(candidateKeys, entry.name());
+        addCommunityTextGgufKey(candidateKeys, fileName(entry.path()));
+        addCommunityTextGgufKey(candidateKeys, entry.path().toString());
         try {
-            addCommunityTextGgufKey(candidateKeys, fileName(Path.of(entry.path)));
+            addCommunityTextGgufKey(candidateKeys, fileName(entry.path()));
         } catch (Exception ignored) {
-            addCommunityTextGgufKey(candidateKeys, entry.path);
+            addCommunityTextGgufKey(candidateKeys, entry.path().toString());
         }
         for (String requested : requestedKeys) {
             for (String candidate : candidateKeys) {
@@ -1010,10 +1016,10 @@ final class DirectSafetensorRoutePolicy {
     }
 
     private static int communityTextGgufPreference(CommunityTextGgufCandidate candidate) {
-        LocalModelIndex.Entry entry = candidate.entry();
-        String text = ((entry.id == null ? "" : entry.id)
+        LocalModelResolver.LocalModelCandidate entry = candidate.entry();
+        String text = ((entry.id() == null ? "" : entry.id())
                 + " "
-                + (entry.name == null ? "" : entry.name)
+                + (entry.name() == null ? "" : entry.name())
                 + " "
                 + candidate.path()).toLowerCase(Locale.ROOT);
         int score = 100;
@@ -1096,14 +1102,16 @@ final class DirectSafetensorRoutePolicy {
         return keys;
     }
 
-    private static boolean gemma4GgufMatches(Set<String> requestedKeys, LocalModelIndex.Entry entry) {
+    private static boolean gemma4GgufMatches(Set<String> requestedKeys, LocalModelResolver.LocalModelCandidate entry) {
         Set<String> candidateKeys = new LinkedHashSet<>();
-        addGemma4GgufKey(candidateKeys, entry.id);
-        addGemma4GgufKey(candidateKeys, entry.name);
+        addGemma4GgufKey(candidateKeys, entry.id());
+        addGemma4GgufKey(candidateKeys, entry.name());
+        addGemma4GgufKey(candidateKeys, fileName(entry.path()));
+        addGemma4GgufKey(candidateKeys, entry.path().toString());
         try {
-            addGemma4GgufKey(candidateKeys, fileName(Path.of(entry.path)));
+            addGemma4GgufKey(candidateKeys, fileName(entry.path()));
         } catch (Exception ignored) {
-            addGemma4GgufKey(candidateKeys, entry.path);
+            addGemma4GgufKey(candidateKeys, entry.path().toString());
         }
         for (String requested : requestedKeys) {
             for (String candidate : candidateKeys) {
@@ -1134,10 +1142,10 @@ final class DirectSafetensorRoutePolicy {
     }
 
     private static int gemma4GgufPreference(Gemma4GgufCandidate candidate) {
-        LocalModelIndex.Entry entry = candidate.entry();
-        String text = ((entry.id == null ? "" : entry.id)
+        LocalModelResolver.LocalModelCandidate entry = candidate.entry();
+        String text = ((entry.id() == null ? "" : entry.id())
                 + " "
-                + (entry.name == null ? "" : entry.name)
+                + (entry.name() == null ? "" : entry.name())
                 + " "
                 + candidate.path()).toLowerCase(Locale.ROOT);
         int score = 100;

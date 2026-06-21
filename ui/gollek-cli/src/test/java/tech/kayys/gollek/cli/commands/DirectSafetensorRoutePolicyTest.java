@@ -4,22 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.sdk.route.RunnerRouteBenchmarkCache;
+import tech.kayys.gollek.sdk.route.RunnerRoutePolicy;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticContract;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.Action;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ActionKind;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ComponentReadiness;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ExecutionProfile;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.HeaderInspection;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.InputMode;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.Problem;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemCode;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.RuntimeCapability;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.TensorInventory;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticContract;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.Action;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ActionKind;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ComponentReadiness;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ExecutionProfile;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.HeaderInspection;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.InputMode;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.Problem;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemCode;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.RuntimeCapability;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.TensorInventory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DirectSafetensorRoutePolicyTest {
+    static { tech.kayys.gollek.safetensor.engine.route.DirectSafetensorRoutePolicy.resolver = new CliLocalModelResolver(); }
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @TempDir

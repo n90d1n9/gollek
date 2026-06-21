@@ -1,4 +1,4 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -10,15 +10,15 @@ import java.util.Set;
 /**
  * Builds stable JSON-friendly reports for cached runner route benchmarks.
  */
-final class RouteBenchmarkCacheReports {
+public final class RouteBenchmarkCacheReports {
     private RouteBenchmarkCacheReports() {
     }
 
-    static Map<String, Object> summaryReport(int recentEntryLimit) {
+    public static Map<String, Object> summaryReport(int recentEntryLimit) {
         return summaryReport(RunnerRouteBenchmarkCache.entries(), recentEntryLimit);
     }
 
-    static Map<String, Object> summaryReport(
+    public static Map<String, Object> summaryReport(
             List<RunnerRouteBenchmarkCache.Entry> entries,
             int recentEntryLimit) {
         RunnerRouteBenchmarkCache.Health health = RunnerRouteBenchmarkCache.health();
@@ -70,7 +70,7 @@ final class RouteBenchmarkCacheReports {
         return report;
     }
 
-    static Map<String, Object> entryReport(RunnerRouteBenchmarkCache.Entry entry) {
+    public static Map<String, Object> entryReport(RunnerRouteBenchmarkCache.Entry entry) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("key", entry.key());
         map.put("identity", entry.identity());
@@ -88,7 +88,7 @@ final class RouteBenchmarkCacheReports {
         return map;
     }
 
-    static Map<String, Object> healthReport(RunnerRouteBenchmarkCache.Health health) {
+    public static Map<String, Object> healthReport(RunnerRouteBenchmarkCache.Health health) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("schemaVersion", 1);
         map.put("status", health.status());
@@ -109,7 +109,7 @@ final class RouteBenchmarkCacheReports {
         return map;
     }
 
-    static Map<String, Object> pruneResultReport(RunnerRouteBenchmarkCache.PruneResult result) {
+    public static Map<String, Object> pruneResultReport(RunnerRouteBenchmarkCache.PruneResult result) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("schemaVersion", 1);
         map.put("success", result.success());

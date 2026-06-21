@@ -1,6 +1,6 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.Problem;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.Problem;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

@@ -3,14 +3,15 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
+import tech.kayys.gollek.sdk.route.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ComponentReadiness;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.HeaderInspection;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.TensorInventory;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ComponentReadiness;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.HeaderInspection;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.TensorInventory;
 import tech.kayys.gollek.spi.model.ModelConfig;
 
 import java.io.IOException;
@@ -42,14 +43,14 @@ final class Gemma4UnifiedSafetensorPreflight {
     private Gemma4UnifiedSafetensorPreflight() {
     }
 
-    record Result(
+    public record Result(
             boolean allowed,
             List<String> messages,
             ProjectorSummary projectors,
             HeaderSummary header,
             TensorInventorySummary inventory,
             ComponentReadinessSummary readiness) {
-        static Result pass() {
+        public static Result pass() {
             return pass(
                     ProjectorSummary.empty(),
                     HeaderSummary.empty(),
@@ -57,7 +58,7 @@ final class Gemma4UnifiedSafetensorPreflight {
                     ComponentReadinessSummary.empty());
         }
 
-        static Result pass(
+        public static Result pass(
                 ProjectorSummary projectors,
                 HeaderSummary header,
                 TensorInventorySummary inventory,
@@ -65,7 +66,7 @@ final class Gemma4UnifiedSafetensorPreflight {
             return new Result(true, List.of(), projectors, header, inventory, readiness);
         }
 
-        static Result invalid(List<String> messages) {
+        public static Result invalid(List<String> messages) {
             return invalid(
                     messages,
                     ProjectorSummary.empty(),
@@ -74,7 +75,7 @@ final class Gemma4UnifiedSafetensorPreflight {
                     ComponentReadinessSummary.empty());
         }
 
-        static Result invalid(
+        public static Result invalid(
                 List<String> messages,
                 ProjectorSummary projectors,
                 HeaderSummary header,
@@ -91,11 +92,11 @@ final class Gemma4UnifiedSafetensorPreflight {
         }
     }
 
-    static Result validate(Path modelPath, ModelConfig config, String modelLabel) {
+    public static Result validate(Path modelPath, ModelConfig config, String modelLabel) {
         return inspect(modelPath, config, modelLabel).text();
     }
 
-    static Inspection inspect(Path modelPath, ModelConfig config, String modelLabel) {
+    public static Inspection inspect(Path modelPath, ModelConfig config, String modelLabel) {
         if (modelPath == null || config == null) {
             return Inspection.pass(
                     ProjectorSummary.empty(),
@@ -540,15 +541,15 @@ final class Gemma4UnifiedSafetensorPreflight {
     }
 
     private record TensorMeta(String name, String dtype, long[] shape) {
-        int rank() {
+        public int rank() {
             return shape.length;
         }
 
-        long dim(int dim) {
+        public long dim(int dim) {
             return shape[dim];
         }
 
-        String shapeString() {
+        public String shapeString() {
             StringBuilder builder = new StringBuilder("[");
             for (int i = 0; i < shape.length; i++) {
                 if (i > 0) {
@@ -566,12 +567,12 @@ final class Gemma4UnifiedSafetensorPreflight {
     private record HeaderFileLoad(Map<String, TensorMeta> tensors, long headerBytes) {
     }
 
-    record HeaderSummary(
+    public record HeaderSummary(
             int safetensorFileCount,
             int tensorCount,
             long headerBytesRead,
             long payloadBytesLoaded) {
-        static HeaderSummary empty() {
+        public static HeaderSummary empty() {
             return new HeaderSummary(0, 0, 0, 0);
         }
 
@@ -585,13 +586,13 @@ final class Gemma4UnifiedSafetensorPreflight {
         }
     }
 
-    record Inspection(
+    public record Inspection(
             Result text,
             ProjectorSummary projectors,
             HeaderSummary header,
             TensorInventorySummary inventory,
             ComponentReadinessSummary readiness) {
-        static Inspection pass(
+        public static Inspection pass(
                 ProjectorSummary projectors,
                 HeaderSummary header,
                 TensorInventorySummary inventory,
@@ -604,7 +605,7 @@ final class Gemma4UnifiedSafetensorPreflight {
                     readiness);
         }
 
-        static Inspection invalid(
+        public static Inspection invalid(
                 List<String> messages,
                 ProjectorSummary projectors,
                 HeaderSummary header,
@@ -622,7 +623,7 @@ final class Gemma4UnifiedSafetensorPreflight {
     /**
      * Header-only readiness signals for the next Gemma 4 runtime implementation steps.
      */
-    record ComponentReadinessSummary(
+    public record ComponentReadinessSummary(
             boolean textDecoderReady,
             boolean visionProjectorReady,
             boolean audioProjectorReady,
@@ -631,11 +632,11 @@ final class Gemma4UnifiedSafetensorPreflight {
             boolean packedMoeRouterReady,
             boolean packedMoeExpertsReady,
             boolean packedMoeHeaderReady) {
-        static ComponentReadinessSummary empty() {
+        public static ComponentReadinessSummary empty() {
             return new ComponentReadinessSummary(false, false, false, false, false, false, false, false);
         }
 
-        static ComponentReadinessSummary from(
+        public static ComponentReadinessSummary from(
                 boolean textDecoderReady,
                 ProjectorSummary projectors,
                 TensorInventorySummary inventory) {
@@ -672,7 +673,7 @@ final class Gemma4UnifiedSafetensorPreflight {
     /**
      * Header-only component inventory for Gemma 4 unified SafeTensor checkpoints.
      */
-    record TensorInventorySummary(
+    public record TensorInventorySummary(
             int textDecoderTensors,
             int embeddingTensors,
             int logitsHeadTensors,
@@ -683,11 +684,11 @@ final class Gemma4UnifiedSafetensorPreflight {
             int packedMoeRouterTensors,
             int packedMoeExpertTensors,
             int unclassifiedTensors) {
-        static TensorInventorySummary empty() {
+        public static TensorInventorySummary empty() {
             return new TensorInventorySummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        static TensorInventorySummary from(Map<String, TensorMeta> tensors) {
+        public static TensorInventorySummary from(Map<String, TensorMeta> tensors) {
             if (tensors == null || tensors.isEmpty()) {
                 return empty();
             }
@@ -822,7 +823,7 @@ final class Gemma4UnifiedSafetensorPreflight {
         }
     }
 
-    record ProjectorSummary(
+    public record ProjectorSummary(
             boolean visionProjection,
             boolean audioProjection,
             boolean videoProjection,
@@ -833,11 +834,11 @@ final class Gemma4UnifiedSafetensorPreflight {
             boolean packedMoeExperts,
             boolean packedMoeRouterReady,
             boolean packedMoeExpertsReady) {
-        static ProjectorSummary empty() {
+        public static ProjectorSummary empty() {
             return new ProjectorSummary(false, false, false, false, false, false, false, false, false, false);
         }
 
-        static ProjectorSummary from(Map<String, TensorMeta> tensors, ModelConfig config) {
+        public static ProjectorSummary from(Map<String, TensorMeta> tensors, ModelConfig config) {
             if (tensors == null || tensors.isEmpty()) {
                 return empty();
             }
@@ -875,7 +876,7 @@ final class Gemma4UnifiedSafetensorPreflight {
                     expertTripletCompatibleWithConfig(tensors, hiddenSize, moeIntermediateSize, numExperts));
         }
 
-        String display() {
+        public String display() {
             String projectors = projectorDisplay();
             String moe = moeDisplay();
             if (!projectors.isBlank() && !moe.isBlank()) {
@@ -890,7 +891,7 @@ final class Gemma4UnifiedSafetensorPreflight {
             return "vision/audio/video projector or packed MoE tensors were not detected";
         }
 
-        List<String> detectedProjectors() {
+        public List<String> detectedProjectors() {
             List<String> values = new ArrayList<>();
             if (visionProjection) {
                 values.add("vision");
@@ -904,7 +905,7 @@ final class Gemma4UnifiedSafetensorPreflight {
             return List.copyOf(values);
         }
 
-        List<String> detectedPackedMoe() {
+        public List<String> detectedPackedMoe() {
             List<String> values = new ArrayList<>();
             if (packedMoeRouter) {
                 values.add("router");

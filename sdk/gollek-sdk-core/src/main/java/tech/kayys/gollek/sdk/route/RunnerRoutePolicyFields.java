@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Kayys.tech
  */
 
-package tech.kayys.gollek.cli.util;
+package tech.kayys.gollek.sdk.route;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

@@ -1,10 +1,10 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
 
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ExecutionProfile;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.InputMode;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.RuntimeCapability;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ExecutionProfile;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.InputMode;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.RuntimeCapability;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,7 +26,7 @@ record Gemma4SafetensorExecutionProfile(
         boolean packedMoeCheckpoint,
         boolean mobileQatCheckpoint) {
 
-    static Gemma4SafetensorExecutionProfile from(
+    public static Gemma4SafetensorExecutionProfile from(
             DirectSafetensorRunProfile runProfile,
             boolean mobileQatCheckpoint) {
         boolean unified = runProfile != null && runProfile.gemma4Unified();
@@ -47,11 +47,11 @@ record Gemma4SafetensorExecutionProfile(
                 mobileQatCheckpoint);
     }
 
-    List<String> supportedInputModes() {
+    public List<String> supportedInputModes() {
         return guardedTextDecoderReady ? List.of(InputMode.TEXT) : List.of();
     }
 
-    List<String> blockedInputModes() {
+    public List<String> blockedInputModes() {
         if (mobileQatCheckpoint || packedMoeCheckpoint) {
             return List.of(InputMode.TEXT, InputMode.IMAGE, InputMode.AUDIO, InputMode.VIDEO);
         }
@@ -61,17 +61,17 @@ record Gemma4SafetensorExecutionProfile(
         return List.of();
     }
 
-    List<String> blockedCapabilities() {
+    public List<String> blockedCapabilities() {
         return missingRuntimeCapabilities();
     }
 
-    List<String> readyRuntimeCapabilities() {
+    public List<String> readyRuntimeCapabilities() {
         return guardedTextDecoderReady
                 ? List.of(RuntimeCapability.GEMMA4_GUARDED_TEXT_DECODER)
                 : List.of();
     }
 
-    List<String> missingRuntimeCapabilities() {
+    public List<String> missingRuntimeCapabilities() {
         if (mobileQatCheckpoint) {
             return List.of(MissingRuntimeCapability.GEMMA4_MOBILE_QAT_LOADER);
         }

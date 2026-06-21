@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -21,19 +21,19 @@ import java.util.Locale;
  * family-specific runtime policy should be applied here instead of falling back to broad
  * config-name heuristics when the family module is available.</p>
  */
-record DirectSafetensorRunProfile(
+public record DirectSafetensorRunProfile(
         ModelConfig config,
         String modelType,
         ModelRuntimeTraits runtimeTraits) {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    DirectSafetensorRunProfile {
+    public DirectSafetensorRunProfile {
         modelType = modelType == null ? "" : modelType;
         runtimeTraits = runtimeTraits == null ? ModelRuntimeTraits.EMPTY : runtimeTraits;
     }
 
-    static DirectSafetensorRunProfile load(Path modelPath) {
+    public static DirectSafetensorRunProfile load(Path modelPath) {
         if (modelPath == null) {
             return unresolved();
         }
@@ -52,15 +52,15 @@ record DirectSafetensorRunProfile(
         }
     }
 
-    static DirectSafetensorRunProfile unresolved() {
+    public static DirectSafetensorRunProfile unresolved() {
         return new DirectSafetensorRunProfile(null, "", ModelRuntimeTraits.EMPTY);
     }
 
-    boolean gemma4Text() {
+    public boolean gemma4Text() {
         return runtimeTraits.gemma4Text();
     }
 
-    boolean gemma4Unified() {
+    public boolean gemma4Unified() {
         if (config == null) {
             return false;
         }
@@ -72,11 +72,11 @@ record DirectSafetensorRunProfile(
                 || normalizedArchitecture.equals("gemma4forimagetexttotext");
     }
 
-    boolean gemma3Text() {
+    public boolean gemma3Text() {
         return runtimeTraits.gemma3Text();
     }
 
-    boolean qwenText() {
+    public boolean qwenText() {
         return runtimeTraits.qwenText();
     }
 

@@ -4,10 +4,10 @@
  * Copyright (c) 2026 Kayys.tech
  */
 
-package tech.kayys.gollek.cli.util;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields.Schema;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields.Validation;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields.Schema;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields.Validation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

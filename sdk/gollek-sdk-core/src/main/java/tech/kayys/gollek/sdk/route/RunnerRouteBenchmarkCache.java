@@ -1,6 +1,6 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,18 +18,18 @@ import java.util.Optional;
 /**
  * Small TSV-backed cache for observed local route throughput.
  */
-final class RunnerRouteBenchmarkCache {
-    static final String CACHE_DIR_PROPERTY = "gollek.cli.route_benchmark_cache_dir";
-    static final String CACHE_ENABLED_PROPERTY = "gollek.cli.route_benchmark_cache_enabled";
-    static final String CACHE_STALE_DAYS_PROPERTY = "gollek.cli.route_benchmark_cache_stale_days";
-    static final String CACHE_ALLOW_STALE_PROPERTY = "gollek.cli.route_benchmark_cache_allow_stale";
-    static final String CACHE_FILE = "route-benchmark-profiles.tsv";
-    static final int DEFAULT_STALE_DAYS = 30;
+public final class RunnerRouteBenchmarkCache {
+    public static final String CACHE_DIR_PROPERTY = "gollek.cli.route_benchmark_cache_dir";
+    public static final String CACHE_ENABLED_PROPERTY = "gollek.cli.route_benchmark_cache_enabled";
+    public static final String CACHE_STALE_DAYS_PROPERTY = "gollek.cli.route_benchmark_cache_stale_days";
+    public static final String CACHE_ALLOW_STALE_PROPERTY = "gollek.cli.route_benchmark_cache_allow_stale";
+    public static final String CACHE_FILE = "route-benchmark-profiles.tsv";
+    public static final int DEFAULT_STALE_DAYS = 30;
 
     private RunnerRouteBenchmarkCache() {
     }
 
-    static Optional<RunnerRoutePerformanceProfile> profileFor(
+    public static Optional<RunnerRoutePerformanceProfile> profileFor(
             RunnerRouteReport report,
             String requestedModel,
             String effectiveModel,
@@ -44,7 +44,7 @@ final class RunnerRouteBenchmarkCache {
                 .map(entry -> RunnerRoutePerformanceProfile.fromBenchmarkCache(report, entry));
     }
 
-    static Optional<Entry> find(
+    public static Optional<Entry> find(
             String requestedModel,
             String effectiveModel,
             String localPath,
@@ -71,18 +71,18 @@ final class RunnerRouteBenchmarkCache {
         return Optional.empty();
     }
 
-    static List<Entry> entries() {
+    public static List<Entry> entries() {
         if (!enabled()) {
             return List.of();
         }
         return snapshot(cacheFile()).entries();
     }
 
-    static Path cacheFilePath() {
+    public static Path cacheFilePath() {
         return cacheFile();
     }
 
-    static boolean clear() {
+    public static boolean clear() {
         try {
             return Files.deleteIfExists(cacheFile());
         } catch (Exception ignored) {
@@ -90,15 +90,15 @@ final class RunnerRouteBenchmarkCache {
         }
     }
 
-    static boolean isEnabled() {
+    public static boolean isEnabled() {
         return enabled();
     }
 
-    static boolean allowStaleProfiles() {
+    public static boolean allowStaleProfiles() {
         return Boolean.parseBoolean(System.getProperty(CACHE_ALLOW_STALE_PROPERTY, "false"));
     }
 
-    static int staleAfterDays() {
+    public static int staleAfterDays() {
         String configured = System.getProperty(CACHE_STALE_DAYS_PROPERTY);
         if (configured == null || configured.isBlank()) {
             return DEFAULT_STALE_DAYS;
@@ -110,11 +110,11 @@ final class RunnerRouteBenchmarkCache {
         }
     }
 
-    static Health health() {
+    public static Health health() {
         return health(staleAfterDays());
     }
 
-    static Health health(int staleAfterDays) {
+    public static Health health(int staleAfterDays) {
         Path cacheFile = cacheFile();
         boolean enabled = enabled();
         boolean exists = Files.exists(cacheFile);
@@ -179,7 +179,7 @@ final class RunnerRouteBenchmarkCache {
                 status);
     }
 
-    static PruneResult pruneOlderThanDays(int olderThanDays) {
+    public static PruneResult pruneOlderThanDays(int olderThanDays) {
         int normalizedDays = normalizedDays(olderThanDays);
         Path cacheFile = cacheFile();
         if (!enabled()) {
@@ -243,7 +243,7 @@ final class RunnerRouteBenchmarkCache {
                 snapshot.invalidLineCount());
     }
 
-    static void record(
+    public static void record(
             String requestedModel,
             String effectiveModel,
             String localPath,
@@ -362,15 +362,15 @@ final class RunnerRouteBenchmarkCache {
         return allowStaleProfiles() || !isStale(entry, staleAfterDays());
     }
 
-    static boolean isStale(Entry entry) {
+    public static boolean isStale(Entry entry) {
         return isStale(entry, staleAfterDays());
     }
 
-    static boolean isStale(Entry entry, int staleAfterDays) {
+    public static boolean isStale(Entry entry, int staleAfterDays) {
         return entry != null && entry.updatedAtEpochMs() < staleCutoffEpochMs(staleAfterDays);
     }
 
-    static long ageDays(Entry entry) {
+    public static long ageDays(Entry entry) {
         if (entry == null) {
             return 0L;
         }
@@ -481,7 +481,7 @@ final class RunnerRouteBenchmarkCache {
         }
     }
 
-    record Entry(
+    public record Entry(
             String key,
             String identity,
             String provider,
@@ -493,7 +493,7 @@ final class RunnerRouteBenchmarkCache {
             int observations,
             long updatedAtEpochMs) {
 
-        static Entry create(
+        public static Entry create(
                 String key,
                 String identity,
                 String provider,
@@ -515,7 +515,7 @@ final class RunnerRouteBenchmarkCache {
                     Instant.now().toEpochMilli());
         }
 
-        Entry merge(double observedTps, Double observedTtftMs, int latestOutputTokens, long latestDurationMs) {
+        public Entry merge(double observedTps, Double observedTtftMs, int latestOutputTokens, long latestDurationMs) {
             int nextObservations = Math.max(1, observations + 1);
             double nextTps = weighted(generationTokensPerSecond, observations, observedTps);
             Double nextTtft = mergeOptional(ttftMs, observedTtftMs, observations);
@@ -532,7 +532,7 @@ final class RunnerRouteBenchmarkCache {
                     Instant.now().toEpochMilli());
         }
 
-        String serialize() {
+        public String serialize() {
             return String.join("\t",
                     sanitize(key),
                     sanitize(identity),
@@ -546,7 +546,7 @@ final class RunnerRouteBenchmarkCache {
                     Long.toString(updatedAtEpochMs));
         }
 
-        static Optional<Entry> parse(String line) {
+        public static Optional<Entry> parse(String line) {
             if (line == null || line.isBlank()) {
                 return Optional.empty();
             }
@@ -587,7 +587,7 @@ final class RunnerRouteBenchmarkCache {
         }
     }
 
-    record Health(
+    public record Health(
             boolean enabled,
             Path cacheFile,
             boolean cacheFileExists,
@@ -599,7 +599,7 @@ final class RunnerRouteBenchmarkCache {
             int staleAfterDays,
             Long newestUpdatedAtEpochMs,
             String status) {
-        static Health from(
+        public static Health from(
                 boolean enabled,
                 Path cacheFile,
                 boolean cacheFileExists,
@@ -632,7 +632,7 @@ final class RunnerRouteBenchmarkCache {
         }
     }
 
-    record PruneResult(
+    public record PruneResult(
             boolean success,
             boolean changed,
             String status,
@@ -642,7 +642,7 @@ final class RunnerRouteBenchmarkCache {
             int removedCount,
             int retainedCount,
             int invalidLineCount) {
-        static PruneResult empty(Path cacheFile, int olderThanDays, String status) {
+        public static PruneResult empty(Path cacheFile, int olderThanDays, String status) {
             return new PruneResult(true, false, status, cacheFile, olderThanDays, 0, 0, 0, 0);
         }
     }

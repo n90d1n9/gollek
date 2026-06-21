@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,11 +16,11 @@ import java.util.function.Predicate;
 /**
  * Small TSV-backed cache for local route artifact equivalence lookups.
  */
-final class RouteArtifactCache {
+public final class RouteArtifactCache {
     private RouteArtifactCache() {
     }
 
-    static Optional<Path> find(
+    public static Optional<Path> find(
             String cacheDirProperty,
             String cacheEnabledProperty,
             String fileName,
@@ -50,7 +50,7 @@ final class RouteArtifactCache {
         return Optional.empty();
     }
 
-    static void put(
+    public static void put(
             String cacheDirProperty,
             String cacheEnabledProperty,
             String fileName,

@@ -1,9 +1,14 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.sdk.route.RunnerRouteBenchmarkCache;
+import tech.kayys.gollek.sdk.route.RunnerRoutePolicy;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

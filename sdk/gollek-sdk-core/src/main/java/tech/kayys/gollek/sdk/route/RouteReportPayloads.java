@@ -1,23 +1,23 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RouteReportPayloadContract;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.Payload;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.RouteArtifactCacheState;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticContract;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadContract;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.Payload;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.RouteArtifactCacheState;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticContract;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
-final class RouteReportPayloads {
+public final class RouteReportPayloads {
     private RouteReportPayloads() {
     }
 
-    static Map<String, Object> routeReportPayload(
+    public static Map<String, Object> routeReportPayload(
             RunnerRouteReport report,
             String requestedModel,
             String effectiveModel,
@@ -36,7 +36,7 @@ final class RouteReportPayloads {
                 false);
     }
 
-    static Map<String, Object> routeReportPayload(
+    public static Map<String, Object> routeReportPayload(
             RunnerRouteReport report,
             String requestedModel,
             String effectiveModel,
@@ -66,7 +66,7 @@ final class RouteReportPayloads {
                 preflight);
     }
 
-    static Map<String, Object> routeReportPayload(
+    public static Map<String, Object> routeReportPayload(
             RunnerRouteReport report,
             String requestedModel,
             String effectiveModel,
@@ -123,7 +123,7 @@ final class RouteReportPayloads {
         return payload;
     }
 
-    static String resolutionStatus(String localPath, boolean repositoryResolutionSkipped) {
+    public static String resolutionStatus(String localPath, boolean repositoryResolutionSkipped) {
         if (hasText(localPath)) {
             return "resolved";
         }

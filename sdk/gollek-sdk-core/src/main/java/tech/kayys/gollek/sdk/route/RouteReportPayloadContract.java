@@ -4,12 +4,12 @@
  * Copyright (c) 2026 Kayys.tech
  */
 
-package tech.kayys.gollek.cli.util;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.Payload;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.RouteArtifactCacheState;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.Schema;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields.Validation;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.Payload;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.RouteArtifactCacheState;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.Schema;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields.Validation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

@@ -5,6 +5,8 @@
  */
 
 package tech.kayys.gollek.cli.util;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 /**
  * Build-time smoke check for packaged model-family bundle readiness.

@@ -1,12 +1,17 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.sdk.route.RunnerRouteBenchmarkCache;
+import tech.kayys.gollek.sdk.route.RunnerRoutePolicy;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.cli.util.PluginGates;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields;
-import tech.kayys.gollek.cli.util.RouteReportPayloadContract;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields;
-import tech.kayys.gollek.cli.util.RunnerRouteReportContract;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadContract;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 
 import java.util.LinkedHashMap;
 import java.util.List;

@@ -1,4 +1,7 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.cli.util.RouteBenchmarkCacheReportContract;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -21,9 +24,9 @@ import tech.kayys.gollek.cli.util.PluginDirectoryReadinessReports;
 import tech.kayys.gollek.cli.util.PluginGateViolationReports;
 import tech.kayys.gollek.cli.util.PluginGates;
 import tech.kayys.gollek.cli.util.RouteBenchmarkCacheReportContract;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticContract;
-import tech.kayys.gollek.cli.util.RouteReportPayloadContract;
-import tech.kayys.gollek.cli.util.RunnerRouteReportContract;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticContract;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadContract;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
 import tech.kayys.gollek.cli.util.SulingAudioExtensionAvailabilityProvider;
 import tech.kayys.gollek.cli.util.UnifiedRuntimeRequirementCompatibility;
 import tech.kayys.gollek.cli.util.UnifiedRuntimeRequirementRecommendations;

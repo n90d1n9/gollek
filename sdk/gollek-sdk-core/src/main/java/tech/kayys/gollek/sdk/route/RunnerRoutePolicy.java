@@ -1,6 +1,6 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RunnerRoutePolicyFields;
+import tech.kayys.gollek.sdk.route.RunnerRoutePolicyFields;
 
 import java.util.List;
 import java.util.Locale;
@@ -9,19 +9,19 @@ import java.util.Map;
 /**
  * Normalizes user-facing runner selection before provider/model resolution.
  */
-final class RunnerRoutePolicy {
-    static final String AUTO = RunnerRoutePolicyFields.AUTO;
-    static final String HYBRID = RunnerRoutePolicyFields.HYBRID;
-    static final String SAFETENSOR = RunnerRoutePolicyFields.SAFETENSOR;
-    static final String GGUF = RunnerRoutePolicyFields.GGUF;
-    static final String LITERT = RunnerRoutePolicyFields.LITERT;
-    static final List<String> SUPPORTED_RUNNERS = RunnerRoutePolicyFields.supportedRunners();
-    static final Map<String, List<String>> RUNNER_ALIASES = RunnerRoutePolicyFields.runnerAliases();
+public final class RunnerRoutePolicy {
+    public static final String AUTO = RunnerRoutePolicyFields.AUTO;
+    public static final String HYBRID = RunnerRoutePolicyFields.HYBRID;
+    public static final String SAFETENSOR = RunnerRoutePolicyFields.SAFETENSOR;
+    public static final String GGUF = RunnerRoutePolicyFields.GGUF;
+    public static final String LITERT = RunnerRoutePolicyFields.LITERT;
+    public static final List<String> SUPPORTED_RUNNERS = RunnerRoutePolicyFields.supportedRunners();
+    public static final Map<String, List<String>> RUNNER_ALIASES = RunnerRoutePolicyFields.runnerAliases();
 
     private RunnerRoutePolicy() {
     }
 
-    static Selection select(
+    public static Selection select(
             String requestedRunner,
             String currentProvider,
             String currentFormat,
@@ -130,7 +130,7 @@ final class RunnerRoutePolicy {
         return trimmed;
     }
 
-    record Selection(
+    public record Selection(
             String runner,
             boolean explicit,
             String providerId,
@@ -138,7 +138,7 @@ final class RunnerRoutePolicy {
             boolean preferAlternateRuntime,
             boolean forceGguf,
             String error) {
-        static Selection invalid(
+        public static Selection invalid(
                 String runner,
                 String providerId,
                 String format,
@@ -155,7 +155,7 @@ final class RunnerRoutePolicy {
                     error);
         }
 
-        boolean valid() {
+        public boolean valid() {
             return error == null || error.isBlank();
         }
     }

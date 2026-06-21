@@ -1,13 +1,13 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 
 import java.util.Locale;
 
 /**
  * Lightweight route-performance hint that can later be backed by measured benchmark cache entries.
  */
-record RunnerRoutePerformanceProfile(
+public record RunnerRoutePerformanceProfile(
         String status,
         String source,
         String provider,
@@ -15,7 +15,7 @@ record RunnerRoutePerformanceProfile(
         String reason,
         String advice) {
 
-    static RunnerRoutePerformanceProfile unavailable() {
+    public static RunnerRoutePerformanceProfile unavailable() {
         return new RunnerRoutePerformanceProfile(
                 RunnerRouteReportFields.RouteProfileStatus.UNAVAILABLE,
                 RunnerRouteReportFields.RouteProfileSource.NONE,
@@ -25,7 +25,7 @@ record RunnerRoutePerformanceProfile(
                 null);
     }
 
-    static RunnerRoutePerformanceProfile from(RunnerRouteReport report) {
+    public static RunnerRoutePerformanceProfile from(RunnerRouteReport report) {
         if (report == null) {
             return unavailable();
         }
@@ -60,7 +60,7 @@ record RunnerRoutePerformanceProfile(
         return unavailable();
     }
 
-    static RunnerRoutePerformanceProfile fromBenchmarkCache(
+    public static RunnerRoutePerformanceProfile fromBenchmarkCache(
             RunnerRouteReport report,
             RunnerRouteBenchmarkCache.Entry entry) {
         if (entry == null) {

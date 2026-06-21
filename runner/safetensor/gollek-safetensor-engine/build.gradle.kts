@@ -33,6 +33,7 @@ repositories {
 }
 
 dependencies {
+    implementation(project(":sdk:gollek-sdk-core"))
     implementation(platform("io.quarkus.platform:quarkus-bom:$quarkusVersion"))
 
     implementation(project(":core:gollek-runtime-config"))

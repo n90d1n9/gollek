@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
 
 import tech.kayys.gollek.models.core.ChatTemplateFormatter;
 import tech.kayys.gollek.spi.Message;
@@ -12,7 +12,7 @@ import tech.kayys.gollek.spi.inference.InferenceResponse;
 import java.util.List;
 import java.util.regex.Pattern;
 
-final class DirectSafetensorTextPolicy {
+public final class DirectSafetensorTextPolicy {
 
     private static final Pattern GEMMA4_THOUGHT_CHANNEL =
             Pattern.compile("^<\\|channel>thought\\n.*?<channel\\|>", Pattern.DOTALL);
@@ -22,14 +22,14 @@ final class DirectSafetensorTextPolicy {
     private DirectSafetensorTextPolicy() {
     }
 
-    static float normalizeRepeatPenalty(DirectSafetensorRunProfile profile, double requestedRepeatPenalty) {
+    public static float normalizeRepeatPenalty(DirectSafetensorRunProfile profile, double requestedRepeatPenalty) {
         if (profile.gemma4Text() && Math.abs(requestedRepeatPenalty - 1.1d) < 1.0e-6) {
             return 1.0f;
         }
         return (float) requestedRepeatPenalty;
     }
 
-    static String preparePrompt(DirectSafetensorRunProfile profile, String systemPrompt, String userPrompt) {
+    public static String preparePrompt(DirectSafetensorRunProfile profile, String systemPrompt, String userPrompt) {
         if (userPrompt == null || userPrompt.isBlank()) {
             return userPrompt;
         }
@@ -53,7 +53,7 @@ final class DirectSafetensorTextPolicy {
         }
     }
 
-    static InferenceResponse sanitizeResponse(InferenceResponse response, DirectSafetensorRunProfile profile) {
+    public static InferenceResponse sanitizeResponse(InferenceResponse response, DirectSafetensorRunProfile profile) {
         if (response == null || response.getContent() == null) {
             return response;
         }

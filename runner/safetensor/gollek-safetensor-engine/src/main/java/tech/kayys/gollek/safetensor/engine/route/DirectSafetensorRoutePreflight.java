@@ -3,12 +3,13 @@
  * Copyright (c) 2026 Kayys.tech
  * SPDX-License-Identifier: Apache-2.0
  */
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.safetensor.engine.route;
+import tech.kayys.gollek.sdk.route.*;
 
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ActionKind;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemDetail;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemCode;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ActionKind;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.MissingRuntimeCapability;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemDetail;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemCode;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,11 +19,11 @@ import java.util.Map;
 /**
  * Adds direct safetensor execution-route guards to dry route preflight reports.
  */
-final class DirectSafetensorRoutePreflight {
+public final class DirectSafetensorRoutePreflight {
     private DirectSafetensorRoutePreflight() {
     }
 
-    static RoutePreflightReport applyGemma4UnifiedValidation(
+    public static RoutePreflightReport applyGemma4UnifiedValidation(
             RoutePreflightReport preflight,
             String provider,
             String requestedModelId,
@@ -36,7 +37,7 @@ final class DirectSafetensorRoutePreflight {
                 false);
     }
 
-    static RoutePreflightReport applyGemma4UnifiedValidation(
+    public static RoutePreflightReport applyGemma4UnifiedValidation(
             RoutePreflightReport preflight,
             String provider,
             String requestedModelId,

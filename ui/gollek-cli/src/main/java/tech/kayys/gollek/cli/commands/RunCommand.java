@@ -1,4 +1,6 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,7 +77,7 @@ import tech.kayys.gollek.cli.util.CliInferenceFeatures;
 import tech.kayys.gollek.cli.util.ExternalModelFamilyPluginScope;
 import tech.kayys.gollek.cli.util.ExternalPluginClasspath;
 import tech.kayys.gollek.cli.util.PluginAvailabilityChecker;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 import tech.kayys.gollek.plugin.kernel.KernelPlatform;
 import tech.kayys.gollek.sdk.util.GollekHome;
 import tech.kayys.suling.FlacLibraryCheck;
@@ -91,6 +93,7 @@ import tech.kayys.suling.audio.Suling;
 @Unremovable
 @Command(name = "run", description = "Run inference using a specified model")
 public class RunCommand implements Runnable {
+    static { tech.kayys.gollek.safetensor.engine.route.DirectSafetensorRoutePolicy.resolver = new CliLocalModelResolver(); }
     private static final String MOSS_AUDIO_TOKENIZER_REPOSITORY =
             "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX";
     private static final String MOSS_AUDIO_TOKENIZER_MODEL_SPEC =

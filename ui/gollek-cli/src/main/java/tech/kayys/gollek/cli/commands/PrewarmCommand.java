@@ -1,4 +1,6 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import io.quarkus.arc.Arc;
 import io.quarkus.arc.Unremovable;

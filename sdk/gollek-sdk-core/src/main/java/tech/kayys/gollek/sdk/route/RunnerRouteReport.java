@@ -1,8 +1,8 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RunnerRouteReportContract;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields.Report;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields.Report;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Structured explanation of the CLI runner/provider routing decision.
  */
-record RunnerRouteReport(
+public record RunnerRouteReport(
         String requestedRunner,
         String normalizedRunner,
         String selectionSource,
@@ -40,7 +40,7 @@ record RunnerRouteReport(
         String routeProfileReason,
         String routeProfileAdvice) {
 
-    static RunnerRouteReport from(
+    public static RunnerRouteReport from(
             String requestedRunner,
             String requestedProvider,
             boolean providerExplicit,
@@ -79,7 +79,7 @@ record RunnerRouteReport(
                 profile.advice());
     }
 
-    RunnerRouteReport withEffectiveRoute(String provider, String format) {
+    public RunnerRouteReport withEffectiveRoute(String provider, String format) {
         RunnerRouteReport next = new RunnerRouteReport(
                 requestedRunner,
                 normalizedRunner,
@@ -112,7 +112,7 @@ record RunnerRouteReport(
         return next.withRouteProfile(RunnerRoutePerformanceProfile.from(next));
     }
 
-    RunnerRouteReport withRuntimeRedirect(
+    public RunnerRouteReport withRuntimeRedirect(
             String fromProvider,
             String fromFormat,
             String toProvider,
@@ -121,7 +121,7 @@ record RunnerRouteReport(
         return withRuntimeRedirect(fromProvider, fromFormat, toProvider, toFormat, reason, false, null);
     }
 
-    RunnerRouteReport withRuntimeRedirect(
+    public RunnerRouteReport withRuntimeRedirect(
             String fromProvider,
             String fromFormat,
             String toProvider,
@@ -163,7 +163,7 @@ record RunnerRouteReport(
         return next.withRouteProfile(RunnerRoutePerformanceProfile.from(next));
     }
 
-    RunnerRouteReport withRouteProfile(RunnerRoutePerformanceProfile profile) {
+    public RunnerRouteReport withRouteProfile(RunnerRoutePerformanceProfile profile) {
         RunnerRoutePerformanceProfile normalized = profile == null
                 ? RunnerRoutePerformanceProfile.unavailable()
                 : profile;
@@ -198,7 +198,7 @@ record RunnerRouteReport(
                 blankToNull(normalized.advice()));
     }
 
-    Map<String, Object> toMap() {
+    public Map<String, Object> toMap() {
         Map<String, Object> report = new LinkedHashMap<>();
         put(report, Report.REQUESTED_RUNNER, requestedRunner);
         put(report, Report.NORMALIZED_RUNNER, normalizedRunner);
@@ -233,7 +233,7 @@ record RunnerRouteReport(
         return report;
     }
 
-    Map<String, Object> toMetadata() {
+    public Map<String, Object> toMetadata() {
         Map<String, Object> report = toMap();
         Map<String, Object> validation = RunnerRouteReportContract.reportValidationReport(report);
         Map<String, Object> metadata = new LinkedHashMap<>();

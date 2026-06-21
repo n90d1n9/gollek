@@ -1,7 +1,7 @@
-package tech.kayys.gollek.cli.commands;
+package tech.kayys.gollek.sdk.route;
 
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ActionKind;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields.ProblemCode;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ActionKind;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields.ProblemCode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -78,7 +78,7 @@ public record RoutePreflightReport(
         return passed(localPath, provider, format, requireLocal) ? 0 : NOT_READY_EXIT_CODE;
     }
 
-    static List<RoutePreflightProblem> problems(
+    public static List<RoutePreflightProblem> problems(
             String localPath,
             String provider,
             String format,
@@ -109,7 +109,7 @@ public record RoutePreflightReport(
         return problems;
     }
 
-    static List<RoutePreflightAction> nextActions(
+    public static List<RoutePreflightAction> nextActions(
             String requestedModel,
             String effectiveModel,
             String localPath,

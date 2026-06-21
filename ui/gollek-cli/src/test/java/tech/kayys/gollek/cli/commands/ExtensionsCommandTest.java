@@ -1,4 +1,9 @@
 package tech.kayys.gollek.cli.commands;
+import tech.kayys.gollek.sdk.route.*;
+import tech.kayys.gollek.sdk.route.RunnerRouteBenchmarkCache;
+import tech.kayys.gollek.sdk.route.RunnerRoutePolicy;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportContract;
+import tech.kayys.gollek.safetensor.engine.route.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,9 +13,9 @@ import tech.kayys.gollek.cli.util.ExtensionAvailabilityPolicy;
 import tech.kayys.gollek.cli.util.ExternalPluginClasspath;
 import tech.kayys.gollek.cli.util.ModelFamilyResolutionReportFields;
 import tech.kayys.gollek.cli.util.RouteBenchmarkCacheReportContract;
-import tech.kayys.gollek.cli.util.RoutePreflightDiagnosticFields;
-import tech.kayys.gollek.cli.util.RouteReportPayloadFields;
-import tech.kayys.gollek.cli.util.RunnerRouteReportFields;
+import tech.kayys.gollek.sdk.route.RoutePreflightDiagnosticFields;
+import tech.kayys.gollek.sdk.route.RouteReportPayloadFields;
+import tech.kayys.gollek.sdk.route.RunnerRouteReportFields;
 import tech.kayys.gollek.cli.util.UnifiedRuntimeRequirementReportFields;
 import tech.kayys.gollek.cli.util.UnifiedRuntimeRequirementProblemCodes;
 import tech.kayys.gollek.plugin.core.ExtensionAvailability;
