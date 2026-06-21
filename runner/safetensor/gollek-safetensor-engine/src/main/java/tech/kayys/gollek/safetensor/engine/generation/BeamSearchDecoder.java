@@ -56,9 +56,9 @@ import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.engine.forward.DirectForwardPass;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
 
 import java.util.*;
 

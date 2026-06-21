@@ -64,6 +64,7 @@ discoveredModelDirs.sortedBy { it.name }.forEach { modelProject ->
     includeOptionalProject(logicalPath, modelProject.absolutePath)
 }
 includeOptionalProject("suling", "../extensions/audio/suling", "stubs/suling")
+includeOptionalProject("stubs:yaff-ffm-adapter", "stubs/yaff-ffm-adapter")
 
 // Optional optimization plugins
 includeOptionalProject("optimization:gollek-plugin-elastic-ep", "optimization/gollek-plugin-elastic-ep")

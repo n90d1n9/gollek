@@ -2,11 +2,11 @@ package tech.kayys.gollek.gguf.tokenizer;
 
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.gguf.loader.GGUFModel;
-import tech.kayys.aljabr.tokenizer.impl.BpeTokenizer;
-import tech.kayys.aljabr.tokenizer.impl.Gpt2PreTokenizer;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.impl.BpeTokenizer;
+import tech.kayys.gollek.tokenizer.impl.Gpt2PreTokenizer;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.util.ArrayList;
 import java.util.HashMap;

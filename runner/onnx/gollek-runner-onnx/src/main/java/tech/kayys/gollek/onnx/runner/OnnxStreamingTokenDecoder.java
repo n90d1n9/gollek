@@ -3,9 +3,9 @@ package tech.kayys.gollek.onnx.runner;
 import java.util.Objects;
 import java.util.function.IntFunction;
 
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.StreamingDecoder;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.StreamingDecoder;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 final class OnnxStreamingTokenDecoder {
 

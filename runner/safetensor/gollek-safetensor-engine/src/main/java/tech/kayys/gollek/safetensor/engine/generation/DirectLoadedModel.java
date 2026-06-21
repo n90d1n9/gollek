@@ -16,7 +16,7 @@ import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 public class DirectLoadedModel implements SafetensorEngine.LoadedModel {
     private final Path path;

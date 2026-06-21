@@ -6,8 +6,8 @@
 package tech.kayys.gollek.safetensor.engine.generation;
 
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.util.BitSet;
 import java.util.Map;

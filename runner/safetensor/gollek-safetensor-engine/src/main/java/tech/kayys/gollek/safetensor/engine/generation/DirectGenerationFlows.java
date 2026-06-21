@@ -9,7 +9,7 @@ import tech.kayys.gollek.safetensor.engine.generation.kv.KVCacheManager;
 import tech.kayys.gollek.safetensor.generation.GenerationConfig;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
 import tech.kayys.gollek.spi.model.ModelConfig;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.nio.file.Path;
 import java.util.Set;

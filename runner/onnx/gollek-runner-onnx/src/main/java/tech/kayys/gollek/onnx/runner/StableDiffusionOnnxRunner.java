@@ -7,9 +7,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import tech.kayys.gollek.spi.exception.InferenceException;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
-import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
 import tech.kayys.gollek.runner.RunnerCapabilities;
 import tech.kayys.gollek.runner.RunnerConfiguration;
 import tech.kayys.gollek.extension.AbstractGollekRunner;

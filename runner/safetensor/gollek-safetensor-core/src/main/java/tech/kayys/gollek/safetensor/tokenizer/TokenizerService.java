@@ -48,8 +48,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import org.jboss.logging.Logger;
 

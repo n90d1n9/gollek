@@ -7,7 +7,7 @@ package tech.kayys.gollek.safetensor.engine.generation;
 
 import tech.kayys.gollek.spi.model.ModelConfig;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 /**
  * Prepared prompt state needed by direct generation entry points.

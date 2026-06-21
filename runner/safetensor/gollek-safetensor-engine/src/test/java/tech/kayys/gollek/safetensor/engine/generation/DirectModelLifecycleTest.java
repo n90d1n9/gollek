@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
 import tech.kayys.gollek.safetensor.spi.SafetensorEngine;
 import tech.kayys.gollek.spi.model.ModelConfig;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.nio.file.Path;
 import java.util.ArrayList;

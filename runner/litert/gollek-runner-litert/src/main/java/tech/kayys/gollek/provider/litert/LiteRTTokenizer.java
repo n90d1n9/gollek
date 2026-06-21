@@ -3,9 +3,9 @@ package tech.kayys.gollek.provider.litert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.kayys.gollek.spi.Message;
-import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -57,7 +57,7 @@ public class LiteRTTokenizer implements AutoCloseable {
     private final Map<String, Integer> vocab = new HashMap<>();
     private final Map<Integer, String> reverseVocab = new HashMap<>();
     private final Map<String, Integer> specialTokens = new HashMap<>();
-    private tech.kayys.aljabr.tokenizer.spi.Tokenizer coreTokenizer;
+    private tech.kayys.gollek.tokenizer.spi.Tokenizer coreTokenizer;
     private int vocabSize = 0;
     private boolean initialized = false;
     private TokenizerType type = TokenizerType.BYTE_FALLBACK;

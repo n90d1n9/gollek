@@ -22,10 +22,10 @@ import tech.kayys.aljabr.core.tensor.DeviceType;
 import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.model.ModelManifest;
 import tech.kayys.gollek.spi.model.RunnerMetadata;
-import tech.kayys.aljabr.tokenizer.runtime.TokenizerFactory;
-import tech.kayys.aljabr.tokenizer.spi.DecodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.EncodeOptions;
-import tech.kayys.aljabr.tokenizer.spi.Tokenizer;
+import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
+import tech.kayys.gollek.tokenizer.spi.DecodeOptions;
+import tech.kayys.gollek.tokenizer.spi.EncodeOptions;
+import tech.kayys.gollek.tokenizer.spi.Tokenizer;
 
 import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
