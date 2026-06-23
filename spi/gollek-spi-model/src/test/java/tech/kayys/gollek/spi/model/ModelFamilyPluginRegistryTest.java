@@ -72,7 +72,7 @@ class ModelFamilyPluginRegistryTest {
         ModelFamilyUnifiedRuntimeRequirement requirement = manifest.unifiedRuntimeRequirements().getFirst();
 
         assertTrue(manifest.requiresUnifiedRuntime());
-        assertEquals("unified_runtime_model", requirement.modelType());
+        assertEquals("unified_runtime_model", requirement.getModelType());
         assertEquals(List.of("text", "image"), requirement.requiredInputModalities());
         assertTrue(requirement.productionReadyRequired());
         assertEquals("needs external unified runtime", requirement.reason());
@@ -462,7 +462,7 @@ class ModelFamilyPluginRegistryTest {
             ModelFamilyResolution resolution = registry.resolve(config);
 
             assertEquals(ModelFamilyResolution.Status.RESOLVED, resolution.status());
-            assertEquals("config_resolution", resolution.modelType());
+            assertEquals("config_resolution", resolution.getModelType());
             assertEquals("ConfigResolutionForCausalLM", resolution.architectureClassName());
             assertEquals(List.of("config-resolution-family"), resolution.familyIds());
         } finally {

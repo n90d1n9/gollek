@@ -91,8 +91,8 @@ public interface ModelFamilyRuntimeAdapter {
      */
     default ModelRuntimeTraits runtimeTraits(ModelConfig config) {
         if (config != null) {
-            String modelType = normalize(config.modelType());
-            String architectureClassName = normalize(config.primaryArchitecture());
+            String modelType = normalize(config.getModelType());
+            String architectureClassName = normalize(config.getPrimaryArchitecture());
             for (ModelArchitecture adapter : safeArchitectureAdapters()) {
                 if (!adapterMatches(adapter, modelType, architectureClassName)) {
                     continue;

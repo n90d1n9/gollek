@@ -111,12 +111,12 @@ public record ModelModalityTraits(
     }
 
     private static String normalizedModelType(ModelConfig config) {
-        return config.modelType() == null ? "" : config.modelType().toLowerCase(Locale.ROOT);
+        return config.getModelType() == null ? "" : config.getModelType().toLowerCase(Locale.ROOT);
     }
 
     private static String normalizedArchitecture(ModelConfig config) {
-        return config.primaryArchitecture() == null
+        return config.getPrimaryArchitecture() == null
                 ? ""
-                : config.primaryArchitecture().toLowerCase(Locale.ROOT);
+                : config.getPrimaryArchitecture().toLowerCase(Locale.ROOT);
     }
 }

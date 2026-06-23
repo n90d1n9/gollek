@@ -18,8 +18,8 @@ NC='\033[0m'
 echo -e "${BLUE}>>> Building Gollek SDK Shared Library...${NC}"
 
 # 1. Build the SDK JAR
-echo -e "${YELLOW}Step 1: Building Maven project...${NC}"
-mvn -pl ${SDK_MODULE} -am clean install -Dmaven.test.skip=true
+echo -e "${YELLOW}Step 1: Building Gradle project...${NC}"
+./gradlew :sdk:gollek-sdk-local:jar
 
 # 2. Prepare Dist Directory
 mkdir -p "${DIST_DIR}"
@@ -28,13 +28,26 @@ mkdir -p "${DIST_DIR}"
 echo -e "${YELLOW}Step 2: Generating classpath and running native-image...${NC}"
 
 # Get the project JAR
-JAR_PATH=$(find "${PROJECT_ROOT}/${SDK_MODULE}/target" -name "gollek-sdk-java-local-*.jar" -not -name "*sources*" | head -n 1)
+JAR_PATH=$(find "${PROJECT_ROOT}/sdk/gollek-sdk-local/build/libs" -name "gollek-sdk-local-*.jar" -not -name "*sources*" | head -n 1)
 
-# Get dependency classpath (robust way)
+# Get dependency classpath (robust way via init script)
 echo -e "${YELLOW}Extracting dependency classpath...${NC}"
-mvn -pl ${SDK_MODULE} dependency:build-classpath -Dmdep.outputFile=.cp.txt
-CP=$(cat ${SDK_MODULE}/.cp.txt)
-# rm ${SDK_MODULE}/.cp.txt
+cat << 'EOF' > .cp.gradle
+allprojects {
+    afterEvaluate { project ->
+        if (project.path == ':sdk:gollek-sdk-local') {
+            task printCp {
+                doLast {
+                    println "CLASSPATH_START:" + project.sourceSets.main.runtimeClasspath.asPath
+                }
+            }
+        }
+    }
+}
+EOF
+
+CP=$(./gradlew -I .cp.gradle :sdk:gollek-sdk-local:printCp -q | grep CLASSPATH_START: | sed 's/CLASSPATH_START://')
+rm .cp.gradle
 
 if [ -z "$CP" ]; then
     echo "Error: Could not generate classpath"

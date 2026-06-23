@@ -28,7 +28,9 @@ public record ModelPromptTraits(
     public static final Set<String> GEMMA4_CONTROL_TOKEN_TEXTS = Set.of(
             "<|channel>",
             "<channel|>",
-            "<|think|>");
+            "<|think|>",
+            "<|turn>",
+            "<turn|>");
     public static final String DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
     public static final String QWEN_DEFAULT_SYSTEM_PROMPT =
             "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
@@ -44,9 +46,9 @@ public record ModelPromptTraits(
     }
 
     public static ModelPromptTraits fromConfig(ModelConfig config) {
-        String modelType = config == null || config.modelType() == null
+        String modelType = config == null || config.getModelType() == null
                 ? ""
-                : config.modelType().toLowerCase(Locale.ROOT);
+                : config.getModelType().toLowerCase(Locale.ROOT);
         boolean gemma4Text = modelType.startsWith("gemma4");
         boolean gemma3Text = modelType.startsWith("gemma3");
         boolean gemmaFamily = modelType.startsWith("gemma");

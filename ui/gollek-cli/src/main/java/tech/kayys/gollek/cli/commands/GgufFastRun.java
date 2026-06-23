@@ -1146,14 +1146,14 @@ public final class GgufFastRun {
             System.out.printf(
                     "%s config: type=%s, layers=%d, hidden=%d, heads=%d/%d, headDim=%d, context=%d, vocab=%d.%n",
                     label,
-                    profile.modelConfig().modelType(),
-                    profile.modelConfig().numHiddenLayers(),
-                    profile.modelConfig().hiddenSize(),
-                    profile.modelConfig().numAttentionHeads(),
-                    profile.modelConfig().resolvedNumKvHeads(),
-                    profile.modelConfig().resolvedHeadDim(),
-                    profile.modelConfig().maxPositionEmbeddings(),
-                    profile.modelConfig().vocabSize());
+                    profile.modelConfig().getModelType(),
+                    profile.modelConfig().getNumHiddenLayers(),
+                    profile.modelConfig().getHiddenSize(),
+                    profile.modelConfig().getNumAttentionHeads(),
+                    profile.modelConfig().getResolvedNumKvHeads(),
+                    profile.modelConfig().getResolvedHeadDim(),
+                    profile.modelConfig().getMaxPositionEmbeddings(),
+                    profile.modelConfig().getVocabSize());
         }
     }
 

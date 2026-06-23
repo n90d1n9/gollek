@@ -116,8 +116,8 @@ class DirectSafetensorRunProfileTest {
 
         assertTrue(profile.gemma4Unified());
         assertTrue(profile.config().requiresGemma4PackedMoeRuntime());
-        assertEquals(128, profile.config().numLocalExperts());
-        assertEquals(8, profile.config().numExpertsPerTok());
-        assertEquals(704, profile.config().moeIntermediateSize());
+        assertEquals(128, profile.config().getNumLocalExperts());
+        assertEquals(8, profile.config().getNumExpertsPerTok());
+        assertEquals(704, profile.config().getMoeIntermediateSize());
     }
 }

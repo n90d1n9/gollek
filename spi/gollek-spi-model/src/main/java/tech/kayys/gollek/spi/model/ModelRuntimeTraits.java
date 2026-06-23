@@ -176,7 +176,7 @@ public record ModelRuntimeTraits(
         boolean qwenText = modelType.contains("qwen");
         ModelPromptTraits prompt = ModelPromptTraits.fromFlags(gemma4Text, gemma3Text, gemmaFamily, qwenText);
         ModelModalityTraits modality = ModelModalityTraits.fromConfig(config);
-        boolean perLayerInputPath = config.hiddenSizePerLayerInput() > 0 || config.vocabSizePerLayerInput() > 0;
+        boolean perLayerInputPath = config.getHiddenSizePerLayerInput() > 0 || config.getVocabSizePerLayerInput() > 0;
         return builder()
                 .gemma4Text(gemma4Text)
                 .gemma3Text(gemma3Text)
@@ -226,9 +226,9 @@ public record ModelRuntimeTraits(
     }
 
     private static String normalizedModelType(ModelConfig config) {
-        return config == null || config.modelType() == null
+        return config == null || config.getModelType() == null
                 ? ""
-                : config.modelType().toLowerCase(Locale.ROOT);
+                : config.getModelType().toLowerCase(Locale.ROOT);
     }
 
     private static AttentionRuntimeTraits defaultAttentionTraits(boolean gemma4Text, boolean gemma3Text,

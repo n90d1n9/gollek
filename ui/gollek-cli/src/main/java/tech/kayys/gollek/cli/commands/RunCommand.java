@@ -26,6 +26,7 @@ import tech.kayys.gollek.onnx.runner.PaddleOcrVlOnnxProbe;
 import tech.kayys.gollek.sdk.model.ModelResolver;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.model.ModelInfo;
 import tech.kayys.gollek.sdk.model.ModelResolution;
 import tech.kayys.gollek.sdk.model.PullProgress;
@@ -5635,16 +5636,16 @@ public class RunCommand implements Runnable {
 
         try {
             Path configPath = Path.of(localPath).resolve("config.json");
-            ModelConfig parsed = ModelConfig.load(configPath, new ObjectMapper());
-            String modelType = parsed.modelType() == null ? "" : parsed.modelType().toLowerCase(Locale.ROOT);
-            String architecture = parsed.primaryArchitecture() == null
+            ModelConfig parsed = new ModelConfigLoader(new ObjectMapper()).load(configPath);
+            String modelType = parsed.getModelType() == null ? "" : parsed.getModelType().toLowerCase(Locale.ROOT);
+            String architecture = parsed.getPrimaryArchitecture() == null
                     ? ""
-                    : parsed.primaryArchitecture().toLowerCase(Locale.ROOT);
+                    : parsed.getPrimaryArchitecture().toLowerCase(Locale.ROOT);
             boolean gemma4UnifiedWrapper = isGemma4UnifiedWrapper(modelType, architecture);
             boolean resolvedGemma4Text = modelType.startsWith("gemma4")
-                    && parsed.hiddenSize() > 0
-                    && parsed.numHiddenLayers() > 0
-                    && parsed.numAttentionHeads() > 0;
+                    && parsed.getHiddenSize() > 0
+                    && parsed.getNumHiddenLayers() > 0
+                    && parsed.getNumAttentionHeads() > 0;
             if (resolvedGemma4Text) {
                 return null;
             }

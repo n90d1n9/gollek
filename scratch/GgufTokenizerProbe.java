@@ -22,7 +22,7 @@ public final class GgufTokenizerProbe {
             long[] ids = tokenizer.encode(text, EncodeOptions.defaultOptions());
             System.out.println("encoded.ids=" + Arrays.toString(ids));
             System.out.println("decoded.roundtrip=" + tokenizer.decode(ids, DecodeOptions.defaultOptions()));
-            System.out.println("bos=" + tokenizer.bosTokenId() + " eos=" + tokenizer.eosTokenId() + " pad=" + tokenizer.padTokenId());
+            System.out.println("bos=" + tokenizer.getBosTokenId() + " eos=" + tokenizer.getEosTokenId() + " pad=" + tokenizer.getPadTokenId());
             System.out.println("stop.ids=" + Arrays.toString(tokenizer.allStopTokenIds()));
             System.out.println("specials=" + tokenizer.specialTokens());
         }

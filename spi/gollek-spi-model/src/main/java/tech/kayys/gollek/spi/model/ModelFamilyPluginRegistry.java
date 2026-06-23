@@ -115,7 +115,7 @@ public final class ModelFamilyPluginRegistry {
         if (config == null) {
             return List.of();
         }
-        return architectureAdaptersFor(config.modelType(), config.primaryArchitecture());
+        return architectureAdaptersFor(config.getModelType(), config.getPrimaryArchitecture());
     }
 
     public List<ModelArchitecture> architectureAdaptersFor(String modelType, String architectureClassName) {
@@ -256,7 +256,7 @@ public final class ModelFamilyPluginRegistry {
         if (config == null) {
             return resolve(null, null);
         }
-        return resolve(config.modelType(), config.primaryArchitecture());
+        return resolve(config.getModelType(), config.getPrimaryArchitecture());
     }
 
     /**

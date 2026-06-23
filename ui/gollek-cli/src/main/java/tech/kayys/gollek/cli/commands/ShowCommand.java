@@ -20,6 +20,7 @@ import tech.kayys.gollek.cli.util.ModelFamilyResolutionReports;
 import tech.kayys.gollek.sdk.core.GollekSdk;
 import tech.kayys.gollek.sdk.model.ModelResolver;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.model.ModelFamilyPlugin;
 import tech.kayys.gollek.spi.model.ModelFamilyPluginRegistry;
 import tech.kayys.gollek.spi.model.ModelFamilyResolution;
@@ -293,7 +294,7 @@ public class ShowCommand implements Runnable {
             if (modelDir.isEmpty() || !Files.isRegularFile(modelDir.get().resolve("config.json"))) {
                 return Optional.empty();
             }
-            ModelConfig config = ModelConfig.load(modelDir.get().resolve("config.json"), JSON);
+            ModelConfig config = new ModelConfigLoader(JSON).load(modelDir.get().resolve("config.json"));
             return Optional.of(registry.resolve(config));
         } catch (Exception ignored) {
             return Optional.empty();

@@ -2,8 +2,6 @@ rootProject.name = "gollek-engine"
 
 // Include aljabr as a composite build so gollek can depend on aljabr projects during development
 includeBuild("../aljabr")  // enabled: include local aljabr composite build as source-of-truth for model modules
-
-
 fun includeOptionalProject(projectPath: String, vararg candidatePaths: String) {
     val projectDir = candidatePaths
         .map { file(it) }

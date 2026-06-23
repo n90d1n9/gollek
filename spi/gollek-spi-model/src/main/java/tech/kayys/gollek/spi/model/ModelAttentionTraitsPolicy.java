@@ -118,9 +118,9 @@ public final class ModelAttentionTraitsPolicy {
 
     public static boolean isCompactAttentionMatvecCandidate(ModelConfig config) {
         return config != null
-                && config.numHiddenLayers() >= 20
-                && config.hiddenSize() <= 2048
-                && config.intermediateSize() >= 2048;
+                && config.getNumHiddenLayers() >= 20
+                && config.getHiddenSize() <= 2048
+                && config.getIntermediateSize() >= 2048;
     }
 
     public static boolean isLargeAttentionMatvecCandidate(ModelConfig config, boolean gemma4Text,
@@ -128,8 +128,8 @@ public final class ModelAttentionTraitsPolicy {
         if (config == null || gemma4Text || perLayerInputPath) {
             return false;
         }
-        return config.numHiddenLayers() >= 30
-                && config.intermediateSize() >= 4096
-                && config.hiddenSize() <= 4096;
+        return config.getNumHiddenLayers() >= 30
+                && config.getIntermediateSize() >= 4096
+                && config.getHiddenSize() <= 4096;
     }
 }

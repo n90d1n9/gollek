@@ -42,15 +42,15 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
-            assertEquals(512, cfg.slidingWindowSize());
-            assertEquals(131072, cfg.maxPositionEmbeddings());
-            assertEquals("gelu_pytorch_tanh", cfg.hiddenAct());
-            assertEquals(2560, cfg.hiddenSize());
-            assertEquals(2, cfg.numHiddenLayers());
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            assertEquals(512, cfg.getSlidingWindowSize());
+            assertEquals(131072, cfg.getMaxPositionEmbeddings());
+            assertEquals("gelu_pytorch_tanh", cfg.getHiddenAct());
+            assertEquals(2560, cfg.getHiddenSize());
+            assertEquals(2, cfg.getNumHiddenLayers());
             assertTrue(cfg.isSlidingAttentionLayer(0));
-            assertEquals("sliding_attention", cfg.layerType(0));
-            assertEquals("full_attention", cfg.layerType(1));
+            assertEquals("sliding_attention", cfg.getLayerType(0));
+            assertEquals("full_attention", cfg.getLayerType(1));
         } finally {
             Files.deleteIfExists(cfgPath);
             Files.deleteIfExists(dir);
@@ -103,19 +103,19 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
-            assertEquals("gemma4_unified", cfg.modelType());
-            assertEquals("Gemma4ForMultimodalLM", cfg.primaryArchitecture());
-            assertEquals(3840, cfg.hiddenSize());
-            assertEquals(48, cfg.numHiddenLayers());
-            assertEquals(16, cfg.numAttentionHeads());
-            assertEquals(8, cfg.numKeyValueHeads());
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            assertEquals("gemma4_unified", cfg.getModelType());
+            assertEquals("Gemma4ForMultimodalLM", cfg.getPrimaryArchitecture());
+            assertEquals(3840, cfg.getHiddenSize());
+            assertEquals(48, cfg.getNumHiddenLayers());
+            assertEquals(16, cfg.getNumAttentionHeads());
+            assertEquals(8, cfg.getNumKeyValueHeads());
             assertEquals(8, cfg.resolvedNumKvHeadsForLayer(0));
             assertEquals(1, cfg.resolvedNumKvHeadsForLayer(5));
             assertEquals(256, cfg.resolvedHeadDimForLayer(0));
             assertEquals(512, cfg.resolvedHeadDimForLayer(5));
-            assertEquals(1024, cfg.slidingWindowSize());
-            assertEquals(131072, cfg.maxPositionEmbeddings());
+            assertEquals(1024, cfg.getSlidingWindowSize());
+            assertEquals(131072, cfg.getMaxPositionEmbeddings());
             assertTrue(ModelRuntimeTraits.fallbackFromConfig(cfg).gemma4Text());
         } finally {
             Files.deleteIfExists(cfgPath);
@@ -143,11 +143,11 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
             assertTrue(cfg.enableMoeBlock());
-            assertEquals(128, cfg.numLocalExperts());
-            assertEquals(8, cfg.numExpertsPerTok());
-            assertEquals(704, cfg.moeIntermediateSize());
+            assertEquals(128, cfg.getNumLocalExperts());
+            assertEquals(8, cfg.getNumExpertsPerTok());
+            assertEquals(704, cfg.getMoeIntermediateSize());
             assertTrue(cfg.usesDoubleWideMlp());
             assertTrue(cfg.isMoe());
             assertTrue(cfg.isGemma4PackedMoe());
@@ -174,11 +174,11 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = ModelConfig.load(cfgPath, new ObjectMapper());
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
             assertTrue(cfg.enableMoeBlock());
-            assertEquals(128, cfg.numLocalExperts());
-            assertEquals(8, cfg.numExpertsPerTok());
-            assertEquals(704, cfg.moeIntermediateSize());
+            assertEquals(128, cfg.getNumLocalExperts());
+            assertEquals(8, cfg.getNumExpertsPerTok());
+            assertEquals(704, cfg.getMoeIntermediateSize());
             assertTrue(cfg.isMoe());
             assertTrue(cfg.requiresGemma4PackedMoeRuntime());
         } finally {
@@ -188,8 +188,8 @@ class ModelConfigGemma4TextMergeTest {
     }
 
     private static String ggufPrimaryArchitecture(String architecture) {
-        return ModelConfig.fromGgufMetadata(Map.of("general.architecture", architecture))
-                .primaryArchitecture();
+        return new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", architecture))
+                .getPrimaryArchitecture();
     }
 
     private static String gemma4TwelveBLayerTypesJson() {

@@ -1,5 +1,6 @@
 package tech.kayys.gollek.spi.model;
 
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -94,7 +95,7 @@ public final class ModelFamilyFixtureValidator {
         ModelConfig config;
         try {
             configRoot = mapper.readTree(configPath.toFile());
-            config = ModelConfig.load(configPath, mapper);
+            config = new ModelConfigLoader(mapper).load(configPath);
         } catch (IOException | RuntimeException error) {
             return List.of(new ModelFamilyContractViolation(familyId, "fixture_config_unreadable",
                     "could not parse fixture config.json: "
@@ -274,15 +275,15 @@ public final class ModelFamilyFixtureValidator {
     private static Set<String> collectModelTypes(JsonNode root, ModelConfig config) {
         Set<String> values = new LinkedHashSet<>();
         collectFieldValues(root, "model_type", values);
-        addIfPresent(values, config.modelType());
+        addIfPresent(values, config.getModelType());
         return values;
     }
 
     private static Set<String> collectArchitectures(JsonNode root, ModelConfig config) {
         Set<String> values = new LinkedHashSet<>();
         collectFieldValues(root, "architectures", values);
-        if (config.architectures() != null) {
-            config.architectures().forEach(value -> addIfPresent(values, value));
+        if (config.getArchitectures() != null) {
+            config.getArchitectures().forEach(value -> addIfPresent(values, value));
         }
         return values;
     }
