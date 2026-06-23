@@ -810,8 +810,8 @@ public final class DirectSafetensorRoutePolicy {
         if (profile == null || profile.config() == null) {
             return Optional.empty();
         }
-        String modelType = communityClassifierToken(profile.config().modelType());
-        String architecture = communityClassifierToken(profile.config().primaryArchitecture());
+        String modelType = communityClassifierToken(profile.config().getModelType());
+        String architecture = communityClassifierToken(profile.config().getPrimaryArchitecture());
         if (isExcludedCommunityTextGgufFamily(modelType, architecture)) {
             return Optional.empty();
         }

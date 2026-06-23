@@ -16,6 +16,7 @@ import tech.kayys.gollek.safetensor.quantization.QuantizationEngine;
 import tech.kayys.gollek.safetensor.quantization.bridge.AccelWeightBridge;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 import tech.kayys.gollek.tokenizer.runtime.TokenizerFactory;
 import tech.kayys.gollek.tokenizer.spi.Tokenizer;
@@ -136,7 +137,7 @@ final class DirectModelLoader {
         try {
             Path configDir = Files.isRegularFile(modelPath) ? modelPath.getParent() : modelPath;
             if (configDir != null) {
-                return ModelConfig.fromDirectory(configDir, objectMapper.get());
+                return new ModelConfigLoader(objectMapper.get()).loadFromDirectory(configDir);
             }
             return new ModelConfig();
         } catch (IOException e) {

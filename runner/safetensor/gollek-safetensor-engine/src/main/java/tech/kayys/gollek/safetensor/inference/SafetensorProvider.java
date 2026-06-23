@@ -27,6 +27,7 @@ import tech.kayys.gollek.spi.provider.AdapterCapabilityProfile;
 import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.safetensor.engine.runtime.ModelRuntimeTraitsResolver;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.registry.LocalModelRegistry;
 import tech.kayys.gollek.spi.registry.ModelEntry;
 import org.jboss.logging.Logger;
@@ -528,7 +529,7 @@ public class SafetensorProvider implements StreamingProvider {
             if (!Files.exists(configPath)) {
                 return false;
             }
-            ModelConfig config = ModelConfig.load(configPath, new ObjectMapper());
+            ModelConfig config = new ModelConfigLoader(new ObjectMapper()).load(configPath);
             return ModelRuntimeTraitsResolver.resolve(config).gemma4Text();
         } catch (Exception e) {
             log.debugf("Unable to inspect safetensor model type for backend auto-selection: %s", e.getMessage());

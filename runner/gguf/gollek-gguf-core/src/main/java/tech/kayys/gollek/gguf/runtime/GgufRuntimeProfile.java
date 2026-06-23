@@ -6,6 +6,7 @@ import tech.kayys.gollek.gguf.loader.GGUFParser;
 import tech.kayys.gollek.gguf.loader.GGUFReader;
 import tech.kayys.gollek.gguf.loader.GGUFTensorInfo;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -167,7 +168,7 @@ public record GgufRuntimeProfile(
                 List.copyOf(summaries),
                 unknownTypeIds.stream().distinct().sorted().toList(),
                 unsupportedRowDotTypeIds.stream().distinct().sorted().toList(),
-                ModelConfig.fromGgufMetadata(metadata),
+                new GgufMetadataMapper().fromGgufMetadata(metadata),
                 loadMillis);
     }
 

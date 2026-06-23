@@ -52,10 +52,10 @@ class GgufRuntimeProfileTest {
         assertEquals("loader-ready; decoder-tensors-ready; row-dot-primitives-ready; generation-disabled",
                 profile.javaStatus());
         assertTrue(profile.compactTypeSummary(2).contains("Q4_K"));
-        assertEquals("gemma4", profile.modelConfig().modelType());
-        assertEquals(2304, profile.modelConfig().hiddenSize());
-        assertEquals(1, profile.modelConfig().numHiddenLayers());
-        assertEquals(8, profile.modelConfig().numAttentionHeads());
+        assertEquals("gemma4", profile.modelConfig().getModelType());
+        assertEquals(2304, profile.modelConfig().getHiddenSize());
+        assertEquals(1, profile.modelConfig().getNumHiddenLayers());
+        assertEquals(8, profile.modelConfig().getNumAttentionHeads());
         assertEquals(4, profile.modelConfig().resolvedNumKvHeads());
     }
 }

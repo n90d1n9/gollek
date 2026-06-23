@@ -46,38 +46,38 @@ public final class LlamaArchMapper {
             HfConfigParser.TokenizerData tok,
             String version) {
 
-        String arch = mapArch(cfg.modelType());
+        String arch = mapArch(cfg.getModelType());
 
         // ── General ──────────────────────────────────────────────────────
         model.addMeta("general.architecture",  GgufMetaValue.ofString(arch));
         model.addMeta("general.name",          GgufMetaValue.ofString(
-                cfg.modelType() + "-" + version));
+                cfg.getModelType() + "-" + version));
         model.addMeta("general.version",       GgufMetaValue.ofString(version));
         model.addMeta("general.alignment",     GgufMetaValue.ofUInt32(GgufModel.DEFAULT_ALIGNMENT));
 
         // ── Hyperparameters ───────────────────────────────────────────────
         String pfx = arch + ".";
         model.addMeta(pfx + "context_length",
-                GgufMetaValue.ofUInt32(cfg.maxPositionEmbeddings()));
+                GgufMetaValue.ofUInt32(cfg.getMaxPositionEmbeddings()));
         model.addMeta(pfx + "embedding_length",
-                GgufMetaValue.ofUInt32(cfg.hiddenSize()));
+                GgufMetaValue.ofUInt32(cfg.getHiddenSize()));
         model.addMeta(pfx + "block_count",
-                GgufMetaValue.ofUInt32(cfg.numHiddenLayers()));
+                GgufMetaValue.ofUInt32(cfg.getNumHiddenLayers()));
         model.addMeta(pfx + "feed_forward_length",
-                GgufMetaValue.ofUInt32(cfg.intermediateSize()));
+                GgufMetaValue.ofUInt32(cfg.getIntermediateSize()));
         model.addMeta(pfx + "attention.head_count",
-                GgufMetaValue.ofUInt32(cfg.numAttentionHeads()));
+                GgufMetaValue.ofUInt32(cfg.getNumAttentionHeads()));
         model.addMeta(pfx + "attention.head_count_kv",
-                GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+                GgufMetaValue.ofUInt32(cfg.getNumKeyValueHeads()));
         model.addMeta(pfx + "attention.layer_norm_rms_epsilon",
-                GgufMetaValue.ofFloat32(cfg.rmsNormEps()));
+                GgufMetaValue.ofFloat32(cfg.getRmsNormEps()));
         model.addMeta(pfx + "rope.freq_base",
-                GgufMetaValue.ofFloat32(cfg.ropeTheta()));
+                GgufMetaValue.ofFloat32(cfg.getRopeTheta()));
         model.addMeta(pfx + "vocab_size",
-                GgufMetaValue.ofUInt32(cfg.vocabSize()));
+                GgufMetaValue.ofUInt32(cfg.getVocabSize()));
 
         // head_dim = hidden_size / num_attention_heads
-        int headDim = cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads());
+        int headDim = cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads());
         model.addMeta(pfx + "rope.dimension_count",
                 GgufMetaValue.ofUInt32(headDim));
 
@@ -174,7 +174,7 @@ public final class LlamaArchMapper {
         String pfx = arch + ".";
 
         // ── DeepSeek V2/V3 MLA (Multi-head Latent Attention) ─────────────
-        if (arch.equals("deepseek2") || cfg.modelType().toLowerCase().contains("deepseek")) {
+        if (arch.equals("deepseek2") || cfg.getModelType().toLowerCase().contains("deepseek")) {
             if (raw.has("kv_lora_rank")) {
                 model.addMeta(pfx + "attention.kv_lora_rank",
                     GgufMetaValue.ofUInt32(raw.get("kv_lora_rank").getAsLong()));
@@ -212,7 +212,7 @@ public final class LlamaArchMapper {
 
         // ── Gemma / Gemma2 specific ───────────────────────────────────────
         if (arch.equals("gemma") || arch.equals("gemma2")) {
-            int headDim = cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads());
+            int headDim = cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads());
             model.addMeta(pfx + "attention.key_length",
                 GgufMetaValue.ofUInt32(headDim));
             model.addMeta(pfx + "attention.value_length",
@@ -275,7 +275,7 @@ public final class LlamaArchMapper {
 
         // ── Yi specific ───────────────────────────────────────────────────
         if (arch.equals("yi")) {
-            int headDim = cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads());
+            int headDim = cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads());
             model.addMeta(pfx + "attention.scale",
                 GgufMetaValue.ofFloat32((float)(1.0 / Math.sqrt(headDim))));
             if (raw.has("rope_scaling")) {
@@ -343,7 +343,7 @@ public final class LlamaArchMapper {
         if (arch.equals("baichuan")) {
             model.addMeta(pfx + "attention.bias",
                 GgufMetaValue.ofBool(true));
-            int headDim = cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads());
+            int headDim = cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads());
             model.addMeta(pfx + "attention.scale",
                 GgufMetaValue.ofFloat32((float)(1.0f / Math.sqrt(headDim))));
             // Baichuan uses ALiBi positional embeddings

@@ -39,7 +39,7 @@ class PromptTemplateCompatTest {
                         .build());
 
         assertFalse(prompt.startsWith("<bos><|turn>"));
-        assertTrue(prompt.startsWith("<|im_start|>system\nYou are Qwen"));
+        assertTrue(prompt.startsWith("<|im_start|>user\nwhere is jakarta"));
     }
 
     @Test

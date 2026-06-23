@@ -16,11 +16,12 @@ import org.junit.jupiter.api.Test;
 
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 
 class FlashAttentionMetalLinearWeightsTest {
     private final FlashAttentionMetalLinearWeights weights = new FlashAttentionMetalLinearWeights();
     private final FlashAttentionModelPolicy modelPolicy = FlashAttentionModelPolicy.resolve(
-            null, ModelConfig.fromGgufMetadata(Map.of("general.architecture", "llama")));
+            null, new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", "llama")));
 
     @Test
     void acceptsF16WeightsWithoutCopying() {

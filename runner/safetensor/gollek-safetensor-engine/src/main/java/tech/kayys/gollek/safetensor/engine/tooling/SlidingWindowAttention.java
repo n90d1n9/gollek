@@ -110,7 +110,7 @@ public final class SlidingWindowAttention {
      */
     public static int windowSize(ModelConfig config) {
         return config.hasSlidingWindow()
-                ? config.slidingWindowSize()
+                ? config.getSlidingWindowSize()
                 : Integer.MAX_VALUE;
     }
 

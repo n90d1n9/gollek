@@ -15,15 +15,18 @@ final class FlashAttentionNormalizationPolicy {
     private final boolean gemma4Text;
     private final boolean architectureAddsOneToRmsNorm;
     private final double queryPreAttentionScalar;
+    private final int headDim;
     private final FlashAttentionNormalizationOptions options;
 
     private FlashAttentionNormalizationPolicy(boolean gemma4Text,
             boolean architectureAddsOneToRmsNorm,
             double queryPreAttentionScalar,
+            int headDim,
             FlashAttentionNormalizationOptions options) {
         this.gemma4Text = gemma4Text;
         this.architectureAddsOneToRmsNorm = architectureAddsOneToRmsNorm;
         this.queryPreAttentionScalar = queryPreAttentionScalar;
+        this.headDim = headDim;
         this.options = options;
     }
 
@@ -36,18 +39,21 @@ final class FlashAttentionNormalizationPolicy {
             FlashAttentionModelPolicy modelPolicy, FlashAttentionNormalizationOptions options) {
         boolean gemma4Text = modelPolicy != null && modelPolicy.gemma4Text();
         boolean addOne = architecture != null && architecture.addOneToRmsNormWeight();
-        double scalar = config == null ? 1.0 : config.queryPreAttnScalar();
+        double scalar = config == null ? 1.0 : config.getQueryPreAttnScalar();
+        int headDim = config == null ? 1 : config.getResolvedHeadDim();
         if (options == null) {
             options = FlashAttentionNormalizationOptions.defaults();
         }
-        return new FlashAttentionNormalizationPolicy(gemma4Text, addOne, scalar, options);
+        return new FlashAttentionNormalizationPolicy(gemma4Text, addOne, scalar, headDim, options);
     }
 
     float attentionScale() {
-        if (gemma4Text) {
-            return 1.0f;
+        if (queryPreAttentionScalar > 0.0) {
+            return (float) (1.0 / Math.sqrt(queryPreAttentionScalar));
+        } else if (headDim > 0) {
+            return (float) (1.0 / Math.sqrt(headDim));
         }
-        return (float) (1.0 / Math.sqrt(Math.max(1.0, queryPreAttentionScalar)));
+        return 1.0f;
     }
 
     boolean addOneToRmsNormWeight() {

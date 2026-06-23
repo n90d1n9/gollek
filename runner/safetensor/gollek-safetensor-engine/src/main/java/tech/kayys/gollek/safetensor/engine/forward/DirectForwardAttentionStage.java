@@ -52,9 +52,12 @@ final class DirectForwardAttentionStage {
             logTensorStats(attnOut, "layer " + ctx.layerIdx() + " attnOut");
         }
 
+
+
+
         DirectForwardElementwiseOps.residualAdd(ctx.runtime().log(), ctx.runtime().metalBinding(),
                 ctx.hiddenIn(), attnOut, ctx.hiddenOut(),
-                ctx.seqLen(), ctx.config().hiddenSize(), ctx.useNativeElementwiseAdd());
+                ctx.seqLen(), ctx.config().getHiddenSize(), ctx.useNativeElementwiseAdd());
         attnOut.close();
         if (ctx.verboseLayers()) {
             logSegmentStats(ctx.hiddenOut(), ctx.hiddenShape(), "layer " + ctx.layerIdx() + " postAttnResidual");

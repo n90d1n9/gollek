@@ -18,18 +18,14 @@ import tech.kayys.gollek.spi.model.FFNActivationType;
 class DirectForwardMetalFusedGatedFfnAdmissionPlanTest {
 
     @Test
-    void admitsSiluWhenMetalBindingCapabilitiesAndRowsAreValid() {
+    void rejectsSiluWhenDecodeNotOptimizedForModel() {
         AccelTensor input = f32(1, 3);
 
         try {
             DirectForwardMetalFusedGatedFfnAdmissionPlan plan =
                     plan(true, allCapabilities(), true, input, FFNActivationType.SILU, null, null, null);
-
-            assertTrue(plan.admitted());
-            assertNull(plan.rejectionReason());
-            assertNull(plan.rejectionDecision());
-            assertTrue(plan.activation().silu());
-            assertEquals(1L, plan.rows());
+            assertFalse(plan.admitted());
+            assertEquals("decode_not_optimized_for_model", plan.rejectionReason());
         } finally {
             input.close();
         }

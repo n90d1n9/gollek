@@ -53,27 +53,27 @@ public final class GemmaArchMapper {
         // ── General ──────────────────────────────────────────────────────
         model.addMeta("general.architecture",  GgufMetaValue.ofString(arch));
         model.addMeta("general.name",          GgufMetaValue.ofString(
-                cfg.modelType() + "-" + version));
+                cfg.getModelType() + "-" + version));
         model.addMeta("general.version",       GgufMetaValue.ofString(version));
         model.addMeta("general.alignment",     GgufMetaValue.ofUInt32(GgufModel.DEFAULT_ALIGNMENT));
 
         // ── Hyperparameters ───────────────────────────────────────────────
         String pfx = arch + ".";
         model.addMeta(pfx + "context_length",
-                GgufMetaValue.ofUInt32(cfg.maxPositionEmbeddings()));
+                GgufMetaValue.ofUInt32(cfg.getMaxPositionEmbeddings()));
         model.addMeta(pfx + "embedding_length",
-                GgufMetaValue.ofUInt32(cfg.hiddenSize()));
+                GgufMetaValue.ofUInt32(cfg.getHiddenSize()));
         model.addMeta(pfx + "block_count",
-                GgufMetaValue.ofUInt32(cfg.numHiddenLayers()));
+                GgufMetaValue.ofUInt32(cfg.getNumHiddenLayers()));
         if (isGemma4(cfg) && gemma4UseDoubleWideMlp(cfg)) {
             model.addMeta(pfx + "feed_forward_length",
                     GgufMetaValue.ofUInt32Array(gemma4FeedForwardLengths(cfg)));
         } else {
             model.addMeta(pfx + "feed_forward_length",
-                    GgufMetaValue.ofUInt32(cfg.intermediateSize()));
+                    GgufMetaValue.ofUInt32(cfg.getIntermediateSize()));
         }
         model.addMeta(pfx + "attention.head_count",
-                GgufMetaValue.ofUInt32(cfg.numAttentionHeads()));
+                GgufMetaValue.ofUInt32(cfg.getNumAttentionHeads()));
         if (isGemma4(cfg)) {
             List<Integer> kvHeads = gemma4KvHeadCounts(cfg);
             if (!kvHeads.isEmpty()) {
@@ -81,23 +81,23 @@ public final class GemmaArchMapper {
                         GgufMetaValue.ofUInt32Array(kvHeads));
             } else {
                 model.addMeta(pfx + "attention.head_count_kv",
-                        GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+                        GgufMetaValue.ofUInt32(cfg.getNumKeyValueHeads()));
             }
         } else {
             model.addMeta(pfx + "attention.head_count_kv",
-                    GgufMetaValue.ofUInt32(cfg.numKeyValueHeads()));
+                    GgufMetaValue.ofUInt32(cfg.getNumKeyValueHeads()));
         }
         model.addMeta(pfx + "attention.layer_norm_rms_epsilon",
-                GgufMetaValue.ofFloat32(cfg.rmsNormEps()));
+                GgufMetaValue.ofFloat32(cfg.getRmsNormEps()));
         model.addMeta(pfx + "rope.freq_base",
                 GgufMetaValue.ofFloat32(isGemma4(cfg)
                         ? gemma4RopeTheta(cfg, "full_attention", 1_000_000.0f)
-                        : cfg.ropeTheta()));
+                        : cfg.getRopeTheta()));
         model.addMeta(pfx + "vocab_size",
-                GgufMetaValue.ofUInt32(cfg.vocabSize()));
+                GgufMetaValue.ofUInt32(cfg.getVocabSize()));
 
         // head_dim from config override, fallback to hidden_size / num_attention_heads
-        int headDim = cfg.headDim() > 0 ? cfg.headDim() : (cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads()));
+        int headDim = cfg.headDim() > 0 ? cfg.headDim() : (cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads()));
         int globalHeadDim = isGemma4(cfg) ? gemma4GlobalHeadDim(cfg, headDim) : headDim;
         model.addMeta(pfx + "rope.dimension_count",
                 GgufMetaValue.ofUInt32(globalHeadDim));
@@ -116,7 +116,7 @@ public final class GemmaArchMapper {
             model.addMeta(pfx + "rope.dimension_count_swa",
                     GgufMetaValue.ofUInt32(headDim));
             model.addMeta(pfx + "rope.freq_base_swa",
-                    GgufMetaValue.ofFloat32(gemma4RopeTheta(cfg, "sliding_attention", cfg.ropeTheta())));
+                    GgufMetaValue.ofFloat32(gemma4RopeTheta(cfg, "sliding_attention", cfg.getRopeTheta())));
 
             int sharedKvLayers = getTextInt(cfg, "num_kv_shared_layers", 0);
             if (sharedKvLayers > 0) {
@@ -210,7 +210,7 @@ public final class GemmaArchMapper {
     }
 
     public static boolean isGemma4(HfConfigParser.ModelConfig cfg) {
-        String modelType = cfg.modelType() == null ? "" : cfg.modelType().toLowerCase();
+        String modelType = cfg.getModelType() == null ? "" : cfg.getModelType().toLowerCase();
         if (modelType.contains("gemma4") || modelType.contains("gemma_4")) {
             return true;
         }
@@ -297,10 +297,10 @@ public final class GemmaArchMapper {
     }
 
     private static List<Integer> gemma4FeedForwardLengths(HfConfigParser.ModelConfig cfg) {
-        int firstWide = cfg.numHiddenLayers() - getTextInt(cfg, "num_kv_shared_layers", 0);
-        List<Integer> values = new ArrayList<>(cfg.numHiddenLayers());
-        for (int i = 0; i < cfg.numHiddenLayers(); i++) {
-            values.add(i < firstWide ? cfg.intermediateSize() : cfg.intermediateSize() * 2);
+        int firstWide = cfg.getNumHiddenLayers() - getTextInt(cfg, "num_kv_shared_layers", 0);
+        List<Integer> values = new ArrayList<>(cfg.getNumHiddenLayers());
+        for (int i = 0; i < cfg.getNumHiddenLayers(); i++) {
+            values.add(i < firstWide ? cfg.getIntermediateSize() : cfg.getIntermediateSize() * 2);
         }
         return values;
     }
@@ -323,7 +323,7 @@ public final class GemmaArchMapper {
         if (pattern.isEmpty()) {
             return List.of();
         }
-        int swaKvHeads = getTextInt(cfg, "num_key_value_heads", cfg.numKeyValueHeads());
+        int swaKvHeads = getTextInt(cfg, "num_key_value_heads", cfg.getNumKeyValueHeads());
         int fullKvHeads = getTextInt(cfg, "num_global_key_value_heads", swaKvHeads);
         List<Integer> values = new ArrayList<>(pattern.size());
         for (boolean isSwa : pattern) {
@@ -377,8 +377,8 @@ public final class GemmaArchMapper {
         }
 
         // Gemma 4: Check for specific features
-        boolean isGemma4 = cfg.modelType().toLowerCase().contains("gemma4") ||
-                          cfg.modelType().toLowerCase().contains("gemma_4");
+        boolean isGemma4 = cfg.getModelType().toLowerCase().contains("gemma4") ||
+                          cfg.getModelType().toLowerCase().contains("gemma_4");
         
         if (isGemma4) {
             // Add Gemma 4 specific metadata
@@ -399,8 +399,8 @@ public final class GemmaArchMapper {
         }
 
         // Gemma 2 specific
-        if (cfg.modelType().toLowerCase().contains("gemma2") ||
-            cfg.modelType().toLowerCase().contains("gemma_2")) {
+        if (cfg.getModelType().toLowerCase().contains("gemma2") ||
+            cfg.getModelType().toLowerCase().contains("gemma_2")) {
             model.addMeta(pfx + "architecture.variant",
                 GgufMetaValue.ofString("gemma2"));
         }

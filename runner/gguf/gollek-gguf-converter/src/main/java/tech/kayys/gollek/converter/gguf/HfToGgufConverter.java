@@ -58,16 +58,16 @@ public final class HfToGgufConverter {
             log(opts, "Tokenizer not found / unreadable: " + e.getMessage());
         }
 
-        log(opts, "Architecture : " + cfg.modelType());
-        log(opts, "Hidden size  : " + cfg.hiddenSize());
-        log(opts, "Layers       : " + cfg.numHiddenLayers());
-        log(opts, "Vocab size   : " + cfg.vocabSize());
+        log(opts, "Architecture : " + cfg.getModelType());
+        log(opts, "Hidden size  : " + cfg.getHiddenSize());
+        log(opts, "Layers       : " + cfg.getNumHiddenLayers());
+        log(opts, "Vocab size   : " + cfg.getVocabSize());
 
         // ── 2. Build GGUF model skeleton ────────────────────────────────
         GgufModel model = new GgufModel();
         
         // Select appropriate mapper based on architecture
-        String modelType = cfg.modelType().toLowerCase();
+        String modelType = cfg.getModelType().toLowerCase();
         if (modelType.contains("gemma")) {
             GemmaArchMapper.applyConfig(model, cfg, tok, opts.modelVersion());
         } else {
@@ -105,7 +105,7 @@ public final class HfToGgufConverter {
 
         for (String hfName : orderedHfNames) {
             // Skip tied embeddings
-            if (hfName.equals("lm_head.weight") && cfg.tieWordEmbeddings()) {
+            if (hfName.equals("lm_head.weight") && cfg.isTieWordEmbeddings()) {
                 log(opts, "  skip (tied embd): " + hfName);
                 continue;
             }
@@ -117,9 +117,9 @@ public final class HfToGgufConverter {
             // Select appropriate mapper based on architecture
             String ggufName;
             if (modelType.contains("gemma")) {
-                ggufName = GemmaArchMapper.mapTensorName(hfName, cfg.numHiddenLayers());
+                ggufName = GemmaArchMapper.mapTensorName(hfName, cfg.getNumHiddenLayers());
             } else {
-                ggufName = LlamaArchMapper.mapTensorName(hfName, cfg.numHiddenLayers());
+                ggufName = LlamaArchMapper.mapTensorName(hfName, cfg.getNumHiddenLayers());
             }
             
             if (ggufName == null) {

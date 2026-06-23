@@ -53,6 +53,9 @@ final class DirectForwardModelContext {
             // Gemma3 reference RMSNorm uses output * (1 + weight).
             return true;
         }
-        return arch.addOneToRmsNormWeight() && !traits.gemma4Text();
+        if (arch != null) {
+            return arch.addOneToRmsNormWeight();
+        }
+        return false;
     }
 }

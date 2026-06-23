@@ -41,7 +41,7 @@ class ModelConfigTest {
         setField(config, "maxPositionEmbeddings", 2048);
 
         assertEquals(32, config.resolvedNumKvHeads()); // Defaults to numAttentionHeads
-        assertEquals(10000.0, config.ropeTheta()); // LLaMA default
+        assertEquals(10000.0, config.getRopeTheta()); // LLaMA default
         assertFalse(config.hasSlidingWindow());
         assertFalse(config.isMoe());
     }
@@ -56,7 +56,7 @@ class ModelConfigTest {
         setField(config, "slidingWindow", 4096);
 
         assertTrue(config.hasSlidingWindow());
-        assertEquals(4096, config.slidingWindowSize());
+        assertEquals(4096, config.getSlidingWindowSize());
     }
 
     @Test
@@ -67,7 +67,7 @@ class ModelConfigTest {
         setField(config, "useSlidingWindow", false);
 
         assertFalse(config.hasSlidingWindow());
-        assertEquals(32768, config.slidingWindowSize());
+        assertEquals(32768, config.getSlidingWindowSize());
     }
 
     @Test
@@ -79,8 +79,8 @@ class ModelConfigTest {
         setField(config, "decoderSparseStep", 1);
 
         assertTrue(config.isMoe());
-        assertEquals(8, config.numLocalExperts());
-        assertEquals(2, config.numExpertsPerTok());
+        assertEquals(8, config.getNumLocalExperts());
+        assertEquals(2, config.getNumExpertsPerTok());
         assertTrue(config.isMoeLayer(0));
         assertTrue(config.isMoeLayer(1));
     }

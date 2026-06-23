@@ -28,7 +28,7 @@ final class DirectForwardLinearCachePolicy {
                 profileKey,
                 isSingleTokenHalfLinearCandidate(input, weight),
                 weight.dequantizedByteSize(),
-                config.numHiddenLayers())) {
+                config.getNumHiddenLayers())) {
             return null;
         }
         AccelTensor dequantized = weight.dequantizeCachedUpTo(OPTIONS.ffnDownLargeHalfCachePerTensorMaxBytes());

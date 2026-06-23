@@ -26,14 +26,14 @@ final class DirectForwardNorms {
                             DirectForwardRuntimeContext runtime) {
         if (useMetalElementwise) {
             DirectForwardElementwiseOps.rmsNormRowsMetal(runtime.metalBinding(), out, in,
-                    weight.dataPtr(), seqLen, config.hiddenSize(), (float) config.rmsNormEps(), addOne);
+                    weight.dataPtr(), seqLen, config.getHiddenSize(), (float) config.getRmsNormEps(), addOne);
             return;
         }
 
         AccelTensor inTensor = AccelTensor.view(in, shape);
-        AccelTensor outTensor = AccelOps.rmsNorm(inTensor, weight, config.rmsNormEps(), addOne);
+        AccelTensor outTensor = AccelOps.rmsNorm(inTensor, weight, config.getRmsNormEps(), addOne);
         MemorySegment.copy(outTensor.dataPtr(), 0, out, 0,
-                (long) seqLen * config.hiddenSize() * Float.BYTES);
+                (long) seqLen * config.getHiddenSize() * Float.BYTES);
         outTensor.close();
     }
 }

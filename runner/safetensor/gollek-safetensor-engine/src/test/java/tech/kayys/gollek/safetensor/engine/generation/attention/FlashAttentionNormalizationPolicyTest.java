@@ -8,6 +8,7 @@ package tech.kayys.gollek.safetensor.engine.generation.attention;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import java.lang.reflect.Proxy;
@@ -32,13 +33,13 @@ class FlashAttentionNormalizationPolicyTest {
         FlashAttentionNormalizationPolicy policy =
                 FlashAttentionNormalizationPolicy.resolve(null, config, modelPolicy);
 
-        assertEquals((float) (1.0 / Math.sqrt(config.queryPreAttnScalar())),
+        assertEquals((float) (1.0 / Math.sqrt(config.getQueryPreAttnScalar())),
                 policy.attentionScale());
     }
 
     @Test
     void usesUnitAttentionScaleForGemma4Text() {
-        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of("general.architecture", "gemma4"));
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", "gemma4"));
         FlashAttentionModelPolicy modelPolicy = FlashAttentionModelPolicy.resolve(null, config);
 
         FlashAttentionNormalizationPolicy policy =
@@ -53,7 +54,7 @@ class FlashAttentionNormalizationPolicyTest {
         ModelConfig classicConfig = new ModelConfig();
         FlashAttentionNormalizationPolicy classicPolicy = FlashAttentionNormalizationPolicy.resolve(
                 architecture, classicConfig, FlashAttentionModelPolicy.resolve(architecture, classicConfig));
-        ModelConfig gemma4Config = ModelConfig.fromGgufMetadata(Map.of("general.architecture", "gemma4"));
+        ModelConfig gemma4Config = new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", "gemma4"));
         FlashAttentionNormalizationPolicy gemma4Policy = FlashAttentionNormalizationPolicy.resolve(
                 architecture, gemma4Config, FlashAttentionModelPolicy.resolve(architecture, gemma4Config));
 
@@ -63,7 +64,7 @@ class FlashAttentionNormalizationPolicyTest {
 
     @Test
     void gemma4QkAndValueNormsHonorInjectedDisableOptions() {
-        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of("general.architecture", "gemma4"));
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", "gemma4"));
         FlashAttentionModelPolicy modelPolicy = FlashAttentionModelPolicy.resolve(null, config);
         FlashAttentionNormalizationPolicy defaultPolicy =
                 FlashAttentionNormalizationPolicy.resolve(null, config, modelPolicy,

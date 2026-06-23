@@ -41,8 +41,8 @@ public class MoeForwardPass {
     public AccelTensor computeAccel(AccelTensor hidden, Map<String, AccelTensor> weights,
             ModelConfig config, ModelArchitecture arch, int layerIdx) {
 
-        int numExperts = config.numLocalExperts();
-        int topK = config.numExpertsPerTok();
+        int numExperts = config.getNumLocalExperts();
+        int topK = config.getNumExpertsPerTok();
 
         log.tracef("MoE layer %d: %d experts, top-%d routing", layerIdx, numExperts, topK);
 
@@ -77,7 +77,7 @@ public class MoeForwardPass {
 
         // 4. Compute per-expert and accumulate
         float[] hiddenData = hiddenFlat.toFloatArray();
-        int hiddenSize = config.hiddenSize();
+        int hiddenSize = config.getHiddenSize();
         float[] outputData = new float[numTokens * hiddenSize];
 
         for (int t = 0; t < numTokens; t++) {

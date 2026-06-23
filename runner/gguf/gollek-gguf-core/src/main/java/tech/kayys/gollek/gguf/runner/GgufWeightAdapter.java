@@ -45,7 +45,7 @@ public final class GgufWeightAdapter {
             putIfPresent(weights, arch.lmHeadWeight(), lmHead);
         }
 
-        for (int i = 0; i < config.numHiddenLayers(); i++) {
+        for (int i = 0; i < config.getNumHiddenLayers(); i++) {
             String prefix = "blk." + i + ".";
 
             putIfPresent(weights, arch.layerAttentionNormWeight(i),
@@ -104,7 +104,7 @@ public final class GgufWeightAdapter {
             maybeLoad(result, weights, arch.perLayerModelProjectionWeight());
             maybeLoad(result, weights, arch.perLayerProjectionNormWeight());
 
-            for (int i = 0; i < config.numHiddenLayers(); i++) {
+            for (int i = 0; i < config.getNumHiddenLayers(); i++) {
                 maybeLoad(result, weights, arch.layerPerLayerInputGateWeight(i));
                 maybeLoad(result, weights, arch.layerPerLayerProjectionWeight(i));
                 maybeLoad(result, weights, arch.layerPostPerLayerInputNormWeight(i));

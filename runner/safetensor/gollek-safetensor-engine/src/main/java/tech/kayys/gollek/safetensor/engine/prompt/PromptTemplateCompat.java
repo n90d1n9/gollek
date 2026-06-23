@@ -20,6 +20,17 @@ public final class PromptTemplateCompat {
     }
 
     public static String format(List<Message> messages, String modelType, ModelRuntimeTraits runtimeTraits) {
+        if (runtimeTraits != null) {
+            if (runtimeTraits.gemma4Text()) {
+                return ChatTemplateFormatter.format(messages, "gemma4_text");
+            }
+            if (runtimeTraits.qwenText()) {
+                return ChatTemplateFormatter.format(messages, "qwen");
+            }
+            if (runtimeTraits.gemma3Text()) {
+                return ChatTemplateFormatter.format(messages, "gemma3_text");
+            }
+        }
         return ChatTemplateFormatter.format(messages, modelType);
     }
 }

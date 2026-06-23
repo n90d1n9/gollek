@@ -29,10 +29,10 @@ record ResolvedModelWeights(
 
     static ResolvedModelWeights create(Map<String, AccelTensor> weights, ModelConfig config,
             ModelArchitecture arch, boolean addOneRmsNorm) {
-        int numLayers = Math.max(0, config.numHiddenLayers());
+        int numLayers = Math.max(0, config.getNumHiddenLayers());
         AccelTensor embedTokens = WeightTensorResolver.first(weights, arch.embedTokensWeightCandidates());
         AccelTensor lmHead = WeightTensorResolver.first(weights, arch.lmHeadWeightCandidates());
-        if (lmHead == null && config.tieWordEmbeddings()) {
+        if (lmHead == null && config.isTieWordEmbeddings()) {
             lmHead = embedTokens;
         }
         ResolvedLayerWeights[] layers = new ResolvedLayerWeights[numLayers];
@@ -71,7 +71,7 @@ record ResolvedModelWeights(
         }
         return new ResolvedModelWeights(
                 arch.id(),
-                config.modelType(),
+                config.getModelType(),
                 numLayers,
                 addOneRmsNorm,
                 embedTokens,
@@ -84,10 +84,10 @@ record ResolvedModelWeights(
     }
 
     boolean matches(ModelConfig config, ModelArchitecture arch, boolean addOneRmsNorm) {
-        return numLayers == Math.max(0, config.numHiddenLayers())
+        return numLayers == Math.max(0, config.getNumHiddenLayers())
                 && this.addOneRmsNorm == addOneRmsNorm
                 && Objects.equals(archId, arch.id())
-                && Objects.equals(modelType, config.modelType());
+                && Objects.equals(modelType, config.getModelType());
     }
 
     ResolvedLayerWeights layer(int index) {

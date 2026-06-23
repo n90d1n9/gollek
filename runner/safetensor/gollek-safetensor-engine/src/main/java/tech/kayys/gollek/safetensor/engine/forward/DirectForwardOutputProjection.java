@@ -77,12 +77,12 @@ final class DirectForwardOutputProjection {
                     hidden.dataPtr(),
                     resolvedWeights.finalNorm().dataPtr(),
                     rows,
-                    config.hiddenSize(),
-                    (float) config.rmsNormEps(),
+                    config.getHiddenSize(),
+                    (float) config.getRmsNormEps(),
                     resolvedWeights.addOneRmsNorm());
             return normed;
         }
-        return AccelOps.rmsNorm(hidden, resolvedWeights.finalNorm(), config.rmsNormEps(),
+        return AccelOps.rmsNorm(hidden, resolvedWeights.finalNorm(), config.getRmsNormEps(),
                 resolvedWeights.addOneRmsNorm());
     }
 

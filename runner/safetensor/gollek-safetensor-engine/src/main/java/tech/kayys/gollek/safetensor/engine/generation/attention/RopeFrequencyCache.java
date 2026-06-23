@@ -37,10 +37,12 @@ public class RopeFrequencyCache {
         private final float[] cos;
         private final float[] sin;
         private final int rotaryDim;
+        private final int rotatedDim;
 
         public RopeFrequencies(int rotaryDim, int maxSeqLen, double theta, ModelConfig.RopeScaling scaling,
                 int exponentDenominator, int rotatedDim) {
             this.rotaryDim = rotaryDim;
+            this.rotatedDim = rotatedDim;
             this.cos = new float[maxSeqLen * (rotaryDim / 2)];
             this.sin = new float[maxSeqLen * (rotaryDim / 2)];
             precompute(maxSeqLen, theta, scaling, exponentDenominator, rotatedDim);
@@ -106,27 +108,57 @@ public class RopeFrequencyCache {
                 }
             } else {
                 // Split-Half RoPE (GPT-NeoX Style)
+                int rotatedHalf = Math.max(0, Math.min(half, rotatedDim / 2));
                 for (int i = 0; i < half; i++) {
+                    if (i >= rotatedHalf) {
+                        // These elements are passed through unmodified in partial RoPE.
+                        // For HuggingFace, they are at the END of the vector (after rotatedDim).
+                        // Wait, if rotatedDim < rotaryDim, the unrotated elements start at rotatedDim!
+                        // So for i >= rotatedHalf, the index should be `rotatedDim + (i - rotatedHalf) * 2`? No!
+                        // In HF: q_rot is `0..rotatedDim-1`. q_pass is `rotatedDim..headDim-1`.
+                        // But wait! If we just don't modify them, they stay where they are.
+                        // Are they already in the correct place? Yes! 
+                        continue;
+                    }
                     float xv1 = seg.getAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i);
-                    float xv2 = seg.getAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i + half);
+                    float xv2 = seg.getAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i + rotatedHalf);
                     float cv = cos[freqOffset + i];
                     float sv = sin[freqOffset + i];
                     seg.setAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i, xv1 * cv - xv2 * sv);
-                    seg.setAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i + half, xv1 * sv + xv2 * cv);
+                    seg.setAtIndex(ValueLayout.JAVA_FLOAT, elementOffset + i + rotatedHalf, xv1 * sv + xv2 * cv);
                 }
             }
         }
 
-        public void rotateInPlace(float[] x, int pos) {
+        public void rotateInPlace(float[] x, int pos, boolean interleaved, int rotatedDim) {
             int half = rotaryDim / 2;
             int offset = pos * half;
-            for (int i = 0; i < half; i++) {
-                float x1 = x[i];
-                float x2 = x[i + half];
-                float c = cos[offset + i];
-                float s = sin[offset + i];
-                x[i] = x1 * c - x2 * s;
-                x[i + half] = x1 * s + x2 * c;
+            if (interleaved) {
+                int rotatedHalf = Math.max(0, Math.min(half, rotatedDim / 2));
+                for (int i = 0; i < half; i++) {
+                    if (i >= rotatedHalf) {
+                        continue;
+                    }
+                    float x1 = x[i * 2];
+                    float x2 = x[i * 2 + 1];
+                    float c = cos[offset + i];
+                    float s = sin[offset + i];
+                    x[i * 2] = x1 * c - x2 * s;
+                    x[i * 2 + 1] = x1 * s + x2 * c;
+                }
+            } else {
+                int rotatedHalf = Math.max(0, Math.min(half, rotatedDim / 2));
+                for (int i = 0; i < half; i++) {
+                    if (i >= rotatedHalf) {
+                        continue;
+                    }
+                    float x1 = x[i];
+                    float x2 = x[i + rotatedHalf];
+                    float c = cos[offset + i];
+                    float s = sin[offset + i];
+                    x[i] = x1 * c - x2 * s;
+                    x[i + rotatedHalf] = x1 * s + x2 * c;
+                }
             }
         }
     }

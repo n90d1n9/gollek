@@ -60,7 +60,7 @@ final class FlashAttentionModelPolicy {
         if (attention.attentionSoftCapAppliesToFinalLogitsOnly()) {
             return 0.0f;
         }
-        Double configured = config != null ? config.attnLogitSoftcapping() : null;
+        Double configured = config != null ? config.getAttnLogitSoftcapping() : null;
         if (configured != null && configured > 0) {
             return configured.floatValue();
         }

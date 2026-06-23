@@ -14,30 +14,29 @@ final class DirectForwardLayerTailStage {
     }
 
     static void run(DirectForwardLayerStageContext ctx, AccelTensor perLayerInput) {
+        if (perLayerInput == null) {
+            System.err.printf("[DEBUG] layer %d: perLayerInput is NULL!%n", ctx.layerIdx());
+        }
         DirectForwardPerLayerInputs.applyResidual(
                 DirectForwardPerLayerResidualRequest.fromStage(ctx, perLayerInput));
-        applyLayerScalar(ctx);
         if (ctx.verboseLayers() && perLayerInput != null) {
             logSegmentStats(ctx.hiddenOut(), ctx.hiddenShape(), "layer " + ctx.layerIdx() + " postPle");
         }
+        if (ctx.layerWeights().hasLayerScalar()
+                && DirectForwardElementwisePolicy.shouldApplyLayerScalar(ctx.traits())) {
+            DirectForwardElementwiseOps.scaleSegmentInPlace(
+                    ctx.runtime().log(),
+                    ctx.runtime().metalBinding(),
+                    ctx.hiddenOut(),
+                    ctx.seqLen(),
+                    ctx.config().getHiddenSize(),
+                    ctx.layerWeights().layerScalarValue(),
+                    ctx.runtime().canUseMetalLayerScalarScale(ctx.useMetalElementwise(), ctx.seqLen()));
+        }
+
         if (ctx.verboseLayers() && ctx.layerWeights().hasLayerScalar()) {
-            System.err.printf("[DEBUG] layer %d layerScalar=%f%n",
+            System.err.printf("[DEBUG] layer %d applied layerScalar=%f%n",
                     ctx.layerIdx(), ctx.layerWeights().layerScalarValue());
         }
-    }
-
-    private static void applyLayerScalar(DirectForwardLayerStageContext ctx) {
-        if (!ctx.layerWeights().hasLayerScalar()
-                || !DirectForwardElementwisePolicy.shouldApplyLayerScalar(ctx.traits())) {
-            return;
-        }
-        DirectForwardElementwiseOps.scaleSegmentInPlace(
-                ctx.runtime().log(),
-                ctx.runtime().metalBinding(),
-                ctx.hiddenOut(),
-                ctx.seqLen(),
-                ctx.config().hiddenSize(),
-                ctx.layerWeights().layerScalarValue(),
-                ctx.runtime().canUseMetalLayerScalarScale(ctx.useMetalElementwise(), ctx.seqLen()));
     }
 }

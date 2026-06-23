@@ -36,7 +36,7 @@ public class LlamaForward {
         int nKVH = cfg.nKVHeads();
         int hDim = cfg.headDim();
         int ffnDim = cfg.ffnDim();
-        float eps = cfg.rmsNormEps();
+        float eps = cfg.getRmsNormEps();
         
         // Embedding
         GGUFVectorOps.embedLookup(w.tokenEmbed, tokenId, dim, x);
@@ -117,7 +117,7 @@ public class LlamaForward {
         GGUFVectorOps.rmsNorm(x, w.outputNorm, xb, dim, eps);
         
         // Output projection
-        float[] logits = new float[cfg.vocabSize()];
+        float[] logits = new float[cfg.getVocabSize()];
         GGUFVectorOps.matVecMulQuant(w.outputWeight, xb, logits, hb);
         return logits;
     }

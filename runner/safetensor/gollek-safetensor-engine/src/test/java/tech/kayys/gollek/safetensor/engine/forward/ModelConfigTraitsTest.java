@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import java.lang.reflect.InvocationHandler;
@@ -40,7 +41,7 @@ class ModelConfigTraitsTest {
 
     @Test
     void perLayerInputMetadataRemainsStructuralFallback() {
-        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of(
                 "general.architecture", "custom",
                 "custom.embedding_length_per_layer_input", 128));
         ModelArchitecture architecture = architectureReturning(ModelRuntimeTraits.builder().build());
@@ -52,7 +53,7 @@ class ModelConfigTraitsTest {
 
     @Test
     void vocabOnlyPerLayerMetadataDoesNotClaimGemma4StylePerLayerInputs() {
-        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of(
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of(
                 "general.architecture", "gemma4_unified",
                 "gemma4_unified.vocab_size_per_layer_input", 262144));
         ModelArchitecture architecture = architectureReturning(ModelRuntimeTraits.builder()
@@ -62,8 +63,8 @@ class ModelConfigTraitsTest {
         ModelConfigTraits traits = ModelConfigTraits.create(config, architecture);
 
         assertTrue(traits.gemma4Text());
-        assertEquals(0, traits.hiddenSizePerLayerInput());
-        assertEquals(262144, traits.vocabSizePerLayerInput());
+        assertEquals(0, traits.getHiddenSizePerLayerInput());
+        assertEquals(262144, traits.getVocabSizePerLayerInput());
         assertFalse(traits.gemma4StylePerLayerInputs());
     }
 

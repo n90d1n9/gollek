@@ -27,7 +27,7 @@ class FlashAttentionShapeAdmissionPlanTest {
                         queryWeight, new ModelConfig(), 24, 0);
 
         assertTrue(plan.admitted());
-        assertEquals(128, plan.resolvedHeadDim());
+        assertEquals(128, plan.getResolvedHeadDim());
         assertNull(plan.rejectionMessage());
     }
 

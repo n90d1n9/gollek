@@ -20,7 +20,7 @@ record FlashAttentionShapeAdmissionPlan(
             int numQueryHeads,
             int layerIdx) {
         if (queryWeight == null || numQueryHeads <= 0) {
-            return admit(config == null ? 0 : config.resolvedHeadDim());
+            return admit(config == null ? 0 : config.getResolvedHeadDim());
         }
         long rows = queryWeight.size(0);
         if (rows % numQueryHeads == 0) {
@@ -88,18 +88,18 @@ record FlashAttentionShapeAdmissionPlan(
     }
 
     private static int resolvedHeadDim(ModelConfig config) {
-        return config == null ? 0 : config.resolvedHeadDim();
+        return config == null ? 0 : config.getResolvedHeadDim();
     }
 
     private static int hiddenSize(ModelConfig config) {
-        return config == null ? 0 : config.hiddenSize();
+        return config == null ? 0 : config.getHiddenSize();
     }
 
     private static String modelType(ModelConfig config) {
-        return config == null ? "<unknown>" : config.modelType();
+        return config == null ? "<unknown>" : config.getModelType();
     }
 
     private static Object architectures(ModelConfig config) {
-        return config == null ? null : config.architectures();
+        return config == null ? null : config.getArchitectures();
     }
 }

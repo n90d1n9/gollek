@@ -29,12 +29,12 @@ public class TextExecutionPreparationPlanner {
             PreparedTextModel model,
             ConversationExecutionState conversationExecutionState) {
         SafetensorEngine.LoadedModel loadedModel = model != null ? model.loadedModel() : null;
-        String modelFamily = loadedModel != null && loadedModel.config() != null && loadedModel.config().modelType() != null
-                ? loadedModel.config().modelType()
+        String modelFamily = loadedModel != null && loadedModel.config() != null && loadedModel.config().getModelType() != null
+                ? loadedModel.config().getModelType()
                 : "unknown";
         String primaryArchitecture = loadedModel != null && loadedModel.config() != null
-                && loadedModel.config().primaryArchitecture() != null
-                ? loadedModel.config().primaryArchitecture()
+                && loadedModel.config().getPrimaryArchitecture() != null
+                ? loadedModel.config().getPrimaryArchitecture()
                 : "unknown";
         ModelRuntimeTraits runtimeTraits = loadedModel != null
                 ? loadedModel.runtimeTraits()

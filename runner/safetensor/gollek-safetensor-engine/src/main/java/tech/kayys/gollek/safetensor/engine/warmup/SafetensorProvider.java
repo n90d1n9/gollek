@@ -46,6 +46,7 @@ import tech.kayys.gollek.spi.inference.StreamingInferenceChunk;
 import tech.kayys.gollek.spi.provider.StreamingProvider;
 import tech.kayys.gollek.safetensor.SafetensorProviderConfig;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.model.ModelModalityTraits;
 
 import java.nio.file.Files;
@@ -334,7 +335,7 @@ public class SafetensorProvider implements StreamingProvider {
 
         ModelConfig modelConfig;
         try {
-            modelConfig = ModelConfig.load(configPath, new ObjectMapper());
+            modelConfig = new ModelConfigLoader(new ObjectMapper()).load(configPath);
         } catch (Exception e) {
             return new ProviderException(
                     "Invalid safetensor checkpoint config.json. Re-pull model to download metadata sidecars.", e);

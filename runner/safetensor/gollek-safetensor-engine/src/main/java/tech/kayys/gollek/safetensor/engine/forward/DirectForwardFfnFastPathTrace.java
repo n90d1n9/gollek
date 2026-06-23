@@ -46,7 +46,7 @@ final class DirectForwardFfnFastPathTrace {
         System.err.printf("[gollek-ffn] path=%s decision=%s model=%s input=%s gate=%s up=%s down=%s%n",
                 path,
                 decision,
-                config != null ? config.modelType() : "unknown",
+                config != null ? config.getModelType() : "unknown",
                 tensorSummary(input),
                 tensorSummary(gateW),
                 tensorSummary(upW),

@@ -2,6 +2,7 @@ package tech.kayys.gollek.gguf.runtime;
 
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 
 import java.util.HashMap;
 import java.util.List;
@@ -32,35 +33,35 @@ class ModelConfigGemma4Test {
         metadata.put("gemma4.vocab_size", 262144);
         metadata.put("gemma4.final_logit_softcapping", 30.0d);
 
-        ModelConfig config = ModelConfig.fromGgufMetadata(metadata);
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(metadata);
 
-        assertEquals("gemma4", config.modelType());
-        assertEquals("Gemma4ForConditionalGeneration", config.primaryArchitecture());
-        assertEquals(32768, config.maxPositionEmbeddings());
-        assertEquals(2304, config.hiddenSize());
-        assertEquals(5, config.numHiddenLayers());
-        assertEquals(12288, config.intermediateSize());
-        assertEquals(8, config.numAttentionHeads());
+        assertEquals("gemma4", config.getModelType());
+        assertEquals("Gemma4ForConditionalGeneration", config.getPrimaryArchitecture());
+        assertEquals(32768, config.getMaxPositionEmbeddings());
+        assertEquals(2304, config.getHiddenSize());
+        assertEquals(5, config.getNumHiddenLayers());
+        assertEquals(12288, config.getIntermediateSize());
+        assertEquals(8, config.getNumAttentionHeads());
         assertEquals(4, config.resolvedNumKvHeads());
-        assertEquals(128, config.resolvedHeadDim());
-        assertEquals(256, config.resolvedMaxHeadDim());
-        assertEquals(2, config.resolvedNumKvSharedLayers());
-        assertEquals(256, config.hiddenSizePerLayerInput());
-        assertEquals(262144, config.vocabSize());
+        assertEquals(128, config.getResolvedHeadDim());
+        assertEquals(256, config.getResolvedMaxHeadDim());
+        assertEquals(2, config.getResolvedNumKvSharedLayers());
+        assertEquals(256, config.getHiddenSizePerLayerInput());
+        assertEquals(262144, config.getVocabSize());
         assertTrue(config.hasSlidingWindow());
-        assertEquals(512, config.slidingWindowSize());
-        assertEquals("sliding_attention", config.layerType(0));
-        assertEquals("full_attention", config.layerType(2));
+        assertEquals(512, config.getSlidingWindowSize());
+        assertEquals("sliding_attention", config.getLayerType(0));
+        assertEquals("full_attention", config.getLayerType(2));
         assertEquals(1_000_000.0d, config.ropeThetaForLayer(2), 0.0001d);
         assertEquals(10_000.0d, config.ropeThetaForLayer(0), 0.0001d);
-        assertEquals(30.0d, config.finalLogitSoftcapping(), 0.0001d);
+        assertEquals(30.0d, config.getFinalLogitSoftcapping(), 0.0001d);
     }
 
     @Test
     void mapsGemma4UnifiedGgufArchitectureClassName() {
-        ModelConfig config = ModelConfig.fromGgufMetadata(Map.of("general.architecture", "gemma4_unified"));
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of("general.architecture", "gemma4_unified"));
 
-        assertEquals("gemma4_unified", config.modelType());
-        assertEquals("Gemma4ForMultimodalLM", config.primaryArchitecture());
+        assertEquals("gemma4_unified", config.getModelType());
+        assertEquals("Gemma4ForMultimodalLM", config.getPrimaryArchitecture());
     }
 }

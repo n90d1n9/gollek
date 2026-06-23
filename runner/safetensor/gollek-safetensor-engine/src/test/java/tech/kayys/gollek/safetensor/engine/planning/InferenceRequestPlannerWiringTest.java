@@ -89,7 +89,7 @@ class InferenceRequestPlannerWiringTest {
         PreparedPrompt prompt = prepared.preparedPrompt();
         assertTrue(prompt.defaultSystemInjected());
         assertTrue(prompt.formattedPrompt().startsWith("<|im_start|>system\nYou are Qwen"));
-        assertEquals("custom", prompt.modelType());
+        assertEquals("custom", prompt.getModelType());
 
         GenerationConfig generationConfig = backend.preparedGeneration.generationConfig();
         assertEquals(32, generationConfig.maxNewTokens());

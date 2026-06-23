@@ -131,10 +131,10 @@ public class InferenceRequestPlanner {
         SafetensorEngine.LoadedModel loadedModel = preparedModel.loadedModel();
 
         String modelType = loadedModel != null && loadedModel.config() != null
-                ? loadedModel.config().modelType()
+                ? loadedModel.config().getModelType()
                 : "";
         String architecture = loadedModel != null && loadedModel.config() != null
-                ? loadedModel.config().primaryArchitecture()
+                ? loadedModel.config().getPrimaryArchitecture()
                 : "";
         ModelRuntimeTraits runtimeTraits = loadedModel != null
                 ? loadedModel.runtimeTraits()

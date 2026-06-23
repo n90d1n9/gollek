@@ -22,7 +22,7 @@ final class DirectForwardPerLayerInputs {
             DirectForwardOperators operators) {
         if (!DirectForwardElementwisePolicy.shouldBuildPerLayerInputs(
                 traits,
-                config.hiddenSizePerLayerInput())) {
+                config.getHiddenSizePerLayerInput())) {
             return null;
         }
 
@@ -30,11 +30,15 @@ final class DirectForwardPerLayerInputs {
         AccelTensor pleProjection = resolvedWeights.pleProjection();
         AccelTensor pleProjectionNorm = resolvedWeights.pleProjectionNorm();
         if (packedPleEmbeddings == null || pleProjection == null || pleProjectionNorm == null) {
+            System.err.printf("[DEBUG] DirectForwardPerLayerInputs.build returning null! packedPleEmbeddings=%s, pleProjection=%s, pleProjectionNorm=%s%n",
+                    packedPleEmbeddings != null ? "PRESENT" : "NULL",
+                    pleProjection != null ? "PRESENT" : "NULL",
+                    pleProjectionNorm != null ? "PRESENT" : "NULL");
             return null;
         }
 
-        int numLayers = config.numHiddenLayers();
-        int pleDim = config.hiddenSizePerLayerInput();
+        int numLayers = config.getNumHiddenLayers();
+        int pleDim = config.getHiddenSizePerLayerInput();
         int seqLen = inputIds.length;
 
         AccelTensor tokenPleRaw = packedPleEmbeddings.indexSelect(inputIds)
@@ -42,13 +46,13 @@ final class DirectForwardPerLayerInputs {
         AccelTensor tokenPle = AccelOps.mulScalar(tokenPleRaw, (float) Math.sqrt(Math.max(1, pleDim)));
         tokenPleRaw.close();
         AccelTensor projectedPle = operators.linear(inputsEmbeds, pleProjection, null, "ple_projection", config);
-        float pleProjectionScale = (float) (1.0 / Math.sqrt(Math.max(1, config.hiddenSize())));
+        float pleProjectionScale = (float) (1.0 / Math.sqrt(Math.max(1, config.getHiddenSize())));
         AccelTensor projectedPleScaled = AccelOps.mulScalar(projectedPle, pleProjectionScale);
         projectedPle.close();
 
         AccelTensor projectedPle4d = projectedPleScaled.reshape(1L, seqLen, numLayers, pleDim);
         AccelTensor projectedPleNormed = AccelOps.rmsNorm(projectedPle4d, pleProjectionNorm,
-                config.rmsNormEps(), resolvedWeights.addOneRmsNorm());
+                config.getRmsNormEps(), resolvedWeights.addOneRmsNorm());
         projectedPle4d.close();
 
         AccelTensor combinedPle = AccelOps.add(projectedPleNormed, tokenPle);
@@ -90,7 +94,7 @@ final class DirectForwardPerLayerInputs {
     static boolean needed(ModelConfigTraits traits, ModelConfig config, ResolvedModelWeights resolvedWeights) {
         if (!DirectForwardElementwisePolicy.shouldBuildPerLayerInputs(
                 traits,
-                config.hiddenSizePerLayerInput())) {
+                config.getHiddenSizePerLayerInput())) {
             return false;
         }
         return resolvedWeights.packedPleEmbeddings() != null
@@ -109,6 +113,12 @@ final class DirectForwardPerLayerInputs {
 
         DirectForwardPerLayerResidualWeights weights = request.weights();
         if (weights == null || !weights.complete()) {
+            System.err.printf("[DEBUG] applyResidual returning! weights=%s, complete=%s, gate=%s, proj=%s, norm=%s%n",
+                    weights != null ? "PRESENT" : "NULL",
+                    weights != null && weights.complete(),
+                    weights != null && weights.gateWeight() != null,
+                    weights != null && weights.projectionWeight() != null,
+                    weights != null && weights.normWeight() != null);
             return;
         }
 
@@ -133,11 +143,11 @@ final class DirectForwardPerLayerInputs {
                     projected.dataPtr(),
                     weights.normWeight().dataPtr(),
                     request.seqLen(),
-                    request.config().hiddenSize(),
-                    (float) request.config().rmsNormEps(),
+                    request.config().getHiddenSize(),
+                    (float) request.config().getRmsNormEps(),
                     request.addOneRmsNorm());
         } else {
-            normed = AccelOps.rmsNorm(projected, weights.normWeight(), request.config().rmsNormEps(),
+            normed = AccelOps.rmsNorm(projected, weights.normWeight(), request.config().getRmsNormEps(),
                     request.addOneRmsNorm());
         }
         projected.close();
@@ -149,7 +159,7 @@ final class DirectForwardPerLayerInputs {
                 normed,
                 request.hiddenSeg(),
                 request.seqLen(),
-                request.config().hiddenSize(),
+                request.config().getHiddenSize(),
                 request.useNativeElementwiseAdd());
         normed.close();
     }

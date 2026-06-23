@@ -30,9 +30,9 @@ final class FlashAttentionRopeStage {
         boolean interleavedRope = useInterleavedRope(modelPolicy);
         int rotatedDim = resolveRotatedDim(config, layerIdx, headDim);
         int rotaryDim = resolveRotaryStorageDim(headDim, rotatedDim, interleavedRope, modelPolicy);
-        RopeFrequencyCache.RopeFrequencies freqs = ropeCache.get(rotaryDim, config.maxPositionEmbeddings(),
-                config.ropeThetaForLayer(layerIdx), config.ropeScaling(),
-                resolveRopeExponentDenominator(rotaryDim), Math.min(rotaryDim, rotatedDim));
+        RopeFrequencyCache.RopeFrequencies freqs = ropeCache.get(rotaryDim, config.getMaxPositionEmbeddings(),
+                config.getRopeThetaForLayer(layerIdx), config.getRopeScaling(),
+                resolveRopeExponentDenominator(rotaryDim, headDim, config, layerIdx), Math.min(rotaryDim, rotatedDim));
         applyRope(q, k, startPos, freqs, interleavedRope);
     }
 
@@ -72,7 +72,7 @@ final class FlashAttentionRopeStage {
     }
 
     private int resolveRotatedDim(ModelConfig config, int layerIdx, int storageDim) {
-        double partialFactor = config.partialRotaryFactorForLayer(layerIdx);
+        double partialFactor = config.getPartialRotaryFactorForLayer(layerIdx);
         int rotaryDim = (int) Math.round(storageDim * partialFactor);
         rotaryDim = Math.max(2, rotaryDim);
         if ((rotaryDim & 1) != 0) {
@@ -81,7 +81,10 @@ final class FlashAttentionRopeStage {
         return Math.min(storageDim, rotaryDim);
     }
 
-    private int resolveRopeExponentDenominator(int rotaryDim) {
+    private int resolveRopeExponentDenominator(int rotaryDim, int headDim, ModelConfig config, int layerIdx) {
+        if ("proportional".equals(config.ropeTypeForLayer(layerIdx))) {
+            return headDim;
+        }
         return rotaryDim;
     }
 }

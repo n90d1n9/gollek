@@ -2,6 +2,7 @@ package tech.kayys.gollek.gguf.runtime;
 
 import org.junit.jupiter.api.Test;
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 
 import java.util.HashMap;
 import java.util.List;
@@ -26,20 +27,20 @@ class ModelConfigLlamaTest {
         metadata.put("tokenizer.ggml.bos_token_id", 1);
         metadata.put("tokenizer.ggml.eos_token_id", 2);
 
-        ModelConfig config = ModelConfig.fromGgufMetadata(metadata);
+        ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(metadata);
 
-        assertEquals("llama", config.modelType());
-        assertEquals("LlamaForCausalLM", config.primaryArchitecture());
-        assertEquals(8192, config.maxPositionEmbeddings());
-        assertEquals(4096, config.hiddenSize());
-        assertEquals(32, config.numHiddenLayers());
-        assertEquals(11008, config.intermediateSize());
-        assertEquals(32, config.numAttentionHeads());
+        assertEquals("llama", config.getModelType());
+        assertEquals("LlamaForCausalLM", config.getPrimaryArchitecture());
+        assertEquals(8192, config.getMaxPositionEmbeddings());
+        assertEquals(4096, config.getHiddenSize());
+        assertEquals(32, config.getNumHiddenLayers());
+        assertEquals(11008, config.getIntermediateSize());
+        assertEquals(32, config.getNumAttentionHeads());
         assertEquals(8, config.resolvedNumKvHeads());
-        assertEquals(128, config.resolvedHeadDim());
-        assertEquals(3, config.vocabSize());
-        assertEquals(500000.0d, config.ropeTheta(), 0.0001d);
-        assertEquals(1, config.bosTokenId().orElseThrow());
-        assertEquals(2, config.eosTokenId().orElseThrow());
+        assertEquals(128, config.getResolvedHeadDim());
+        assertEquals(3, config.getVocabSize());
+        assertEquals(500000.0d, config.getRopeTheta(), 0.0001d);
+        assertEquals(1, config.getBosTokenId().orElseThrow());
+        assertEquals(2, config.getEosTokenId().orElseThrow());
     }
 }

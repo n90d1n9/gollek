@@ -96,7 +96,7 @@ final class FlashAttentionProjectionStage {
             boolean addOneRmsNorm = normalizationPolicy.addOneToRmsNormWeight();
             boolean keySeparatedFromValue = false;
             if (normalizationPolicy.qkNormEnabled() && in.qNormW != null) {
-                AccelTensor qNormed = normalizer.perHeadRmsNormReusingInput(q, in.qNormW, config.rmsNormEps(),
+                AccelTensor qNormed = normalizer.perHeadRmsNormReusingInput(q, in.qNormW, config.getRmsNormEps(),
                         addOneRmsNorm, modelPolicy);
                 if (qNormed != q) {
                     q.close();
@@ -104,7 +104,7 @@ final class FlashAttentionProjectionStage {
                 q = qNormed;
             }
             if (normalizationPolicy.qkNormEnabled() && !sharedKv && in.kNormW != null) {
-                AccelTensor kNormed = normalizeKey(k, in.kNormW, config.rmsNormEps(), addOneRmsNorm, modelPolicy,
+                AccelTensor kNormed = normalizeKey(k, in.kNormW, config.getRmsNormEps(), addOneRmsNorm, modelPolicy,
                         alternativeAttention);
                 if (kNormed != k) {
                     k.close();
@@ -113,7 +113,7 @@ final class FlashAttentionProjectionStage {
                 k = kNormed;
             }
             if (!sharedKv && normalizationPolicy.valueNormEnabled()) {
-                AccelTensor vNormed = normalizeValue(v, config.rmsNormEps(), modelPolicy,
+                AccelTensor vNormed = normalizeValue(v, config.getRmsNormEps(), modelPolicy,
                         alternativeAttention && !keySeparatedFromValue);
                 if (vNormed != v) {
                     v.close();

@@ -8,6 +8,7 @@ package tech.kayys.gollek.safetensor.engine.route;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import tech.kayys.gollek.spi.model.ModelConfig;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
 import tech.kayys.gollek.spi.model.ModelRuntimeTraits;
 
 import java.nio.file.Files;
@@ -42,10 +43,10 @@ public record DirectSafetensorRunProfile(
             if (configDir == null) {
                 return unresolved();
             }
-            ModelConfig config = ModelConfig.fromDirectory(configDir, OBJECT_MAPPER);
+            ModelConfig config = new ModelConfigLoader(OBJECT_MAPPER).loadFromDirectory(configDir);
             return new DirectSafetensorRunProfile(
                     config,
-                    config.modelType(),
+                    config.getModelType(),
                     runtimeTraits(config));
         } catch (Exception ignored) {
             return unresolved();
@@ -64,8 +65,8 @@ public record DirectSafetensorRunProfile(
         if (config == null) {
             return false;
         }
-        String normalizedModelType = normalize(config.modelType());
-        String normalizedArchitecture = normalize(config.primaryArchitecture());
+        String normalizedModelType = normalize(config.getModelType());
+        String normalizedArchitecture = normalize(config.getPrimaryArchitecture());
         return normalizedModelType.equals("gemma4_unified")
                 || normalizedArchitecture.equals("gemma4unifiedforconditionalgeneration")
                 || normalizedArchitecture.equals("gemma4formultimodallm")
