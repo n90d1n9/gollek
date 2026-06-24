@@ -40,9 +40,15 @@ final class FlashAttentionJavaFallback {
                 v.stride()[0],
                 v.stride()[1],
                 v.stride()[2]);
-        return FlashAttentionDenseFallbackLoop.compute(
-                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
-                attentionContextBuffer);
+        try {
+            return FlashAttentionDenseFallbackLoop.compute(
+                    q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
+                    attentionContextBuffer);
+        } finally {
+            java.lang.ref.Reference.reachabilityFence(q);
+            java.lang.ref.Reference.reachabilityFence(k);
+            java.lang.ref.Reference.reachabilityFence(v);
+        }
     }
 
     static AccelTensor denseCachedAttention(AccelTensor q, KVCacheManager.KVCacheSession kvSession, int kvLayerIdx,
@@ -74,9 +80,13 @@ final class FlashAttentionJavaFallback {
             ModelConfig config, int layerIdx, MemorySegment attentionContextBuffer) {
         FlashAttentionDenseFallbackLoop.KeyValueSource source = new GatheredKeyValueSource(
                 kSeg, vSeg, startPos + Math.toIntExact(q.size(1)), numKVHeads, headDim);
-        return FlashAttentionDenseFallbackLoop.compute(
-                q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
-                attentionContextBuffer);
+        try {
+            return FlashAttentionDenseFallbackLoop.compute(
+                    q, source, config, layerIdx, startPos, numQHeads, numKVHeads, headDim, scale, causal, softCap,
+                    attentionContextBuffer);
+        } finally {
+            java.lang.ref.Reference.reachabilityFence(q);
+        }
     }
 
     private record StridedKeyValueSource(

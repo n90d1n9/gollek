@@ -57,7 +57,7 @@ final class FlashAttentionNormalizationPolicy {
     }
 
     boolean addOneToRmsNormWeight() {
-        return architectureAddsOneToRmsNorm && !gemma4Text;
+        return architectureAddsOneToRmsNorm;
     }
 
     boolean qkNormEnabled() {

@@ -129,7 +129,7 @@ final class DirectForwardMetalMatvecGatedFfn {
         } catch (RuntimeException e) {
             out.close();
             trace("reject:runtime_failure:" + e.getClass().getSimpleName(), config, input, gateW, upW, downW);
-            log.debugf("Falling back from Metal matvec gated FFN: %s", e.getMessage());
+            System.err.println("Falling back from Metal matvec gated FFN: " + e.getMessage());
             return null;
         }
     }

@@ -119,15 +119,15 @@ public final class SafetensorToGgufConverter {
         HfConfigParser.ModelConfig cfg   = HfConfigParser.parseConfig(opts.inputDir);
         HfConfigParser.TokenizerData tok = tryParseTokenizer(opts, cfg);
 
-        log(opts, "Architecture : " + cfg.getModelType());
-        log(opts, "Layers       : " + cfg.getNumHiddenLayers());
-        log(opts, "Vocab size   : " + cfg.getVocabSize());
+        log(opts, "Architecture : " + cfg.modelType());
+        log(opts, "Layers       : " + cfg.numHiddenLayers());
+        log(opts, "Vocab size   : " + cfg.vocabSize());
 
         // 2. Build GGUF model skeleton (metadata)
         GgufModel model = new GgufModel();
         
         // Select appropriate mapper based on architecture
-        String modelType = cfg.getModelType().toLowerCase();
+        String modelType = cfg.modelType().toLowerCase();
         if (modelType.contains("gemma")) {
             GemmaArchMapper.applyConfig(model, cfg, tok, opts.modelVersion);
         } else {
@@ -271,12 +271,12 @@ public final class SafetensorToGgufConverter {
             if (entry == null) continue;
 
             // Select appropriate mapper based on architecture
-            String modelType = cfg.getModelType().toLowerCase();
+            String modelType = cfg.modelType().toLowerCase();
             String ggufName;
             if (modelType.contains("gemma")) {
-                ggufName = GemmaArchMapper.mapTensorName(hfName, cfg.getNumHiddenLayers());
+                ggufName = GemmaArchMapper.mapTensorName(hfName, cfg.numHiddenLayers());
             } else {
-                ggufName = LlamaArchMapper.mapTensorName(hfName, cfg.getNumHiddenLayers());
+                ggufName = LlamaArchMapper.mapTensorName(hfName, cfg.numHiddenLayers());
             }
             
             if (ggufName == null) {
@@ -327,7 +327,7 @@ public final class SafetensorToGgufConverter {
             return dataOffset;
         }
 
-        int headDimFull = getTextInt(cfg, "global_head_dim", cfg.headDim() > 0 ? cfg.headDim() : cfg.getHiddenSize() / Math.max(1, cfg.getNumAttentionHeads()));
+        int headDimFull = getTextInt(cfg, "global_head_dim", cfg.headDim() > 0 ? cfg.headDim() : cfg.hiddenSize() / Math.max(1, cfg.numAttentionHeads()));
         float partialRotary = gemma4FullPartialRotaryFactor(cfg);
         int nRot = Math.max(1, (int) (headDimFull * partialRotary / 2.0f));
         int nUnrot = Math.max(0, headDimFull / 2 - nRot);

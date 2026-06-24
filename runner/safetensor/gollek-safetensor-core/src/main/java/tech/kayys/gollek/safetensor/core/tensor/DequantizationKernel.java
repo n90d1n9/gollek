@@ -2,12 +2,9 @@ package tech.kayys.gollek.safetensor.core.tensor;
 
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
-import jdk.incubator.vector.ShortVector;
-import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.nio.ByteOrder;
 
 /**
  * SIMD-optimized dequantization kernels using Java Vector API.
@@ -85,8 +82,6 @@ public class DequantizationKernel {
         }
     }
 
-    private static final VectorSpecies<Short> S_SPECIES = ShortVector.SPECIES_128;
-
     /**
      * Dequantize BF16 weights to Float32.
      */
@@ -96,19 +91,9 @@ public class DequantizationKernel {
 
     public static void dequantizeBf16(MemorySegment src, long srcByteOffset, MemorySegment dst, long dstByteOffset,
             long numel) {
-        long i = 0;
-        long unrolledBound = numel - (numel % S_SPECIES.length());
-        for (; i < unrolledBound; i += S_SPECIES.length()) {
-            ShortVector sv = ShortVector.fromMemorySegment(S_SPECIES, src, srcByteOffset + i * Short.BYTES,
-                    ByteOrder.nativeOrder());
-            // Zero-extend short to int, shift left 16 to form float32
-            IntVector iv = (IntVector) sv.castShape(IntVector.SPECIES_256, 0);
-            iv = iv.and(0xFFFF).lanewise(VectorOperators.LSHL, 16);
-            FloatVector fv = iv.reinterpretAsFloats();
-            fv.intoMemorySegment(dst, dstByteOffset + i * Float.BYTES, ByteOrder.nativeOrder());
-        }
-
-        for (; i < numel; i++) {
+        // Scalar loop — safe on all platforms including Apple Silicon (128-bit SIMD).
+        // BF16 -> F32: shift the 16-bit BF16 bits up by 16 positions to make a valid F32.
+        for (long i = 0; i < numel; i++) {
             short raw = src.get(ValueLayout.JAVA_SHORT, srcByteOffset + i * Short.BYTES);
             dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + i * Float.BYTES,
                     Float.intBitsToFloat((raw & 0xFFFF) << 16));

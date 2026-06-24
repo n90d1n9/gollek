@@ -50,15 +50,12 @@ record DirectForwardGemma4Bf16LinearPolicy(DirectForwardGemma4Bf16LinearOptions 
             if (options.enableBf16ToF16LogitsLinear() != null) {
                 return options.enableBf16ToF16LogitsLinear();
             }
-            return false;
-        }
-        if (!isFfnProjection(profileKey) || options.disableBf16ToF16FfnLinear()) {
-            return false;
+            return true;
         }
         if (options.enableBf16ToF16FfnLinear() != null) {
             return options.enableBf16ToF16FfnLinear();
         }
-        return false;
+        return true;
     }
 
     boolean allowBf16ToF16LinearForRows(

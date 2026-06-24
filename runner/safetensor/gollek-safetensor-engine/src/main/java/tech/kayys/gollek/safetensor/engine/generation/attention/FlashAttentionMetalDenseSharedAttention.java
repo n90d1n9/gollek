@@ -68,7 +68,15 @@ final class FlashAttentionMetalDenseSharedAttention {
         FlashAttentionRoutingPolicy routing = routingPolicy();
         boolean usePackedSharedDecode = routing.shouldUsePackedSharedDecodeAttention(config, modelPolicy, seqLenQ,
                 sharedKvState);
-        boolean useFa4 = routing.canUseFa4Attention(softCap) && !usePackedSharedDecode;
+        boolean useFa4 = false;
+        if (!usePackedSharedDecode && routing.canUseFa4Attention(softCap)) {
+            if (!slidingLayer) {
+                useFa4 = true;
+            } else {
+                useFa4 = routing.canUseRestrictedSlidingPrefillFa4Attention(config, layerIdx, Math.toIntExact(seqLenQ), startPos, softCap);
+            }
+        }
+        
         if (!useFa4 && !usePackedSharedDecode && !routing.allowLegacyMetalAttentionBridge(modelPolicy)) {
             return null;
         }

@@ -134,7 +134,7 @@ public class AccelTensor implements AutoCloseable {
             long size = halfStorageByteSize();
             long paddedSize = (size + 4095L) & ~4095L;
             MemorySegment f16Seg = f16Arena.allocate(paddedSize + 4096L, 4096L);
-            DequantizationKernel.transcodeBf16ToF16(dataSegment(), f16Seg, numel());
+            DequantizationKernel.transcodeBf16ToF16(dataPtr(), f16Seg, numel());
             cachedF16 = new AccelTensor(f16Seg, shape, contiguousStride(shape), 0, f16Arena)
                     .withQuantization(QuantType.F16, null, null, -1);
             return cachedF16;
@@ -437,8 +437,17 @@ public class AccelTensor implements AutoCloseable {
     // ── Data access ───────────────────────────────────────────────────
 
     /**
+     * Returns the bytes-per-element for this tensor's storage type.
+     * BF16 and F16 use 2 bytes; F32 uses 4 bytes; others default to 4.
+     */
+    public int elementByteSize() {
+        return (quantType == QuantType.BF16 || quantType == QuantType.F16) ? Short.BYTES : Float.BYTES;
+    }
+
+    /**
      * Returns the raw MemorySegment backing this tensor.
      * For contiguous tensors, this is the full data block.
+     * NOTE: does NOT apply offset. Use dataPtr() to get offset-corrected start.
      */
     public MemorySegment dataSegment() {
         checkClosed();
@@ -447,10 +456,11 @@ public class AccelTensor implements AutoCloseable {
 
     /**
      * Returns a pointer to the first element of this tensor (accounting for offset).
+     * Uses the correct bytes-per-element for BF16/F16 (2 bytes) vs F32 (4 bytes).
      */
     public MemorySegment dataPtr() {
         checkClosed();
-        return offset == 0L ? data : data.asSlice(offset * (long) Float.BYTES);
+        return offset == 0L ? data : data.asSlice(offset * (long) elementByteSize());
     }
 
     /**

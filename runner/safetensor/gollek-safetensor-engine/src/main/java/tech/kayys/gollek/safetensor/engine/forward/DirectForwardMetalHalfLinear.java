@@ -147,13 +147,14 @@ final class DirectForwardMetalHalfLinear {
                         executionPlan.nativeBf16Weight());
             }
             if (rc != 0) {
+                log.infof("Metal linear failed with rc=%d, m=%d, halfMatvecCandidate=%b, nativeBf16Weight=%b", rc, m, executionPlan.halfMatvecCandidate(), executionPlan.nativeBf16Weight());
                 throw new IllegalStateException("Metal matmulTransposedRightHalf failed with code " + rc);
             }
             DirectInferenceProfiler.recordLinearPath(profileKey, executionPath);
             return addBiasIfNeeded(out, bias);
         } catch (RuntimeException e) {
             out.close();
-            log.debugf("Falling back from Metal half linear to AccelOps: %s", e.getMessage());
+            System.err.println("Falling back from Metal half linear to AccelOps: " + e.getMessage());
             return null;
         }
     }
