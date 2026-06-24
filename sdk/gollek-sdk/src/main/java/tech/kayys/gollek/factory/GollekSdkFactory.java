@@ -199,11 +199,39 @@ public class GollekSdkFactory {
      * Finds a provider for the given mode via ServiceLoader.
      */
     private static Optional<GollekSdkProvider> findProvider(GollekSdkProvider.Mode mode) {
-        return ServiceLoader.load(GollekSdkProvider.class)
-                .stream()
-                .map(ServiceLoader.Provider::get)
-                .filter(p -> p.mode() == mode)
-                .min(Comparator.comparingInt(GollekSdkProvider::priority));
+        ServiceLoader<GollekSdkProvider> loader = ServiceLoader.load(GollekSdkProvider.class);
+        GollekSdkProvider best = null;
+        int bestPriority = Integer.MAX_VALUE;
+        var it = loader.iterator();
+        while (true) {
+            try {
+                if (!it.hasNext()) break;
+            } catch (Throwable t) {
+                // If hasNext fails, stop discovery to avoid ServiceLoader runtime crash
+                return Optional.ofNullable(best);
+            }
+            GollekSdkProvider p = null;
+            try {
+                p = it.next();
+            } catch (Throwable t) {
+                // Skip providers that cannot be instantiated (broken service implementations)
+                // and continue discovery
+                continue;
+            }
+            try {
+                if (p.mode() == mode) {
+                    int pr = p.priority();
+                    if (pr < bestPriority) {
+                        bestPriority = pr;
+                        best = p;
+                    }
+                }
+            } catch (Throwable t) {
+                // Protect against provider methods throwing; skip on error
+                continue;
+            }
+        }
+        return Optional.ofNullable(best);
     }
 
     /**

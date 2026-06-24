@@ -2,6 +2,8 @@ package tech.kayys.gollek.spi.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tech.kayys.gollek.spi.model.loader.ModelConfigLoader;
+import tech.kayys.gollek.spi.model.mapper.GgufMetadataMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -42,7 +44,7 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper()).load(cfgPath);
             assertEquals(512, cfg.getSlidingWindowSize());
             assertEquals(131072, cfg.getMaxPositionEmbeddings());
             assertEquals("gelu_pytorch_tanh", cfg.getHiddenAct());
@@ -103,17 +105,17 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper()).load(cfgPath);
             assertEquals("gemma4_unified", cfg.getModelType());
             assertEquals("Gemma4ForMultimodalLM", cfg.getPrimaryArchitecture());
             assertEquals(3840, cfg.getHiddenSize());
             assertEquals(48, cfg.getNumHiddenLayers());
             assertEquals(16, cfg.getNumAttentionHeads());
             assertEquals(8, cfg.getNumKeyValueHeads());
-            assertEquals(8, cfg.resolvedNumKvHeadsForLayer(0));
-            assertEquals(1, cfg.resolvedNumKvHeadsForLayer(5));
-            assertEquals(256, cfg.resolvedHeadDimForLayer(0));
-            assertEquals(512, cfg.resolvedHeadDimForLayer(5));
+            assertEquals(8, cfg.getResolvedNumKvHeadsForLayer(0));
+            assertEquals(1, cfg.getResolvedNumKvHeadsForLayer(5));
+            assertEquals(256, cfg.getResolvedHeadDimForLayer(0));
+            assertEquals(512, cfg.getResolvedHeadDimForLayer(5));
             assertEquals(1024, cfg.getSlidingWindowSize());
             assertEquals(131072, cfg.getMaxPositionEmbeddings());
             assertTrue(ModelRuntimeTraits.fallbackFromConfig(cfg).gemma4Text());
@@ -143,7 +145,7 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper()).load(cfgPath);
             assertTrue(cfg.enableMoeBlock());
             assertEquals(128, cfg.getNumLocalExperts());
             assertEquals(8, cfg.getNumExpertsPerTok());
@@ -174,7 +176,7 @@ class ModelConfigGemma4TextMergeTest {
         Path cfgPath = dir.resolve("config.json");
         Files.writeString(cfgPath, json, StandardCharsets.UTF_8);
         try {
-            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper().load(cfgPath));
+            ModelConfig cfg = new ModelConfigLoader(new ObjectMapper()).load(cfgPath);
             assertTrue(cfg.enableMoeBlock());
             assertEquals(128, cfg.getNumLocalExperts());
             assertEquals(8, cfg.getNumExpertsPerTok());

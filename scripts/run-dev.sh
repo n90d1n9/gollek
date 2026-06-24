@@ -49,7 +49,35 @@ append_java_tool_option() {
 
 append_java_tool_option "--enable-native-access=ALL-UNNAMED"
 append_java_tool_option "--add-modules=jdk.incubator.vector"
+append_java_tool_option "-XX:MaxDirectMemorySize=24g"
 export JAVA_TOOL_OPTIONS
+
+# ── Metal dylib discovery ─────────────────────────────────────────────────────
+# Enable native Metal elementwise/FFN/attention kernels (opt-in gate).
+export ALJABR_METAL_ENABLE_ELEMENTWISE_KERNELS="${ALJABR_METAL_ENABLE_ELEMENTWISE_KERNELS:-1}"
+
+# If the metal dylib hasn't been pointed at explicitly, probe standard locations
+# relative to the repo root (which may differ from CWD when invoked from gollek/).
+if [[ -z "${ALJABR_METAL_DYLIB:-}" ]]; then
+  WAYANG_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
+  for DYLIB_CANDIDATE in \
+      "$WAYANG_ROOT/aljabr/backend/metal/aljabr-backend-metal/target/native/darwin-aarch64/libaljabr_metal.dylib" \
+      "$ROOT_DIR/aljabr/backend/metal/aljabr-backend-metal/target/native/darwin-aarch64/libaljabr_metal.dylib" \
+      "$HOME/.aljabr/libs/libaljabr_metal.dylib"; do
+    if [[ -f "$DYLIB_CANDIDATE" ]]; then
+      export ALJABR_METAL_DYLIB="$DYLIB_CANDIDATE"
+      break
+    fi
+  done
+fi
+
+if [[ -n "${ALJABR_METAL_DYLIB:-}" ]]; then
+  append_java_tool_option "-Daljabr.metal.dylib=${ALJABR_METAL_DYLIB}"
+  echo "${BOLD}${CYAN}:) Metal dylib:${RESET} ${ALJABR_METAL_DYLIB}"
+else
+  echo "${BOLD}${YELLOW}:) Metal dylib not found — Metal backend will fall back to CPU${RESET}"
+fi
+
 
 echo "${BOLD}${GREEN}:) Resolved backend targets:${RESET} ${BACKEND_TARGETS}"
 echo "${BOLD}${GREEN}:) Resolved format targets:${RESET} ${FORMAT_TARGETS}"
@@ -65,15 +93,13 @@ cd "$ROOT_DIR"
 
 JAR_FILE="ui/gollek-cli/build/gollek.jar"
 
-if [ ! -f "$JAR_FILE" ]; then
-    echo "${BOLD}${YELLOW}:) JAR not found. Building first...${RESET}"
+    echo "${BOLD}${YELLOW}:) Building latest CLI...${RESET}"
     ./gradlew :ui:gollek-cli:quarkusBuild \
       -Pgollek.backend="${RESOLVED_BACKEND_PROPERTY}" \
       -Pgollek.profile="${BUILD_PROFILE}" \
       -Pgollek.model.formats="${FORMAT_TARGETS}" \
       -Pgollek.llm.types="${LLM_TARGETS}" \
       -Pgollek.architecture="${ARCHITECTURE_VALUE}"
-fi
 
 # Execute the built application
 exec java ${JAVA_TOOL_OPTIONS:-} -jar "$JAR_FILE" "$@"

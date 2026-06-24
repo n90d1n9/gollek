@@ -138,7 +138,7 @@ class Gemma4ModelFamilyPluginTest {
                 plugin.descriptor().metadata().get("moe_direct_safetensor"));
         assertEquals("gemma4_unified", plugin.descriptor().metadata().get("unified_model_type"));
         assertEquals(1, plugin.unifiedRuntimeRequirements().size());
-        assertEquals("gemma4_unified", plugin.unifiedRuntimeRequirements().getFirst().getModelType());
+        assertEquals("gemma4_unified", plugin.unifiedRuntimeRequirements().getFirst().modelType());
         assertEquals(List.of("text", "image", "audio", "video"),
                 plugin.unifiedRuntimeRequirements().getFirst().requiredInputModalities());
         assertTrue(plugin.unifiedRuntimeRequirements().getFirst().productionReadyRequired());
@@ -364,7 +364,7 @@ class Gemma4ModelFamilyPluginTest {
                 resolution.primarySupportReport().orElseThrow().directSafetensorStatus());
         assertTrue(resolution.primaryRuntimeManifest().orElseThrow().modelTypes().contains("gemma4_unified"));
         assertEquals("gemma4_unified",
-                resolution.primaryRuntimeManifest().orElseThrow().unifiedRuntimeRequirements().getFirst().getModelType());
+                resolution.primaryRuntimeManifest().orElseThrow().unifiedRuntimeRequirements().getFirst().modelType());
         assertTrue(resolution.primaryRuntimeManifest().orElseThrow().requiresUnifiedRuntime());
         assertTrue(compatibility.compatible());
         assertEquals(List.of("gemma4"), compatibility.architectureAdapterIds());

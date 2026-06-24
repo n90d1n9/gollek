@@ -330,7 +330,7 @@ public class Gemma4Family implements ModelArchitecture {
 
     @Override
     public boolean addOneToRmsNormWeight() {
-        return false;
+        return true;
     }
 
     @Override
