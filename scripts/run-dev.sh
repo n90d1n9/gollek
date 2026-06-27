@@ -93,13 +93,33 @@ cd "$ROOT_DIR"
 
 JAR_FILE="ui/gollek-cli/build/gollek.jar"
 
-    echo "${BOLD}${YELLOW}:) Building latest CLI...${RESET}"
-    ./gradlew :ui:gollek-cli:quarkusBuild \
-      -Pgollek.backend="${RESOLVED_BACKEND_PROPERTY}" \
-      -Pgollek.profile="${BUILD_PROFILE}" \
-      -Pgollek.model.formats="${FORMAT_TARGETS}" \
-      -Pgollek.llm.types="${LLM_TARGETS}" \
-      -Pgollek.architecture="${ARCHITECTURE_VALUE}"
+# If the CLI jar is missing, try to build it automatically to avoid "Unable to access jarfile" errors.
+if [[ ! -f "$JAR_FILE" ]]; then
+  echo "${BOLD}${YELLOW}:) CLI JAR not found at $JAR_FILE — building...${RESET}"
+  if [[ -x "./gradlew" ]]; then
+    ./gradlew build -p ui/gollek-cli -x test
+  else
+    gradle build -p ui/gollek-cli -x test
+  fi
+fi
 
-# Execute the built application
+
+
+    if [[ "${BUILD_ONLY:-false}" == "true" || "${1:-}" == "--build-only" ]]; then
+      echo "${BOLD}${YELLOW}:) Building latest CLI...${RESET}"
+      ./gradlew :ui:gollek-cli:quarkusBuild \
+        -Pgollek.backend="${RESOLVED_BACKEND_PROPERTY}" \
+        -Pgollek.profile="${BUILD_PROFILE}" \
+        -Pgollek.model.formats="${FORMAT_TARGETS}" \
+        -Pgollek.llm.types="${LLM_TARGETS}" \
+        -Pgollek.architecture="${ARCHITECTURE_VALUE}"
+      exit 0
+    fi
+
+# Verify JAR exists and execute the built application
+if [[ ! -f "$JAR_FILE" ]]; then
+  echo "${BOLD}${RED}Error:${RESET} Unable to access jarfile $JAR_FILE" >&2
+  exit 1
+fi
+
 exec java ${JAVA_TOOL_OPTIONS:-} -jar "$JAR_FILE" "$@"

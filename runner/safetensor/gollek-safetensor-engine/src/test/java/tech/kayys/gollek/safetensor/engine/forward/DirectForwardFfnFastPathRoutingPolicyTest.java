@@ -22,46 +22,46 @@ class DirectForwardFfnFastPathRoutingPolicyTest {
     }
 
     @Test
-    void localFusedHalfFfnSkipsGemma4UnlessExplicitlyAllowed() {
+    void localFusedHalfFfnSkipsNativeBf16UnlessExplicitlyAllowed() {
         assertTrue(policy(DirectForwardFfnFastPathOptions.defaults()).shouldTryLocalFusedHalfFfn(generic()));
         assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()).shouldTryLocalFusedHalfFfn(gemma4()));
         assertTrue(policy(DirectForwardFfnFastPathOptions.defaults()
-                .withGemma4FusedHalfFfn(true, false))
+                .withNativeBf16FusedHalfFfn(true, false))
                 .shouldTryLocalFusedHalfFfn(gemma4()));
     }
 
     @Test
-    void gemma4FusedHalfFfnGlobalFlagHonorsDisableAndExplicit() {
-        assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()).isGemma4FusedHalfFfnAllowed());
+    void nativeBf16FusedHalfFfnGlobalFlagHonorsDisableAndExplicit() {
+        assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()).isNativeBf16FusedHalfFfnAllowed());
         assertTrue(policy(DirectForwardFfnFastPathOptions.defaults()
-                .withGemma4FusedHalfFfn(true, false))
-                .isGemma4FusedHalfFfnAllowed());
+                .withNativeBf16FusedHalfFfn(true, false))
+                .isNativeBf16FusedHalfFfnAllowed());
         assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()
-                .withGemma4FusedHalfFfn(true, true))
-                .isGemma4FusedHalfFfnAllowed());
+                .withNativeBf16FusedHalfFfn(true, true))
+                .isNativeBf16FusedHalfFfnAllowed());
     }
 
     @Test
-    void gemma4FusedHalfFfnPrefillRequiresEffectiveMinimumRows() {
+    void nativeBf16FusedHalfFfnPrefillRequiresEffectiveMinimumRows() {
         DirectForwardFfnFastPathRoutingPolicy policy = policy(
                 DirectForwardFfnFastPathOptions.defaults().withMetalFusedFfnPrefill(null, 3));
 
-        assertFalse(policy.allowGemma4FusedHalfFfn(1, gemma4()));
-        assertFalse(policy.allowGemma4FusedHalfFfn(2, gemma4()));
-        assertTrue(policy.allowGemma4FusedHalfFfn(3, gemma4()));
-        assertTrue(policy.allowGemma4FusedHalfFfn(1, generic()));
+        assertFalse(policy.allowNativeBf16FusedHalfFfn(1, gemma4()));
+        assertFalse(policy.allowNativeBf16FusedHalfFfn(2, gemma4()));
+        assertTrue(policy.allowNativeBf16FusedHalfFfn(3, gemma4()));
+        assertTrue(policy.allowNativeBf16FusedHalfFfn(1, generic()));
     }
 
     @Test
-    void gemma4FusedHalfFfnPrefillExplicitStillRejectsDecodeRows() {
+    void nativeBf16FusedHalfFfnPrefillExplicitStillRejectsDecodeRows() {
         DirectForwardFfnFastPathRoutingPolicy policy = policy(
                 DirectForwardFfnFastPathOptions.defaults().withMetalFusedFfnPrefill(true, 2));
 
-        assertFalse(policy.allowGemma4FusedHalfFfn(1, gemma4()));
-        assertTrue(policy.allowGemma4FusedHalfFfn(2, gemma4()));
+        assertFalse(policy.allowNativeBf16FusedHalfFfn(1, gemma4()));
+        assertTrue(policy.allowNativeBf16FusedHalfFfn(2, gemma4()));
         assertFalse(policy(DirectForwardFfnFastPathOptions.defaults()
                 .withMetalFusedFfnPrefill(false, 2))
-                .allowGemma4FusedHalfFfn(2, gemma4()));
+                .allowNativeBf16FusedHalfFfn(2, gemma4()));
     }
 
     @Test
@@ -99,7 +99,7 @@ class DirectForwardFfnFastPathRoutingPolicyTest {
     }
 
     @Test
-    void rowPrefillMatvecFfnIsGemma4OnlyOptInAndBounded() {
+    void rowPrefillMatvecFfnIsNativeBf16OnlyOptInAndBounded() {
         DirectForwardFfnFastPathRoutingPolicy defaults = policy(DirectForwardFfnFastPathOptions.defaults());
         DirectForwardFfnFastPathRoutingPolicy enabled = policy(
                 DirectForwardFfnFastPathOptions.defaults().withMetalMatvecFfnPrefillRows(true, 4));

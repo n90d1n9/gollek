@@ -66,7 +66,7 @@ record DirectForwardMetalFusedGatedFfnAdmissionPlan(
         if (input == null) {
             return reject(activation, "input_null");
         }
-        boolean gemma4PolicyTarget = DirectForwardElementwisePolicy.isGemma4FfnPolicyTarget(traits);
+        boolean nativeBf16FfnTarget = DirectForwardElementwisePolicy.isNativeBf16FfnWithPerLayerInputTarget(traits);
         if (activation.gelu() && !DirectForwardFfnFastPathPolicy.shouldUseMetalGegluFusedFfn(traits)) {
             return reject(activation, "geglu_flag_disabled");
         }
@@ -78,19 +78,19 @@ record DirectForwardMetalFusedGatedFfnAdmissionPlan(
         if (rows <= 0L) {
             return reject(activation, rows, "invalid_rows:" + rows);
         }
-        if (activation.silu() && traits.qwenText() && !DirectForwardFfnFastPathPolicy.shouldUseQwenMetalFusedFfn()) {
+        if (activation.silu() && traits.siluGated() && !DirectForwardFfnFastPathPolicy.shouldUseSiluGatedFusedFfn()) {
             return reject(
                     activation,
                     rows,
-                    rows == 1L ? "qwen_decode_pair_path_preferred" : "qwen_prefill_pair_path_preferred");
+                    rows == 1L ? "silu_gated_decode_pair_path_preferred" : "silu_gated_prefill_pair_path_preferred");
         }
-        if (gemma4PolicyTarget && !DirectForwardFfnFastPathPolicy.allowGemma4FusedHalfFfn(rows, traits)) {
+        if (nativeBf16FfnTarget && !DirectForwardFfnFastPathPolicy.allowNativeBf16FusedHalfFfn(rows, traits)) {
             return reject(
                     activation,
                     rows,
-                    rows == 1L ? "gemma4_decode_flag_disabled" : "gemma4_prefill_flag_disabled");
+                    rows == 1L ? "native_bf16_decode_flag_disabled" : "native_bf16_prefill_flag_disabled");
         }
-        if (rows == 1L && !gemma4PolicyTarget && !traits.qwenText()) {
+        if (rows == 1L && !nativeBf16FfnTarget && !traits.siluGated()) {
             return reject(activation, rows, "decode_not_optimized_for_model");
         }
         if (rows != 1L && !DirectForwardFfnFastPathPolicy.shouldUseMetalFusedFfnPrefill(traits)) {

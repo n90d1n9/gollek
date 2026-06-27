@@ -20,33 +20,33 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
     }
 
     boolean shouldUseMetalGegluFusedFfn(ModelConfigTraits traits) {
-        return isGemma4FfnPolicyTarget(traits) || options.enableMetalGegluFusedFfn();
+        return isNativeBf16FfnWithPerLayerInputTarget(traits) || options.enableMetalGegluFusedFfn();
     }
 
     boolean shouldTryLocalFusedHalfFfn(ModelConfigTraits traits) {
-        return !isGemma4FfnPolicyTarget(traits)
-                || Boolean.TRUE.equals(allowGemma4FusedHalfFfnExplicit());
+        return !isNativeBf16FfnWithPerLayerInputTarget(traits)
+                || Boolean.TRUE.equals(allowNativeBf16FusedHalfFfnExplicit());
     }
 
-    boolean isGemma4FusedHalfFfnAllowed() {
-        if (options.disableGemma4FusedHalfFfn()) {
+    boolean isNativeBf16FusedHalfFfnAllowed() {
+        if (options.disableNativeBf16FusedHalfFfn()) {
             return false;
         }
-        Boolean explicit = allowGemma4FusedHalfFfnExplicit();
+        Boolean explicit = allowNativeBf16FusedHalfFfnExplicit();
         if (explicit != null) {
             return explicit;
         }
         return false;
     }
 
-    boolean allowGemma4FusedHalfFfn(long rows, ModelConfigTraits traits) {
-        if (!isGemma4FfnPolicyTarget(traits)) {
+    boolean allowNativeBf16FusedHalfFfn(long rows, ModelConfigTraits traits) {
+        if (!isNativeBf16FfnWithPerLayerInputTarget(traits)) {
             return true;
         }
-        if (options.disableGemma4FusedHalfFfn()) {
+        if (options.disableNativeBf16FusedHalfFfn()) {
             return false;
         }
-        Boolean explicit = allowGemma4FusedHalfFfnExplicit();
+        Boolean explicit = allowNativeBf16FusedHalfFfnExplicit();
         if (explicit != null) {
             return explicit;
         }
@@ -54,7 +54,7 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         if (prefillExplicit != null) {
             return rows > 1L && prefillExplicit;
         }
-        long effectiveMinRows = Math.max(2L, (long) gemma4FusedFfnPrefillMinRows());
+        long effectiveMinRows = Math.max(2L, (long) nativeBf16FusedFfnPrefillMinRows());
         return rows >= effectiveMinRows && shouldUseMetalFusedFfnPrefill(traits);
     }
 
@@ -63,10 +63,10 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         if (explicit != null) {
             return explicit;
         }
-        // M4 safetensor profiles now prefer the fused GEGLU prefill path for
-        // Gemma-4 BF16: one native dispatch replaces gate/up projection,
+        // Prefer the fused GeGLU/SwiGLU prefill path for models with native BF16
+        // matvec or per-layer embeddings: one dispatch replaces gate/up projection,
         // activation, and down projection orchestration across prompt rows.
-        return isGemma4FfnPolicyTarget(traits);
+        return isNativeBf16FfnWithPerLayerInputTarget(traits);
     }
 
     boolean shouldUseMetalGegluMatvecFfn(ModelConfigTraits traits) {
@@ -77,9 +77,9 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         if (explicit != null) {
             return explicit;
         }
-        // Decode is memory-bound: the native GEGLU matvec avoids three Java
-        // orchestrated launches for gate/up, activation, and down projection.
-        return traits.gemma3Text() || isGemma4FfnPolicyTarget(traits);
+        // Decode is memory-bound: the native GeGLU matvec avoids three Java-orchestrated
+        // launches for gate/up, activation, and down projection.
+        return traits.geluGatedFfn() || isNativeBf16FfnWithPerLayerInputTarget(traits);
     }
 
     boolean shouldUseMetalSwigluMatvecFfn(ModelConfigTraits traits) {
@@ -90,11 +90,9 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         if (explicit != null) {
             return explicit;
         }
-        // Qwen and IBM Granite decode benefit from the native single-token SwiGLU
-        // FFN path: one Metal dispatch replaces gate/up projection, activation, and
-        // down projection orchestration. Both architectures use SILU activation and
-        // the same gated FFN weight layout. The caller still rejects prefill rows.
-        return traits.qwenText() || traits.siluGated();
+        // Any model declaring SILU gated activation (Qwen, IBM Granite, etc.) benefits
+        // from the native single-token SwiGLU FFN path. The caller still rejects prefill rows.
+        return traits.siluGated();
     }
 
     boolean shouldUseMetalGateUpMatvecFfn() {
@@ -105,7 +103,7 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
     }
 
     boolean shouldUseMetalMatvecFfnPrefillRows(ModelConfigTraits traits, long rows) {
-        if (options.disableMetalMatvecFfn() || !isGemma4FfnPolicyTarget(traits)) {
+        if (options.disableMetalMatvecFfn() || !isNativeBf16FfnWithPerLayerInputTarget(traits)) {
             return false;
         }
         if (!Boolean.TRUE.equals(enableMetalMatvecFfnPrefillRowsExplicit())) {
@@ -117,21 +115,21 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
 
     boolean shouldPreferMetalFusedFfnPrefillOverMatvecRows(ModelConfigTraits traits, long rows) {
         return rows > 1L
-                && isGemma4FfnPolicyTarget(traits)
+                && isNativeBf16FfnWithPerLayerInputTarget(traits)
                 && !Boolean.TRUE.equals(preferMetalMatvecFfnPrefillRowsExplicit())
                 && !options.disableMetalFusedFfn()
                 && shouldUseMetalFusedFfnPrefill(traits)
-                && allowGemma4FusedHalfFfn(rows, traits);
+                && allowNativeBf16FusedHalfFfn(rows, traits);
     }
 
     boolean shouldValidateMetalMatvecFfn(boolean traceFfnFastPath) {
         return options.validateMetalMatvecFfn() || traceFfnFastPath;
     }
 
-    private Boolean allowGemma4FusedHalfFfnExplicit() {
+    private Boolean allowNativeBf16FusedHalfFfnExplicit() {
         return runtimeOptionalBooleanProperty(
-                DirectForwardFfnFastPathOptions.ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY,
-                options.gemma4FusedHalfFfnExplicit());
+                DirectForwardFfnFastPathOptions.ALLOW_NATIVE_BF16_FUSED_HALF_FFN_PROPERTY,
+                options.nativeBf16FusedHalfFfnExplicit());
     }
 
     private Boolean enableMetalFusedFfnPrefillExplicit() {
@@ -170,16 +168,16 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
                 options.preferMetalMatvecFfnPrefillRows());
     }
 
-    private int gemma4FusedFfnPrefillMinRows() {
+    private int nativeBf16FusedFfnPrefillMinRows() {
         String runtimeValue = System.getProperty(
-                DirectForwardFfnFastPathOptions.GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY);
+                DirectForwardFfnFastPathOptions.NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY);
         if (runtimeValue == null || runtimeValue.isBlank()) {
-            return options.gemma4FusedFfnPrefillMinRows();
+            return options.nativeBf16FusedFfnPrefillMinRows();
         }
         try {
             return Integer.parseInt(runtimeValue.trim());
         } catch (NumberFormatException ignored) {
-            return options.gemma4FusedFfnPrefillMinRows();
+            return options.nativeBf16FusedFfnPrefillMinRows();
         }
     }
 
@@ -196,7 +194,7 @@ record DirectForwardFfnFastPathRoutingPolicy(DirectForwardFfnFastPathOptions opt
         }
     }
 
-    private static boolean isGemma4FfnPolicyTarget(ModelConfigTraits traits) {
-        return traits.gemma4Text() || traits.gemma4StylePerLayerInputs();
+    private static boolean isNativeBf16FfnWithPerLayerInputTarget(ModelConfigTraits traits) {
+        return traits.nativeBf16Matvec() || traits.perLayerInputEmbedding();
     }
 }

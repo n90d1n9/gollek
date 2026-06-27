@@ -17,6 +17,22 @@ public record ModelRuntimeTraits(
         boolean gemma3Text,
         boolean qwenText,
         boolean perLayerInputPath,
+        /**
+         * Model uses optimized native BF16 Metal matvec kernels (e.g. x4/x8 variants).
+         * Policy classes must use this flag instead of {@code gemma4Text()}.
+         */
+        boolean nativeBf16Matvec,
+        /**
+         * Model uses a GELU-gated FFN (GeGLU activation).
+         * Policy classes must use this flag instead of {@code gemma3Text()} or {@code gemma4Text()}
+         * when routing FFN kernel dispatch.
+         */
+        boolean geluGatedFfn,
+        /**
+         * Model injects per-layer learned input embeddings (e.g. Gemma 4 per-layer input path).
+         * Policy classes must use this flag instead of {@code gemma4StylePerLayerInputs()}.
+         */
+        boolean perLayerInputEmbedding,
         PromptBosPolicy promptBosPolicy,
         Set<String> allowedControlTokenTexts,
         boolean validateContinuationTokensByDecode,
@@ -97,11 +113,17 @@ public record ModelRuntimeTraits(
                 ? defaultAttentionTraits(gemma4Text, gemma3Text, qwenText, perLayerInputPath, null)
                 : attention;
         multimodalModel = multimodalModel || audioModel || visionModel;
+        // Capability flags must be consistent with identity flags when not explicitly set.
+        // These are the canonical source of truth for policy dispatch.
     }
 
     public ModelRuntimeTraits(boolean gemma4Text, boolean gemma3Text, boolean qwenText,
             boolean perLayerInputPath) {
         this(gemma4Text, gemma3Text, qwenText, perLayerInputPath,
+                // Capability flags derived from identity for compact constructor backward compat.
+                gemma4Text,
+                gemma3Text || gemma4Text,
+                perLayerInputPath && gemma4Text,
                 ModelPromptTraits.defaultPromptBosPolicy(gemma4Text, gemma3Text),
                 ModelPromptTraits.allowedControlTokenTexts(gemma4Text),
                 ModelPromptTraits.validatesContinuationTokensByDecode(gemma4Text),
@@ -116,6 +138,7 @@ public record ModelRuntimeTraits(
             boolean perLayerInputPath, PromptBosPolicy promptBosPolicy, Set<String> allowedControlTokenTexts,
             boolean validateContinuationTokensByDecode, boolean rejectEmptyDecodedTokens) {
         this(gemma4Text, gemma3Text, qwenText, perLayerInputPath,
+                gemma4Text, gemma3Text || gemma4Text, perLayerInputPath && gemma4Text,
                 promptBosPolicy, allowedControlTokenTexts,
                 validateContinuationTokensByDecode, rejectEmptyDecodedTokens, null, false, false, false);
     }
@@ -125,6 +148,7 @@ public record ModelRuntimeTraits(
             boolean validateContinuationTokensByDecode, boolean rejectEmptyDecodedTokens,
             AttentionRuntimeTraits attention) {
         this(gemma4Text, gemma3Text, qwenText, perLayerInputPath,
+                gemma4Text, gemma3Text || gemma4Text, perLayerInputPath && gemma4Text,
                 promptBosPolicy, allowedControlTokenTexts,
                 validateContinuationTokensByDecode, rejectEmptyDecodedTokens, attention, false, false, false);
     }
@@ -134,6 +158,7 @@ public record ModelRuntimeTraits(
             boolean validateContinuationTokensByDecode, boolean rejectEmptyDecodedTokens,
             AttentionRuntimeTraits attention, boolean audioModel) {
         this(gemma4Text, gemma3Text, qwenText, perLayerInputPath,
+                gemma4Text, gemma3Text || gemma4Text, perLayerInputPath && gemma4Text,
                 promptBosPolicy, allowedControlTokenTexts,
                 validateContinuationTokensByDecode, rejectEmptyDecodedTokens, attention, audioModel, false, audioModel);
     }
@@ -143,6 +168,7 @@ public record ModelRuntimeTraits(
             boolean validateContinuationTokensByDecode, boolean rejectEmptyDecodedTokens,
             AttentionRuntimeTraits attention, boolean audioModel, boolean multimodalModel) {
         this(gemma4Text, gemma3Text, qwenText, perLayerInputPath,
+                gemma4Text, gemma3Text || gemma4Text, perLayerInputPath && gemma4Text,
                 promptBosPolicy, allowedControlTokenTexts,
                 validateContinuationTokensByDecode, rejectEmptyDecodedTokens, attention,
                 audioModel, false, multimodalModel);
@@ -177,11 +203,19 @@ public record ModelRuntimeTraits(
         ModelPromptTraits prompt = ModelPromptTraits.fromFlags(gemma4Text, gemma3Text, gemmaFamily, qwenText);
         ModelModalityTraits modality = ModelModalityTraits.fromConfig(config);
         boolean perLayerInputPath = config.getHiddenSizePerLayerInput() > 0 || config.getVocabSizePerLayerInput() > 0;
+        // Derive capability flags from config metadata. Model-family modules that
+        // register explicit traits via the Builder should set these directly instead.
+        boolean nativeBf16Matvec = gemma4Text;
+        boolean geluGatedFfn = gemma3Text || gemma4Text;
+        boolean perLayerInputEmbedding = perLayerInputPath && gemma4Text;
         return builder()
                 .gemma4Text(gemma4Text)
                 .gemma3Text(gemma3Text)
                 .qwenText(qwenText)
                 .perLayerInputPath(perLayerInputPath)
+                .nativeBf16Matvec(nativeBf16Matvec)
+                .geluGatedFfn(geluGatedFfn)
+                .perLayerInputEmbedding(perLayerInputEmbedding)
                 .prompt(prompt)
                 .attention(defaultAttentionTraits(gemma4Text, gemma3Text, qwenText, perLayerInputPath, config))
                 .modalities(modality)
@@ -246,6 +280,9 @@ public record ModelRuntimeTraits(
         private boolean gemma3Text;
         private boolean qwenText;
         private boolean perLayerInputPath;
+        private boolean nativeBf16Matvec;
+        private boolean geluGatedFfn;
+        private boolean perLayerInputEmbedding;
         private PromptBosPolicy promptBosPolicy;
         private Set<String> allowedControlTokenTexts;
         private boolean allowedControlTokenTextsSet;
@@ -294,6 +331,33 @@ public record ModelRuntimeTraits(
 
         public Builder perLayerInputPath(boolean perLayerInputPath) {
             this.perLayerInputPath = perLayerInputPath;
+            return this;
+        }
+
+        public Builder nativeBf16Matvec() {
+            return nativeBf16Matvec(true);
+        }
+
+        public Builder nativeBf16Matvec(boolean nativeBf16Matvec) {
+            this.nativeBf16Matvec = nativeBf16Matvec;
+            return this;
+        }
+
+        public Builder geluGatedFfn() {
+            return geluGatedFfn(true);
+        }
+
+        public Builder geluGatedFfn(boolean geluGatedFfn) {
+            this.geluGatedFfn = geluGatedFfn;
+            return this;
+        }
+
+        public Builder perLayerInputEmbedding() {
+            return perLayerInputEmbedding(true);
+        }
+
+        public Builder perLayerInputEmbedding(boolean perLayerInputEmbedding) {
+            this.perLayerInputEmbedding = perLayerInputEmbedding;
             return this;
         }
 
@@ -379,6 +443,9 @@ public record ModelRuntimeTraits(
                     gemma3Text,
                     qwenText,
                     perLayerInputPath,
+                    nativeBf16Matvec,
+                    geluGatedFfn,
+                    perLayerInputEmbedding,
                     promptBosPolicy == null
                             ? ModelPromptTraits.defaultPromptBosPolicy(gemma4Text, gemma3Text)
                             : promptBosPolicy,
@@ -405,6 +472,9 @@ public record ModelRuntimeTraits(
                     .gemma3Text(traits.gemma3Text())
                     .qwenText(traits.qwenText())
                     .perLayerInputPath(traits.perLayerInputPath())
+                    .nativeBf16Matvec(traits.nativeBf16Matvec())
+                    .geluGatedFfn(traits.geluGatedFfn())
+                    .perLayerInputEmbedding(traits.perLayerInputEmbedding())
                     .promptBosPolicy(traits.promptBosPolicy())
                     .allowedControlTokenTexts(traits.allowedControlTokenTexts())
                     .validateContinuationTokensByDecode(traits.validateContinuationTokensByDecode())

@@ -30,9 +30,12 @@ final class FlashAttentionJavaFallback {
     static AccelTensor denseSharedAttention(AccelTensor q, AccelTensor k, AccelTensor v,
             ModelConfig config, int layerIdx, int startPos, int numQHeads, int numKVHeads, int headDim,
             float scale, boolean causal, float softCap, MemorySegment attentionContextBuffer) {
+        // IMPORTANT: StridedKeyValueSource holds strong references to k and v (not just raw
+        // MemorySegments) so that the backing Arena.ofAuto() cannot be GC-collected while the
+        // long-running attention compute loop is still reading from those segments.
         FlashAttentionDenseFallbackLoop.KeyValueSource source = new StridedKeyValueSource(
-                k.dataSegment(),
-                v.dataSegment(),
+                k,
+                v,
                 Math.toIntExact(k.size(1)),
                 k.stride()[0],
                 k.stride()[1],
@@ -90,8 +93,8 @@ final class FlashAttentionJavaFallback {
     }
 
     private record StridedKeyValueSource(
-            MemorySegment keySegment,
-            MemorySegment valueSegment,
+            AccelTensor keyTensor,
+            AccelTensor valueTensor,
             int totalTokens,
             long keyBatchStride,
             long keyTokenStride,
@@ -99,6 +102,17 @@ final class FlashAttentionJavaFallback {
             long valueBatchStride,
             long valueTokenStride,
             long valueHeadStride) implements FlashAttentionDenseFallbackLoop.KeyValueSource {
+
+        @Override
+        public MemorySegment keySegment() {
+            // Accessing via the tensor (not a stored raw segment) keeps the tensor reachable
+            return keyTensor.dataSegment();
+        }
+
+        @Override
+        public MemorySegment valueSegment() {
+            return valueTensor.dataSegment();
+        }
 
         @Override
         public long keyOffset(int batch, int token, int kvHeadIdx) {

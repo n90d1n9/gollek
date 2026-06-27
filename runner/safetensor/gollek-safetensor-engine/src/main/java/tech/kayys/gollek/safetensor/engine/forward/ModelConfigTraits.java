@@ -18,10 +18,14 @@ record ModelConfigTraits(
         boolean gemma4Text,
         boolean gemma3Text,
         boolean qwenText,
-        boolean gemma4StylePerLayerInputs) {
+        boolean gemma4StylePerLayerInputs,
+        // Capability flags — policy classes MUST use these, never model-identity fields above.
+        boolean nativeBf16Matvec,
+        boolean geluGatedFfn,
+        boolean perLayerInputEmbedding) {
 
     static final ModelConfigTraits EMPTY =
-            new ModelConfigTraits(null, "", 0, 0, false, false, false, false);
+            new ModelConfigTraits(null, "", 0, 0, false, false, false, false, false, false, false);
 
     /**
      * Returns true for models that use SwiGLU (SILU activation) with gated FFNs.
@@ -42,6 +46,7 @@ record ModelConfigTraits(
         int hiddenSizePerLayerInput = config.getHiddenSizePerLayerInput();
         int vocabSizePerLayerInput = config.getVocabSizePerLayerInput();
         ModelRuntimeTraits runtimeTraits = ModelRuntimeTraitsResolver.resolve(arch, config);
+        boolean perLayerInputPath = runtimeTraits.perLayerInputPath() || hiddenSizePerLayerInput > 0;
         return new ModelConfigTraits(
                 config,
                 modelType,
@@ -50,7 +55,10 @@ record ModelConfigTraits(
                 runtimeTraits.gemma4Text(),
                 runtimeTraits.gemma3Text(),
                 runtimeTraits.qwenText(),
-                runtimeTraits.perLayerInputPath() || hiddenSizePerLayerInput > 0);
+                perLayerInputPath,
+                runtimeTraits.nativeBf16Matvec(),
+                runtimeTraits.geluGatedFfn(),
+                runtimeTraits.perLayerInputEmbedding());
     }
 
     boolean matches(ModelConfig config) {

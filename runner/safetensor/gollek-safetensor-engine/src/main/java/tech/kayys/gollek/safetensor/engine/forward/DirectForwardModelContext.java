@@ -49,8 +49,8 @@ final class DirectForwardModelContext {
 
     private boolean useAddOneRmsNorm(ModelArchitecture arch, ModelConfig config) {
         ModelConfigTraits traits = traits(config, arch);
-        if (traits.gemma3Text()) {
-            // Gemma3 reference RMSNorm uses output * (1 + weight).
+        if (traits.geluGatedFfn()) {
+            // GeGLU-gated models (Gemma 3, Gemma 4, etc.) use output * (1 + weight) RMSNorm.
             return true;
         }
         if (arch != null) {

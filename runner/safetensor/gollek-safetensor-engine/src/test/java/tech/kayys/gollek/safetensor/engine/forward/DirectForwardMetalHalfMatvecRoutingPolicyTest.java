@@ -68,7 +68,7 @@ class DirectForwardMetalHalfMatvecRoutingPolicyTest {
     }
 
     @Test
-    void logitsMpsMatvecRequiresExplicitEnableAndRejectsGemma4() throws Exception {
+    void logitsMpsMatvecRequiresExplicitEnableAndRejectsNativeBf16() throws Exception {
         DirectForwardMetalHalfMatvecRoutingPolicy policy = policy(
                 DirectForwardMetalHalfMatvecOptions.defaults().withLogitsMpsMatvec(true, false, 10, 4));
         Fixture generic = fixture("llama", false, false, false, 30, 4096, 4096);
@@ -110,7 +110,7 @@ class DirectForwardMetalHalfMatvecRoutingPolicyTest {
     }
 
     @Test
-    void transposedMatvecDefaultsToGemma4LogitsOnly() throws Exception {
+    void transposedMatvecDefaultsToNativeBf16LogitsOnly() throws Exception {
         DirectForwardMetalHalfMatvecRoutingPolicy policy = policy(
                 DirectForwardMetalHalfMatvecOptions.defaults().withTransposedHalfMatvec(null, false, false, 4));
         Fixture generic = fixture("llama", false, false, false, 30, 4096, 4096);

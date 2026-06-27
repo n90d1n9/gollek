@@ -48,7 +48,7 @@ class DirectForwardMetalHalfMatvecPairPolicyTest {
     }
 
     @Test
-    void halfLinearPairDefaultsToGenericAndGemma4ShapeRules() throws Exception {
+    void halfLinearPairDefaultsToGenericAndNativeBf16ShapeRules() throws Exception {
         Fixture generic = fixture("llama", false, false, false, 30, 4096, 4096);
         Fixture gemma4 = fixture("gemma4_text", true, false, false, 40, 3584, 14336);
 

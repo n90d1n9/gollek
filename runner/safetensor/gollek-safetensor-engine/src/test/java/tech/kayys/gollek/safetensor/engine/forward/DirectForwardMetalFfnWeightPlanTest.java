@@ -44,7 +44,7 @@ class DirectForwardMetalFfnWeightPlanTest {
     }
 
     @Test
-    void gemma4Bf16GatedPlanKeepsNativeBf16Weights() {
+    void nativeBf16GatedPlanKeepsNativeBf16Weights() {
         AccelTensor gate = bf16(2, 3);
         AccelTensor up = bf16(2, 3);
         AccelTensor down = bf16(3, 2);

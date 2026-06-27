@@ -207,6 +207,11 @@ public final class DefaultTensor implements Tensor {
     public long numel() { return shape.numel(); }
 
     @Override
+    public float[] toFloatArray() {
+        return buffer.segment().toArray(java.lang.foreign.ValueLayout.JAVA_FLOAT);
+    }
+
+    @Override
     public void release() {
         if (buffer != null) {
             buffer.release();

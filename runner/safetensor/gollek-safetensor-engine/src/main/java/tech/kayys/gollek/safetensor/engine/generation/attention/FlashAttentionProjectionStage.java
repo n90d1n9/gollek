@@ -53,6 +53,9 @@ final class FlashAttentionProjectionStage {
         AccelTensor q = null;
         AccelTensor k = null;
         AccelTensor v = null;
+        AccelTensor qUnreshaped = null;
+        AccelTensor kUnreshaped = null;
+        AccelTensor vUnreshaped = null;
         try {
             FlashAttentionProjector.LinearPair qkPair = qkvTriple == null && !packedQkv
                     && (!sharedKv && !useDenseSharedKvState)
@@ -87,6 +90,10 @@ final class FlashAttentionProjectionStage {
                     qkvBuffers,
                     k);
 
+            qUnreshaped = q;
+            kUnreshaped = k;
+            vUnreshaped = v;
+
             q = reshapeQuery(q, in, headLayout, config);
             if (!sharedKv) {
                 k = reshapeKey(k, in, headLayout, config);
@@ -120,22 +127,28 @@ final class FlashAttentionProjectionStage {
                 }
                 v = vNormed;
             }
-            return new PreparedTensors(q, k, v, sharedProjectionOwner);
+            return new PreparedTensors(q, k, v, sharedProjectionOwner, qUnreshaped, kUnreshaped, vUnreshaped);
         } catch (RuntimeException | Error e) {
-            releasePreparedOnFailure(sharedKvState, useDenseSharedKvState, q, k, v, sharedProjectionOwner);
+            releasePreparedOnFailure(sharedKvState, useDenseSharedKvState, q, k, v, sharedProjectionOwner, qUnreshaped, kUnreshaped, vUnreshaped);
             throw e;
         }
     }
 
     private void releasePreparedOnFailure(SharedKvState sharedKvState, boolean useDenseSharedKvState,
-            AccelTensor q, AccelTensor k, AccelTensor v, AccelTensor sharedProjectionOwner) {
+            AccelTensor q, AccelTensor k, AccelTensor v, AccelTensor sharedProjectionOwner,
+            AccelTensor qUnreshaped, AccelTensor kUnreshaped, AccelTensor vUnreshaped) {
         closeIfOpen(q);
+        closeIfOpen(qUnreshaped);
         if (useDenseSharedKvState && sharedKvState != null) {
             sharedKvState.releaseView(k);
+            sharedKvState.releaseView(kUnreshaped);
             sharedKvState.releaseView(v);
+            sharedKvState.releaseView(vUnreshaped);
         } else {
             closeIfOpen(k);
+            closeIfOpen(kUnreshaped);
             closeIfOpen(v);
+            closeIfOpen(vUnreshaped);
         }
         closeIfOpen(sharedProjectionOwner);
     }
@@ -197,7 +210,6 @@ final class FlashAttentionProjectionStage {
         AccelTensor reshaped = FlashAttentionShapeValidator.reshapeProjection(
                 q, "query", in.x.size(0), in.x.size(1), headLayout.numQueryHeads(), headLayout.headDim(), config,
                 in.layerIdx);
-        q.close();
         return reshaped;
     }
 
@@ -206,7 +218,6 @@ final class FlashAttentionProjectionStage {
         AccelTensor reshaped = FlashAttentionShapeValidator.reshapeProjection(
                 k, "key", in.x.size(0), in.x.size(1), headLayout.numKeyValueHeads(), headLayout.headDim(), config,
                 in.layerIdx);
-        k.close();
         return reshaped;
     }
 
@@ -215,18 +226,21 @@ final class FlashAttentionProjectionStage {
         AccelTensor reshaped = FlashAttentionShapeValidator.reshapeProjection(
                 v, "value", in.x.size(0), in.x.size(1), headLayout.numKeyValueHeads(), headLayout.headDim(), config,
                 in.layerIdx);
-        v.close();
         return reshaped;
     }
 
     record PreparedTensors(AccelTensor query, AccelTensor key, AccelTensor value,
-            AccelTensor sharedOwner) implements AutoCloseable {
+            AccelTensor sharedOwner,
+            AccelTensor qUnreshaped, AccelTensor kUnreshaped, AccelTensor vUnreshaped) implements AutoCloseable {
         @Override
         public void close() {
             closeIfOpen(query);
             closeIfOpen(key);
             closeIfOpen(value);
             closeIfOpen(sharedOwner);
+            closeIfOpen(qUnreshaped);
+            closeIfOpen(kUnreshaped);
+            closeIfOpen(vUnreshaped);
         }
 
         private static void closeIfOpen(AccelTensor tensor) {

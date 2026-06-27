@@ -4,7 +4,7 @@ import io.quarkus.arc.Unremovable;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import tech.kayys.gollek.plugin.runner.*;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.provider.LLMProvider;
 
 import java.nio.file.Path;

@@ -32,7 +32,7 @@ import tech.kayys.gollek.inference.libtorch.util.SafetensorsLoader;
 import tech.kayys.gollek.spi.observability.AdapterSpec;
 import tech.kayys.gollek.spi.observability.AdapterSpecResolver;
 import tech.kayys.gollek.spi.inference.InferenceResponse;
-import tech.kayys.gollek.core.model.ModelFormat;
+import tech.kayys.aljabr.core.model.ModelFormat;
 import tech.kayys.gollek.spi.provider.AdapterCapabilityProfile;
 import tech.kayys.gollek.spi.provider.ProviderCapabilities;
 import tech.kayys.gollek.spi.provider.ProviderConfig;
@@ -693,7 +693,10 @@ public class LibTorchProvider implements StreamingProvider {
                 chunk.finishReason(),
                 chunk.usage(),
                 chunk.emittedAt(),
-                metadata);
+                metadata,
+                                    null,
+                                    null,
+                                    null);
     }
 
     private String resolveTenantId(ProviderRequest request) {

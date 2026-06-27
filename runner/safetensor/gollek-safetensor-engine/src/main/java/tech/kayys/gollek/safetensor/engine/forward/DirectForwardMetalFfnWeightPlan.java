@@ -63,7 +63,7 @@ record DirectForwardMetalFfnWeightPlan(
             ModelConfigTraits traits,
             String profileKey,
             boolean decodeLogitsPhase) {
-        return DirectForwardMetalLinearPolicy.allowGemma4Bf16ToF16LinearForRows(
+        return DirectForwardMetalLinearPolicy.allowNativeBf16ToF16ConversionForRows(
                 rows,
                 traits,
                 profileKey,
@@ -134,7 +134,7 @@ record DirectForwardMetalFfnWeightPlan(
         return DirectForwardLinearCachePolicy.toMetalHalfWeight(
                 weight,
                 nativeBf16Weights,
-                traits.gemma4Text(),
+                traits.nativeBf16Matvec(),
                 allowBf16ToF16Weights,
                 DirectForwardMetalLinearPolicy.allowMetalBf16Linear(traits));
     }

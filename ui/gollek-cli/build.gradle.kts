@@ -68,7 +68,7 @@ sourceSets {
     main {
         java {
             setSrcDirs(listOf("src/main/java"))
-            exclude("tech/kayys/gollek/cli/NewGollekCLI.java")
+            exclude("tech/kayys/gollek/cli/GollekCLI.java")
         }
         resources {
             setSrcDirs(listOf("src/main/resources"))

@@ -27,9 +27,9 @@ record DirectForwardElementwiseRoutingPolicy(DirectForwardElementwiseOptions opt
         if (forceCpuForward) {
             return false;
         }
-        boolean gemma4 = traits.gemma4Text();
-        if (gemma4) {
-            if (options.disableMetalGemma4Elementwise()) {
+        boolean nativeBf16 = traits.nativeBf16Matvec();
+        if (nativeBf16) {
+            if (options.disableNativeBf16MetalElementwise()) {
                 return false;
             }
             if (!canUseMetal || !nativeElementwiseKernelsAvailable) {
@@ -38,17 +38,17 @@ record DirectForwardElementwiseRoutingPolicy(DirectForwardElementwiseOptions opt
         } else if (!canUseMetal && !nativeElementwiseFallbackAvailable) {
             return false;
         }
-        int defaultMinSeq = gemma4 ? 1 : 16;
+        int defaultMinSeq = nativeBf16 ? 1 : 16;
         int minSeq = options.metalElementwiseMinSeq() >= 0
                 ? options.metalElementwiseMinSeq()
                 : defaultMinSeq;
         if (seqLen < minSeq) {
             return false;
         }
-        if (!gemma4) {
+        if (!nativeBf16) {
             return true;
         }
-        return options.enableGemma4MetalElementwise() || nativeElementwiseKernelsAvailable;
+        return options.enableNativeBf16MetalElementwise() || nativeElementwiseKernelsAvailable;
     }
 
     boolean canUseMetalLayerScalarScale(
@@ -70,28 +70,28 @@ record DirectForwardElementwiseRoutingPolicy(DirectForwardElementwiseOptions opt
         if (options.enableMetalPostFfnNorm() != null) {
             return options.enableMetalPostFfnNorm();
         }
-        return isGemma4FfnPolicyTarget(traits);
+        return isNativeBf16FfnWithPerLayerInputTarget(traits);
     }
 
     boolean shouldBuildPerLayerInputs(ModelConfigTraits traits, int hiddenSizePerLayerInput) {
         if (hiddenSizePerLayerInput <= 0) {
             return false;
         }
-        return !isGemma4PerLayerInputDisabled(traits);
+        return !isPerLayerInputEmbeddingDisabled(traits);
     }
 
     boolean shouldApplyLayerScalar(ModelConfigTraits traits) {
-        if (!traits.gemma4Text()) {
+        if (!traits.nativeBf16Matvec()) {
             return true;
         }
-        return !options.disableGemma4LayerScalar();
+        return !options.disableNativeBf16LayerScalar();
     }
 
-    static boolean isGemma4FfnPolicyTarget(ModelConfigTraits traits) {
-        return traits.gemma4Text() || traits.gemma4StylePerLayerInputs();
+    static boolean isNativeBf16FfnWithPerLayerInputTarget(ModelConfigTraits traits) {
+        return traits.nativeBf16Matvec() || traits.perLayerInputEmbedding();
     }
 
-    private boolean isGemma4PerLayerInputDisabled(ModelConfigTraits traits) {
-        return traits.gemma4Text() && options.disableGemma4PerLayerInput();
+    private boolean isPerLayerInputEmbeddingDisabled(ModelConfigTraits traits) {
+        return traits.perLayerInputEmbedding() && options.disablePerLayerInputEmbedding();
     }
 }

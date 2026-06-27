@@ -38,12 +38,12 @@ record DirectForwardMetalHalfMatvecTransposedPolicy(
             // transposed-weight matvec kernel is still experimental there.
             return explicitEnabled && options.enableMetalTransposedHalfMatvecAll();
         }
-        if (!traits.gemma4Text() && !options.enableMetalTransposedHalfMatvecAll()) {
+        if (!traits.nativeBf16Matvec() && !options.enableMetalTransposedHalfMatvecAll()) {
             return false;
         }
         if (options.enableMetalTransposedHalfMatvec() != null) {
             return explicitEnabled;
         }
-        return traits.gemma4Text();
+        return traits.nativeBf16Matvec();
     }
 }

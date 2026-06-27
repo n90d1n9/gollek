@@ -68,7 +68,10 @@ public interface ModelPipeline {
                         null,
                         null,
                         Instant.now(),
-                        response.getMetadata()),
+                        response.getMetadata(),
+                        null,
+                        null,
+                        null),
                 new StreamingInferenceChunk(
                         request.request().getRequestId(),
                         1,
@@ -82,6 +85,9 @@ public interface ModelPipeline {
                                 response.getOutputTokens(),
                                 response.getDurationMs()),
                         Instant.now(),
-                        response.getMetadata())));
+                        response.getMetadata(),
+                        null,
+                        null,
+                        null)));
     }
 }

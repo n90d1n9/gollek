@@ -26,8 +26,18 @@ public class ModelArchitectureRegistry {
     @Any
     Instance<ModelArchitecture> allArchitectures;
 
-    public Instance<ModelArchitecture> getAllArchitectures() {
-        return allArchitectures;
+    private Iterable<ModelArchitecture> manualArchitectures;
+
+    public Iterable<ModelArchitecture> getAllArchitectures() {
+        if (allArchitectures != null) {
+            return allArchitectures;
+        }
+        if (manualArchitectures == null) {
+            List<ModelArchitecture> list = new ArrayList<>();
+            java.util.ServiceLoader.load(ModelArchitecture.class).forEach(list::add);
+            manualArchitectures = list;
+        }
+        return manualArchitectures;
     }
 
     /**
@@ -41,13 +51,13 @@ public class ModelArchitectureRegistry {
         String primaryArch = config.getPrimaryArchitecture();
         String modelType = config.getModelType();
 
-        for (ModelArchitecture arch : allArchitectures) {
+        for (ModelArchitecture arch : getAllArchitectures()) {
             if (arch.supportedArchClassNames().contains(primaryArch)) {
                 log.debugf("Architecture resolved by class name: %s → %s", primaryArch, arch.id());
                 return arch;
             }
         }
-        for (ModelArchitecture arch : allArchitectures) {
+        for (ModelArchitecture arch : getAllArchitectures()) {
             if (modelType != null && arch.supportedModelTypes().contains(modelType)) {
                 log.debugf("Architecture resolved by model_type: %s → %s", modelType, arch.id());
                 return arch;
@@ -67,7 +77,7 @@ public class ModelArchitectureRegistry {
      * @throws IllegalArgumentException if no registered architecture matches
      */
     public ModelArchitecture resolveGguf(String ggufArch) {
-        for (ModelArchitecture arch : allArchitectures) {
+        for (ModelArchitecture arch : getAllArchitectures()) {
             if (arch.matchesGgufArch(ggufArch)) {
                 log.debugf("Architecture resolved by GGUF arch: %s → %s", ggufArch, arch.id());
                 return arch;
@@ -81,7 +91,7 @@ public class ModelArchitectureRegistry {
     /** All registered architecture IDs — useful for health/info endpoints. */
     public List<String> registeredIds() {
         List<String> ids = new ArrayList<>();
-        allArchitectures.forEach(a -> ids.add(a.id()));
+        getAllArchitectures().forEach(a -> ids.add(a.id()));
         return Collections.unmodifiableList(ids);
     }
 }

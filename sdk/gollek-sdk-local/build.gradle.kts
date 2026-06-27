@@ -9,7 +9,7 @@ version = "0.1.0-SNAPSHOT"
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
-            artifactId = "gollek-sdk-java-local"
+            artifactId = "gollek-sdk-local"
             from(components["java"])
         }
     }

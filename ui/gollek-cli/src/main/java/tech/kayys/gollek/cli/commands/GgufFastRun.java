@@ -759,20 +759,22 @@ public final class GgufFastRun {
             String sessionLabel = sessionReuseLabel(sessionCache != null, lease.reused(), lease.reuseKind());
             String warmSuffix = ", session=" + sessionLabel;
             printExecutionRoute(out, session.backendName(), runnerName);
-            out.printf("Using llama.cpp GGUF %s for %s "
-                            + "(backend=%s, nGpuLayers=%d, threads=%d, context=%d, batch=%d, ubatch=%d, "
-                            + "swaFull=%s, cpuFallback=%s%s).%n",
-                    runnerName,
-                    modelPath.getFileName(),
-                    session.backendName(),
-                    nGpuLayers,
-                    threads,
-                    context,
-                    batch,
-                    microBatch,
-                    swaFull,
-                    cpuFallback,
-                    warmSuffix);
+            if (!fastRunQuiet()) {
+                out.printf("Using llama.cpp GGUF %s for %s "
+                                + "(backend=%s, nGpuLayers=%d, threads=%d, context=%d, batch=%d, ubatch=%d, "
+                                + "swaFull=%s, cpuFallback=%s%s).%n",
+                        runnerName,
+                        modelPath.getFileName(),
+                        session.backendName(),
+                        nGpuLayers,
+                        threads,
+                        context,
+                        batch,
+                        microBatch,
+                        swaFull,
+                        cpuFallback,
+                        warmSuffix);
+            }
             long generateStartNanos = System.nanoTime();
             String output = session.generate(prompt, args.maxTokens, args.temperature, args.topK, args.topP);
             long afterGenerateNanos = System.nanoTime();
@@ -783,8 +785,10 @@ public final class GgufFastRun {
                     session,
                     sessionCache != null && lease.reused(),
                     lease.reuseKind());
-            printFastRunStats(out, label, session.lastGeneratedTokens(), startNanos, openNanos, generateNanos,
-                    afterGenerateNanos, nativeMetrics);
+            if (!fastRunQuiet()) {
+                printFastRunStats(out, label, session.lastGeneratedTokens(), startNanos, openNanos, generateNanos,
+                        afterGenerateNanos, nativeMetrics);
+            }
             if (fastRunTiming()) {
                 String timingNativeMetrics = nativeMetrics.map(metrics -> ", native={" + metrics + "}").orElse("");
                 err.printf("GGUF timing: open=%.3fms, generateCall=%.3fms%s%n",
@@ -1014,6 +1018,9 @@ public final class GgufFastRun {
     }
 
     static void printRunHeader(Path modelPath, FastArgs args, PrintStream out) {
+        if (fastRunQuiet()) {
+            return;
+        }
         if (args == null || args.banner) {
             printBanner(out);
         }
@@ -1025,6 +1032,9 @@ public final class GgufFastRun {
     }
 
     static void printExecutionRoute(PrintStream out, String backendName, String runnerName) {
+        if (fastRunQuiet()) {
+            return;
+        }
         out.println(executionRouteLine(backendName, runnerName));
         out.println("--------------------------------------------------");
     }
@@ -1448,6 +1458,17 @@ public final class GgufFastRun {
 
     private static boolean fastRunDebug() {
         return booleanConfig("gollek.gguf.fast_run.debug", false);
+    }
+
+    /**
+     * Quiet mode: suppress all verbose run headers, execution-route lines, performance
+     * metrics blocks, and the 'Using llama.cpp GGUF...' status line. Only the raw
+     * generated tokens are printed to stdout. Activated by system property
+     * {@code gollek.gguf.fast_run.quiet=true} or env {@code GOLLEK_GGUF_FAST_QUIET=1}.
+     * This is automatically set when Wayang uses the SDK in embedded mode.
+     */
+    static boolean fastRunQuiet() {
+        return booleanConfig("gollek.gguf.fast_run.quiet", false);
     }
 
     private static boolean daemonEnabled() {

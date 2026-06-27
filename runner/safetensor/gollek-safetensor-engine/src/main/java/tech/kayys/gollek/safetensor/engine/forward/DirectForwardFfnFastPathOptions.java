@@ -8,13 +8,13 @@ package tech.kayys.gollek.safetensor.engine.forward;
 import static tech.kayys.gollek.safetensor.engine.forward.DirectForwardRuntimeOptions.parseOptionalBoolean;
 
 record DirectForwardFfnFastPathOptions(
-        Boolean gemma4FusedHalfFfnExplicit,
-        boolean disableGemma4FusedHalfFfn,
+        Boolean nativeBf16FusedHalfFfnExplicit,
+        boolean disableNativeBf16FusedHalfFfn,
         boolean disableMetalFusedFfn,
-        boolean enableQwenMetalFusedFfn,
+        boolean enableSiluGatedFusedFfn,
         boolean enableMetalGegluFusedFfn,
         Boolean enableMetalFusedFfnPrefill,
-        int gemma4FusedFfnPrefillMinRows,
+        int nativeBf16FusedFfnPrefillMinRows,
         Boolean enableMetalMatvecFfnPrefillRows,
         Boolean preferMetalMatvecFfnPrefillRows,
         int metalMatvecFfnPrefillMaxRows,
@@ -24,21 +24,21 @@ record DirectForwardFfnFastPathOptions(
         boolean disableMetalMatvecFfn,
         boolean validateMetalMatvecFfn) {
 
-    static final String ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY =
-            "gollek.safetensor.allow_gemma4_fused_half_ffn";
-    private static final String DISABLE_GEMMA4_FUSED_HALF_FFN_PROPERTY =
-            "gollek.safetensor.disable_gemma4_fused_half_ffn";
+    static final String ALLOW_NATIVE_BF16_FUSED_HALF_FFN_PROPERTY =
+            "gollek.safetensor.allow_native_bf16_fused_half_ffn";
+    private static final String DISABLE_NATIVE_BF16_FUSED_HALF_FFN_PROPERTY =
+            "gollek.safetensor.disable_native_bf16_fused_half_ffn";
     private static final String DISABLE_METAL_FUSED_FFN_PROPERTY =
             "gollek.safetensor.disable_metal_fused_ffn";
-    private static final String ENABLE_QWEN_METAL_FUSED_FFN_PROPERTY =
-            "gollek.safetensor.enable_qwen_metal_fused_ffn";
+    private static final String ENABLE_SILU_GATED_FUSED_FFN_PROPERTY =
+            "gollek.safetensor.enable_silu_gated_fused_ffn";
     private static final String ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY =
             "gollek.safetensor.enable_metal_geglu_fused_ffn";
     static final String ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY =
             "gollek.safetensor.enable_metal_fused_ffn_prefill";
-    static final String GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY =
-            "gollek.safetensor.gemma4_fused_ffn_prefill_min_rows";
-    private static final int DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS = 2;
+    static final String NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY =
+            "gollek.safetensor.native_bf16_fused_ffn_prefill_min_rows";
+    private static final int DEFAULT_NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS = 2;
     static final String ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY =
             "gollek.safetensor.enable_metal_matvec_ffn_prefill_rows";
     static final String PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY =
@@ -59,14 +59,14 @@ record DirectForwardFfnFastPathOptions(
 
     static DirectForwardFfnFastPathOptions fromSystemProperties() {
         return new DirectForwardFfnFastPathOptions(
-                parseOptionalBoolean(System.getProperty(ALLOW_GEMMA4_FUSED_HALF_FFN_PROPERTY)),
-                Boolean.getBoolean(DISABLE_GEMMA4_FUSED_HALF_FFN_PROPERTY),
+                parseOptionalBoolean(System.getProperty(ALLOW_NATIVE_BF16_FUSED_HALF_FFN_PROPERTY)),
+                Boolean.getBoolean(DISABLE_NATIVE_BF16_FUSED_HALF_FFN_PROPERTY),
                 Boolean.getBoolean(DISABLE_METAL_FUSED_FFN_PROPERTY),
-                Boolean.TRUE.equals(parseOptionalBoolean(System.getProperty(ENABLE_QWEN_METAL_FUSED_FFN_PROPERTY))),
+                Boolean.TRUE.equals(parseOptionalBoolean(System.getProperty(ENABLE_SILU_GATED_FUSED_FFN_PROPERTY))),
                 Boolean.getBoolean(ENABLE_METAL_GEGLU_FUSED_FFN_PROPERTY),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_FUSED_FFN_PREFILL_PROPERTY)),
-                Integer.getInteger(GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY,
-                        DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS),
+                Integer.getInteger(NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS_PROPERTY,
+                        DEFAULT_NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS),
                 parseOptionalBoolean(System.getProperty(ENABLE_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY)),
                 parseOptionalBoolean(System.getProperty(PREFER_METAL_MATVEC_FFN_PREFILL_ROWS_PROPERTY)),
                 Integer.getInteger(METAL_MATVEC_FFN_PREFILL_MAX_ROWS_PROPERTY,
@@ -81,19 +81,19 @@ record DirectForwardFfnFastPathOptions(
     static DirectForwardFfnFastPathOptions defaults() {
         return new DirectForwardFfnFastPathOptions(
                 null, false, false, false, false, null,
-                DEFAULT_GEMMA4_FUSED_FFN_PREFILL_MIN_ROWS, null, null,
+                DEFAULT_NATIVE_BF16_FUSED_FFN_PREFILL_MIN_ROWS, null, null,
                 DEFAULT_METAL_MATVEC_FFN_PREFILL_MAX_ROWS, null, null, null, false, false);
     }
 
-    DirectForwardFfnFastPathOptions withGemma4FusedHalfFfn(Boolean allow, boolean disable) {
+    DirectForwardFfnFastPathOptions withNativeBf16FusedHalfFfn(Boolean allow, boolean disable) {
         return new DirectForwardFfnFastPathOptions(
                 allow,
                 disable,
                 disableMetalFusedFfn,
-                enableQwenMetalFusedFfn,
+                enableSiluGatedFusedFfn,
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
-                gemma4FusedFfnPrefillMinRows,
+                nativeBf16FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
                 preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
@@ -105,15 +105,15 @@ record DirectForwardFfnFastPathOptions(
     }
 
     DirectForwardFfnFastPathOptions withMetalFusedFfn(
-            boolean disabled, boolean qwenEnabled, boolean gegluEnabled) {
+            boolean disabled, boolean siluGatedEnabled, boolean gegluEnabled) {
         return new DirectForwardFfnFastPathOptions(
-                gemma4FusedHalfFfnExplicit,
-                disableGemma4FusedHalfFfn,
+                nativeBf16FusedHalfFfnExplicit,
+                disableNativeBf16FusedHalfFfn,
                 disabled,
-                qwenEnabled,
+                siluGatedEnabled,
                 gegluEnabled,
                 enableMetalFusedFfnPrefill,
-                gemma4FusedFfnPrefillMinRows,
+                nativeBf16FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
                 preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
@@ -126,10 +126,10 @@ record DirectForwardFfnFastPathOptions(
 
     DirectForwardFfnFastPathOptions withMetalFusedFfnPrefill(Boolean enabled, int minRows) {
         return new DirectForwardFfnFastPathOptions(
-                gemma4FusedHalfFfnExplicit,
-                disableGemma4FusedHalfFfn,
+                nativeBf16FusedHalfFfnExplicit,
+                disableNativeBf16FusedHalfFfn,
                 disableMetalFusedFfn,
-                enableQwenMetalFusedFfn,
+                enableSiluGatedFusedFfn,
                 enableMetalGegluFusedFfn,
                 enabled,
                 minRows,
@@ -150,13 +150,13 @@ record DirectForwardFfnFastPathOptions(
     DirectForwardFfnFastPathOptions withMetalMatvecFfnPrefillRows(
             Boolean enabled, int maxRows, Boolean preferRows) {
         return new DirectForwardFfnFastPathOptions(
-                gemma4FusedHalfFfnExplicit,
-                disableGemma4FusedHalfFfn,
+                nativeBf16FusedHalfFfnExplicit,
+                disableNativeBf16FusedHalfFfn,
                 disableMetalFusedFfn,
-                enableQwenMetalFusedFfn,
+                enableSiluGatedFusedFfn,
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
-                gemma4FusedFfnPrefillMinRows,
+                nativeBf16FusedFfnPrefillMinRows,
                 enabled,
                 preferRows,
                 maxRows,
@@ -170,13 +170,13 @@ record DirectForwardFfnFastPathOptions(
     DirectForwardFfnFastPathOptions withMetalMatvecFfn(
             Boolean gegluEnabled, Boolean swigluEnabled, Boolean gateUpEnabled, boolean disabled) {
         return new DirectForwardFfnFastPathOptions(
-                gemma4FusedHalfFfnExplicit,
-                disableGemma4FusedHalfFfn,
+                nativeBf16FusedHalfFfnExplicit,
+                disableNativeBf16FusedHalfFfn,
                 disableMetalFusedFfn,
-                enableQwenMetalFusedFfn,
+                enableSiluGatedFusedFfn,
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
-                gemma4FusedFfnPrefillMinRows,
+                nativeBf16FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
                 preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,
@@ -189,13 +189,13 @@ record DirectForwardFfnFastPathOptions(
 
     DirectForwardFfnFastPathOptions withValidateMetalMatvecFfn(boolean validate) {
         return new DirectForwardFfnFastPathOptions(
-                gemma4FusedHalfFfnExplicit,
-                disableGemma4FusedHalfFfn,
+                nativeBf16FusedHalfFfnExplicit,
+                disableNativeBf16FusedHalfFfn,
                 disableMetalFusedFfn,
-                enableQwenMetalFusedFfn,
+                enableSiluGatedFusedFfn,
                 enableMetalGegluFusedFfn,
                 enableMetalFusedFfnPrefill,
-                gemma4FusedFfnPrefillMinRows,
+                nativeBf16FusedFfnPrefillMinRows,
                 enableMetalMatvecFfnPrefillRows,
                 preferMetalMatvecFfnPrefillRows,
                 metalMatvecFfnPrefillMaxRows,

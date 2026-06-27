@@ -54,8 +54,8 @@ final class DirectForwardElementwisePolicy {
         return ROUTING.shouldApplyLayerScalar(traits);
     }
 
-    static boolean isGemma4FfnPolicyTarget(ModelConfigTraits traits) {
-        return DirectForwardElementwiseRoutingPolicy.isGemma4FfnPolicyTarget(traits);
+    static boolean isNativeBf16FfnWithPerLayerInputTarget(ModelConfigTraits traits) {
+        return DirectForwardElementwiseRoutingPolicy.isNativeBf16FfnWithPerLayerInputTarget(traits);
     }
 
 }

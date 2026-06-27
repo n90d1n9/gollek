@@ -95,11 +95,9 @@ final class DirectForwardOutputProjection {
         long tLogits0 = System.nanoTime();
         AccelTensor logits = linear(context, decodeLogitsPhase, input, lmHeadW, null, "logits", outputBuffer);
         
-        System.out.println("[DEBUG] final_logit_softcapping configured: " + context.config().getFinalLogitSoftcapping());
         if (context.config().getFinalLogitSoftcapping() != null) {
             float softcap = context.config().getFinalLogitSoftcapping().floatValue();
             if (softcap > 0.0f) {
-                System.out.println("[DEBUG] applying final softcap: " + softcap);
                 applyFinalSoftcap(logits, softcap);
             }
         }
@@ -110,14 +108,10 @@ final class DirectForwardOutputProjection {
 
     private static AccelTensor applyFinalSoftcap(AccelTensor logits, float softcap) {
         float[] floats = logits.toFloatArray();
-        System.out.printf("[DEBUG] logits before softcap: [%.4f, %.4f, %.4f, %.4f, %.4f]\n", floats[0], floats[1], floats[2], floats[3], floats[4]);
         for (int i = 0; i < floats.length; i++) {
             floats[i] = (float) (Math.tanh(floats[i] / softcap) * softcap);
         }
-        System.out.printf("[DEBUG] logits after softcap: [%.4f, %.4f, %.4f, %.4f, %.4f]\n", floats[0], floats[1], floats[2], floats[3], floats[4]);
         MemorySegment.copy(floats, 0, logits.dataPtr(), ValueLayout.JAVA_FLOAT, 0L, floats.length);
-        float test = logits.dataPtr().getAtIndex(ValueLayout.JAVA_FLOAT, 0);
-        System.out.printf("[DEBUG] logits readback: %.4f\n", test);
         return logits;
     }
 

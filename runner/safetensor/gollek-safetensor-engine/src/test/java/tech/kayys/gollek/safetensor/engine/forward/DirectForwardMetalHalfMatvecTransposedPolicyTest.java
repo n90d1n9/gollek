@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DirectForwardMetalHalfMatvecTransposedPolicyTest {
 
     @Test
-    void defaultsToGemma4LogitsOnly() {
+    void defaultsToNativeBf16LogitsOnly() {
         DirectForwardMetalHalfMatvecTransposedOptions options =
                 DirectForwardMetalHalfMatvecTransposedOptions.defaults()
                         .withTransposedHalfMatvec(null, false, false, 4);

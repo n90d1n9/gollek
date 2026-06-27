@@ -36,8 +36,8 @@ record DirectForwardMetalHalfMatvecPairPolicy(
         if (options.enableMetalHalfLinearPair() != null) {
             return options.enableMetalHalfLinearPair();
         }
-        if (traits.gemma4Text() || traits.gemma4StylePerLayerInputs()) {
-            return multiRowLinearInput || !allowGemma4FusedHalfFfn;
+        if (traits.nativeBf16Matvec() || traits.perLayerInputEmbedding()) {
+            return multiRowLinearInput || !DirectForwardFfnFastPathPolicy.isNativeBf16FusedHalfFfnAllowed();
         }
         return true;
     }

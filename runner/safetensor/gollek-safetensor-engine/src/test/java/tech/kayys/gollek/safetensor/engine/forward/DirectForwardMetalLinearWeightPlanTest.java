@@ -36,7 +36,7 @@ class DirectForwardMetalLinearWeightPlanTest {
     }
 
     @Test
-    void gemma4Bf16PairPlanKeepsNativeBf16Weights() {
+    void nativeBf16PairPlanKeepsNativeBf16Weights() {
         AccelTensor first = bf16(2, 3);
         AccelTensor second = bf16(2, 3);
 

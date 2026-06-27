@@ -8,7 +8,7 @@ dependencies {
     implementation(project(":spi:gollek-spi-inference"))
     implementation(project(":core:gollek-error-code"))
     implementation(project(":spi:gollek-spi"))
-    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
+    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0")
     implementation("io.quarkus:quarkus-arc")
     implementation("io.quarkus:quarkus-vertx")
     implementation("io.quarkus:quarkus-mutiny")
@@ -33,6 +33,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers:1.19.7")
     testImplementation("org.testcontainers:junit-jupiter:1.19.7")
     testImplementation("io.quarkus:quarkus-junit5")
+    testImplementation("io.quarkus:quarkus-vault")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

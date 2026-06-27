@@ -51,6 +51,8 @@ subprojects {
     val junitJupiterVersion = "5.10.2"
     val junitPlatformVersion = "1.10.2"
     val mockitoJupiterVersion = "5.14.2"
+    val restAssuredVersion = "5.3.2"
+    val awaitilityVersion = "4.2.0"
 
     java {
         toolchain {
@@ -221,6 +223,24 @@ subprojects {
                 && requested.version.isNullOrBlank()) {
                 useVersion(mockitoJupiterVersion)
                 because("Align Mockito JUnit integration versions across mixed legacy Gradle modules")
+            }
+            if (requested.group == "io.rest-assured"
+                && requested.name == "rest-assured"
+                && requested.version.isNullOrBlank()) {
+                useVersion(restAssuredVersion)
+                because("Align REST Assured versions for test dependencies")
+            }
+            if (requested.group == "org.awaitility"
+                && requested.name == "awaitility"
+                && requested.version.isNullOrBlank()) {
+                useVersion(awaitilityVersion)
+                because("Align Awaitility versions for test dependencies")
+            }
+            if (requested.group == "org.mockito"
+                && requested.name == "mockito-core"
+                && requested.version.isNullOrBlank()) {
+                useVersion(mockitoJupiterVersion)
+                because("Align Mockito core versions across mixed legacy Gradle modules")
             }
         }
     }

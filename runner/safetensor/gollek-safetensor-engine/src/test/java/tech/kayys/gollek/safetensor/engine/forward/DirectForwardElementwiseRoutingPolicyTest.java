@@ -29,7 +29,7 @@ class DirectForwardElementwiseRoutingPolicyTest {
     }
 
     @Test
-    void elementwiseMinSeqOverrideAppliesToGenericAndGemma4() {
+    void elementwiseMinSeqOverrideAppliesToGenericAndNativeBf16() {
         DirectForwardElementwiseRoutingPolicy policy = policy(
                 DirectForwardElementwiseOptions.defaults().withMetalElementwise(false, false, 4));
 
@@ -74,7 +74,7 @@ class DirectForwardElementwiseRoutingPolicyTest {
     }
 
     @Test
-    void postFfnNormDefaultsToGemma4FamilyAndHonorsOverrides() {
+    void postFfnNormDefaultsToNativeBf16FamilyAndHonorsOverrides() {
         DirectForwardElementwiseOptions options = DirectForwardElementwiseOptions.defaults();
         DirectForwardElementwiseRoutingPolicy policy = policy(options);
 
@@ -86,7 +86,7 @@ class DirectForwardElementwiseRoutingPolicyTest {
     }
 
     @Test
-    void perLayerInputsRequireHiddenSizeAndGemma4DisableOnlyAffectsGemma4Text() {
+    void perLayerInputsRequireHiddenSizeAndNativeBf16DisableOnlyAffectsNativeBf16Text() {
         DirectForwardElementwiseRoutingPolicy policy = policy(
                 DirectForwardElementwiseOptions.defaults().withPerLayerInputDisabled(true));
 
@@ -97,7 +97,7 @@ class DirectForwardElementwiseRoutingPolicyTest {
     }
 
     @Test
-    void layerScalarDisableOnlyAffectsGemma4Text() {
+    void layerScalarDisableOnlyAffectsNativeBf16Text() {
         DirectForwardElementwiseRoutingPolicy policy = policy(
                 DirectForwardElementwiseOptions.defaults().withLayerScalar(true, false, 64));
 

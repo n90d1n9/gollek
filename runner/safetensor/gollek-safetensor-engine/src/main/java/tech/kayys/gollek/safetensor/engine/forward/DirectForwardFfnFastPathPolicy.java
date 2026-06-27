@@ -22,20 +22,20 @@ final class DirectForwardFfnFastPathPolicy {
         return ROUTING.shouldUseMetalGegluFusedFfn(traits);
     }
 
-    static boolean shouldUseQwenMetalFusedFfn() {
-        return OPTIONS.enableQwenMetalFusedFfn();
-    }
-
     static boolean shouldTryLocalFusedHalfFfn(ModelConfigTraits traits) {
         return ROUTING.shouldTryLocalFusedHalfFfn(traits);
     }
 
-    static boolean allowGemma4FusedHalfFfn() {
-        return ROUTING.isGemma4FusedHalfFfnAllowed();
+    static boolean shouldUseSiluGatedFusedFfn() {
+        return OPTIONS.enableSiluGatedFusedFfn();
     }
 
-    static boolean allowGemma4FusedHalfFfn(long rows, ModelConfigTraits traits) {
-        return ROUTING.allowGemma4FusedHalfFfn(rows, traits);
+    static boolean isNativeBf16FusedHalfFfnAllowed() {
+        return ROUTING.isNativeBf16FusedHalfFfnAllowed();
+    }
+
+    static boolean allowNativeBf16FusedHalfFfn(long rows, ModelConfigTraits traits) {
+        return ROUTING.allowNativeBf16FusedHalfFfn(rows, traits);
     }
 
     static boolean shouldUseMetalFusedFfnPrefill(ModelConfigTraits traits) {

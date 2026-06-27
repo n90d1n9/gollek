@@ -11,11 +11,11 @@ import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 
 record DirectForwardMetalLinearRoutingPolicy(
         DirectForwardMetalLinearOptions options,
-        DirectForwardGemma4Bf16LinearPolicy gemma4Bf16Policy) {
+        DirectForwardNativeBf16LinearPolicy nativeBf16Policy) {
 
     DirectForwardMetalLinearRoutingPolicy {
         options = Objects.requireNonNull(options, "options");
-        gemma4Bf16Policy = Objects.requireNonNull(gemma4Bf16Policy, "gemma4Bf16Policy");
+        nativeBf16Policy = Objects.requireNonNull(nativeBf16Policy, "nativeBf16Policy");
     }
 
     static DirectForwardMetalLinearRoutingPolicy from(DirectForwardMetalLinearOptions options) {
@@ -23,7 +23,7 @@ record DirectForwardMetalLinearRoutingPolicy(
                 options == null ? DirectForwardMetalLinearOptions.defaults() : options;
         return new DirectForwardMetalLinearRoutingPolicy(
                 resolved,
-                DirectForwardGemma4Bf16LinearPolicy.from(resolved.gemma4Bf16Options()));
+                DirectForwardNativeBf16LinearPolicy.from(resolved.nativeBf16Options()));
     }
 
     boolean experimentalMetalLinearEnabled() {
@@ -31,8 +31,8 @@ record DirectForwardMetalLinearRoutingPolicy(
     }
 
     boolean allowMetalBf16Linear(ModelConfigTraits traits) {
-        if (traits.gemma4Text()) {
-            return gemma4Bf16Policy.allowMetalBf16Linear(traits);
+        if (traits.nativeBf16Matvec()) {
+            return nativeBf16Policy.allowMetalBf16Linear(traits);
         }
         return allowGenericMetalBf16Linear();
     }
@@ -45,7 +45,7 @@ record DirectForwardMetalLinearRoutingPolicy(
                 weight,
                 traits,
                 profileKey,
-                allowGemma4Bf16ToF16Linear(traits, profileKey));
+                allowNativeBf16ToF16Conversion(traits, profileKey));
     }
 
     boolean shouldUseNativeMetalBf16Linear(
@@ -75,9 +75,9 @@ record DirectForwardMetalLinearRoutingPolicy(
             return false;
         }
         AccelTensor.QuantType quantType = weight.quantType();
-        if (quantType == AccelTensor.QuantType.BF16 && traits.gemma4Text()
+        if (quantType == AccelTensor.QuantType.BF16 && traits.nativeBf16Matvec()
                 && !shouldUseNativeMetalBf16Linear(weight, traits, profileKey)
-                && !allowGemma4Bf16ToF16Linear(traits, profileKey)) {
+                && !allowNativeBf16ToF16Conversion(traits, profileKey)) {
             return false;
         }
         if (quantType != AccelTensor.QuantType.F16
@@ -107,24 +107,24 @@ record DirectForwardMetalLinearRoutingPolicy(
             return false;
         }
         AccelTensor.QuantType quantType = weight.quantType();
-        if (quantType == AccelTensor.QuantType.BF16 && traits.gemma4Text()) {
+        if (quantType == AccelTensor.QuantType.BF16 && traits.nativeBf16Matvec()) {
             return shouldUseNativeMetalBf16Linear(weight, traits, profileKey)
-                    || allowGemma4Bf16ToF16Linear(traits, profileKey);
+                    || allowNativeBf16ToF16Conversion(traits, profileKey);
         }
         return quantType == AccelTensor.QuantType.F16
                 || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits));
     }
 
-    boolean allowGemma4Bf16ToF16Linear(ModelConfigTraits traits, String profileKey) {
-        return gemma4Bf16Policy.allowBf16ToF16Linear(traits, profileKey);
+    boolean allowNativeBf16ToF16Conversion(ModelConfigTraits traits, String profileKey) {
+        return nativeBf16Policy.allowBf16ToF16Linear(traits, profileKey);
     }
 
-    boolean allowGemma4Bf16ToF16LinearForRows(
+    boolean allowNativeBf16ToF16ConversionForRows(
             long rows,
             ModelConfigTraits traits,
             String profileKey,
             boolean decodeLogitsPhase) {
-        return gemma4Bf16Policy.allowBf16ToF16LinearForRows(rows, traits, profileKey, decodeLogitsPhase);
+        return nativeBf16Policy.allowBf16ToF16LinearForRows(rows, traits, profileKey, decodeLogitsPhase);
     }
 
     private boolean allowGenericMetalBf16Linear() {
@@ -141,11 +141,11 @@ record DirectForwardMetalLinearRoutingPolicy(
             ModelConfigTraits traits,
             String profileKey,
             boolean allowBf16ToF16) {
-        if (traits.gemma4Text()) {
+        if (traits.nativeBf16Matvec()) {
             if (allowBf16ToF16) {
                 return false;
             }
-            return gemma4Bf16Policy.preferNativeMetalBf16Linear(traits);
+            return nativeBf16Policy.preferNativeMetalBf16Linear(traits);
         }
         return options.preferNativeMetalBf16Linear();
     }

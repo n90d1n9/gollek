@@ -13,14 +13,36 @@ println("   - Inference Enabled: $enableInference")
 
 dependencies {
     implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
-    implementation(project(":core:gollek-ir"))
-    implementation(project(":spi:gollek-spi"))
-    implementation(project(":spi:gollek-spi-model"))
+    // Optional intra-build project dependencies — only add if those projects are present
+    val gollekIr = findProject(":core:gollek-ir")
+    if (gollekIr != null) {
+        add("implementation", gollekIr)
+    } else {
+        println("   [Warning] core:gollek-ir not present; skipping project dependency")
+    }
+    val spiGollek = findProject(":spi:gollek-spi")
+    if (spiGollek != null) {
+        add("implementation", spiGollek)
+    } else {
+        println("   [Warning] spi:gollek-spi not present; skipping project dependency")
+    }
+    val spiModel = findProject(":spi:gollek-spi-model")
+    if (spiModel != null) {
+        add("implementation", spiModel)
+    } else {
+        println("   [Warning] spi:gollek-spi-model not present; skipping project dependency")
+    }
     // Depend on published aljabr core aggregator for shared math/tensor/tokenizer foundations
     implementation("tech.kayys.aljabr:aljabr-core:0.1.0-SNAPSHOT")
     
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.2")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 // Dynamically include/exclude packages based on feature flags

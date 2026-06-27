@@ -4,7 +4,7 @@ import tech.kayys.gollek.gguf.core.GgmlType;
 import tech.kayys.gollek.gguf.core.GgufMetaType;
 import tech.kayys.gollek.gguf.core.GgufMetaValue;
 import tech.kayys.gollek.gguf.core.GgufModel;
-import tech.kayys.aljabr.ml.autograd.GradTensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * GGUF v3 writer for GradTensor-backed training models.
+ * GGUF v3 writer for Tensor-backed training models.
  */
 public final class GGUFWriter {
 
@@ -45,14 +45,14 @@ public final class GGUFWriter {
     private GGUFWriter() {
     }
 
-    public static void save(Path path, Map<String, GradTensor> tensors, Map<String, GgufMetaValue> metadata)
+    public static void save(Path path, Map<String, Tensor> tensors, Map<String, GgufMetaValue> metadata)
             throws IOException {
         save(path, tensors, metadata, TensorEncoding.F32);
     }
 
     public static void save(
             Path path,
-            Map<String, GradTensor> tensors,
+            Map<String, Tensor> tensors,
             Map<String, GgufMetaValue> metadata,
             TensorEncoding encoding) throws IOException {
         Objects.requireNonNull(path, "path");
@@ -83,15 +83,15 @@ public final class GGUFWriter {
     }
 
     private static List<EncodedTensor> encodeTensors(
-            Map<String, GradTensor> tensors,
+            Map<String, Tensor> tensors,
             TensorEncoding encoding,
             int alignment) throws IOException {
         List<EncodedTensor> encoded = new ArrayList<>(tensors.size());
         long offset = 0;
-        for (Map.Entry<String, GradTensor> entry : tensors.entrySet()) {
+        for (Map.Entry<String, Tensor> entry : tensors.entrySet()) {
             String name = requireTensorName(entry.getKey());
-            GradTensor tensor = Objects.requireNonNull(entry.getValue(), "tensor " + name);
-            long[] shape = ggufShape(tensor.shape());
+            Tensor tensor = Objects.requireNonNull(entry.getValue(), "tensor " + name);
+            long[] shape = ggufShape(tensor.shape().dims());
             GgmlType type = tensorType(tensor, encoding);
             byte[] data = encodeTensor(tensor, type);
             encoded.add(new EncodedTensor(name, shape, type, offset, data));
@@ -123,7 +123,7 @@ public final class GGUFWriter {
         return copy;
     }
 
-    private static GgmlType tensorType(GradTensor tensor, TensorEncoding encoding) {
+    private static GgmlType tensorType(Tensor tensor, TensorEncoding encoding) {
         long n = tensor.numel();
         return switch (encoding) {
             case F32 -> GgmlType.F32;
@@ -133,12 +133,12 @@ public final class GGUFWriter {
         };
     }
 
-    private static byte[] encodeTensor(GradTensor tensor, GgmlType type) throws IOException {
+    private static byte[] encodeTensor(Tensor tensor, GgmlType type) throws IOException {
         return switch (type) {
-            case F32 -> encodeF32(tensor.data());
-            case F16 -> encodeF16(tensor.data());
-            case Q8_0 -> encodeQ8_0(tensor.data());
-            case Q4_0 -> encodeQ4_0(tensor.data());
+            case F32 -> encodeF32(tensor.toFloatArray());
+            case F16 -> encodeF16(tensor.toFloatArray());
+            case Q8_0 -> encodeQ8_0(tensor.toFloatArray());
+            case Q4_0 -> encodeQ4_0(tensor.toFloatArray());
             default -> throw new IllegalArgumentException("Unsupported GGUF export tensor type: " + type);
         };
     }

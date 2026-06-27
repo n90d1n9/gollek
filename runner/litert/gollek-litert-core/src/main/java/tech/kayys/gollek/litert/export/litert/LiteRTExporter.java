@@ -1,7 +1,7 @@
 package tech.kayys.gollek.ml.export.litert;
 
-import tech.kayys.gollek.ml.autograd.GradTensor;
-import tech.kayys.aljabr.ml.nn.NNModule;
+import tech.kayys.aljabr.core.tensor.Tensor;
+import tech.kayys.aljabr.core.nn.Module;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Exports a Gollek {@link NNModule} to a TensorFlow Lite FlatBuffer ({@code .tflite})
+ * Exports a Gollek {@link Module} to a TensorFlow Lite FlatBuffer ({@code .tflite})
  * loadable by the LiteRT runtime.
  *
  * <p>Layer → TFLite builtin op mapping:
@@ -49,15 +49,15 @@ public final class LiteRTExporter {
     private static final int OP_CUSTOM          = 32;
     private static final int TENSOR_FLOAT32     = 0;
 
-    private final NNModule model;
+    private final Module model;
     private final long[]   inputShape;
 
-    private LiteRTExporter(NNModule model, long[] inputShape) {
+    private LiteRTExporter(Module model, long[] inputShape) {
         this.model      = model;
         this.inputShape = inputShape;
     }
 
-    public static LiteRTExporter fromModel(NNModule model, long[] inputShape) {
+    public static LiteRTExporter fromModel(Module model, long[] inputShape) {
         return new LiteRTExporter(model, inputShape);
     }
 
@@ -79,34 +79,34 @@ public final class LiteRTExporter {
         int prevOut = 0;
         int nextTensor = 1;
 
-        Map<String, GradTensor> params = new LinkedHashMap<>();
-        model.namedParameters().forEach((k, v) -> params.put(k, v.data()));
+        Map<String, Tensor> params = new LinkedHashMap<>();
+        model.namedParameters().forEach((k, v) -> params.put(k, v));
 
-        for (var entry : model.modules().entrySet()) {
+        for (var entry : model.children().entrySet()) {
             String name = entry.getKey();
             if (name.isEmpty() || name.contains(".")) continue; // direct children only
 
             String type = entry.getValue().getClass().getSimpleName();
             switch (type) {
                 case "Linear" -> {
-                    GradTensor w = params.get(name + ".weight");
-                    GradTensor b = params.get(name + ".bias");
+                    Tensor w = params.get(name + ".weight");
+                    Tensor b = params.get(name + ".bias");
 
-                    buffers.add(w != null ? w.data() : new float[0]);
+                    buffers.add(w != null ? w.toFloatArray() : new float[0]);
                     int wIdx = nextTensor++;
                     tensors.add(new TFLiteTensor(name + ".weight",
-                            w != null ? w.shape() : new long[]{1}, buffers.size() - 1));
+                            w != null ? w.shape().dims() : new long[]{1}, buffers.size() - 1));
 
                     List<Integer> inputs = new ArrayList<>(List.of(prevOut, wIdx));
                     if (b != null) {
-                        buffers.add(b.data());
+                        buffers.add(b.toFloatArray());
                         int bIdx = nextTensor++;
                         tensors.add(new TFLiteTensor(name + ".bias",
-                                new long[]{b.data().length}, buffers.size() - 1));
+                                new long[]{b.numel()}, buffers.size() - 1));
                         inputs.add(bIdx);
                     }
 
-                    long outCols = w != null ? w.shape()[0] : 1;
+                    long outCols = w != null ? w.shape().dim(0) : 1;
                     int outIdx = nextTensor++;
                     tensors.add(new TFLiteTensor(name + "_out",
                             new long[]{inputShape[0], outCols}, 0));

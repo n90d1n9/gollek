@@ -357,7 +357,10 @@ public class OnnxRunnerSession implements RunnerSession {
                     null,
                     null,
                     Instant.now(),
-                    null
+                    null,
+                                    null,
+                                    null,
+                                    null
                 ));
             }
             
@@ -376,7 +379,10 @@ public class OnnxRunnerSession implements RunnerSession {
                     System.currentTimeMillis() - t0
                 ),
                 Instant.now(),
-                null
+                null,
+                                    null,
+                                    null,
+                                    null
             ));
             emitter.complete();
         } catch (Exception e) {

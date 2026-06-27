@@ -1,6 +1,6 @@
 package tech.kayys.gollek.ml.gguf;
 
-import tech.kayys.aljabr.ml.autograd.GradTensor;
+import tech.kayys.aljabr.core.tensor.Tensor;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -19,7 +19,7 @@ public final class GgufWriter {
 
     private static final int MAGIC = 0x46554747; // "GGUF" in LE
 
-    public static void save(Path path, Map<String, GradTensor> tensors, Map<String, GgufMetaValue> metadata) throws IOException {
+    public static void save(Path path, Map<String, Tensor> tensors, Map<String, GgufMetaValue> metadata) throws IOException {
         try (FileOutputStream fos = new FileOutputStream(path.toFile());
              FileChannel channel = fos.getChannel()) {
 
@@ -40,13 +40,13 @@ public final class GgufWriter {
 
             // 3. Tensor infos
             long currentOffset = 0;
-            for (Map.Entry<String, GradTensor> entry : tensors.entrySet()) {
+            for (Map.Entry<String, Tensor> entry : tensors.entrySet()) {
                 String name = entry.getKey();
-                GradTensor tensor = entry.getValue();
+                Tensor tensor = entry.getValue();
                 
                 writeString(channel, name);
                 
-                long[] shape = tensor.shape();
+                long[] shape = tensor.shape().dims();
                 writeInt(channel, shape.length);
                 for (long d : shape) writeLong(channel, d);
                 
@@ -68,8 +68,8 @@ public final class GgufWriter {
             }
 
             // 5. Data
-            for (GradTensor tensor : tensors.values()) {
-                float[] data = tensor.data();
+            for (Tensor tensor : tensors.values()) {
+                float[] data = tensor.toFloatArray();
                 ByteBuffer dataBuf = ByteBuffer.allocate(data.length * 4).order(ByteOrder.LITTLE_ENDIAN);
                 for (float f : data) dataBuf.putFloat(f);
                 dataBuf.flip();

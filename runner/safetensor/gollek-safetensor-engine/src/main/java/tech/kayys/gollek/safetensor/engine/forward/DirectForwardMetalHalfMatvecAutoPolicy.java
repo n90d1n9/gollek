@@ -39,10 +39,10 @@ record DirectForwardMetalHalfMatvecAutoPolicy(
         if (traits.modelType().isBlank() || config == null) {
             return false;
         }
-        if (traits.gemma4Text() || traits.gemma4StylePerLayerInputs()) {
+        if (traits.nativeBf16Matvec() || traits.perLayerInputEmbedding()) {
             return true;
         }
-        if (traits.qwenText()) {
+        if (traits.siluGated()) {
             return config.getNumHiddenLayers() >= 20
                     && config.getHiddenSize() <= 2048
                     && config.getIntermediateSize() >= 2048;

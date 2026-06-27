@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DirectForwardMetalHalfMatvecLogitsPolicyTest {
 
     @Test
-    void logitsMpsMatvecRequiresExplicitEnableAndRejectsGemma4() {
+    void logitsMpsMatvecRequiresExplicitEnableAndRejectsNativeBf16() {
         DirectForwardMetalHalfMatvecLogitsOptions options =
                 DirectForwardMetalHalfMatvecLogitsOptions.defaults().withLogitsMpsMatvec(true, false, 10, 4);
         DirectForwardMetalHalfMatvecLogitsPolicy policy =

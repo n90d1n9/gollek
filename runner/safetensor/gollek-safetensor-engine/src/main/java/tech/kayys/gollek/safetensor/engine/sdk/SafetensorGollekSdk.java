@@ -176,7 +176,10 @@ public class SafetensorGollekSdk implements GollekSdk {
                                     "stop",
                                     usage,
                                     java.time.Instant.now(),
-                                    response.getMetadata());
+                                    response.getMetadata(),
+                                    null,
+                                    null,
+                                    null);
                         }
                         return StreamingInferenceChunk.textDelta(requestId, idx, content);
                     });

@@ -39,6 +39,8 @@ import java.util.stream.Collectors;
  * <li>Plugin isolation via custom ClassLoaders</li>
  * </ul>
  */
+@jakarta.enterprise.context.ApplicationScoped
+@io.quarkus.arc.DefaultBean
 public class PluginManager {
 
     private static final Logger LOG = Logger.getLogger(PluginManager.class);

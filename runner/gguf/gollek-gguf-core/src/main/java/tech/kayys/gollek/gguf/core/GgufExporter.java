@@ -1,7 +1,7 @@
 package tech.kayys.gollek.gguf.core;
 
-import tech.kayys.aljabr.ml.autograd.GradTensor;
-import tech.kayys.aljabr.ml.nn.NNModule;
+import tech.kayys.aljabr.core.tensor.Tensor;
+import tech.kayys.aljabr.core.nn.Module;
 import tech.kayys.gollek.gguf.writer.GGUFWriter;
 
 import java.io.IOException;
@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Exports a Gollek {@link NNModule} to GGUF format for llama.cpp
+ * Exports a Gollek {@link Module} to GGUF format for llama.cpp
  *
  * <p>
  * Quantization is applied tensor-by-tensor before writing:
@@ -60,20 +60,20 @@ public final class GgufExporter {
             "general.parameter_count",
             "general.quantization_version");
 
-    private final NNModule model;
+    private final Module model;
     private final Map<String, Object> metadata;
     private Quantization quantization = Quantization.NONE;
 
-    private GgufExporter(NNModule model, Map<String, Object> metadata) {
+    private GgufExporter(Module model, Map<String, Object> metadata) {
         this.model = model;
         this.metadata = metadata != null ? metadata : Map.of();
     }
 
-    public static GgufExporter fromModel(NNModule model) {
+    public static GgufExporter fromModel(Module model) {
         return new GgufExporter(model, Map.of());
     }
 
-    public static GgufExporter fromModel(NNModule model, Map<String, Object> metadata) {
+    public static GgufExporter fromModel(Module model, Map<String, Object> metadata) {
         return new GgufExporter(model, metadata);
     }
 
@@ -88,7 +88,7 @@ public final class GgufExporter {
                     "NF4 GGUF export requires IQ4_NL tensor packing; use INT4 for Q4_0 GGUF export.");
         }
 
-        Map<String, GradTensor> stateDict = model.stateDict();
+        Map<String, Tensor> stateDict = model.namedParameters();
         Map<String, GgufMetaValue> ggufMeta = ggufMetadata();
         GGUFWriter.save(outputPath, stateDict, ggufMeta, quantization.tensorEncoding);
     }

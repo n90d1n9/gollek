@@ -34,73 +34,73 @@ class DirectForwardMetalLinearRoutingPolicyTest {
     }
 
     @Test
-    void gemma4Bf16DefaultsOnUnlessDisabledOrExplicitlyRejected() {
+    void nativeBf16DefaultsOnUnlessDisabledOrExplicitlyRejected() {
         ModelConfigTraits gemma4 = traits(true);
 
         assertTrue(policy(DirectForwardMetalLinearOptions.defaults()).allowMetalBf16Linear(gemma4));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16(null, true))
+                .withNativeBf16Bf16(null, true))
                 .allowMetalBf16Linear(gemma4));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16(false, false))
+                .withNativeBf16Bf16(false, false))
                 .allowMetalBf16Linear(gemma4));
     }
 
     @Test
-    void gemma4Bf16ToF16GlobalOverrideWinsBeforeProjectionSpecificDefaults() {
+    void nativeBf16ToF16GlobalOverrideWinsBeforeProjectionSpecificDefaults() {
         ModelConfigTraits gemma4 = traits(true);
 
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults())
-                .allowGemma4Bf16ToF16Linear(gemma4, "ffn_gate"));
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "ffn_gate"));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults())
-                .allowGemma4Bf16ToF16Linear(gemma4, "logits"));
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "logits"));
         assertTrue(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16(true, false))
-                .allowGemma4Bf16ToF16Linear(gemma4, "ffn_gate"));
+                .withNativeBf16Bf16ToF16(true, false))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "ffn_gate"));
         assertTrue(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16(true, false))
-                .allowGemma4Bf16ToF16Linear(gemma4, "logits"));
+                .withNativeBf16Bf16ToF16(true, false))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "logits"));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16(true, true))
-                .allowGemma4Bf16ToF16Linear(gemma4, "ffn_gate"));
+                .withNativeBf16Bf16ToF16(true, true))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "ffn_gate"));
     }
 
     @Test
-    void gemma4Bf16ToF16ProjectionSpecificOverridesStayScoped() {
+    void nativeBf16ToF16ProjectionSpecificOverridesStayScoped() {
         ModelConfigTraits gemma4 = traits(true);
 
         assertTrue(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16Ffn(true, false))
-                .allowGemma4Bf16ToF16Linear(gemma4, "ffn_down"));
+                .withNativeBf16Bf16ToF16Ffn(true, false))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "ffn_down"));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16Ffn(true, false))
-                .allowGemma4Bf16ToF16Linear(gemma4, "logits"));
+                .withNativeBf16Bf16ToF16Ffn(true, false))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "logits"));
         assertTrue(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16Logits(true, false))
-                .allowGemma4Bf16ToF16Linear(gemma4, "logits"));
+                .withNativeBf16Bf16ToF16Logits(true, false))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "logits"));
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16Logits(true, true))
-                .allowGemma4Bf16ToF16Linear(gemma4, "logits"));
+                .withNativeBf16Bf16ToF16Logits(true, true))
+                .allowNativeBf16Bf16ToF16Linear(gemma4, "logits"));
     }
 
     @Test
-    void gemma4Bf16ToF16RowsGateDecodeLogitsOnly() {
+    void nativeBf16ToF16RowsGateDecodeLogitsOnly() {
         ModelConfigTraits gemma4 = traits(true);
         DirectForwardMetalLinearRoutingPolicy policy = policy(
-                DirectForwardMetalLinearOptions.defaults().withGemma4Bf16ToF16Logits(true, false));
+                DirectForwardMetalLinearOptions.defaults().withNativeBf16Bf16ToF16Logits(true, false));
 
-        assertFalse(policy.allowGemma4Bf16ToF16LinearForRows(2, gemma4, "logits", true));
-        assertFalse(policy.allowGemma4Bf16ToF16LinearForRows(1, gemma4, "logits", false));
-        assertTrue(policy.allowGemma4Bf16ToF16LinearForRows(1, gemma4, "logits", true));
+        assertFalse(policy.allowNativeBf16Bf16ToF16LinearForRows(2, gemma4, "logits", true));
+        assertFalse(policy.allowNativeBf16Bf16ToF16LinearForRows(1, gemma4, "logits", false));
+        assertTrue(policy.allowNativeBf16Bf16ToF16LinearForRows(1, gemma4, "logits", true));
     }
 
     @Test
-    void nonGemma4NeverUsesGemma4Bf16ToF16Path() {
+    void nonNativeBf16NeverUsesNativeBf16Bf16ToF16Path() {
         ModelConfigTraits generic = traits(false);
 
         assertFalse(policy(DirectForwardMetalLinearOptions.defaults()
-                .withGemma4Bf16ToF16(true, false))
-                .allowGemma4Bf16ToF16Linear(generic, "ffn_gate"));
+                .withNativeBf16Bf16ToF16(true, false))
+                .allowNativeBf16Bf16ToF16Linear(generic, "ffn_gate"));
     }
 
     private static ModelConfigTraits traits(boolean gemma4Text) {

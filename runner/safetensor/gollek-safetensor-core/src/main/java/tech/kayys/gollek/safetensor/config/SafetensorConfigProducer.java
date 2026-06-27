@@ -23,7 +23,8 @@ public class SafetensorConfigProducer {
      * Produce ObjectMapper bean.
      */
     @Produces
-    @ApplicationScoped
+    @jakarta.inject.Named("safetensorObjectMapper")
+    @jakarta.inject.Singleton
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
     }

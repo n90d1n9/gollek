@@ -14,10 +14,10 @@ record DirectForwardMetalLinearOptions(
         boolean disableExperimentalMetalBf16Linear,
         Boolean experimentalMetalBf16Linear,
         boolean preferNativeMetalBf16Linear,
-        DirectForwardGemma4Bf16LinearOptions gemma4Bf16Options) {
+        DirectForwardNativeBf16LinearOptions nativeBf16Options) {
 
     DirectForwardMetalLinearOptions {
-        gemma4Bf16Options = Objects.requireNonNull(gemma4Bf16Options, "gemma4Bf16Options");
+        nativeBf16Options = Objects.requireNonNull(nativeBf16Options, "nativeBf16Options");
     }
 
     private static final String EXPERIMENTAL_METAL_LINEAR_PROPERTY =
@@ -37,12 +37,12 @@ record DirectForwardMetalLinearOptions(
                 Boolean.getBoolean(DISABLE_EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY),
                 parseOptionalBoolean(System.getProperty(EXPERIMENTAL_METAL_BF16_LINEAR_PROPERTY)),
                 Boolean.getBoolean(PREFER_NATIVE_METAL_BF16_LINEAR_PROPERTY),
-                DirectForwardGemma4Bf16LinearOptions.fromSystemProperties());
+                DirectForwardNativeBf16LinearOptions.fromSystemProperties());
     }
 
     static DirectForwardMetalLinearOptions defaults() {
         return new DirectForwardMetalLinearOptions(
-                true, false, null, false, DirectForwardGemma4Bf16LinearOptions.defaults());
+                true, false, null, false, DirectForwardNativeBf16LinearOptions.defaults());
     }
 
     DirectForwardMetalLinearOptions withExperimentalMetalLinear(boolean enabled) {
@@ -51,7 +51,7 @@ record DirectForwardMetalLinearOptions(
                 disableExperimentalMetalBf16Linear,
                 experimentalMetalBf16Linear,
                 preferNativeMetalBf16Linear,
-                gemma4Bf16Options);
+                nativeBf16Options);
     }
 
     DirectForwardMetalLinearOptions withGenericBf16(Boolean enable, boolean disable, boolean preferNative) {
@@ -60,43 +60,43 @@ record DirectForwardMetalLinearOptions(
                 disable,
                 enable,
                 preferNative,
-                gemma4Bf16Options);
+                nativeBf16Options);
     }
 
-    DirectForwardMetalLinearOptions withGemma4Bf16(Boolean enable, boolean disable) {
+    DirectForwardMetalLinearOptions withNativeBf16(Boolean enable, boolean disable) {
         return new DirectForwardMetalLinearOptions(
                 experimentalMetalLinearEnabled,
                 disableExperimentalMetalBf16Linear,
                 experimentalMetalBf16Linear,
                 preferNativeMetalBf16Linear,
-                gemma4Bf16Options.withMetalBf16(enable, disable));
+                nativeBf16Options.withMetalBf16(enable, disable));
     }
 
-    DirectForwardMetalLinearOptions withGemma4Bf16ToF16(Boolean enable, boolean disable) {
+    DirectForwardMetalLinearOptions withNativeBf16ToF16(Boolean enable, boolean disable) {
         return new DirectForwardMetalLinearOptions(
                 experimentalMetalLinearEnabled,
                 disableExperimentalMetalBf16Linear,
                 experimentalMetalBf16Linear,
                 preferNativeMetalBf16Linear,
-                gemma4Bf16Options.withBf16ToF16(enable, disable));
+                nativeBf16Options.withBf16ToF16(enable, disable));
     }
 
-    DirectForwardMetalLinearOptions withGemma4Bf16ToF16Ffn(Boolean enable, boolean disable) {
+    DirectForwardMetalLinearOptions withNativeBf16ToF16Ffn(Boolean enable, boolean disable) {
         return new DirectForwardMetalLinearOptions(
                 experimentalMetalLinearEnabled,
                 disableExperimentalMetalBf16Linear,
                 experimentalMetalBf16Linear,
                 preferNativeMetalBf16Linear,
-                gemma4Bf16Options.withBf16ToF16Ffn(enable, disable));
+                nativeBf16Options.withBf16ToF16Ffn(enable, disable));
     }
 
-    DirectForwardMetalLinearOptions withGemma4Bf16ToF16Logits(Boolean enable, boolean disable) {
+    DirectForwardMetalLinearOptions withNativeBf16ToF16Logits(Boolean enable, boolean disable) {
         return new DirectForwardMetalLinearOptions(
                 experimentalMetalLinearEnabled,
                 disableExperimentalMetalBf16Linear,
                 experimentalMetalBf16Linear,
                 preferNativeMetalBf16Linear,
-                gemma4Bf16Options.withBf16ToF16Logits(enable, disable));
+                nativeBf16Options.withBf16ToF16Logits(enable, disable));
     }
 
     private static boolean resolveExperimentalMetalLinearEnabled() {

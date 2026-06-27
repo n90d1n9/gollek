@@ -28,6 +28,7 @@ import java.nio.file.Paths;
  * Hardware capability detector
  */
 @ApplicationScoped
+@io.quarkus.arc.DefaultBean
 public class HardwareDetector {
 
     private static final Logger LOG = Logger.getLogger(HardwareDetector.class);

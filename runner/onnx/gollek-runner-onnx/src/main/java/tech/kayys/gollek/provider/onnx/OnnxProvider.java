@@ -458,7 +458,10 @@ public class OnnxProvider implements StreamingProvider {
                     response.getFinishReason() == InferenceResponse.FinishReason.STOP ? "stop" : "length",
                     null,
                     Instant.now(),
-                    response.getMetadata()));
+                    response.getMetadata(),
+                                    null,
+                                    null,
+                                    null));
             emitter.complete();
         } catch (Exception e) {
             emitter.fail(new RuntimeException(cleanErrorMessage(e), e));
@@ -527,7 +530,10 @@ public class OnnxProvider implements StreamingProvider {
                 null,
                 null,
                 Instant.now(),
-                metadata);
+                metadata,
+                                    null,
+                                    null,
+                                    null);
     }
 
     private StreamingInferenceChunk mossTtsPcmChunk(
@@ -563,7 +569,10 @@ public class OnnxProvider implements StreamingProvider {
                 null,
                 null,
                 Instant.now(),
-                metadata);
+                metadata,
+                                    null,
+                                    null,
+                                    null);
     }
 
     private void emitAudioChunks(
@@ -594,7 +603,10 @@ public class OnnxProvider implements StreamingProvider {
                     finalChunk ? "stop" : null,
                     null,
                     Instant.now(),
-                    chunkMetadata));
+                    chunkMetadata,
+                                    null,
+                                    null,
+                                    null));
         }
     }
 
@@ -1389,7 +1401,10 @@ public class OnnxProvider implements StreamingProvider {
                         ? new StreamingInferenceChunk.ChunkUsage(chunk.usage().inputTokens(), chunk.usage().outputTokens(), 0)
                         : null,
                 chunk.emittedAt(),
-                chunk.metadata());
+                chunk.metadata(),
+                                    null,
+                                    null,
+                                    null);
     }
 
     private ModalityType convertModality(tech.kayys.gollek.spi.model.ModalityType modality) {

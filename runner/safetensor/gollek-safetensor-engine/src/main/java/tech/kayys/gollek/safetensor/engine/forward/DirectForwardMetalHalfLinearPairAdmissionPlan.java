@@ -30,7 +30,7 @@ record DirectForwardMetalHalfLinearPairAdmissionPlan(
                 DirectForwardMetalHalfMatvecPolicy.shouldUseMetalHalfLinearPair(
                         traits,
                         isMultiRowLinearInput(input),
-                        DirectForwardFfnFastPathPolicy.allowGemma4FusedHalfFfn()));
+                        DirectForwardFfnFastPathPolicy.isNativeBf16FusedHalfFfnAllowed()));
     }
 
     static DirectForwardMetalHalfLinearPairAdmissionPlan from(

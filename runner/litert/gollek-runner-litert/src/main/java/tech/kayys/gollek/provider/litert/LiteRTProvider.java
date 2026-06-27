@@ -533,7 +533,10 @@ public class LiteRTProvider implements StreamingProvider {
                             null,
                             null,
                             Instant.now(),
-                            metadata));
+                            metadata,
+                                    null,
+                                    null,
+                                    null));
                 });
 
                 Map<String, Object> finalMetadata = new LinkedHashMap<>();
@@ -551,7 +554,10 @@ public class LiteRTProvider implements StreamingProvider {
                         "stop",
                         null,
                         Instant.now(),
-                        finalMetadata));
+                        finalMetadata,
+                                    null,
+                                    null,
+                                    null));
                 emitter.complete();
             } catch (Exception e) {
                 String userFacingMessage = userFacingLiteRtFailureMessage(e);

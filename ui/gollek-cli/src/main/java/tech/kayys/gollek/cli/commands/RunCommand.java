@@ -1493,91 +1493,187 @@ public class RunCommand implements Runnable {
                 java.util.concurrent.atomic.AtomicLong lastTokenTime = new java.util.concurrent.atomic.AtomicLong(0);
                 long streamStartTime = System.currentTimeMillis();
                 String streamFinalLocalPath = finalLocalPath;
+                java.util.concurrent.atomic.AtomicBoolean llamaFallbackAttempted = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-                sdk.streamCompletion(request)
-                        .subscribe().with(
-                                chunk -> {
-                                    if (chunk.metadata() != null && !chunk.metadata().isEmpty()) {
-                                        metricsRef.set(chunk.metadata());
+                // Helper to create a stream subscriber (used for primary and fallback)
+                java.util.function.Consumer<io.smallrye.mutiny.Multi<tech.kayys.gollek.spi.inference.StreamingInferenceChunk>> subscribeToStream = (multi) -> {
+                    multi.subscribe().with(
+                            chunk -> {
+                                if (chunk.metadata() != null && !chunk.metadata().isEmpty()) {
+                                    metricsRef.set(chunk.metadata());
+                                }
+
+                                if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                    if (chunk.imageDeltaBase64() != null) {
+                                        try {
+                                            byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
+                                            imageBuffer.write(decoded);
+                                        } catch (Exception imageDecodeFailure) {}
                                     }
+                                    return;
+                                }
 
-                                    if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
-                                        if (chunk.imageDeltaBase64() != null) {
-                                            try {
-                                                byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
-                                                imageBuffer.write(decoded);
-                                            } catch (Exception imageDecodeFailure) {}
-                                        }
-                                        return;
+                                if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.AUDIO) {
+                                    handleAudioChunk(chunk, audioOutput, liveAudioSink);
+                                    return;
+                                }
+
+                                String delta = chunk.getDelta();
+                                if (delta != null) {
+                                    boolean progressDelta = delta.startsWith("[") && delta.contains("]");
+                                    if (!progressDelta && !delta.isEmpty()) {
+                                        long now = System.currentTimeMillis();
+                                        firstTokenTime.compareAndSet(0, now);
+                                        lastTokenTime.set(now);
                                     }
-
-                                    if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.AUDIO) {
-                                        handleAudioChunk(chunk, audioOutput, liveAudioSink);
-                                        return;
-                                    }
-
-                                    String delta = chunk.getDelta();
-                                    if (delta != null) {
-                                        boolean progressDelta = delta.startsWith("[") && delta.contains("]");
-                                        if (!progressDelta && !delta.isEmpty()) {
-                                            long now = System.currentTimeMillis();
-                                            firstTokenTime.compareAndSet(0, now);
-                                            lastTokenTime.set(now);
-                                        }
-                                        if (progressDelta) {
-                                            if (!enableJsonSse) {
-                                                System.out.print("\r" + ChatUIRenderer.CYAN + delta + ChatUIRenderer.RESET + "  ");
-                                                System.out.flush();
-                                            }
-                                        } else if (enableJsonSse) {
-                                            printOpenAiSseDelta(request.getRequestId(), request.getModel(), delta);
-                                        } else {
-                                            System.out.print(delta);
+                                    if (progressDelta) {
+                                        if (!enableJsonSse) {
+                                            System.out.print("\r" + ChatUIRenderer.CYAN + delta + ChatUIRenderer.RESET + "  ");
                                             System.out.flush();
                                         }
-                                        tokenCount.incrementAndGet();
-                                    }
-                                },
-                                error -> {
-                                    liveAudioSink.close();
-                                    audioOutput.closeQuietly();
-                                    streamFailed.set(true);
-                                    uiRenderer.printError(error.getMessage(), false);
-                                    printProviderHintFromError(error);
-                                    latch.countDown();
-                                },
-                                () -> {
-                                    liveAudioSink.close();
-                                    long duration = observedStreamDurationMillis(
-                                            streamStartTime, System.currentTimeMillis(), lastTokenTime);
-                                    handleOutputs(imageBuffer, audioOutput, metricsRef.get());
-                                    double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
-                                    Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
-                                    Map<String, Object> streamMetrics = observedStreamMetrics(
-                                            effectiveExecutionRouteMetadata(metricsRef.get()),
-                                            tokenCount.get(),
-                                            duration,
-                                            ttftMs);
-                                    recordRouteBenchmarkProfile(
-                                            request.getModel(),
-                                            streamFinalLocalPath,
-                                            streamMetrics,
-                                            tokenCount.get(),
-                                            duration,
-                                            audioOutput.hasOutput());
-                                    if (enableJsonSse) {
-                                        printOpenAiSseFinal(request.getRequestId(), request.getModel());
+                                    } else if (enableJsonSse) {
+                                        printOpenAiSseDelta(request.getRequestId(), request.getModel(), delta);
                                     } else {
-                                        printCompletionStatsForOutput(
-                                                tokenCount.get(),
-                                                duration,
-                                                tps,
-                                                ttftMs,
-                                                streamMetrics,
-                                                audioOutput.hasOutput());
+                                        System.out.print(delta);
+                                        System.out.flush();
                                     }
-                                    latch.countDown();
-                                });
+                                    tokenCount.incrementAndGet();
+                                }
+                            },
+                            error -> {
+                                // Attempt fallback to llama.cpp for streaming if available and not yet tried
+                                try {
+                                    if (!llamaFallbackAttempted.get() && pluginChecker != null && pluginChecker.hasProvider("llamacpp")) {
+                                        llamaFallbackAttempted.set(true);
+                                        System.err.println("Warning: stream provider failed: " + (error == null ? "unknown" : error.getMessage()));
+                                        System.err.println("Attempting streaming fallback to provider 'llamacpp' (llama.cpp)...");
+                                        try { sdk.setPreferredProvider("llamacpp"); } catch (Throwable ignore) {}
+                                        // start fallback stream
+                                        try {
+                                            java.util.concurrent.atomic.AtomicBoolean fallbackStreamFailed = new java.util.concurrent.atomic.AtomicBoolean(false);
+                                            sdk.streamCompletion(request).subscribe().with(
+                                                    chunk -> {
+                                                        if (chunk.metadata() != null && !chunk.metadata().isEmpty()) {
+                                                            metricsRef.set(chunk.metadata());
+                                                        }
+                                                        if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.IMAGE) {
+                                                            if (chunk.imageDeltaBase64() != null) {
+                                                                try {
+                                                                    byte[] decoded = java.util.Base64.getDecoder().decode(chunk.imageDeltaBase64());
+                                                                    imageBuffer.write(decoded);
+                                                                } catch (Exception imageDecodeFailure) {}
+                                                            }
+                                                            return;
+                                                        }
+                                                        if (chunk.modality() == tech.kayys.gollek.spi.model.ModalityType.AUDIO) {
+                                                            handleAudioChunk(chunk, audioOutput, liveAudioSink);
+                                                            return;
+                                                        }
+                                                        String delta = chunk.getDelta();
+                                                        if (delta != null) {
+                                                            boolean progressDelta = delta.startsWith("[") && delta.contains("]");
+                                                            if (!progressDelta && !delta.isEmpty()) {
+                                                                long now = System.currentTimeMillis();
+                                                                firstTokenTime.compareAndSet(0, now);
+                                                                lastTokenTime.set(now);
+                                                            }
+                                                            if (progressDelta) {
+                                                                if (!enableJsonSse) {
+                                                                    System.out.print("\r" + ChatUIRenderer.CYAN + delta + ChatUIRenderer.RESET + "  ");
+                                                                    System.out.flush();
+                                                                }
+                                                            } else if (enableJsonSse) {
+                                                                printOpenAiSseDelta(request.getRequestId(), request.getModel(), delta);
+                                                            } else {
+                                                                System.out.print(delta);
+                                                                System.out.flush();
+                                                            }
+                                                            tokenCount.incrementAndGet();
+                                                        }
+                                                    },
+                                                    fallbackError -> {
+                                                        // fallback failed -> close sinks and report
+                                                        liveAudioSink.close();
+                                                        audioOutput.closeQuietly();
+                                                        fallbackStreamFailed.set(true);
+                                                        uiRenderer.printError(fallbackError == null ? "Fallback stream failed" : fallbackError.getMessage(), false);
+                                                        printProviderHintFromError(fallbackError);
+                                                        latch.countDown();
+                                                    },
+                                                    () -> {
+                                                        liveAudioSink.close();
+                                                        long duration = observedStreamDurationMillis(streamStartTime, System.currentTimeMillis(), lastTokenTime);
+                                                        handleOutputs(imageBuffer, audioOutput, metricsRef.get());
+                                                        double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
+                                                        Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
+                                                        Map<String, Object> streamMetrics = observedStreamMetrics(effectiveExecutionRouteMetadata(metricsRef.get()), tokenCount.get(), duration, ttftMs);
+                                                        recordRouteBenchmarkProfile(request.getModel(), streamFinalLocalPath, streamMetrics, tokenCount.get(), duration, audioOutput.hasOutput());
+                                                        if (enableJsonSse) {
+                                                            printOpenAiSseFinal(request.getRequestId(), request.getModel());
+                                                        } else {
+                                                            printCompletionStatsForOutput(tokenCount.get(), duration, tps, ttftMs, streamMetrics, audioOutput.hasOutput());
+                                                        }
+                                                        latch.countDown();
+                                                    });
+                                        } catch (Throwable fallbackStartErr) {
+                                            liveAudioSink.close();
+                                            audioOutput.closeQuietly();
+                                            streamFailed.set(true);
+                                            uiRenderer.printError(fallbackStartErr.getMessage(), false);
+                                            printProviderHintFromError(fallbackStartErr);
+                                            latch.countDown();
+                                        }
+                                        return;
+                                    }
+                                } catch (Exception probeErr) {
+                                    // ignore probing errors, fall through to failure closing
+                                }
+
+                                // No fallback available or fallback already attempted: close resources and finish
+                                liveAudioSink.close();
+                                audioOutput.closeQuietly();
+                                streamFailed.set(true);
+                                uiRenderer.printError(error == null ? "Stream failed" : error.getMessage(), false);
+                                printProviderHintFromError(error);
+                                latch.countDown();
+                            },
+                            () -> {
+                                liveAudioSink.close();
+                                long duration = observedStreamDurationMillis(
+                                        streamStartTime, System.currentTimeMillis(), lastTokenTime);
+                                handleOutputs(imageBuffer, audioOutput, metricsRef.get());
+                                double tps = (tokenCount.get() / (Math.max(1, duration) / 1000.0));
+                                Double ttftMs = ttftMillis(metricsRef.get(), streamStartTime, firstTokenTime);
+                                Map<String, Object> streamMetrics = observedStreamMetrics(
+                                        effectiveExecutionRouteMetadata(metricsRef.get()),
+                                        tokenCount.get(),
+                                        duration,
+                                        ttftMs);
+                                recordRouteBenchmarkProfile(
+                                        request.getModel(),
+                                        streamFinalLocalPath,
+                                        streamMetrics,
+                                        tokenCount.get(),
+                                        duration,
+                                        audioOutput.hasOutput());
+                                if (enableJsonSse) {
+                                    printOpenAiSseFinal(request.getRequestId(), request.getModel());
+                                } else {
+                                    printCompletionStatsForOutput(
+                                            tokenCount.get(),
+                                            duration,
+                                            tps,
+                                            ttftMs,
+                                            streamMetrics,
+                                            audioOutput.hasOutput());
+                                }
+                                latch.countDown();
+                            });
+                    };
+
+                // Start primary stream
+                subscribeToStream.accept(sdk.streamCompletion(request));
+
                 try {
                     latch.await();
                 } catch (InterruptedException e) {
@@ -1588,15 +1684,47 @@ public class RunCommand implements Runnable {
                 }
                 requestProcessExit(streamFailed.get() ? 1 : 0);
             } else {
-                InferenceResponse response = sdk.createCompletion(request);
-                printResponse(response, startTime);
-                requestProcessExit();
+                try {
+                    InferenceResponse response = sdk.createCompletion(request);
+                    printResponse(response, startTime);
+                    requestProcessExit();
+                } catch (Throwable createEx) {
+                    // Attempt fallback to local llama.cpp provider if available
+                    if (tryFallbackToLlamaCpp(createEx, request, startTime)) {
+                        return;
+                    }
+                    throw createEx;
+                }
             }
 
         } catch (Throwable e) {
             System.err.println("\n[FATAL] RunCommand failed: " + e.getMessage());
             e.printStackTrace(System.err);
             System.exit(1);
+        }
+    }
+
+    private boolean tryFallbackToLlamaCpp(Throwable cause, InferenceRequest request, long startTime) {
+        try {
+            if (pluginChecker == null) return false;
+            if (!pluginChecker.hasProvider("llamacpp")) return false;
+        } catch (Exception e) {
+            return false;
+        }
+
+        System.err.println("Warning: primary provider failed: " + (cause == null ? "unknown" : cause.getMessage()));
+        System.err.println("Attempting fallback to provider 'llamacpp' (llama.cpp)...");
+        try {
+            try {
+                sdk.setPreferredProvider("llamacpp");
+            } catch (Throwable ignore) {}
+            InferenceResponse fallbackResponse = sdk.createCompletion(request);
+            printResponse(fallbackResponse, startTime);
+            requestProcessExit();
+            return true;
+        } catch (Throwable fallbackErr) {
+            System.err.println("Fallback to 'llamacpp' failed: " + fallbackErr.getMessage());
+            return false;
         }
     }
 

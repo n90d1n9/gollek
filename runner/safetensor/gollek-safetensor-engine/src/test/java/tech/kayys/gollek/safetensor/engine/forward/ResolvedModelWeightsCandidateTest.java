@@ -7,7 +7,7 @@ package tech.kayys.gollek.safetensor.engine.forward;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import tech.kayys.gollek.models.gemma4.Gemma4Family;
+import tech.kayys.gollek.models.gemma4.NativeBf16Family;
 import tech.kayys.gollek.safetensor.core.tensor.AccelTensor;
 import tech.kayys.gollek.spi.model.ModelArchitecture;
 import tech.kayys.gollek.spi.model.ModelConfig;
@@ -82,11 +82,11 @@ class ResolvedModelWeightsCandidateTest {
     }
 
     @Test
-    void resolvesGemma4UnifiedTextWrappedWeightsWithRealAdapter() throws Exception {
+    void resolvesNativeBf16UnifiedTextWrappedWeightsWithRealAdapter() throws Exception {
         ModelConfig config = new ObjectMapper().readValue("""
                 {
                   "model_type": "gemma4_unified",
-                  "architectures": ["Gemma4UnifiedForConditionalGeneration"],
+                  "architectures": ["NativeBf16UnifiedForConditionalGeneration"],
                   "hidden_size": 8,
                   "num_hidden_layers": 2,
                   "num_attention_heads": 2,
@@ -104,11 +104,11 @@ class ResolvedModelWeightsCandidateTest {
         Map<String, AccelTensor> weights = new HashMap<>();
         AccelTensor embed = put(weights, "model.language_model.embed_tokens.weight", 32, 8);
         AccelTensor finalNorm = put(weights, "model.language_model.norm.weight", 8);
-        Gemma4LayerTensors slidingLayer = putGemma4Layer(weights, 0, true, 8, 8, 4, 16);
-        Gemma4LayerTensors fullLayer = putGemma4Layer(weights, 1, false, 8, 16, 8, 16);
+        NativeBf16LayerTensors slidingLayer = putNativeBf16Layer(weights, 0, true, 8, 8, 4, 16);
+        NativeBf16LayerTensors fullLayer = putNativeBf16Layer(weights, 1, false, 8, 16, 8, 16);
 
         ResolvedModelWeights resolved = ResolvedModelWeights.create(
-                weights, config, new Gemma4Family(), true);
+                weights, config, new NativeBf16Family(), true);
 
         assertSame(embed, resolved.embedTokens());
         assertSame(embed, resolved.lmHead());
@@ -149,7 +149,7 @@ class ResolvedModelWeightsCandidateTest {
         return tensor;
     }
 
-    private static Gemma4LayerTensors putGemma4Layer(
+    private static NativeBf16LayerTensors putNativeBf16Layer(
             Map<String, AccelTensor> weights,
             int layer,
             boolean includeValueProjection,
@@ -174,7 +174,7 @@ class ResolvedModelWeightsCandidateTest {
         AccelTensor ffnGate = put(weights, prefix + "mlp.gate_proj.weight", intermediateSize, hiddenSize);
         AccelTensor ffnUp = put(weights, prefix + "mlp.up_proj.weight", intermediateSize, hiddenSize);
         AccelTensor ffnDown = put(weights, prefix + "mlp.down_proj.weight", hiddenSize, intermediateSize);
-        return new Gemma4LayerTensors(
+        return new NativeBf16LayerTensors(
                 query,
                 key,
                 value,
@@ -194,7 +194,7 @@ class ResolvedModelWeightsCandidateTest {
     /**
      * Bundles synthetic Gemma 4 layer tensors so the resolver test can assert every wrapped candidate explicitly.
      */
-    private record Gemma4LayerTensors(
+    private record NativeBf16LayerTensors(
             AccelTensor query,
             AccelTensor key,
             AccelTensor value,

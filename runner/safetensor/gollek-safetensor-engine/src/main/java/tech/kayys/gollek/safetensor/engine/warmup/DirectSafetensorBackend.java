@@ -170,12 +170,14 @@ public class DirectSafetensorBackend {
                     if ("AUDIO".equals(response.getMetadata().get("modality"))) {
                         return new StreamingInferenceChunk(response.getRequestId(), index, 
                                 tech.kayys.gollek.spi.model.ModalityType.AUDIO, 
-                                response.getContent(), null, isFinal, response.getFinishReason(), null, Instant.now(), metadata);
+                                response.getContent(), null, isFinal, response.getFinishReason(), null, Instant.now(), metadata,
+                                null, null, null);
                     }
                     if (isFinal) {
                         return new StreamingInferenceChunk(response.getRequestId(), index,
                                 tech.kayys.gollek.spi.model.ModalityType.TEXT,
-                                response.getContent(), null, true, response.getFinishReason(), null, Instant.now(), metadata);
+                                response.getContent(), null, true, response.getFinishReason(), null, Instant.now(), metadata,
+                                null, null, null);
                     } else {
                         return StreamingInferenceChunk.withMetadata(
                                 response.getRequestId(), index, response.getContent(), metadata);

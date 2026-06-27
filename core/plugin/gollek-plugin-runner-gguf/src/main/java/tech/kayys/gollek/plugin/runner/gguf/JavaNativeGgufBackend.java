@@ -77,7 +77,7 @@ final class JavaNativeGgufBackend implements GgufBackend {
             metadata.put("layers", profile.modelConfig().getNumHiddenLayers());
             metadata.put("hiddenSize", profile.modelConfig().getHiddenSize());
             metadata.put("attentionHeads", profile.modelConfig().getNumAttentionHeads());
-            metadata.put("kvHeads", profile.modelConfig().resolvedNumKvHeads());
+            metadata.put("kvHeads", profile.modelConfig().getResolvedNumKvHeads());
             metadata.put("headDim", profile.modelConfig().getResolvedHeadDim());
             metadata.put("contextLength", profile.modelConfig().getMaxPositionEmbeddings());
             metadata.put("vocabSize", profile.modelConfig().getVocabSize());

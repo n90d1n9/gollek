@@ -170,6 +170,10 @@ public final class Message {
         return new Message(Message.Role.ASSISTANT, content);
     }
 
+    public static Message assistantWithToolCalls(String content, List<ToolCall> toolCalls) {
+        return new Message(Message.Role.ASSISTANT, content, null, null, toolCalls, null);
+    }
+
     public static Message tool(String toolCallId, String content) {
         return new Message(Message.Role.TOOL, content, null, null, null, toolCallId);
     }

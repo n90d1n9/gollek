@@ -70,7 +70,10 @@ final class OnnxStreamingTextChunks {
                         generation.outputTokens(),
                         generation.durationMs()),
                 java.time.Instant.now(),
-                null));
+                null,
+                                    null,
+                                    null,
+                                    null));
         return true;
     }
 

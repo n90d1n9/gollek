@@ -66,7 +66,16 @@ public record StreamingInferenceChunk(
         Instant      emittedAt,
 
         /** Optional metadata associated with this chunk (e.g., hardware execution info). */
-        Map<String, Object> metadata
+        Map<String, Object> metadata,
+
+        /** Tool call ID if this chunk represents a tool invocation. */
+        @org.jetbrains.annotations.Nullable String toolCallId,
+
+        /** Tool name if this chunk represents a tool invocation start. */
+        @org.jetbrains.annotations.Nullable String toolName,
+
+        /** Incremental JSON argument fragment for a tool call. */
+        @org.jetbrains.annotations.Nullable String toolInputDelta
 ) {
     /** Alias for index() for backwards compatibility. */
     public int getIndex() { return index(); }
@@ -80,45 +89,69 @@ public record StreamingInferenceChunk(
 
     public static StreamingInferenceChunk textDelta(String requestId, int index, String delta) {
         return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT,
-                delta, null, false, null, null, Instant.now(), null);
+                delta, null, false, null, null, Instant.now(), null, null, null, null);
     }
 
     public static StreamingInferenceChunk finalTextChunk(String requestId, int index,
                                                  String delta, ChunkUsage usage) {
         return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT,
-                delta, null, true, "stop", usage, Instant.now(), null);
+                delta, null, true, "stop", usage, Instant.now(), null, null, null, null);
     }
 
     public static StreamingInferenceChunk errorChunk(String requestId, int index, String message) {
         return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT,
-                message, null, true, "error", null, Instant.now(), null);
+                message, null, true, "error", null, Instant.now(), null, null, null, null);
     }
 
     public static StreamingInferenceChunk imageChunk(String requestId, int index,
                                              String base64Delta, boolean finished) {
         return new StreamingInferenceChunk(requestId, index, ModalityType.IMAGE,
-                null, base64Delta, finished, finished ? "stop" : null, null, Instant.now(), null);
+                null, base64Delta, finished, finished ? "stop" : null, null, Instant.now(), null, null, null, null);
     }
 
         /**
      * Create a non-final chunk.
      */
     public static StreamingInferenceChunk of(String requestId, int index, String delta) {
-        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, false, null, null, Instant.now(), null);
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, false, null, null, Instant.now(), null, null, null, null);
     }
 
     /**
      * Create a chunk with metadata.
      */
     public static StreamingInferenceChunk withMetadata(String requestId, int index, String delta, Map<String, Object> metadata) {
-        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, false, null, null, Instant.now(), metadata);
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, false, null, null, Instant.now(), metadata, null, null, null);
     }
 
     /**
      * Create the final chunk.
      */
     public static StreamingInferenceChunk finalChunk(String requestId, int index, String delta) {
-        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, true, "stop", null, Instant.now(), null);
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, delta, null, true, "stop", null, Instant.now(), null, null, null, null);
+    }
+
+    public static StreamingInferenceChunk toolCallStart(String requestId, int index, String toolCallId, String toolName) {
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, null, null, false, null, null, Instant.now(), null, toolCallId, toolName, null);
+    }
+
+    public static StreamingInferenceChunk toolCallDelta(String requestId, int index, String toolCallId, String inputDelta) {
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, null, null, false, null, null, Instant.now(), null, toolCallId, null, inputDelta);
+    }
+
+    public static StreamingInferenceChunk toolCallEnd(String requestId, int index, String toolCallId) {
+        return new StreamingInferenceChunk(requestId, index, ModalityType.TEXT, null, null, false, null, null, Instant.now(), null, toolCallId, null, null);
+    }
+
+    public boolean isToolCallStart() {
+        return toolCallId != null && toolInputDelta == null && toolName != null && !finished;
+    }
+
+    public boolean isToolCallDelta() {
+        return toolCallId != null && toolInputDelta != null;
+    }
+
+    public boolean isToolCallEnd() {
+        return toolCallId != null && toolName == null && toolInputDelta == null && !finished;
     }
 
     // -------------------------------------------------------------------------

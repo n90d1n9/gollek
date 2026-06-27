@@ -51,15 +51,15 @@ final class DirectForwardMetalLinearPolicy {
         return POLICY.canUseMetalHalfWeight(weight, traits, profileKey);
     }
 
-    static boolean allowGemma4Bf16ToF16Linear(ModelConfigTraits traits, String profileKey) {
-        return POLICY.allowGemma4Bf16ToF16Linear(traits, profileKey);
+    static boolean allowNativeBf16ToF16Conversion(ModelConfigTraits traits, String profileKey) {
+        return POLICY.allowNativeBf16ToF16Conversion(traits, profileKey);
     }
 
-    static boolean allowGemma4Bf16ToF16LinearForRows(
+    static boolean allowNativeBf16ToF16ConversionForRows(
             long rows,
             ModelConfigTraits traits,
             String profileKey,
             boolean decodeLogitsPhase) {
-        return POLICY.allowGemma4Bf16ToF16LinearForRows(rows, traits, profileKey, decodeLogitsPhase);
+        return POLICY.allowNativeBf16ToF16ConversionForRows(rows, traits, profileKey, decodeLogitsPhase);
     }
 }

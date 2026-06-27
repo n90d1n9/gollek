@@ -26,7 +26,7 @@ class ModelConfigTraitsTest {
     @Test
     void familyFlagsComeFromResolvedRuntimeTraitsNotModelTypeHeuristics() throws Exception {
         ModelConfig config = new ObjectMapper().readValue("""
-                {"model_type":"gemma4_text","architectures":["Gemma4ForCausalLM"]}
+                {"model_type":"gemma4_text","architectures":["NativeBf16ForCausalLM"]}
                 """, ModelConfig.class);
         ModelArchitecture architecture = architectureReturning(ModelRuntimeTraits.builder()
                 .qwenText()
@@ -52,7 +52,7 @@ class ModelConfigTraitsTest {
     }
 
     @Test
-    void vocabOnlyPerLayerMetadataDoesNotClaimGemma4StylePerLayerInputs() {
+    void vocabOnlyPerLayerMetadataDoesNotClaimNativeBf16StylePerLayerInputs() {
         ModelConfig config = new GgufMetadataMapper().fromGgufMetadata(Map.of(
                 "general.architecture", "gemma4_unified",
                 "gemma4_unified.vocab_size_per_layer_input", 262144));

@@ -56,6 +56,8 @@ final class FlashAttentionDenseFallbackLoop {
             success = true;
             return out;
         } finally {
+            java.lang.ref.Reference.reachabilityFence(q);
+            java.lang.ref.Reference.reachabilityFence(keyValueSource);
             if (!success && !out.isClosed()) {
                 out.close();
             }

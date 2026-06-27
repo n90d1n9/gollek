@@ -266,7 +266,10 @@ public class ChatSessionImpl implements ChatSession {
                                 chunk.finishReason(),
                                 chunk.usage(),
                                 chunk.emittedAt(),
-                                chunk.metadata()
+                                chunk.metadata(),
+                                null,
+                                null,
+                                null
                         );
                     }
                     return chunk;

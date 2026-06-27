@@ -70,7 +70,7 @@ record DirectForwardMetalLinearWeightPlan(
             ModelConfigTraits traits,
             String profileKey,
             boolean decodeLogitsPhase) {
-        return DirectForwardMetalLinearPolicy.allowGemma4Bf16ToF16LinearForRows(
+        return DirectForwardMetalLinearPolicy.allowNativeBf16ToF16ConversionForRows(
                 rows,
                 traits,
                 profileKey,
