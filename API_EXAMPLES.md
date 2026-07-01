@@ -3,6 +3,8 @@
 **Base URL**: `http://localhost:9131`
 **Authentication**: Add header `-H 'X-API-Key: community'`
 
+Note: Some clients (including curl without explicit Accept headers) may receive an HTML 404 page from Quarkus. If you see "Resource not found" HTML, add `-H 'Accept: application/json'` to your request. Examples below include the Accept header where appropriate.
+
 ---
 
 ## 🏥 Health Check
@@ -611,7 +613,7 @@ All errors follow this format:
 Parse and format responses:
 
 ```bash
-curl -s -H 'X-API-Key: community' \
+curl -s -H 'Accept: application/json' -H 'X-API-Key: community' \
   'http://localhost:9131/v1/models' | jq '.data[] | {id, object}'
 ```
 
@@ -623,4 +625,68 @@ curl -s -X POST -H 'X-API-Key: community' \
   -d '{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"Hi"}]}' \
   'http://localhost:9131/v1/chat/completions' | jq '.choices[0].message.content'
 ```
+
+---
+
+## 🧪 Automated Testing
+
+Use the provided test script to validate all endpoints:
+
+```bash
+# Run all tests
+bash API_TEST_SCRIPT.sh http://localhost:9131 community false
+
+# Run with verbose output
+bash API_TEST_SCRIPT.sh http://localhost:9131 community true
+
+# Use custom API key
+bash API_TEST_SCRIPT.sh http://localhost:9131 "your-api-key" false
+```
+
+**Expected output**: 8/9 tests passing (authentication test may vary based on security configuration)
+
+---
+
+## 🚀 Quick Start Example
+
+Complete script to get started:
+
+```bash
+#!/bin/bash
+
+API_KEY="community"
+BASE_URL="http://localhost:9131"
+HEADERS=(-H "X-API-Key: $API_KEY" -H "Accept: application/json" -H "Content-Type: application/json")
+
+# 1. Health check
+echo "1. Checking server health..."
+curl -s "${HEADERS[@]}" "$BASE_URL/health" | jq .
+
+# 2. List models
+echo "2. Listing available models..."
+curl -s "${HEADERS[@]}" "$BASE_URL/v1/models" | jq '.[] | {id, object}' | head -20
+
+# 3. Simple chat
+echo "3. Sending chat message..."
+curl -s -X POST "${HEADERS[@]}" \
+  -d '{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"Hello Gollek!"}]}' \
+  "$BASE_URL/v1/chat/completions" | jq '.choices[0].message'
+```
+
+---
+
+## 📋 Environment Variables Setup
+
+For convenience, set these environment variables:
+
+```bash
+export GOLLEK_API_KEY="community"
+export GOLLEK_BASE_URL="http://localhost:9131"
+
+# Then use in curl:
+curl -H "X-API-Key: $GOLLEK_API_KEY" \
+  -H "Accept: application/json" \
+  "$GOLLEK_BASE_URL/v1/models"
+```
+
 

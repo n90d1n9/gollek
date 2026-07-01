@@ -750,7 +750,9 @@ public final class LiteRtLmFastRun {
         Engine.Companion.setNativeMinLogSeverity(nativeLogSeverity());
 
         int engineMaxNumTokens = maxNumTokens(args);
-        printRunHeader(modelPath, args, out);
+        if (args.banner) {
+            printRunHeader(modelPath, args, out);
+        }
         long beforeEngineInitNanos = System.nanoTime();
         String requestedBackend = normalizedBackend(args.backend);
         try (EngineLease lease = engineCache == null
@@ -758,15 +760,17 @@ public final class LiteRtLmFastRun {
                 : engineCache.acquire(modelPath, requestedBackend, engineMaxNumTokens)) {
             long afterEngineInitNanos = System.nanoTime();
             String warmSuffix = engineCache == null ? "" : ", warmEngine=" + lease.reused;
-            printExecutionRoute(out, lease, runnerName);
-            out.printf("Using official LiteRT-LM JVM %s for %s (backend=%s, speculativeDecoding=%s, engineMaxNumTokens=%d%s).%n",
-                    runnerName,
-                    modelPath.getFileName(),
-                    lease.backendName,
-                    lease.speculativeDecoding,
-                    engineMaxNumTokens,
-                    warmSuffix);
-            if (lease.fallbackReason != null) {
+            if (args.banner) {
+                printExecutionRoute(out, lease, runnerName);
+                out.printf("Using official LiteRT-LM JVM %s for %s (backend=%s, speculativeDecoding=%s, engineMaxNumTokens=%d%s).%n",
+                        runnerName,
+                        modelPath.getFileName(),
+                        lease.backendName,
+                        lease.speculativeDecoding,
+                        engineMaxNumTokens,
+                        warmSuffix);
+            }
+            if (lease.fallbackReason != null && args.banner) {
                 err.printf("LiteRT-LM GPU backend failed; using official CPU fallback instead: %s%n",
                         lease.fallbackReason);
             }
@@ -833,15 +837,17 @@ public final class LiteRtLmFastRun {
                 }
                 lease.markPrewarmed(prewarmIterationCount());
                 long endNanos = System.nanoTime();
-                printFastRunStats(out,
-                        streamUpdates.get(),
-                        tokenLimiter.emittedTokenCount(),
-                        startNanos,
-                        beforeEngineInitNanos,
-                        afterEngineInitNanos,
-                        afterConversationCreateNanos,
-                        firstChunkNanos.get(),
-                        endNanos);
+                if (args.banner) {
+                    printFastRunStats(out,
+                            streamUpdates.get(),
+                            tokenLimiter.emittedTokenCount(),
+                            startNanos,
+                            beforeEngineInitNanos,
+                            afterEngineInitNanos,
+                            afterConversationCreateNanos,
+                            firstChunkNanos.get(),
+                            endNanos);
+                }
                 if (Boolean.getBoolean("gollek.litert.fast_run.profile")) {
                     long first = firstChunkNanos.get();
                     err.printf(Locale.ROOT,
@@ -2301,6 +2307,7 @@ public final class LiteRtLmFastRun {
         private int topK = 40;
         private String backend = System.getProperty("gollek.litert.fast_run.backend", "gpu");
         private boolean supported = true;
+        private boolean banner = true;
 
         private boolean supported() {
             return supported && prompt != null && !prompt.isBlank()
@@ -2322,6 +2329,7 @@ public final class LiteRtLmFastRun {
                     arg = arg.substring(0, eq);
                 }
                 switch (arg) {
+                    case "--no-banner", "--suppress-banner" -> parsed.banner = false;
                     case "--model", "-m" -> {
                         Value next = valueOrNext(value, args, i);
                         parsed.model = next.value();

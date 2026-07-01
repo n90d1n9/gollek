@@ -19,8 +19,10 @@ publishing {
 }
 
 dependencies {
+    implementation(project(":sdk:gollek-sdk"))
     implementation(project(":sdk:gollek-sdk-core"))
     implementation(project(":sdk:gollek-sdk-api"))
+    implementation("io.quarkus:quarkus-arc:3.32.2")
     implementation(project(":core:gollek-core"))
     implementation(project(":core:gollek-model-repository"))
     implementation(project(":core:gollek-observability"))

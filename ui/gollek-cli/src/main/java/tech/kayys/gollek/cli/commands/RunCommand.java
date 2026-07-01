@@ -139,6 +139,9 @@ public class RunCommand implements Runnable {
     @Option(names = { "-m", "--model" }, description = "Model ID for repository resolution (e.g., huggingface ID)")
     public String modelId;
 
+    @Option(names = { "--no-banner" }, description = "Suppress header and footer output")
+    public boolean noBanner;
+
     @Option(names = { "--modelFile" }, description = "Path to a local model file (.gguf, .tflite, .task, .litertlm)")
     public String modelFile;
 
@@ -679,7 +682,7 @@ public class RunCommand implements Runnable {
             String finalLocalPath = null;
             String requestedModelRef = modelId;
             uiRenderer.setJsonMode(enableJsonSse || jsonMode || listTtsVoicesJson || ocrJsonOutput || routeReportJson);
-            if (!routeReportJson) {
+            if (!quietRouteResolutionOutput()) {
                 uiRenderer.printBanner();
             }
 
@@ -1452,7 +1455,7 @@ public class RunCommand implements Runnable {
 
             InferenceRequest request = requestBuilder.build();
 
-            if (!enableJsonSse) {
+            if (!quietRouteResolutionOutput() && !enableJsonSse) {
                 uiRenderer.printModelInfo(modelId, providerId, format, null, false);
                 printQuantizationInfo();
                 if (libtorchSafetensorCliBridge) {
@@ -2612,7 +2615,7 @@ public class RunCommand implements Runnable {
     }
 
     private boolean quietRouteResolutionOutput() {
-        return ttsVoicesJsonOutput() || routeReportJson;
+        return ttsVoicesJsonOutput() || routeReportJson || noBanner;
     }
 
     boolean shouldAllowRepositoryResolutionDuringRouteReport() {
@@ -5507,7 +5510,7 @@ public class RunCommand implements Runnable {
     }
 
     private void printQuantizationInfo() {
-        if (quantizeStrategy == null || quantizeStrategy.isBlank()) {
+        if (quantizeStrategy == null || quantizeStrategy.isBlank() || noBanner) {
             return;
         }
 
@@ -6894,12 +6897,12 @@ public class RunCommand implements Runnable {
             printAudioRunStats(metadata, durationMs);
             return;
         }
-        uiRenderer.printStats(tokenCount, durationMs / 1000.0, tps, ttftMs, false);
-        uiRenderer.printBenchmarks(metadata, false);
+        uiRenderer.printStats(tokenCount, durationMs / 1000.0, tps, ttftMs, noBanner);
+        uiRenderer.printBenchmarks(metadata, noBanner);
     }
 
     private void printAudioRunStats(Map<String, Object> metadata, long fallbackDurationMs) {
-        if (enableJsonSse) {
+        if (enableJsonSse || noBanner) {
             return;
         }
         List<String> parts = new ArrayList<>();

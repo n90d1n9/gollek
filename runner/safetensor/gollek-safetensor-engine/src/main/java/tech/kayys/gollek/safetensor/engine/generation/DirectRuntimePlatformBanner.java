@@ -16,8 +16,8 @@ final class DirectRuntimePlatformBanner {
 
     static void print(Instance<?> metalBackend) {
         Status status = describe(DirectInferenceProfiler.metalDeviceLabel(metalBackend));
-        System.out.println(status.platformLine());
-        System.out.println(status.accelerationLine());
+        // System.out.println(status.platformLine());
+        // System.out.println(status.accelerationLine());
         System.out.flush();
     }
 

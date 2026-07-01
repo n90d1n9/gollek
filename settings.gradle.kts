@@ -15,7 +15,7 @@ fun includeOptionalProject(projectPath: String, vararg candidatePaths: String) {
 }
 
 // Optional core projects — include if their directories exist to avoid hard failures on partial checkouts
-includeOptionalProject("gollek-utils", "gollek-utils")
+//includeOptionalProject("gollek-utils", "gollek-utils")
 includeOptionalProject("core:gollek-adapter", "core/gollek-adapter")
 includeOptionalProject("core:gollek-core", "core/gollek-core")
 includeOptionalProject("core:gollek-error-code", "core/gollek-error-code")

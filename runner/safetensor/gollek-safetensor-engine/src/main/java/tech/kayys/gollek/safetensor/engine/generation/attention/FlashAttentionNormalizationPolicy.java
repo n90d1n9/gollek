@@ -39,7 +39,8 @@ final class FlashAttentionNormalizationPolicy {
             FlashAttentionModelPolicy modelPolicy, FlashAttentionNormalizationOptions options) {
         boolean gemma4Text = modelPolicy != null && modelPolicy.gemma4Text();
         boolean addOne = architecture != null && architecture.addOneToRmsNormWeight();
-        double scalar = config == null ? 1.0 : config.getQueryPreAttnScalar();
+        Double qPas = config == null ? null : config.getQueryPreAttnScalar();
+        double scalar = qPas == null ? 0.0 : qPas;
         int headDim = config == null ? 1 : config.getResolvedHeadDim();
         if (options == null) {
             options = FlashAttentionNormalizationOptions.defaults();
