@@ -98,7 +98,7 @@ includeOptionalProject("plugins:gamelan", "plugins/gamelan")
 
 // Optional provider plugins
 // includeOptionalProject("provider:gollek-plugin-anthropic", "provider/gollek-plugin-anthropic")
-// includeOptionalProject("provider:gollek-plugin-cerebras", "provider/gollek-plugin-cerebras")
+includeOptionalProject("provider:gollek-plugin-cerebras", "provider/gollek-plugin-cerebras")
 // includeOptionalProject("provider:gollek-plugin-gemini", "provider/gollek-plugin-gemini")
 includeOptionalProject("provider:gollek-plugin-mistral", "provider/gollek-plugin-mistral")
 includeOptionalProject("provider:gollek-plugin-openai", "provider/gollek-plugin-openai")

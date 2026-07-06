@@ -44,7 +44,8 @@ public class AccelTensor implements AutoCloseable {
         INT4,    // 4-bit integer quantized (packed)
         FP8,     // 8-bit float quantized (E4M3/E5M2)
         F16,     // 16-bit float (IEEE 754 half-precision)
-        BF16     // 16-bit bfloat16
+        BF16,    // 16-bit bfloat16
+        NF4      // 4-bit NormalFloat (BitsAndBytes)
     }
 
     private final MemorySegment data;
@@ -64,6 +65,13 @@ public class AccelTensor implements AutoCloseable {
     private volatile AccelTensor cachedF16 = null;
     private volatile AccelTensor cachedF16Transposed2d = null;
     private static final long DEFAULT_MAX_CACHED_DEQUANTIZED_BYTES = 32L * 1024L * 1024L;
+
+    
+    // Thread-local scratch buffers to prevent massive JVM GC thrashing when 
+    // repeatedly dequantizing large projection matrices on the fly
+    private static final ThreadLocal<java.lang.foreign.Arena> scratchArena = ThreadLocal.withInitial(java.lang.foreign.Arena::ofShared);
+    private static final ThreadLocal<java.lang.foreign.MemorySegment> scratchSeg = ThreadLocal.withInitial(() -> scratchArena.get().allocate(0));
+
     private static final String MAX_CACHED_DEQUANTIZED_BYTES_PROPERTY =
             "gollek.safetensor.max_cached_dequantized_bytes";
 
@@ -73,21 +81,21 @@ public class AccelTensor implements AutoCloseable {
      * @return a new contiguous F32 tensor, or this tensor if it is already F32
      */
     public AccelTensor dequantize() {
-        return dequantizeInternal(shouldCacheDequantized());
+        return dequantizeInternal(shouldCacheDequantized(), false);
     }
 
     /**
      * Dequantizes this tensor while allowing a caller-specific cache ceiling.
      */
     public AccelTensor dequantizeCachedUpTo(long maxCachedBytes) {
-        return dequantizeInternal(maxCachedBytes > 0L && dequantizedByteSize() <= maxCachedBytes);
+        return dequantizeInternal(maxCachedBytes > 0L && dequantizedByteSize() <= maxCachedBytes, false);
     }
 
     /**
      * Dequantizes this tensor without storing the expanded F32 tensor on the source weight.
      */
     public AccelTensor dequantizeTransient() {
-        return dequantizeInternal(false);
+        return dequantizeInternal(false, true);
     }
 
     /**
@@ -113,33 +121,78 @@ public class AccelTensor implements AutoCloseable {
         if (quantType == QuantType.F16) {
             return this;
         }
-        if (quantType != QuantType.BF16) {
-            return null;
+        if (quantType == QuantType.BF16) {
+            if (maxCachedBytes <= 0L || halfStorageByteSize() > maxCachedBytes) {
+                return null;
+            }
+            AccelTensor cached = cachedF16;
+            if (cached != null && !cached.isClosed()) {
+                return cached;
+            }
+            synchronized (this) {
+                cached = cachedF16;
+                if (cached != null && !cached.isClosed()) {
+                    return cached;
+                }
+                Arena f16Arena = Arena.ofAuto();
+                long size = halfStorageByteSize();
+                long paddedSize = (size + 4095L) & ~4095L;
+                MemorySegment f16Seg = f16Arena.allocate(paddedSize + 4096L, 4096L);
+                DequantizationKernel.transcodeBf16ToF16(dataPtr(), f16Seg, numel());
+                cachedF16 = new AccelTensor(f16Seg, shape, contiguousStride(shape), 0, f16Arena)
+                        .withQuantization(QuantType.F16, null, null, -1);
+                return cachedF16;
+            }
+        }
+        // For quantized types (INT4, BNB, INT8), dequantize to F32 then transcode to F16.
+        return toQuantizedF16CachedUpTo(maxCachedBytes);
+    }
+
+    /**
+     * Dequantizes a quantized (INT4/BNB/INT8) weight to F16 and caches the result permanently
+     * on this tensor object. This lets Metal matvec kernels consume INT4/BNB-quantized MoE
+     * expert weights after a single one-time dequantization, completely eliminating the
+     * per-token CPU dequantize bottleneck.
+     *
+     * <p>The cached F16 weight is ~2x the size of the quantized source for INT8, and ~4x for INT4,
+     * so it only makes sense for weights below {@code maxCachedBytes}.
+     */
+    public AccelTensor toQuantizedF16CachedUpTo(long maxCachedBytes) {
+        if (!isQuantized() || quantType == QuantType.F16 || quantType == QuantType.BF16) {
+            return toF16CachedUpTo(maxCachedBytes);
         }
         if (maxCachedBytes <= 0L || halfStorageByteSize() > maxCachedBytes) {
             return null;
         }
-
         AccelTensor cached = cachedF16;
         if (cached != null && !cached.isClosed()) {
             return cached;
         }
-
         synchronized (this) {
             cached = cachedF16;
             if (cached != null && !cached.isClosed()) {
                 return cached;
             }
-            Arena f16Arena = Arena.ofAuto();
-            long size = halfStorageByteSize();
-            long paddedSize = (size + 4095L) & ~4095L;
-            MemorySegment f16Seg = f16Arena.allocate(paddedSize + 4096L, 4096L);
-            DequantizationKernel.transcodeBf16ToF16(dataPtr(), f16Seg, numel());
-            cachedF16 = new AccelTensor(f16Seg, shape, contiguousStride(shape), 0, f16Arena)
-                    .withQuantization(QuantType.F16, null, null, -1);
-            return cachedF16;
+            // Step 1: dequantize to F32 scratch (transient – not cached on this tensor)
+            AccelTensor f32 = dequantizeInternal(false, true);
+            try {
+                long n = numel();
+                long halfSize = n * 2L;
+                long paddedSize = (halfSize + 4095L) & ~4095L;
+                Arena f16Arena = Arena.ofAuto();
+                MemorySegment f16Seg = f16Arena.allocate(paddedSize + 4096L, 4096L);
+                // Step 2: transcode F32 → F16
+                DequantizationKernel.transcodeF32ToF16(f32.dataPtr(), f16Seg, n);
+                cachedF16 = new AccelTensor(f16Seg, shape, contiguousStride(shape), 0, f16Arena)
+                        .withQuantization(QuantType.F16, null, null, -1);
+                return cachedF16;
+            } finally {
+                // f32 is a scratch tensor – don't close it if it's the shared scratchSeg
+                // (wrapSegment tensors must not be closed)
+            }
         }
     }
+
 
     /**
      * Returns a cached transposed IEEE F16 copy for decode-time Metal matvec.
@@ -200,7 +253,7 @@ public class AccelTensor implements AutoCloseable {
         return Long.getLong(MAX_CACHED_DEQUANTIZED_BYTES_PROPERTY, DEFAULT_MAX_CACHED_DEQUANTIZED_BYTES);
     }
 
-    private AccelTensor dequantizeInternal(boolean cacheResult) {
+    private AccelTensor dequantizeInternal(boolean cacheResult, boolean useScratch) {
         if (quantType == QuantType.F32) return this;
 
         if (cacheResult) {
@@ -218,16 +271,42 @@ public class AccelTensor implements AutoCloseable {
                 }
             }
 
-            AccelTensor expanded = AccelTensor.zeros(shape);
+            AccelTensor expanded;
+            if (useScratch && !cacheResult) {
+                long bytes = numel() * Float.BYTES;
+                java.lang.foreign.MemorySegment seg = scratchSeg.get();
+                if (seg.byteSize() < bytes) {
+                    java.lang.foreign.Arena a = scratchArena.get();
+                    a.close();
+                    a = java.lang.foreign.Arena.ofShared();
+                    scratchArena.set(a);
+                    seg = a.allocate(bytes + 4096L, 4096L);
+                    scratchSeg.set(seg);
+                }
+                expanded = AccelTensor.wrapSegment(seg, shape);
+            } else {
+                expanded = AccelTensor.zeros(shape);
+            }
             switch (quantType) {
-                case INT8 -> DequantizationKernel.dequantizeInt8(
-                        dataSegment(), expanded.dataSegment(), scales(), numel());
-                case INT4 -> DequantizationKernel.dequantizeInt4(
-                        dataSegment(), expanded.dataSegment(), scales(), zeros(), numel(), groupSize());
+                case INT8 -> {
+                    MemorySegment slicedScales = computeSlicedScales(scales, groupSize);
+                    DequantizationKernel.dequantizeInt8(dataPtr(), expanded.dataPtr(), slicedScales, numel());
+                }
+                case INT4 -> {
+                    MemorySegment slicedScales = computeSlicedScales(scales, groupSize);
+                    MemorySegment slicedZeros  = computeSlicedScales(zeros, groupSize);
+                    DequantizationKernel.dequantizeInt4(
+                            dataPtr(), expanded.dataPtr(), slicedScales, slicedZeros, numel(), groupSize());
+                }
+                case NF4 -> {
+                    MemorySegment slicedScales = computeSlicedScales(scales, groupSize);
+                    DequantizationKernel.dequantizeNf4(
+                            dataPtr(), expanded.dataPtr(), slicedScales, numel(), groupSize());
+                }
                 case F16 -> DequantizationKernel.dequantizeF16(
-                        dataSegment(), expanded.dataSegment(), numel());
+                        dataPtr(), expanded.dataPtr(), numel());
                 case BF16 -> DequantizationKernel.dequantizeBf16(
-                        dataSegment(), expanded.dataSegment(), numel());
+                        dataPtr(), expanded.dataPtr(), numel());
                 default -> {
                     expanded.close();
                     throw new UnsupportedOperationException("Unsupported quantization type: " + quantType);
@@ -261,6 +340,12 @@ public class AccelTensor implements AutoCloseable {
         this.offset = offset;
         this.arena = null;
         this.parent = parent;
+        if (parent != null) {
+            this.quantType = parent.quantType;
+            this.scales = parent.scales;
+            this.zeros = parent.zeros;
+            this.groupSize = parent.groupSize;
+        }
     }
 
     // ── Factory methods ───────────────────────────────────────────────
@@ -437,11 +522,37 @@ public class AccelTensor implements AutoCloseable {
     // ── Data access ───────────────────────────────────────────────────
 
     /**
-     * Returns the bytes-per-element for this tensor's storage type.
      * BF16 and F16 use 2 bytes; F32 uses 4 bytes; others default to 4.
+     * Note: For sub-byte formats like INT4, this returns 4 but you should use
+     * byteSizeForElements() for memory size calculations!
      */
     public int elementByteSize() {
-        return (quantType == QuantType.BF16 || quantType == QuantType.F16) ? Short.BYTES : Float.BYTES;
+        if (quantType == QuantType.BF16 || quantType == QuantType.F16) return Short.BYTES;
+        if (quantType == QuantType.INT8) return Byte.BYTES;
+        return Float.BYTES;
+    }
+
+    /**
+     * Returns the number of bytes required to store the given number of elements.
+     * Handles sub-byte formats like INT4 (0.5 bytes per element).
+     */
+    public long byteSizeForElements(long elements) {
+        if (quantType == QuantType.INT4 || quantType == QuantType.NF4) {
+            return (elements + 1) / 2L;
+        } else if (quantType == QuantType.BF16 || quantType == QuantType.F16) {
+            return elements * 2L;
+        } else if (quantType == QuantType.INT8 || quantType == QuantType.FP8) {
+            return elements;
+        } else {
+            return elements * 4L;
+        }
+    }
+
+    /**
+     * Returns the total storage byte size of this tensor, taking quantization into account.
+     */
+    public long storageByteSize() {
+        return byteSizeForElements(numel());
     }
 
     /**
@@ -460,7 +571,17 @@ public class AccelTensor implements AutoCloseable {
      */
     public MemorySegment dataPtr() {
         checkClosed();
-        return offset == 0L ? data : data.asSlice(offset * (long) elementByteSize());
+        if (offset == 0L) return data;
+        return data.asSlice(byteSizeForElements(offset));
+    }
+
+    private MemorySegment computeSlicedScales(MemorySegment scalesSeg, int gs) {
+        if (scalesSeg == null || offset == 0L || gs <= 0) {
+            return scalesSeg;
+        }
+        long skippedScales = offset / gs;
+        long scaleByteSize = (quantType == QuantType.INT8 || quantType == QuantType.INT4 || quantType == QuantType.NF4) ? 4L : 2L;
+        return scalesSeg.asSlice(skippedScales * scaleByteSize);
     }
 
     /**
@@ -709,7 +830,56 @@ public class AccelTensor implements AutoCloseable {
         return new AccelTensor(data, newShape, newStride, offset, this);
     }
 
+    
     /**
+     * Returns a contiguous copy of a BF16/F16 tensor while preserving its half-precision
+     */
+    public AccelTensor contiguousHalf() {
+        boolean isHalf = (quantType == QuantType.BF16 || quantType == QuantType.F16);
+        if (!isHalf) {
+            return this;
+        }
+        if (isContiguous()) {
+            return this;
+        }
+        
+        long n = numel();
+        java.lang.foreign.Arena newArena = java.lang.foreign.Arena.ofAuto();
+        long elemBytes = elementByteSize();
+        long paddedSize = (n * elemBytes + 31L) & ~31L;
+        java.lang.foreign.MemorySegment newSeg = newArena.allocate(paddedSize + 4096L, 4096L);
+        
+        if (isContiguous()) {
+            java.lang.foreign.MemorySegment.copy(dataPtr(), 0, newSeg, 0, n * elemBytes);
+        } else {
+            long[] idx = new long[shape.length];
+            for (long flat = 0; flat < n; flat++) {
+                long srcElemIdx = offset;
+                for (int d = 0; d < shape.length; d++) {
+                    srcElemIdx += idx[d] * stride[d];
+                }
+                
+                if (elemBytes == 2) {
+                    short val = data.get(java.lang.foreign.ValueLayout.JAVA_SHORT, srcElemIdx * 2L);
+                    newSeg.set(java.lang.foreign.ValueLayout.JAVA_SHORT, flat * 2L, val);
+                } else {
+                    byte val = data.get(java.lang.foreign.ValueLayout.JAVA_BYTE, srcElemIdx);
+                    newSeg.set(java.lang.foreign.ValueLayout.JAVA_BYTE, flat, val);
+                }
+                
+                for (int d = shape.length - 1; d >= 0; d--) {
+                    idx[d]++;
+                    if (idx[d] < shape[d]) break;
+                    idx[d] = 0;
+                }
+            }
+        }
+        
+        long[] newStride = contiguousStride(shape);
+        return new AccelTensor(newSeg, shape, newStride, 0, newArena).withQuantization(quantType, scales, zeros, groupSize);
+    }
+
+/**
      * Returns a contiguous copy if non-contiguous, or this if already contiguous.
      */
     public AccelTensor contiguous() {
@@ -843,9 +1013,9 @@ public class AccelTensor implements AutoCloseable {
             if (quantType == QuantType.INT8) {
                 byte q = data.get(ValueLayout.JAVA_BYTE, srcRowByteOff + j);
                 dst.set(ValueLayout.JAVA_FLOAT, dstByteOffset + (long) j * Float.BYTES, q * scale);
-            } else if (quantType == QuantType.INT4) {
+            } else if (quantType == QuantType.INT4 || quantType == QuantType.NF4) {
                 // Support simple packed INT4? 
-                // This is getting complex, for now assume INT8 for embeddings
+                throw new UnsupportedOperationException("Cannot fromByteArray a packed INT4/NF4 directly as float");
             }
         }
     }
@@ -925,15 +1095,18 @@ public class AccelTensor implements AutoCloseable {
 
     /**
      * Materializes a strided view into a new contiguous tensor.
+     * Handles all dtypes correctly (F32, BF16, F16, INT8, INT4).
      */
     private AccelTensor materialize(long[] srcShape, long[] srcStride) {
         long n = numelOf(srcShape);
         Arena newArena = Arena.ofAuto();
-        MemorySegment newSeg = newArena.allocate(n * Float.BYTES, 64);
+        long requiredBytes = byteSizeForElements(n);
+        long paddedSize = (requiredBytes + 4095L) & ~4095L;
+        MemorySegment newSeg = newArena.allocate(paddedSize + 4096L, 4096L);
 
         if (srcShape.length > 0 && srcStride[srcShape.length - 1] == 1) {
-            // Optimized row-copy for tensors contiguous in the last dimension (common for transposes)
-            int lastDim = (int) srcShape[srcShape.length - 1];
+            // Optimized row-copy: last dimension is already contiguous
+            long lastDim = srcShape[srcShape.length - 1];
             long outerNumel = n / lastDim;
             long[] outerShape = new long[srcShape.length - 1];
             System.arraycopy(srcShape, 0, outerShape, 0, srcShape.length - 1);
@@ -944,11 +1117,12 @@ public class AccelTensor implements AutoCloseable {
                 for (int d = 0; d < outerShape.length; d++) {
                     srcRowOffset += outerIdx[d] * srcStride[d];
                 }
-                MemorySegment.copy(data, ValueLayout.JAVA_FLOAT, srcRowOffset * Float.BYTES,
-                                   newSeg, ValueLayout.JAVA_FLOAT, row * lastDim * Float.BYTES,
-                                   lastDim);
                 
-                // Increment indices
+                MemorySegment.copy(data, byteSizeForElements(srcRowOffset),
+                                   newSeg, byteSizeForElements(row * lastDim),
+                                   byteSizeForElements(lastDim));
+
+                // Increment outer indices
                 for (int d = outerShape.length - 1; d >= 0; d--) {
                     outerIdx[d]++;
                     if (outerIdx[d] < outerShape[d]) break;
@@ -956,14 +1130,21 @@ public class AccelTensor implements AutoCloseable {
                 }
             }
         } else {
-            // Fallback for fully non-contiguous slices
+            if (quantType == QuantType.INT4 || quantType == QuantType.NF4) {
+                throw new UnsupportedOperationException("Cannot materialize non-contiguous INT4/NF4 tensor element-by-element");
+            }
+            int elemBytes = elementByteSize();
+            // Fallback: element-by-element copy (handles any stride pattern)
             long[] idx = new long[srcShape.length];
             for (long flat = 0; flat < n; flat++) {
                 long srcIdx = offset;
                 for (int d = 0; d < srcShape.length; d++) {
                     srcIdx += idx[d] * srcStride[d];
                 }
-                newSeg.setAtIndex(ValueLayout.JAVA_FLOAT, flat, data.getAtIndex(ValueLayout.JAVA_FLOAT, srcIdx));
+                // Raw element copy by dtype
+                MemorySegment.copy(data, srcIdx * elemBytes,
+                                   newSeg, flat * elemBytes,
+                                   elemBytes);
                 for (int d = srcShape.length - 1; d >= 0; d--) {
                     idx[d]++;
                     if (idx[d] < srcShape[d]) break;
@@ -971,7 +1152,13 @@ public class AccelTensor implements AutoCloseable {
                 }
             }
         }
-        return new AccelTensor(newSeg, srcShape, contiguousStride(srcShape), 0, newArena);
+        AccelTensor result = new AccelTensor(newSeg, srcShape, contiguousStride(srcShape), 0, newArena);
+        // Preserve quantization metadata so downstream Metal/CPU kernels know the dtype
+        result.quantType = this.quantType;
+        result.scales = this.scales;
+        result.zeros = this.zeros;
+        result.groupSize = this.groupSize;
+        return result;
     }
 
     static long numelOf(long[] shape) {

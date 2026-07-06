@@ -16,7 +16,7 @@ import java.util.Map;
  * Owns per-model forward traits and resolved-weight caching.
  */
 @Singleton
-final class DirectForwardModelContext {
+public class DirectForwardModelContext {
     private final DirectForwardWeightResolver weightResolver = new DirectForwardWeightResolver();
     private volatile ModelConfigTraits lastModelConfigTraits = ModelConfigTraits.EMPTY;
 

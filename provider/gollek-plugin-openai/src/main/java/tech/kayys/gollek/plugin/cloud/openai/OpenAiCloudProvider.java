@@ -189,8 +189,33 @@ public class OpenAiCloudProvider implements LLMProvider, StreamingProvider {
                 .anyMatch(m -> m.equalsIgnoreCase(lower) || lower.startsWith(m.toLowerCase()));
     }
 
+    private synchronized void ensureInitialized() {
+        if (initialized) return;
+        String apiKey = System.getenv("OPENAI_API_KEY");
+        try {
+            java.nio.file.Path provConfig = java.nio.file.Paths.get("./config/providers", ID + ".yaml");
+            if (java.nio.file.Files.exists(provConfig)) {
+                String content = java.nio.file.Files.readString(provConfig);
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("api\\.key:\\s*(.+)").matcher(content);
+                if (m.find()) {
+                    apiKey = m.group(1).trim();
+                }
+            }
+        } catch (Exception e) {}
+        
+        if (apiKey != null) {
+            ProviderConfig cfg = ProviderConfig.builder(ID)
+                .secret("apiKey", apiKey)
+                .build();
+            try {
+                initialize(cfg);
+            } catch (Exception e) {}
+        }
+    }
+
     @Override
     public Uni<InferenceResponse> infer(ProviderRequest request) {
+        ensureInitialized();
         if (!initialized) {
             return Uni.createFrom().failure(
                 new IllegalStateException("Provider not initialized"));
@@ -219,6 +244,7 @@ public class OpenAiCloudProvider implements LLMProvider, StreamingProvider {
 
     @Override
     public Multi<StreamingInferenceChunk> inferStream(ProviderRequest request) {
+        ensureInitialized();
         if (!initialized) {
             return Multi.createFrom().failure(
                 new IllegalStateException("Provider not initialized"));

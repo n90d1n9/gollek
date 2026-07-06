@@ -27,6 +27,10 @@ public class DefaultProviderRegistry implements ProviderRegistry {
     private final Map<String, LLMProvider> providersByVersionKey = new ConcurrentHashMap<>();
     private final Map<String, GollekPlugin> owningPlugins = new ConcurrentHashMap<>();
 
+    public DefaultProviderRegistry() {
+        this.discoveredProviders = null;
+    }
+
     @Inject
     public DefaultProviderRegistry(Instance<LLMProvider> discoveredProviders) {
         this.discoveredProviders = discoveredProviders;
@@ -37,9 +41,11 @@ public class DefaultProviderRegistry implements ProviderRegistry {
     public synchronized void discoverProviders() {
         providersById.clear();
         providersByVersionKey.clear();
-        discoveredProviders.stream()
-                .filter(LLMProvider::isEnabled)
-                .forEach(this::register);
+        if (discoveredProviders != null) {
+            discoveredProviders.stream()
+                    .filter(LLMProvider::isEnabled)
+                    .forEach(this::register);
+        }
     }
 
     @Override

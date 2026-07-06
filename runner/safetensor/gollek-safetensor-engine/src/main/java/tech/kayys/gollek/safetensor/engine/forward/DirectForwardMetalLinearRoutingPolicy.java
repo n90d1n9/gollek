@@ -80,8 +80,12 @@ record DirectForwardMetalLinearRoutingPolicy(
                 && !allowNativeBf16ToF16Conversion(traits, profileKey)) {
             return false;
         }
-        if (quantType != AccelTensor.QuantType.F16
-                && (quantType != AccelTensor.QuantType.BF16 || !allowMetalBf16Linear(traits))) {
+        boolean isHalfCompatible = quantType == AccelTensor.QuantType.F16
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits));
+        boolean isQuantizedToF16 = quantType == AccelTensor.QuantType.INT4
+                || quantType == AccelTensor.QuantType.INT8
+                || quantType == AccelTensor.QuantType.FP8;
+        if (!isHalfCompatible && !isQuantizedToF16) {
             return false;
         }
         if (!weight.isContiguous()) {
@@ -111,9 +115,19 @@ record DirectForwardMetalLinearRoutingPolicy(
             return shouldUseNativeMetalBf16Linear(weight, traits, profileKey)
                     || allowNativeBf16ToF16Conversion(traits, profileKey);
         }
-        return quantType == AccelTensor.QuantType.F16
-                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits));
+        if (quantType == AccelTensor.QuantType.F16
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits))) {
+            return true;
+        }
+        // Allow quantized weights: they will be converted to F16 on first use and cached.
+        if (quantType == AccelTensor.QuantType.INT4
+                || quantType == AccelTensor.QuantType.INT8
+                || quantType == AccelTensor.QuantType.FP8) {
+            return true;
+        }
+        return false;
     }
+
 
     boolean allowNativeBf16ToF16Conversion(ModelConfigTraits traits, String profileKey) {
         return nativeBf16Policy.allowBf16ToF16Linear(traits, profileKey);

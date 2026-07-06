@@ -162,6 +162,19 @@ public class DirectInferenceEngine implements SafetensorEngine {
         return loadModel(modelPath, null, QuantizationEngine.QuantStrategy.NONE);
     }
 
+    public String loadModel(Path modelPath, Path adapterPath, String quantStrategy) {
+        tech.kayys.gollek.safetensor.quantization.QuantizationEngine.QuantStrategy resolvedQuantStrategy = 
+                tech.kayys.gollek.safetensor.quantization.QuantizationEngine.QuantStrategy.NONE;
+        if (quantStrategy != null && !quantStrategy.isBlank()) {
+            try {
+                resolvedQuantStrategy = tech.kayys.gollek.safetensor.quantization.QuantizationEngine.QuantStrategy.valueOf(quantStrategy.toUpperCase());
+            } catch (Exception e) {
+                // Ignore, fallback to NONE
+            }
+        }
+        return loadModel(modelPath, adapterPath, resolvedQuantStrategy);
+    }
+
     public String loadModel(Path modelPath, Path adapterPath,
             QuantizationEngine.QuantStrategy quantStrategy) {
         return components().modelStore().load(modelPath, quantStrategy);

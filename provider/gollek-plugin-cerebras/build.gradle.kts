@@ -20,6 +20,9 @@ repositories {
 dependencies {
     
     implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi-model"))
     implementation(project(":core:gollek-observability"))
     implementation(group = "io.quarkus", name = "quarkus-vertx")
     implementation(group = "io.quarkus", name = "quarkus-rest-jackson")

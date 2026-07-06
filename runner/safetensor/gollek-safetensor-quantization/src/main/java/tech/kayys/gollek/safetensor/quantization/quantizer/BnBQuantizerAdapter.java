@@ -37,7 +37,7 @@ public class BnBQuantizerAdapter implements Quantizer {
             java.lang.foreign.ValueLayout.JAVA_FLOAT, absmaxOut);
             
         quantized.withQuantization(
-            AccelTensor.QuantType.INT4, 
+            AccelTensor.QuantType.NF4, 
             scaleSeg, 
             null, // no zeros for NF4
             blockSize

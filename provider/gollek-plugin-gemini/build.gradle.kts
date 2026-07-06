@@ -20,7 +20,12 @@ repositories {
 dependencies {
     
     implementation(project(":spi:gollek-spi-provider"))
+    implementation(project(":spi:gollek-spi"))
+    implementation(project(":spi:gollek-spi-inference"))
+    implementation(project(":spi:gollek-spi-model"))
     implementation(project(":core:gollek-observability"))
+    implementation(group = "io.quarkus", name = "quarkus-vertx")
+    implementation(group = "io.quarkus", name = "quarkus-rest-jackson")
     implementation(group = "io.smallrye.reactive", name = "mutiny")
     implementation(group = "com.fasterxml.jackson.core", name = "jackson-databind")
     implementation(group = "com.fasterxml.jackson.datatype", name = "jackson-datatype-jsr310")

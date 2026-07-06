@@ -57,6 +57,8 @@ dependencies {
     implementation(project(":runner:safetensor:gollek-safetensor-spi"))
     implementation("tech.kayys.aljabr:aljabr-backend-metal:0.1.0-SNAPSHOT")
     implementation(project(":models:gollek-model-gemma4"))
+    implementation(project(":models:gollek-model-qwen3-5-moe"))
+    implementation(project(":models:gollek-model-qwen3-moe"))
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

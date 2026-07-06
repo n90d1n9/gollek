@@ -44,12 +44,17 @@ public class MistralProvider implements StreamingProvider {
     com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Inject
-    MistralConfig configDetails;
+    jakarta.enterprise.inject.Instance<MistralConfig> configDetailsInstance;
+
+    private MistralConfig configDetails;
 
     private HttpClient httpClient;
 
     @jakarta.annotation.PostConstruct
     void init() {
+        if (configDetailsInstance != null && configDetailsInstance.isResolvable()) {
+            configDetails = configDetailsInstance.get();
+        }
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .proxy(ProxySelector.getDefault())
@@ -76,6 +81,15 @@ public class MistralProvider implements StreamingProvider {
     @Override
     public void initialize(ProviderConfig config) {
         log.info("Mistral provider initialized");
+        if (this.objectMapper == null) {
+            this.objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        }
+        if (this.httpClient == null) {
+            this.httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .proxy(ProxySelector.getDefault())
+                    .build();
+        }
     }
 
     @Override
@@ -136,7 +150,7 @@ public class MistralProvider implements StreamingProvider {
                     "Mistral API key not configured. Set MISTRAL_API_KEY environment variable."));
         }
 
-        String baseUrl = configDetails.baseUrl();
+        String baseUrl = (configDetails != null && configDetails.baseUrl() != null) ? configDetails.baseUrl() : "https://api.mistral.ai";
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -196,7 +210,7 @@ public class MistralProvider implements StreamingProvider {
                     "Mistral API key not configured. Set MISTRAL_API_KEY environment variable."));
         }
 
-        String baseUrl = configDetails.baseUrl();
+        String baseUrl = (configDetails != null && configDetails.baseUrl() != null) ? configDetails.baseUrl() : "https://api.mistral.ai";
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -286,11 +300,27 @@ public class MistralProvider implements StreamingProvider {
         if (request != null && request.getApiKey().isPresent()) {
             return request.getApiKey().get();
         }
-        String key = configDetails.apiKey();
-        if (key != null && !key.isBlank() && !"dummy".equals(key)) {
-            return key;
+        if (configDetails != null) {
+            String key = configDetails.apiKey();
+            if (key != null && !key.isBlank() && !"dummy".equals(key)) {
+                return key;
+            }
         }
-        // Fallback to standard environment variable
+        
+        // Fallback to local YAML file in standalone mode
+        try {
+            java.nio.file.Path provConfig = java.nio.file.Paths.get("./config/providers", id() + ".yaml");
+            if (java.nio.file.Files.exists(provConfig)) {
+                String content = java.nio.file.Files.readString(provConfig);
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("api\\.key:\\s*(.+)").matcher(content);
+                if (m.find()) {
+                    return m.group(1).trim();
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
         return System.getenv("MISTRAL_API_KEY");
     }
 

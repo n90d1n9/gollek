@@ -5598,6 +5598,7 @@ public class RunCommand implements Runnable {
                 .seed(seed != null ? seed.longValue() : -1L)
                 .build();
         String preparedPrompt = DirectSafetensorTextPolicy.preparePrompt(profile, effectiveSystemPrompt, userPrompt);
+        
         InferenceResponse response = directInferenceEngine().generate(preparedPrompt, modelPath, config)
                 .await()
                 .atMost(Duration.ofMinutes(5));
@@ -7006,7 +7007,7 @@ public class RunCommand implements Runnable {
     }
 
     private void printExecutionRouteInfo(Map<String, Object> metadata) {
-        if (metadata == null || metadata.isEmpty()) {
+        if (metadata == null || metadata.isEmpty() || noBanner) {
             return;
         }
         Object requested = metadata.get("requested_provider");

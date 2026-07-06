@@ -438,7 +438,7 @@ public final class AccelOps {
         MemorySegment outSeg = out.dataPtr();
 
         try {
-            if (useExperimentalSingleTokenSgemv() && M == 1) {
+            if (M == 1) {
                 // Single-token decode is overwhelmingly matrix-vector work.
                 // Using sgemv avoids the heavier sgemm setup costs on the hot decode path.
                 sgemv().invokeExact(
@@ -705,7 +705,7 @@ public final class AccelOps {
 
     private static AccelTensor linearSingleTokenHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias,
             AccelTensor outputBuffer) {
-        weight = weight.contiguous();
+        weight = weight.contiguousHalf();
 
         long[] inputShape = input.shape();
         long kLong = inputShape[inputShape.length - 1];
@@ -719,15 +719,15 @@ public final class AccelOps {
             out = AccelTensor.zeros(outputShape);
         }
 
-        MemorySegment inputSeg = input.dataSegment();
-        MemorySegment weightSeg = weight.dataSegment();
+        MemorySegment inputSeg = input.dataPtr();
+        MemorySegment weightSeg = weight.dataPtr();
         MemorySegment outSeg = out.dataPtr();
         boolean bf16 = weight.quantType() == AccelTensor.QuantType.BF16;
         AccelTensor contiguousBias = null;
         MemorySegment biasSeg = null;
         if (bias != null) {
             contiguousBias = bias.contiguous();
-            biasSeg = contiguousBias.dataSegment();
+            biasSeg = contiguousBias.dataPtr();
         }
         final MemorySegment finalBiasSeg = biasSeg;
 
@@ -779,7 +779,7 @@ public final class AccelOps {
 
     private static AccelTensor linearSmallBatchHalfWeight(AccelTensor input, AccelTensor weight, AccelTensor bias,
             int rows, AccelTensor outputBuffer) {
-        weight = weight.contiguous();
+        weight = weight.contiguousHalf();
 
         long[] inputShape = input.shape();
         int K = Math.toIntExact(inputShape[inputShape.length - 1]);

@@ -45,20 +45,36 @@ is_legacy_gradle_module() {
   esac
 }
 
+is_quarkus_module() {
+  local module="$1"
+  local quarkus_list="${QUARKUS_MODULES:-}"
+  [[ " ${quarkus_list} " == *" ${module} "* ]]
+}
+
 read -r -a MODULE_ARRAY <<< "${MODULES:-}"
 SUPPORTED_MODULES=()
+QUARKUS_BUILD_MODULES=()
 SKIPPED_MODULES=()
+
 for module in "${MODULE_ARRAY[@]}"; do
   if is_legacy_gradle_module "$module"; then
     SKIPPED_MODULES+=("$module")
+  elif is_quarkus_module "$module"; then
+    QUARKUS_BUILD_MODULES+=("$module")
   else
     SUPPORTED_MODULES+=("$module")
   fi
 done
 
+# Standard build tasks (clean + build for each non-Quarkus module)
 GRADLE_BUILD_TASKS=(clean)
 for module in "${SUPPORTED_MODULES[@]}"; do
   GRADLE_BUILD_TASKS+=("${module}:build")
+done
+
+# Quarkus modules need quarkusBuild (produces the uber-jar)
+for module in "${QUARKUS_BUILD_MODULES[@]}"; do
+  GRADLE_BUILD_TASKS+=("${module}:quarkusBuild")
 done
 
 echo "${BOLD}${CYAN}:) Resolved backend targets:${RESET} ${BACKEND_TARGETS}"
@@ -77,6 +93,13 @@ if [[ ${#SKIPPED_MODULES[@]} -gt 0 ]]; then
   done
 fi
 
+if [[ ${#QUARKUS_BUILD_MODULES[@]} -gt 0 ]]; then
+  echo "${BOLD}${CYAN}:) Quarkus modules (quarkusBuild):${RESET}"
+  for module in "${QUARKUS_BUILD_MODULES[@]}"; do
+    echo "   - ${module}"
+  done
+fi
+
 ./gradlew "${GRADLE_JAVA_HOME_ARG[@]}" "${GRADLE_BUILD_TASKS[@]}" \
   -x test \
   -Pgollek.backend="${RESOLVED_BACKEND_PROPERTY}" \
@@ -84,3 +107,17 @@ fi
   -Pgollek.model.formats="${FORMAT_TARGETS}" \
   -Pgollek.llm.types="${LLM_TARGETS}" \
   -Pgollek.architecture="${ARCHITECTURE_VALUE}"
+
+# Confirm the CLI jar was produced
+CLI_JAR="${ROOT_DIR}/ui/gollek-cli/build/gollek.jar"
+if [[ ${#QUARKUS_BUILD_MODULES[@]} -gt 0 ]]; then
+  if [[ -f "${CLI_JAR}" ]]; then
+    JAR_SIZE=$(du -sh "${CLI_JAR}" | cut -f1)
+    echo ""
+    echo "${BOLD}${GREEN}:) gollek.jar ready:${RESET} ${CLI_JAR} (${JAR_SIZE})"
+    echo "${BOLD}${GREEN}:) Run with:${RESET} java -jar --add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED ${CLI_JAR} run --model <model> --prompt \"<prompt>\""
+  else
+    echo "${BOLD}${YELLOW}:| Warning:${RESET} quarkusBuild ran but ${CLI_JAR} was not found."
+    exit 1
+  fi
+fi

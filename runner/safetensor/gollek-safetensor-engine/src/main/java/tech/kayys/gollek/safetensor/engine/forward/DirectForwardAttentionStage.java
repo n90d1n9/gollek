@@ -41,6 +41,37 @@ final class DirectForwardAttentionStage {
                 startPos,
                 sharedKvStates);
 
+        // Qwen3.6 attn_output_gate hack: slice q_proj weight in half
+        // so standard FlashAttention gets the correct head dimension.
+        if (attnIn.qW != null) {
+            long expectedQRows = (long) ctx.config().getNumAttentionHeads() * ctx.config().getResolvedHeadDim();
+            if (expectedQRows > 0 && attnIn.qW.size(0) == expectedQRows * 2) {
+                if (ctx.verboseLayers()) {
+                    System.err.printf("[DEBUG] Layer %d slicing qW from %d to %d for attn_output_gate%n",
+                            ctx.layerIdx(), attnIn.qW.size(0), expectedQRows);
+                }
+                AccelTensor slicedQw = attnIn.qW.slice(0, 0, expectedQRows).squeeze();
+                AccelTensor slicedQb = attnIn.qB != null ? attnIn.qB.slice(0, 0, expectedQRows).squeeze() : null;
+                attnIn = new AttentionInput(attnIn.x, slicedQw, attnIn.kW, attnIn.vW, attnIn.oW,
+                        slicedQb, attnIn.kB, attnIn.vB, attnIn.oB,
+                        attnIn.arch, attnIn.config, attnIn.kvCache,
+                        attnIn.layerIdx, attnIn.startPos, attnIn.isCausal,
+                        attnIn.qNormW, attnIn.kNormW, attnIn.postAttnNormW,
+                        attnIn.sharedKvStates, attnIn.attentionContextBuffer,
+                        attnIn.attentionOutputBuffer);
+            }
+        }
+
+        if (attnIn.qW == null && !ctx.arch().hasFusedQKV()) {
+            // Unsupported attention block (e.g. Mamba linear_attn hybrid). 
+            // Skip the attention block by passing the hidden state directly.
+            if (ctx.verboseLayers()) {
+                System.err.printf("[DEBUG] Layer %d Attention skipped (unsupported block type)%n", ctx.layerIdx());
+            }
+            MemorySegment.copy(ctx.hiddenIn(), 0, ctx.hiddenOut(), 0, ctx.hiddenIn().byteSize());
+            return;
+        }
+
         if (ctx.verboseLayers()) {
             System.err.printf("[DEBUG] Layer %d Attention start%n", ctx.layerIdx());
             System.err.flush();

@@ -15,7 +15,7 @@ import tech.kayys.aljabr.metal.binding.MetalBinding;
  * forward execution.
  */
 @Singleton
-final class DirectForwardRuntimeState {
+public class DirectForwardRuntimeState {
     private MetalBinding metalBinding;
     private boolean metalReady;
     private DirectForwardMetalCapabilities metalCapabilities = DirectForwardMetalCapabilities.EMPTY;

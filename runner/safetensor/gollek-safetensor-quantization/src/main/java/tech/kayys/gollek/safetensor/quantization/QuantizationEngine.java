@@ -719,7 +719,7 @@ public class QuantizationEngine {
 
         return switch (tensor.quantType()) {
             case F32, F16, BF16 -> true;
-            case INT4 -> tensor.scales() != null;
+            case INT4, NF4 -> tensor.scales() != null;
             case INT8 -> tensor.scales() != null;
             case FP8 -> false;
         };

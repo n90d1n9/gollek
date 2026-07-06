@@ -45,12 +45,17 @@ public class AnthropicProvider implements StreamingProvider {
     com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Inject
-    AnthropicConfig configDetails;
+    jakarta.enterprise.inject.Instance<AnthropicConfig> configDetailsInstance;
+
+    private AnthropicConfig configDetails;
 
     private HttpClient httpClient;
 
     @jakarta.annotation.PostConstruct
     void init() {
+        if (configDetailsInstance != null && configDetailsInstance.isResolvable()) {
+            configDetails = configDetailsInstance.get();
+        }
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .proxy(ProxySelector.getDefault())
@@ -61,7 +66,7 @@ public class AnthropicProvider implements StreamingProvider {
 
     @Override
     public boolean isEnabled() {
-        return configDetails != null && configDetails.enabled();
+        return configDetails == null || configDetails.enabled();
     }
 
     @Override
@@ -77,6 +82,12 @@ public class AnthropicProvider implements StreamingProvider {
     @Override
     public void initialize(ProviderConfig config) {
         log.info("Anthropic provider initialized");
+        if (this.objectMapper == null) {
+            this.objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        }
+        if (this.httpClient == null) {
+            this.httpClient = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).proxy(java.net.ProxySelector.getDefault()).build();
+        }
     }
 
     @Override
@@ -138,7 +149,7 @@ public class AnthropicProvider implements StreamingProvider {
                     "Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable."));
         }
 
-        String baseUrl = configDetails.baseUrl();
+        String baseUrl = (configDetails != null && configDetails.baseUrl() != null) ? configDetails.baseUrl() : "https://api.anthropic.com";
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -197,7 +208,7 @@ public class AnthropicProvider implements StreamingProvider {
                     "Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable."));
         }
 
-        String baseUrl = configDetails.baseUrl();
+        String baseUrl = (configDetails != null && configDetails.baseUrl() != null) ? configDetails.baseUrl() : "https://api.anthropic.com";
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -303,11 +314,32 @@ public class AnthropicProvider implements StreamingProvider {
         if (request != null && request.getApiKey().isPresent()) {
             return request.getApiKey().get();
         }
-        String key = configDetails.apiKey();
-        if (key != null && !key.isBlank() && !"dummy".equals(key)) {
-            return key;
+        if (configDetails != null) {
+            String key = configDetails.apiKey();
+            if (key != null && !key.isBlank() && !"dummy".equals(key)) {
+                return key;
+            }
         }
-        // Fallback to standard environment variable
+        
+        // Fallback to local YAML file in standalone mode
+        try {
+            java.nio.file.Path provConfig = java.nio.file.Paths.get("./config/providers", id() + ".yaml");
+            if (java.nio.file.Files.exists(provConfig)) {
+                String content = java.nio.file.Files.readString(provConfig);
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("api\\.key:\\s*(.+)").matcher(content);
+                if (m.find()) {
+                    return m.group(1).trim();
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        String sysProp = System.getProperty(id() + ".api.key");
+        if (sysProp != null && !sysProp.isBlank()) {
+            return sysProp;
+        }
+
         return System.getenv("ANTHROPIC_API_KEY");
     }
 

@@ -17,6 +17,16 @@ public class DequantizationKernel {
     private static final VectorSpecies<Integer> I_SPECIES = IntVector.SPECIES_PREFERRED;
 
     /**
+     * The 16 NormalFloat-4 quantization levels.
+     */
+    private static final float[] NF4_TABLE = {
+        -1.0f, -0.6961928009986877f, -0.5250730514526367f, -0.39491748809814453f,
+        -0.28444138169288635f, -0.18477343022823334f, -0.09105003625154495f, 0.0f,
+        0.07958029955625534f, 0.16093020141124725f, 0.24611230194568634f, 0.33791524171829224f,
+        0.44070982933044434f, 0.5626170039176941f, 0.7229568362236023f, 1.0f
+    };
+
+    /**
      * Dequantize INT8 weights to Float32.
      * Symmetric quantization expected: weight = qweight * scale.
      */
@@ -68,6 +78,29 @@ public class DequantizationKernel {
     }
 
     /**
+     * Dequantize NF4 weights (BitsAndBytes NormalFloat-4).
+     */
+    public static void dequantizeNf4(MemorySegment src, MemorySegment dst, MemorySegment scales, long numel, int groupSize) {
+        long i = 0;
+        long numBytes = (numel + 1) / 2;
+
+        for (; i < numBytes; i++) {
+            byte b = src.get(ValueLayout.JAVA_BYTE, i);
+            // BnB NF4 extracts high nibble first (for even indices) and low nibble second
+            int v1 = (b >> 4) & 0x0F;
+            int v2 = b & 0x0F;
+
+            long groupIdx = (i * 2) / groupSize;
+            float scale = scales.getAtIndex(ValueLayout.JAVA_FLOAT, groupIdx);
+
+            dst.setAtIndex(ValueLayout.JAVA_FLOAT, i * 2, NF4_TABLE[v1] * scale);
+            if (i * 2 + 1 < numel) {
+                dst.setAtIndex(ValueLayout.JAVA_FLOAT, i * 2 + 1, NF4_TABLE[v2] * scale);
+            }
+        }
+    }
+
+    /**
      * Dequantize F16 weights to Float32.
      */
     public static void dequantizeF16(MemorySegment src, MemorySegment dst, long numel) {
@@ -107,6 +140,18 @@ public class DequantizationKernel {
     public static void transcodeBf16ToF16(MemorySegment src, MemorySegment dst, long numel) {
         for (long i = 0; i < numel; i++) {
             dst.setAtIndex(ValueLayout.JAVA_SHORT, i, bf16ToFloat16(src.getAtIndex(ValueLayout.JAVA_SHORT, i)));
+        }
+    }
+
+    /**
+     * Transcodes a packed F32 segment into F16, element by element.
+     * Used to convert dequantized INT4/BNB weights into F16 so they can be
+     * consumed directly by the Metal matvec kernel.
+     */
+    public static void transcodeF32ToF16(MemorySegment src, MemorySegment dst, long numel) {
+        for (long i = 0; i < numel; i++) {
+            float v = src.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+            dst.setAtIndex(ValueLayout.JAVA_SHORT, i, float32ToFloat16(v));
         }
     }
 

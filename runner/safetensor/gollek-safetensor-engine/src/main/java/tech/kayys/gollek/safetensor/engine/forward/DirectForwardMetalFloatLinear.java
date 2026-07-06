@@ -56,6 +56,10 @@ final class DirectForwardMetalFloatLinear {
         }
     }
 
+    // MPS hangs indefinitely on very large F32 matrices (e.g. lm_head for 152k-vocab models).
+    // Cap at 256M weight elements (~1 GB in F32) to prevent a hard hang.
+    private static final long MAX_METAL_FLOAT_WEIGHT_ELEMENTS = 256L * 1024L * 1024L;
+
     private static boolean canUseCandidate(boolean metalLinearEnabled,
                                            MetalBinding metalBinding,
                                            AccelTensor input,
@@ -78,6 +82,10 @@ final class DirectForwardMetalFloatLinear {
         }
         long rows = input.numel() / Math.max(1L, input.size(-1));
         if (rows <= 0L) {
+            return false;
+        }
+        // Guard against oversized weight tensors that cause MPS to hang.
+        if (weight.numel() > MAX_METAL_FLOAT_WEIGHT_ELEMENTS) {
             return false;
         }
         long batchProduct = 1L;

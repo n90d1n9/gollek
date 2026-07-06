@@ -14,9 +14,6 @@ final class DirectForwardLayerTailStage {
     }
 
     static void run(DirectForwardLayerStageContext ctx, AccelTensor perLayerInput) {
-        if (perLayerInput == null) {
-            System.err.printf("[DEBUG] layer %d: perLayerInput is NULL!%n", ctx.layerIdx());
-        }
         DirectForwardPerLayerInputs.applyResidual(
                 DirectForwardPerLayerResidualRequest.fromStage(ctx, perLayerInput));
         if (ctx.verboseLayers() && perLayerInput != null) {

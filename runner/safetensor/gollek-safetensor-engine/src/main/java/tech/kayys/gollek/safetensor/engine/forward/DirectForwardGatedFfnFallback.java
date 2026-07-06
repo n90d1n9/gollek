@@ -24,9 +24,19 @@ final class DirectForwardGatedFfnFallback {
         long gateElementCount = elementCount(gateShape);
         AccelTensor combinedBuffer = combinedWorkspace(request, xLast, gateOutDim, gateElementCount, gateShape);
 
+        boolean localCombined = false;
+        if (combinedBuffer == null && request.gateW() != null && request.upW() != null && gateOutDim == request.upW().size(0)) {
+            combinedBuffer = AccelTensor.zeros(gateShape);
+            localCombined = true;
+        }
+
         AccelTensor acceleratedCombined = DirectForwardGatedFfnFastPaths.tryCombined(request, combinedBuffer);
         if (acceleratedCombined != null) {
-            return downProjectAndClose(request, acceleratedCombined);
+            return downProjectAndClose(request, acceleratedCombined, localCombined ? combinedBuffer : null);
+        }
+
+        if (localCombined && combinedBuffer != null) {
+            combinedBuffer.close();
         }
 
         AccelTensor gateBuffer = null;
@@ -72,7 +82,7 @@ final class DirectForwardGatedFfnFallback {
             gate.close();
         }
         up.close();
-        return downProjectAndClose(request, combined);
+        return downProjectAndClose(request, combined, localCombined ? combinedBuffer : null);
     }
 
     private static AccelTensor combinedWorkspace(DirectForwardGatedFfnRequest request,
@@ -114,7 +124,8 @@ final class DirectForwardGatedFfnFallback {
     }
 
     private static AccelTensor downProjectAndClose(DirectForwardGatedFfnRequest request,
-                                                   AccelTensor combined) {
+                                                   AccelTensor combined,
+                                                   AccelTensor localCombinedBuffer) {
         AccelTensor out = DirectForwardLinearProjection.ffnDownLinear(linearRequest(
                 request,
                 combined,
@@ -124,6 +135,9 @@ final class DirectForwardGatedFfnFallback {
                 request.downOutputBuffer()));
         if (request.ws() == null || combined.dataPtr() != request.ws().getCombinedSeg()) {
             combined.close();
+        }
+        if (localCombinedBuffer != null && !localCombinedBuffer.isClosed() && localCombinedBuffer != combined) {
+            localCombinedBuffer.close();
         }
         return out;
     }

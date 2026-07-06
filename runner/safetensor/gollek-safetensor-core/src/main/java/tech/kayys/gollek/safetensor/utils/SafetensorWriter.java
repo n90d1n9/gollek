@@ -127,7 +127,7 @@ public class SafetensorWriter {
         return switch (tensor.quantType()) {
             case F16, BF16 -> numel * 2L;
             case INT8, FP8 -> numel;
-            case INT4 -> (numel + 1L) / 2L;
+            case INT4, NF4 -> (numel + 1L) / 2L;
             case F32 -> numel * 4L;
         };
     }

@@ -356,7 +356,7 @@ final class MetalF16WeightCache {
             case BF16, F16 -> tensor.halfStorageByteSize();
             case F32 -> tensor.dequantizedByteSize();
             case INT8, FP8 -> tensor.numel();
-            case INT4 -> (tensor.numel() + 1L) / 2L;
+            case INT4, NF4 -> (tensor.numel() + 1L) / 2L;
         };
     }
 

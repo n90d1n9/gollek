@@ -29,6 +29,7 @@ dependencies {
     implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0-SNAPSHOT")
     implementation("tech.kayys.gollek:gollek-engine:0.1.0-SNAPSHOT")
     implementation(project(":plugins:gollek-plugin-mcp"))
+    implementation(project(":plugins:gollek-plugin-model-router"))
     implementation(project(":runner:gguf:gollek-gguf-converter"))
     implementation(project(":core:gollek-model-repo-hf"))
     implementation(project(":core:gollek-model-repo-local"))
@@ -46,7 +47,8 @@ dependencies {
     implementation(project(":core:gollek-runtime-config"))
     implementation(project(":optimization:gollek-plugin-kv-cache"))
 
-    
+
+
     implementation("io.smallrye.reactive:mutiny:2.5.5")
     implementation("io.opentelemetry:opentelemetry-api:1.34.1")
     implementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.0.1")

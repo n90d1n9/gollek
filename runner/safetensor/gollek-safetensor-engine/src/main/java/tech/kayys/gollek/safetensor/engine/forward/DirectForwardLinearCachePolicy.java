@@ -68,8 +68,15 @@ final class DirectForwardLinearCachePolicy {
         if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear) {
             return weight.toF16CachedUpTo(OPTIONS.metalF16WeightCacheMaxBytes());
         }
+        // For quantized weights (INT4, BNB, INT8): dequantize to F16 once and cache.
+        // This converts the weight to a Metal-compatible format with a one-time cost,
+        // eliminating the per-token CPU dequantize+sgemm bottleneck on every decode step.
+        if (weight.isQuantized()) {
+            return weight.toQuantizedF16CachedUpTo(OPTIONS.metalF16WeightCacheMaxBytes());
+        }
         return null;
     }
+
 
     static AccelTensor cachedTransposedF16Weight(AccelTensor weight) {
         return weight.toF16Transposed2dCachedUpTo(OPTIONS.metalF16WeightCacheMaxBytes());
