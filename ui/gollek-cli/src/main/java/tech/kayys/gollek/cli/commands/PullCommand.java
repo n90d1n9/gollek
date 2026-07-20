@@ -66,6 +66,9 @@ public class PullCommand implements Runnable {
     @Option(names = { "-m", "--move" }, description = "Move model from local file path instead of copying")
     boolean move;
 
+    @Option(names = { "-i", "--include" }, description = "Glob pattern to filter files when pulling from HuggingFace (e.g. '*IQ2_XXS*', '*Q4_K_M*'). Supports multiple patterns.")
+    List<String> include;
+
     @Override
     public void run() {
         try {
@@ -165,11 +168,23 @@ public class PullCommand implements Runnable {
             try {
                 Files.createDirectories(targetDir);
                 HuggingFaceClient client = huggingFaceClient.get();
-                List<String> files = client.listFiles(repoId);
-                try (HfProgressRenderer progress = new HfProgressRenderer(files.size())) {
-                    client.downloadRepository(repoId, targetDir, progress);
+                List<String> allFiles = client.listFiles(repoId);
+                List<String> filesToDownload = filterFiles(allFiles, include);
+                if (filesToDownload.isEmpty()) {
+                    System.err.println("No files matched the --include filter. Available files:");
+                    allFiles.forEach(f -> System.err.println("  " + f));
+                    throw new RuntimeException("No matching files for include filter: " + include);
                 }
-                saveDirectDownloadManifest(repoId, targetDir, files, manifestName);
+                System.out.printf("Downloading %d/%d files (filter: %s)%n",
+                        filesToDownload.size(), allFiles.size(),
+                        include != null && !include.isEmpty() ? include : "all");
+                try (HfProgressRenderer progress = new HfProgressRenderer(filesToDownload.size())) {
+                    for (String filename : filesToDownload) {
+                        if (filename.startsWith(".")) continue;
+                        client.downloadFile(repoId, filename, targetDir.resolve(filename), progress);
+                    }
+                }
+                saveDirectDownloadManifest(repoId, targetDir, filesToDownload, manifestName);
                 LocalModelIndex.refreshFromDisk();
             } catch (Exception ex) {
                 throw new RuntimeException("Direct HuggingFace download fallback failed for " + repoId, ex);
@@ -191,6 +206,46 @@ public class PullCommand implements Runnable {
             return "hf:" + trimmed;
         }
         return trimmed;
+    }
+
+    /**
+     * Filter a list of filenames against a list of glob patterns.
+     * If no patterns are given, all files are returned.
+     * Patterns are matched case-insensitively against the basename.
+     * Config/tokenizer files are always included when a filter is active,
+     * so the downloaded model remains usable.
+     */
+    private List<String> filterFiles(List<String> files, List<String> patterns) {
+        if (patterns == null || patterns.isEmpty()) {
+            return files;
+        }
+        return files.stream()
+                .filter(f -> isEssentialFile(f) || patterns.stream().anyMatch(p -> globMatches(p, f)))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /** Always download tokenizer/config files regardless of glob filter. */
+    private boolean isEssentialFile(String filename) {
+        String base = Path.of(filename).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return base.equals("config.json")
+                || base.equals("tokenizer.json")
+                || base.equals("tokenizer_config.json")
+                || base.equals("tokenizer.model")
+                || base.equals("special_tokens_map.json")
+                || base.equals("generation_config.json")
+                || base.equals("vocab.json")
+                || base.equals("merges.txt")
+                || base.equals("readme.md")
+                || base.equals("license");
+    }
+
+    private boolean globMatches(String pattern, String filename) {
+        // Match against the basename only, case-insensitive
+        String base = Path.of(filename).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        String pat = pattern.toLowerCase(java.util.Locale.ROOT);
+        // Convert glob to regex: * → .*, ? → .
+        String regex = pat.replace(".", "\\.").replace("*", ".*").replace("?", ".");
+        return base.matches(regex);
     }
 
     private void saveDirectDownloadManifest(String repoId, Path targetDir, List<String> files, String manifestName)

@@ -22,6 +22,8 @@ final class WeightAliasExpander {
             new Alias("text_model.", "model."),
             new Alias("model.text_model.", "model."),
             new Alias("language_model.model.", "model."),
+            new Alias("mlp.switch_mlp.", "mlp.experts."),
+
             new Alias("model.language_model.", "model."),
             new Alias("text_model.model.", "model."),
             new Alias("model.text_model.model.", "model."));
@@ -31,6 +33,14 @@ final class WeightAliasExpander {
 
     static void applyCommonAliases(Map<String, AccelTensor> weights) {
         applyAliases(weights, COMMON_TEXT_MODEL_ALIASES);
+        
+        Map<String, AccelTensor> qweightUpdates = new HashMap<>();
+        for (Map.Entry<String, AccelTensor> entry : weights.entrySet()) {
+            if (entry.getKey().endsWith(".qweight")) {
+                qweightUpdates.putIfAbsent(entry.getKey().replace(".qweight", ".weight"), entry.getValue());
+            }
+        }
+        weights.putAll(qweightUpdates);
     }
 
     static void applyAliases(Map<String, AccelTensor> weights, List<Alias> aliases) {

@@ -62,6 +62,7 @@ final class DirectGenerationLoop {
         long samplingNanos = 0L;
         int decodeSteps = 0;
 
+        System.err.println("DirectGenerationLoop: firstToken=" + next + ", stops=" + stops);
         for (int step = 0; step < maxNewTokens; step++) {
             if ((checkStopTokens && stops.contains(next)) || isCancelled(cancelled)) {
                 break;

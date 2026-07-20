@@ -30,7 +30,9 @@ final class DirectForwardLinearProjection {
         boolean metalLinearEnabled = request.runtime().metalLinearEnabled();
         if (request.weight().isQuantized()
                 && request.weight().quantType() != AccelTensor.QuantType.BF16
-                && request.weight().quantType() != AccelTensor.QuantType.F16) {
+                && request.weight().quantType() != AccelTensor.QuantType.F16
+                && request.weight().quantType() != AccelTensor.QuantType.NF4
+                && request.weight().quantType() != AccelTensor.QuantType.INT4) {
             AccelTensor dequantized = request.weight().dequantize();
             try {
                 return linear(request.withWeight(dequantized));

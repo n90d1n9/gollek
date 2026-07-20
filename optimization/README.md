@@ -109,7 +109,7 @@ System.out.println("Applied optimizations: " + applied);
 #### 1. Implement the OptimizationPlugin Interface
 
 ```java
-package com.example.plugin;
+package tech.kayys.plugin;
 
 import tech.kayys.gollek.plugin.optimization.*;
 import java.util.*;
@@ -173,7 +173,7 @@ public class MyCustomKernelPlugin implements OptimizationPlugin {
 
 ```xml
 <project>
-    <groupId>com.example</groupId>
+    <groupId>tech.kayys</groupId>
     <artifactId>gollek-plugin-my-custom</artifactId>
     <version>1.0.0</version>
     
@@ -199,7 +199,7 @@ public class MyCustomKernelPlugin implements OptimizationPlugin {
                     <archive>
                         <manifestEntries>
                             <Plugin-Id>my-custom-kernel</Plugin-Id>
-                            <Plugin-Class>com.example.plugin.MyCustomKernelPlugin</Plugin-Class>
+                            <Plugin-Class>tech.kayys.plugin.MyCustomKernelPlugin</Plugin-Class>
                             <Plugin-Type>optimization</Plugin-Type>
                         </manifestEntries>
                     </archive>

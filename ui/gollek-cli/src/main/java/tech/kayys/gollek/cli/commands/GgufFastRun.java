@@ -501,10 +501,25 @@ public final class GgufFastRun {
             String runnerName) throws Throwable {
         EngineMode engine = args.engineMode();
         if (engine == EngineMode.JAVA) {
-            printJavaNativeProbe(modelPath, "Java-native GGUF loader");
-            err.println("Java-native GGUF generation is not enabled yet; refusing to silently use llama.cpp. "
-                    + "Use --engine benchmark to compare the Java loader with the llama.cpp fallback.");
-            return COMMAND_ERROR;
+            try {
+                System.out.println("Executing Java Native GGUF Engine...");
+                tech.kayys.gollek.plugin.runner.gguf.JavaNativeGgufBackend backend = new tech.kayys.gollek.plugin.runner.gguf.JavaNativeGgufBackend(modelPath);
+                
+                tech.kayys.gollek.plugin.runner.RunnerRequest request = new tech.kayys.gollek.plugin.runner.RunnerRequest(tech.kayys.gollek.plugin.runner.RequestType.INFER);
+                
+                tech.kayys.gollek.plugin.runner.RunnerResult<?> result = backend.execute(request);
+                
+                if (result.isSuccess()) {
+                    System.out.println(result.getData());
+                } else {
+                    System.err.println("Execution failed: " + result.getErrorMessage().orElse("Unknown error"));
+                }
+                return 0;
+            } catch (Throwable e) {
+                System.err.println("Java Native Engine crashed:");
+                e.printStackTrace(System.err);
+                return COMMAND_ERROR;
+            }
         }
         if (engine == EngineMode.BENCHMARK) {
             out.println("GGUF engine benchmark: Java-native loader/probe vs llama.cpp generation fallback.");
@@ -2747,7 +2762,7 @@ public final class GgufFastRun {
                         parsed.engine = next.value();
                         i = next.index();
                     }
-                    case "--java-native" -> parsed.engine = "java";
+                    case "--java-native", "--java" -> parsed.engine = "java";
                     case "--llamacpp", "--llama-cpp" -> parsed.engine = "llamacpp";
                     case "--benchmark", "--bench" -> parsed.engine = "benchmark";
                     case "--no-banner", "--suppress-banner" -> parsed.banner = false;

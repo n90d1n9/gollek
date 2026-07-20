@@ -498,7 +498,7 @@ public class RunCommand implements Runnable {
     @Option(names = { "--backend" }, description = "GGUF backend to use for local fast path (metal or cpu)")
     String ggufBackend;
 
-    @Option(names = { "--java-native" }, description = "Use the Java-native GGUF loader/probe path")
+    @Option(names = { "--java-native", "--java" }, description = "Use the Java-native GGUF loader/probe path")
     boolean javaNativeGguf;
 
     @Option(names = { "--llamacpp", "--llama-cpp" }, description = "Use the llama.cpp GGUF engine")
@@ -5599,9 +5599,12 @@ public class RunCommand implements Runnable {
                 .build();
         String preparedPrompt = DirectSafetensorTextPolicy.preparePrompt(profile, effectiveSystemPrompt, userPrompt);
         
+        directInferenceEngine().loadModel(modelPath, null, quantizeStrategy);
+        System.err.println("Directly generating...");
         InferenceResponse response = directInferenceEngine().generate(preparedPrompt, modelPath, config)
                 .await()
                 .atMost(Duration.ofMinutes(5));
+        System.err.println("Generated response: '" + response.getContent() + "'");
         return DirectSafetensorTextPolicy.sanitizeResponse(response, profile);
     }
 

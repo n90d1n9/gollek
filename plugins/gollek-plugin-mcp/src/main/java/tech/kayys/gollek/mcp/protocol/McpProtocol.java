@@ -13,11 +13,16 @@ import java.util.Map;
 /**
  * Protocol types for the Model Context Protocol (MCP) 2025-11-25 specification.
  *
- * <p>MCP is a standard for connecting AI assistants to external data sources
- * and tools. It uses JSON-RPC 2.0 over SSE (Server-Sent Events), stdio, or HTTP Streamable.
- * See: <a href="https://modelcontextprotocol.io/specification/2025-11-25">MCP Spec 2025-11-25</a></p>
+ * <p>
+ * MCP is a standard for connecting AI assistants to external data sources
+ * and tools. It uses JSON-RPC 2.0 over SSE (Server-Sent Events), stdio, or HTTP
+ * Streamable.
+ * See: <a href="https://modelcontextprotocol.io/specification/2025-11-25">MCP
+ * Spec 2025-11-25</a>
+ * </p>
  *
  * <h2>Message flow</h2>
+ * 
  * <pre>
  * Client → Server: initialize request
  * Server → Client: initialize response (capabilities)
@@ -30,19 +35,20 @@ import java.util.Map;
  *
  * <h2>Compliance notes</h2>
  * <ul>
- *   <li>JSON Schema dialect defaults to 2020-12</li>
- *   <li>_meta parameter reserved for protocol-level metadata</li>
- *   <li>All list endpoints support pagination via cursors</li>
- *   <li>Capabilities negotiation in initialize handshake</li>
- *   <li>Support for roots, sampling, logging, completions, elicitation</li>
+ * <li>JSON Schema dialect defaults to 2020-12</li>
+ * <li>_meta parameter reserved for protocol-level metadata</li>
+ * <li>All list endpoints support pagination via cursors</li>
+ * <li>Capabilities negotiation in initialize handshake</li>
+ * <li>Support for roots, sampling, logging, completions, elicitation</li>
  * </ul>
  */
 public final class McpProtocol {
 
-    private McpProtocol() {}
+    private McpProtocol() {
+    }
 
     public static final String JSONRPC_VERSION = "2.0";
-    public static final String MCP_VERSION     = "2025-11-25";
+    public static final String MCP_VERSION = "2025-11-25";
 
     // ── JSON-RPC base types ────────────────────────────────────────────────────
 
@@ -56,8 +62,7 @@ public final class McpProtocol {
             String jsonrpc,
             String id,
             String method,
-            Object params
-    ) {
+            Object params) {
         public JsonRpcRequest(String id, String method, Object params) {
             this(JSONRPC_VERSION, id, method, params);
         }
@@ -72,8 +77,7 @@ public final class McpProtocol {
     public record JsonRpcNotification(
             String jsonrpc,
             String method,
-            Object params
-    ) {
+            Object params) {
         public JsonRpcNotification(String method, Object params) {
             this(JSONRPC_VERSION, method, params);
         }
@@ -89,23 +93,25 @@ public final class McpProtocol {
             String jsonrpc,
             String id,
             JsonNode result,
-            JsonRpcError error
-    ) {}
+            JsonRpcError error) {
+    }
 
     /**
      * JSON-RPC 2.0 error response.
-     * code MUST be an integer. Per spec: -32700 Parse error, -32600 Invalid Request,
+     * code MUST be an integer. Per spec: -32700 Parse error, -32600 Invalid
+     * Request,
      * -32601 Method not found, -32602 Invalid params, -32603 Internal error,
      * -32000 to -32099 Server-reserved (custom extensions).
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record JsonRpcError(int code, String message, Object data) {}
+    public record JsonRpcError(int code, String message, Object data) {
+    }
 
     // ── Protocol metadata (_meta) ─────────────────────────────────────────────
 
     /**
      * Reserved parameter key for protocol-level metadata.
-     * Key format: prefix/name where prefix is reverse DNS (e.g., com.example/).
+     * Key format: prefix/name where prefix is reverse DNS (e.g., tech.kayys/).
      * Reserved for MCP if second label is "modelcontextprotocol" or "mcp".
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -123,35 +129,31 @@ public final class McpProtocol {
     public record InitializeParams(
             String protocolVersion,
             ClientCapabilities capabilities,
-            ClientInfo clientInfo
-    ) {
+            ClientInfo clientInfo) {
         public static InitializeParams of(String clientName, String clientVersion) {
             return new InitializeParams(
                     MCP_VERSION,
                     new ClientCapabilities(
                             new RootsCapability(false),
                             new SamplingCapability(),
-                            new ElicitationCapability()
-                    ),
-                    new ClientInfo(clientName, clientVersion)
-            );
+                            new ElicitationCapability()),
+                    new ClientInfo(clientName, clientVersion));
         }
 
         public static InitializeParams of(String clientName, String clientVersion,
-                                          boolean rootsListChanged, boolean samplingEnabled) {
+                boolean rootsListChanged, boolean samplingEnabled) {
             return new InitializeParams(
                     MCP_VERSION,
                     new ClientCapabilities(
                             rootsListChanged ? new RootsCapability(true) : null,
                             samplingEnabled ? new SamplingCapability() : null,
-                            new ElicitationCapability()
-                    ),
-                    new ClientInfo(clientName, clientVersion)
-            );
+                            new ElicitationCapability()),
+                    new ClientInfo(clientName, clientVersion));
         }
     }
 
-    public record ClientInfo(String name, String version) {}
+    public record ClientInfo(String name, String version) {
+    }
 
     /**
      * Client capabilities advertised during initialization.
@@ -161,29 +163,32 @@ public final class McpProtocol {
     public record ClientCapabilities(
             RootsCapability roots,
             SamplingCapability sampling,
-            ElicitationCapability elicitation
-    ) {}
+            ElicitationCapability elicitation) {
+    }
 
     /**
      * Roots capability - client will expose file system roots to server.
      * listChanged: true if client emits notifications when root list changes.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record RootsCapability(boolean listChanged) {}
+    public record RootsCapability(boolean listChanged) {
+    }
 
     /**
      * Sampling capability - client allows server to request LLM sampling.
      * Empty object indicates support.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record SamplingCapability() {}
+    public record SamplingCapability() {
+    }
 
     /**
      * Elicitation capability - client allows server to request user input.
      * Empty object indicating support.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record ElicitationCapability() {}
+    public record ElicitationCapability() {
+    }
 
     /**
      * Initialize response from server.
@@ -194,8 +199,8 @@ public final class McpProtocol {
             String protocolVersion,
             ServerCapabilities capabilities,
             ServerInfo serverInfo,
-            String instructions
-    ) {}
+            String instructions) {
+    }
 
     /**
      * Server capabilities negotiated during initialization.
@@ -207,18 +212,35 @@ public final class McpProtocol {
             ResourcesCapability resources,
             PromptsCapability prompts,
             LoggingCapability logging,
-            CompletionsCapability completions
-    ) {
-        public boolean hasTools()     { return tools     != null; }
-        public boolean hasResources() { return resources != null; }
-        public boolean hasPrompts()   { return prompts   != null; }
-        public boolean hasLogging()   { return logging   != null; }
-        public boolean hasCompletions() { return completions != null; }
+            CompletionsCapability completions) {
+        public boolean hasTools() {
+            return tools != null;
+        }
+
+        public boolean hasResources() {
+            return resources != null;
+        }
+
+        public boolean hasPrompts() {
+            return prompts != null;
+        }
+
+        public boolean hasLogging() {
+            return logging != null;
+        }
+
+        public boolean hasCompletions() {
+            return completions != null;
+        }
     }
 
-    /** Tools capability - listChanged: true if server sends notifications/tools/list_changed */
+    /**
+     * Tools capability - listChanged: true if server sends
+     * notifications/tools/list_changed
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ToolsCapability(boolean listChanged) {}
+    public record ToolsCapability(boolean listChanged) {
+    }
 
     /**
      * Resources capability.
@@ -226,22 +248,33 @@ public final class McpProtocol {
      * listChanged: true if server sends notifications/resources/list_changed.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ResourcesCapability(boolean subscribe, boolean listChanged) {}
+    public record ResourcesCapability(boolean subscribe, boolean listChanged) {
+    }
 
-    /** Prompts capability - listChanged: true if server sends notifications/prompts/list_changed */
+    /**
+     * Prompts capability - listChanged: true if server sends
+     * notifications/prompts/list_changed
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record PromptsCapability(boolean listChanged) {}
+    public record PromptsCapability(boolean listChanged) {
+    }
 
     /** Logging capability - empty object indicates support */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record LoggingCapability() {}
+    public record LoggingCapability() {
+    }
 
-    /** Completions capability - empty object indicates support for completion/complete */
+    /**
+     * Completions capability - empty object indicates support for
+     * completion/complete
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CompletionsCapability() {}
+    public record CompletionsCapability() {
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ServerInfo(String name, String version) {}
+    public record ServerInfo(String name, String version) {
+    }
 
     // ── Tools ─────────────────────────────────────────────────────────────────
 
@@ -251,7 +284,9 @@ public final class McpProtocol {
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ListToolsParams(String cursor) {
-        public ListToolsParams() { this(null); }
+        public ListToolsParams() {
+            this(null);
+        }
     }
 
     /**
@@ -260,7 +295,8 @@ public final class McpProtocol {
      * Empty tools array with no nextCursor indicates completion.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ListToolsResult(List<McpTool> tools, String nextCursor) {}
+    public record ListToolsResult(List<McpTool> tools, String nextCursor) {
+    }
 
     /**
      * Tool definition.
@@ -272,8 +308,8 @@ public final class McpProtocol {
             String name,
             String description,
             InputSchema inputSchema,
-            ToolAnnotations annotations
-    ) {}
+            ToolAnnotations annotations) {
+    }
 
     /**
      * Tool annotations - hints for clients about tool behavior.
@@ -285,8 +321,8 @@ public final class McpProtocol {
             Boolean readOnlyHint,
             Boolean destructiveHint,
             Boolean idempotentHint,
-            Boolean openWorldHint
-    ) {}
+            Boolean openWorldHint) {
+    }
 
     /**
      * Tool input schema.
@@ -298,8 +334,7 @@ public final class McpProtocol {
     public record InputSchema(
             String type,
             Map<String, Object> properties,
-            List<String> required
-    ) {
+            List<String> required) {
         public InputSchema(Map<String, Object> properties, List<String> required) {
             this("object", properties, required);
         }
@@ -310,7 +345,8 @@ public final class McpProtocol {
      * arguments: optional map matching tool's inputSchema.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record CallToolParams(String name, Map<String, Object> arguments) {}
+    public record CallToolParams(String name, Map<String, Object> arguments) {
+    }
 
     /**
      * Tool call response.
@@ -321,22 +357,28 @@ public final class McpProtocol {
     public record CallToolResult(List<ContentBlock> content, Boolean isError) {
         /** Extract the first text content block's text value. */
         public String firstText() {
-            if (content == null || content.isEmpty()) return "";
+            if (content == null || content.isEmpty())
+                return "";
             return content.stream()
                     .filter(c -> "text".equals(c.type()))
                     .map(ContentBlock::text)
                     .findFirst()
                     .orElse("");
         }
+
         /** Combines all text content blocks. */
         public String allText() {
-            if (content == null) return "";
+            if (content == null)
+                return "";
             return content.stream()
                     .filter(c -> "text".equals(c.type()) && c.text() != null)
                     .map(ContentBlock::text)
                     .reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b);
         }
-        public boolean failed() { return Boolean.TRUE.equals(isError); }
+
+        public boolean failed() {
+            return Boolean.TRUE.equals(isError);
+        }
     }
 
     /**
@@ -345,25 +387,29 @@ public final class McpProtocol {
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ContentBlock(
-            String type,       // "text" | "image" | "audio" | "resource"
-            String text,       // for type="text"
-            String mimeType,   // for type="image", "audio", or "resource"
-            String data,       // base64 for type="image" or "audio"
-            ResourceContent resource,  // for type="resource"
-            String id          // for type="audio" - optional identifier
-    ) {}
+            String type, // "text" | "image" | "audio" | "resource"
+            String text, // for type="text"
+            String mimeType, // for type="image", "audio", or "resource"
+            String data, // base64 for type="image" or "audio"
+            ResourceContent resource, // for type="resource"
+            String id // for type="audio" - optional identifier
+    ) {
+    }
 
     // ── Resources ─────────────────────────────────────────────────────────────
 
     /** Resources list request params with optional cursor */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ListResourcesParams(String cursor) {
-        public ListResourcesParams() { this(null); }
+        public ListResourcesParams() {
+            this(null);
+        }
     }
 
     /** Resources list response */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ListResourcesResult(List<McpResource> resources, String nextCursor) {}
+    public record ListResourcesResult(List<McpResource> resources, String nextCursor) {
+    }
 
     /**
      * Resource definition.
@@ -387,8 +433,9 @@ public final class McpProtocol {
             String src,
             String mimeType,
             List<String> sizes,
-            String theme  // "light" | "dark"
-    ) {}
+            String theme // "light" | "dark"
+    ) {
+    }
 
     /** Read resource request params */
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -403,7 +450,8 @@ public final class McpProtocol {
      * contents: array of resource contents (text or blob).
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ReadResourceResult(List<ResourceContent> contents) {}
+    public record ReadResourceResult(List<ResourceContent> contents) {
+    }
 
     /**
      * Embedded resource content (within content blocks).
@@ -415,58 +463,68 @@ public final class McpProtocol {
             String uri,
             String mimeType,
             String text,
-            String blob  // base64-encoded binary content
-    ) {}
+            String blob // base64-encoded binary content
+    ) {
+    }
 
     // ── Resource subscriptions ────────────────────────────────────────────────
 
     /** Subscribe to resource updates */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record SubscribeParams(String uri) {}
+    public record SubscribeParams(String uri) {
+    }
 
     /** Unsubscribe from resource updates */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record UnsubscribeParams(String uri) {}
+    public record UnsubscribeParams(String uri) {
+    }
 
     // ── Prompts ───────────────────────────────────────────────────────────────
 
     /** Prompts list request params with optional cursor */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ListPromptsParams(String cursor) {
-        public ListPromptsParams() { this(null); }
+        public ListPromptsParams() {
+            this(null);
+        }
     }
 
     /** Prompts list response */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ListPromptsResult(List<McpPrompt> prompts, String nextCursor) {}
+    public record ListPromptsResult(List<McpPrompt> prompts, String nextCursor) {
+    }
 
     /**
      * Prompt definition.
      * arguments: optional list of arguments the prompt accepts.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record McpPrompt(String name, String description, List<PromptArgument> arguments) {}
+    public record McpPrompt(String name, String description, List<PromptArgument> arguments) {
+    }
 
     /**
      * Prompt argument definition.
      * required: whether this argument must be provided.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record PromptArgument(String name, String description, boolean required) {}
+    public record PromptArgument(String name, String description, boolean required) {
+    }
 
     /**
      * Get prompt request params.
      * arguments: map of argument values matching prompt's argument definitions.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record GetPromptParams(String name, Map<String, String> arguments) {}
+    public record GetPromptParams(String name, Map<String, String> arguments) {
+    }
 
     /**
      * Get prompt response.
      * messages: array of messages with role and content.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record GetPromptResult(String description, List<PromptMessage> messages) {}
+    public record GetPromptResult(String description, List<PromptMessage> messages) {
+    }
 
     /**
      * Prompt message.
@@ -474,7 +532,8 @@ public final class McpProtocol {
      * content: text or image content.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record PromptMessage(String role, ContentBlock content) {}
+    public record PromptMessage(String role, ContentBlock content) {
+    }
 
     // ── Roots ─────────────────────────────────────────────────────────────────
 
@@ -482,7 +541,8 @@ public final class McpProtocol {
      * Roots list request (server → client).
      * No params required.
      */
-    public record RootsListRequest() {}
+    public record RootsListRequest() {
+    }
 
     /**
      * Roots list response (client → server).
@@ -490,7 +550,8 @@ public final class McpProtocol {
      * URI MUST be file:// scheme.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record RootsResult(List<RootInfo> roots) {}
+    public record RootsResult(List<RootInfo> roots) {
+    }
 
     /**
      * Root info.
@@ -498,7 +559,8 @@ public final class McpProtocol {
      * name: optional human-readable name.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record RootInfo(String uri, String name) {}
+    public record RootInfo(String uri, String name) {
+    }
 
     // ── Sampling ──────────────────────────────────────────────────────────────
 
@@ -514,8 +576,7 @@ public final class McpProtocol {
             String temperature,
             Integer maxTokens,
             List<String> stopSequences,
-            Map<String, Object> metadata
-    ) {
+            Map<String, Object> metadata) {
         public enum IncludeContext {
             none, allServers, thisServer
         }
@@ -527,7 +588,8 @@ public final class McpProtocol {
      * content: text or image content.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record SamplingMessage(String role, ContentBlock content) {}
+    public record SamplingMessage(String role, ContentBlock content) {
+    }
 
     /**
      * Sampling response (client → server).
@@ -538,8 +600,9 @@ public final class McpProtocol {
             String role,
             ContentBlock content,
             String model,
-            String stopReason  // "endTurn" | "stopSequence" | "maxTokens" | "cancelled" | null
-    ) {}
+            String stopReason // "endTurn" | "stopSequence" | "maxTokens" | "cancelled" | null
+    ) {
+    }
 
     // ── Elicitation ───────────────────────────────────────────────────────────
 
@@ -550,14 +613,15 @@ public final class McpProtocol {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ElicitRequest(
             String message,
-            String requestedSchema
-    ) {}
+            String requestedSchema) {
+    }
 
     /**
      * Elicitation response (client → server).
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ElicitResult(String action, Map<String, Object> content) {}
+    public record ElicitResult(String action, Map<String, Object> content) {
+    }
 
     // ── Completions ───────────────────────────────────────────────────────────
 
@@ -566,7 +630,8 @@ public final class McpProtocol {
      * Provides argument auto-completion for prompts/resources.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record CompleteParams(CompleteRef ref, CompleteArgument argument) {}
+    public record CompleteParams(CompleteRef ref, CompleteArgument argument) {
+    }
 
     /** Reference to prompt or resource for completion */
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -574,6 +639,7 @@ public final class McpProtocol {
         public static CompleteRef forPrompt(String name) {
             return new CompleteRef("ref/prompt", name, null);
         }
+
         public static CompleteRef forResource(String uri) {
             return new CompleteRef("ref/resource", null, uri);
         }
@@ -581,7 +647,8 @@ public final class McpProtocol {
 
     /** Argument value to complete */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CompleteArgument(String name, String value) {}
+    public record CompleteArgument(String name, String value) {
+    }
 
     /**
      * Completion response.
@@ -589,10 +656,12 @@ public final class McpProtocol {
      * hasMore: true if more values available.
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CompleteResult(CompleteInfo completion) {}
+    public record CompleteResult(CompleteInfo completion) {
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record CompleteInfo(List<String> values, Integer total, Boolean hasMore) {}
+    public record CompleteInfo(List<String> values, Integer total, Boolean hasMore) {
+    }
 
     // ── Logging ───────────────────────────────────────────────────────────────
 
@@ -601,7 +670,8 @@ public final class McpProtocol {
      * level: minimum severity to receive.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record SetLoggingLevelParams(String level) {}
+    public record SetLoggingLevelParams(String level) {
+    }
 
     /**
      * Log message notification (server → client).
@@ -612,8 +682,7 @@ public final class McpProtocol {
     public record LoggingMessageNotification(
             String level,
             String logger,
-            Object data
-    ) {
+            Object data) {
         public static final String METHOD = "notifications/message";
     }
 
@@ -625,10 +694,9 @@ public final class McpProtocol {
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ProgressNotification(
-            Object progressToken,  // from _meta.progressToken
+            Object progressToken, // from _meta.progressToken
             Integer progress,
-            Integer total
-    ) {
+            Integer total) {
         public static final String METHOD = "notifications/progress";
     }
 
@@ -641,8 +709,7 @@ public final class McpProtocol {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CancelledNotification(
             String requestId,
-            String reason
-    ) {
+            String reason) {
         public static final String METHOD = "notifications/cancelled";
     }
 
@@ -677,19 +744,20 @@ public final class McpProtocol {
     // ── Notifications ─────────────────────────────────────────────────────────
 
     /** Client sends this after receiving initialize response */
-    public record InitializedNotification() {}
+    public record InitializedNotification() {
+    }
 
     // ── Error codes (JSON-RPC + MCP-specific) ────────────────────────────────
 
     /** Standard JSON-RPC 2.0 error codes */
-    public static final int ERR_PARSE_ERROR       = -32700;
-    public static final int ERR_INVALID_REQUEST   = -32600;
-    public static final int ERR_METHOD_NOT_FOUND  = -32601;
-    public static final int ERR_INVALID_PARAMS    = -32602;
-    public static final int ERR_INTERNAL          = -32603;
+    public static final int ERR_PARSE_ERROR = -32700;
+    public static final int ERR_INVALID_REQUEST = -32600;
+    public static final int ERR_METHOD_NOT_FOUND = -32601;
+    public static final int ERR_INVALID_PARAMS = -32602;
+    public static final int ERR_INTERNAL = -32603;
 
     /** MCP-specific error codes (-32000 to -32099 server-reserved) */
-    public static final int ERR_TIMEOUT           = -32000; // Request timeout
-    public static final int ERR_NOT_FOUND         = -32002; // MCP: resource/tool/prompt not found
-    public static final int ERR_INVALID_CURSOR    = -32001; // MCP: invalid pagination cursor
+    public static final int ERR_TIMEOUT = -32000; // Request timeout
+    public static final int ERR_NOT_FOUND = -32002; // MCP: resource/tool/prompt not found
+    public static final int ERR_INVALID_CURSOR = -32001; // MCP: invalid pagination cursor
 }

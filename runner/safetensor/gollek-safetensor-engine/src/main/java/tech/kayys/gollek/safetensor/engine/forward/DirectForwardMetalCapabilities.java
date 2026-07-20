@@ -29,12 +29,14 @@ record DirectForwardMetalCapabilities(
         boolean supportsMatvecTransposedRightHalf,
         boolean supportsMatvecTransposedRightHalfMps,
         boolean supportsMatvecTransposedRightBf16,
+        boolean supportsMatvecTransposedRightNf4,
+        boolean supportsMatvecTransposedRightInt4,
         boolean supportsMatvecTransposedWeightHalf) {
 
     static final DirectForwardMetalCapabilities EMPTY = new DirectForwardMetalCapabilities(
             false, false, false, false, false, false, false, false, false, false,
             false, false, false, false, false, false, false, false, false, false,
-            false, false);
+            false, false, false, false);
 
     static DirectForwardMetalCapabilities detect(MetalBinding binding) {
         if (binding == null) {
@@ -63,8 +65,10 @@ record DirectForwardMetalCapabilities(
                     binding.supportsMatvecTransposedRightHalf(),
                     binding.supportsMatvecTransposedRightHalfMps(),
                     binding.supportsMatvecTransposedRightBf16(),
+                    binding.supportsMatvecTransposedRightNf4(),
+                    binding.supportsMatvecTransposedRightInt4(),
                     binding.supportsMatvecTransposedWeightHalf());
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
             return EMPTY;
         }
     }

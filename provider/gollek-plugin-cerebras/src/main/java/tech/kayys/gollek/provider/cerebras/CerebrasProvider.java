@@ -126,13 +126,13 @@ public class CerebrasProvider implements StreamingProvider {
                 .version(VERSION)
                 .vendor("Cerebras")
                 .homepage("https://cerebras.ai")
-                .defaultModel("llama3.1-8b")
+                .defaultModel("gpt-oss-120b")
                 .build();
     }
 
     @Override
     public boolean supports(String model, ProviderRequest request) {
-        return model != null && (model.startsWith("llama3.1-") || model.contains("cerebras"));
+        return model != null && (model.startsWith("llama3.") || model.contains("cerebras"));
     }
 
     @Override

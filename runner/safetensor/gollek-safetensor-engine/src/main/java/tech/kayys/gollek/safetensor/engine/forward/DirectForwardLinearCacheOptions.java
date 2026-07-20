@@ -13,7 +13,7 @@ record DirectForwardLinearCacheOptions(
 
     private static final String METAL_F16_WEIGHT_CACHE_MAX_BYTES_PROPERTY =
             "gollek.safetensor.metal_f16_weight_cache_max_bytes";
-    private static final long DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;
+    private static final long DEFAULT_METAL_F16_WEIGHT_CACHE_MAX_BYTES = 8L * 1024L * 1024L * 1024L;
     private static final String LOGITS_LARGE_HALF_CACHE_MAX_BYTES_PROPERTY =
             "gollek.safetensor.logits_large_half_cache_max_bytes";
     private static final long DEFAULT_LOGITS_LARGE_HALF_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L;

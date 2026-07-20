@@ -28,6 +28,7 @@ sourceSets {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     mavenLocal()
 }

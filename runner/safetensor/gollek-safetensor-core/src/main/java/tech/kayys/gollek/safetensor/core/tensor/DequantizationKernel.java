@@ -68,7 +68,7 @@ public class DequantizationKernel {
             // Apply scales/zeros based on group
             long groupIdx = (i * 2) / groupSize;
             float scale = scales.getAtIndex(ValueLayout.JAVA_FLOAT, groupIdx);
-            float zero = (zeros != null) ? zeros.getAtIndex(ValueLayout.JAVA_FLOAT, groupIdx) : 0.0f;
+            float zero = (zeros != null) ? zeros.getAtIndex(ValueLayout.JAVA_FLOAT, groupIdx) : 8.0f;
 
             dst.setAtIndex(ValueLayout.JAVA_FLOAT, i * 2, (v1 - zero) * scale);
             if (i * 2 + 1 < numel) {

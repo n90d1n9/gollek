@@ -36,8 +36,12 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Quantization engine for model compression.
@@ -451,68 +455,109 @@ public class QuantizationEngine {
         }
 
         QuantConfig config = createDefaultConfig(effectiveStrategy);
-        Map<String, AccelTensor> quantized = new HashMap<>(weights.size() * 2);
         Path cachePath = inferenceCachePath(modelPath, effectiveStrategy);
         Map<String, CachedTensor> cachedTensors = loadInferenceCache(cachePath, effectiveStrategy);
-        int cacheHits = 0;
-        int quantizedFresh = 0;
 
+        // Separate tensors that need quantization from those that can pass through.
+        Map<String, AccelTensor> passThrough = new ConcurrentHashMap<>();
+        Map<String, AccelTensor> toQuantize  = new LinkedHashMap<>();
         for (Map.Entry<String, AccelTensor> entry : weights.entrySet()) {
-            String name = entry.getKey();
-            AccelTensor source = entry.getValue();
-
-            if (!shouldQuantizeForInference(name, source)) {
-                quantized.put(name, source);
-                continue;
+            if (!shouldQuantizeForInference(entry.getKey(), entry.getValue())) {
+                passThrough.put(entry.getKey(), entry.getValue());
+            } else {
+                toQuantize.put(entry.getKey(), entry.getValue());
             }
+        }
 
+        // Check cache first (serial, cheap)
+        AtomicInteger cacheHits = new AtomicInteger(0);
+        Map<String, AccelTensor> fromCache = new ConcurrentHashMap<>();
+        CopyOnWriteArrayList<Map.Entry<String, AccelTensor>> needsQuant = new CopyOnWriteArrayList<>();
+        for (Map.Entry<String, AccelTensor> entry : toQuantize.entrySet()) {
+            String name = entry.getKey();
             CachedTensor cached = cachedTensors.get(name);
             if (cached != null) {
                 try {
-                    quantized.put(name, cached.toTensor());
-                    source.close();
-                    cacheHits++;
+                    fromCache.put(name, cached.toTensor());
+                    entry.getValue().close();
+                    cacheHits.incrementAndGet();
                     continue;
                 } catch (Exception e) {
-                    log.warnf(e, "Failed to hydrate cached quantized tensor for %s; falling back to live quantization", name);
+                    log.warnf(e, "Failed to hydrate cached tensor for %s; will re-quantize", name);
                 }
             }
-
-            try {
-                AccelTensor materialized = materializeForQuantization(source);
-                AccelTensor candidate = quantizer.quantizeTensor(materialized, config);
-                if (!isUsableQuantizedTensor(candidate)) {
-                    log.warnf("Quantizer %s produced unsupported tensor for %s; keeping original weight",
-                            effectiveStrategy, name);
-                    if (candidate != null && candidate != source && candidate != materialized) {
-                        candidate.close();
-                    }
-                    quantized.put(name, source);
-                    continue;
-                }
-
-                quantized.put(name, candidate);
-                quantizedFresh++;
-                if (materialized != source) {
-                    materialized.close();
-                }
-                source.close();
-            } catch (Exception e) {
-                log.warnf(e, "Failed to quantize %s with strategy %s; keeping original weight", name, effectiveStrategy);
-                quantized.put(name, source);
-            }
+            needsQuant.add(entry);
         }
 
-        if (cachePath != null && quantizedFresh > 0) {
+        int totalToQuant = needsQuant.size();
+        if (totalToQuant > 0) {
+            int cpuCores = Runtime.getRuntime().availableProcessors();
+            System.err.printf("[Gollek] Quantizing %d tensors (BnB NF4) using %d CPU threads...%n",
+                    totalToQuant, cpuCores);
+        }
+
+        // Parallel quantization — uses all CPU cores via ForkJoinPool work-stealing.
+        AtomicInteger doneCount = new AtomicInteger(0);
+        AtomicInteger quantizedFresh = new AtomicInteger(0);
+        Map<String, AccelTensor> freshQuant = new ConcurrentHashMap<>();
+
+        ForkJoinPool pool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
+        try {
+            pool.submit(() -> needsQuant.parallelStream().forEach(entry -> {
+                String name = entry.getKey();
+                AccelTensor source = entry.getValue();
+                int idx = doneCount.incrementAndGet();
+                long t0 = System.currentTimeMillis();
+                try {
+                    AccelTensor materialized = materializeForQuantization(source);
+                    AccelTensor candidate = quantizer.quantizeTensor(materialized, config);
+                    long ms = System.currentTimeMillis() - t0;
+                    if (!isUsableQuantizedTensor(candidate)) {
+                        System.err.printf("[Gollek] [%d/%d] SKIP (unsupported output) %s  (%.1fs)%n",
+                                idx, totalToQuant, name, ms / 1000.0);
+                        log.warnf("Quantizer %s produced unsupported tensor for %s", effectiveStrategy, name);
+                        if (candidate != null && candidate != source && candidate != materialized) candidate.close();
+                        freshQuant.put(name, source);
+                        return;
+                    }
+                    System.err.printf("[Gollek] [%d/%d] OK  %s  (%.1fs, %s → NF4)%n",
+                            idx, totalToQuant, name, ms / 1000.0, source.quantType());
+                    freshQuant.put(name, candidate);
+                    quantizedFresh.incrementAndGet();
+                    if (materialized != source) materialized.close();
+                    source.close();
+                } catch (Exception e) {
+                    long ms = System.currentTimeMillis() - t0;
+                    System.err.printf("[Gollek] [%d/%d] ERR %s  (%.1fs): %s%n",
+                            idx, totalToQuant, name, ms / 1000.0, e.getMessage());
+                    log.warnf(e, "Failed to quantize %s; keeping original", name);
+                    freshQuant.put(name, source);
+                }
+            })).get();
+        } catch (Exception e) {
+            log.errorf(e, "Parallel quantization pool failed");
+        } finally {
+            pool.shutdown();
+        }
+
+        // Merge results
+        Map<String, AccelTensor> quantized = new HashMap<>(weights.size() * 2);
+        quantized.putAll(passThrough);
+        quantized.putAll(fromCache);
+        quantized.putAll(freshQuant);
+
+        if (cachePath != null && quantizedFresh.get() > 0) {
             persistInferenceCache(cachePath, effectiveStrategy, quantized);
         }
 
-        if (cacheHits > 0) {
-            log.infof("Loaded %d quantized tensors from inference cache (%s)", cacheHits, effectiveStrategy);
+        if (cacheHits.get() > 0) {
+            log.infof("Loaded %d quantized tensors from inference cache (%s)", cacheHits.get(), effectiveStrategy);
         }
+        System.err.printf("[Gollek] Quantization complete: %d fresh, %d cached, %d pass-through%n",
+                quantizedFresh.get(), cacheHits.get(), passThrough.size());
         log.infof("Prepared %d inference weights with strategy %s", quantized.size(), effectiveStrategy);
-        String cacheState = cacheHits > 0 ? "warm" : (quantizedFresh > 0 ? "cold" : "bypass");
-        return new InferenceQuantizationResult(quantized, cacheState, cachePath, cacheHits, quantizedFresh);
+        String cacheState = cacheHits.get() > 0 ? "warm" : (quantizedFresh.get() > 0 ? "cold" : "bypass");
+        return new InferenceQuantizationResult(quantized, cacheState, cachePath, cacheHits.get(), quantizedFresh.get());
     }
 
     /**
@@ -551,11 +596,10 @@ public class QuantizationEngine {
 
     private boolean shouldQuantizeForInference(String name, AccelTensor tensor) {
         return tensor != null
-                && (name.endsWith(".weight") || name.endsWith(".qweight"))
-                && tensor.rank() == 2
+                && (name.endsWith(".weight") || name.endsWith(".qweight") || name.endsWith("down_proj") || name.endsWith("gate_up_proj"))
+                && (tensor.rank() == 2 || tensor.rank() == 3)
                 && tensor.numel() >= 4096
                 && !name.contains("embed_tokens")
-                && !name.contains("lm_head")
                 && !name.contains("position_embedding")
                 && !name.contains("vision_tower");
     }
@@ -709,8 +753,16 @@ public class QuantizationEngine {
         if (tensor.quantType() == AccelTensor.QuantType.F32) {
             return tensor;
         }
+        // BF16 and F16 tensors are handled directly by BnBQuantizerAdapter via chunked
+        // MemorySegment reads — avoid allocating a full F32 copy here, which would OOM
+        // for large tensors like lm_head (~2.5GB for a 35B MoE model).
+        if (tensor.quantType() == AccelTensor.QuantType.BF16
+                || tensor.quantType() == AccelTensor.QuantType.F16) {
+            return tensor;
+        }
         return tensor.dequantize();
     }
+
 
     private boolean isUsableQuantizedTensor(AccelTensor tensor) {
         if (tensor == null) {

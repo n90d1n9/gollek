@@ -114,7 +114,10 @@ public class Qwen35MoeFamily implements ModelArchitecture {
 
     @Override
     public List<String> layerFfnGateWeightCandidates(int i) {
-        return List.of(layerFfnGateWeight(i), "model.language_model.layers." + i + ".mlp.gate_proj.weight");
+        return List.of(layerFfnGateWeight(i), 
+                       "model.language_model.layers." + i + ".mlp.gate_proj.weight",
+                       "model.layers." + i + ".mlp.shared_expert.gate_proj.weight",
+                       "language_model.model.layers." + i + ".mlp.shared_expert.gate_proj.weight");
     }
 
     @Override
@@ -124,7 +127,10 @@ public class Qwen35MoeFamily implements ModelArchitecture {
 
     @Override
     public List<String> layerFfnUpWeightCandidates(int i) {
-        return List.of(layerFfnUpWeight(i), "model.language_model.layers." + i + ".mlp.up_proj.weight");
+        return List.of(layerFfnUpWeight(i), 
+                       "model.language_model.layers." + i + ".mlp.up_proj.weight",
+                       "model.layers." + i + ".mlp.shared_expert.up_proj.weight",
+                       "language_model.model.layers." + i + ".mlp.shared_expert.up_proj.weight");
     }
 
     @Override
@@ -134,7 +140,10 @@ public class Qwen35MoeFamily implements ModelArchitecture {
 
     @Override
     public List<String> layerFfnDownWeightCandidates(int i) {
-        return List.of(layerFfnDownWeight(i), "model.language_model.layers." + i + ".mlp.down_proj.weight");
+        return List.of(layerFfnDownWeight(i), 
+                       "model.language_model.layers." + i + ".mlp.down_proj.weight",
+                       "model.layers." + i + ".mlp.shared_expert.down_proj.weight",
+                       "language_model.model.layers." + i + ".mlp.shared_expert.down_proj.weight");
     }
 
     @Override
@@ -160,7 +169,11 @@ public class Qwen35MoeFamily implements ModelArchitecture {
 
     @Override
     public List<String> expertGateWeightCandidates(int layerIdx, int expertIdx) {
-        return List.of(expertGateWeight(layerIdx, expertIdx), "model.language_model.layers." + layerIdx + ".mlp.experts.gate_up_proj");
+        return List.of(expertGateWeight(layerIdx, expertIdx), 
+                       "model.language_model.layers." + layerIdx + ".mlp.experts.gate_up_proj",
+                       "model.language_model.layers." + layerIdx + ".mlp.experts.gate_proj.weight",
+                       "model.layers." + layerIdx + ".mlp.switch_mlp.gate_proj.weight",
+                       "language_model.model.layers." + layerIdx + ".mlp.switch_mlp.gate_proj.weight");
     }
 
     @Override
@@ -171,7 +184,11 @@ public class Qwen35MoeFamily implements ModelArchitecture {
     
     @Override
     public List<String> expertUpWeightCandidates(int layerIdx, int expertIdx) {
-        return expertGateWeightCandidates(layerIdx, expertIdx);
+        return List.of(expertUpWeight(layerIdx, expertIdx),
+                       "model.language_model.layers." + layerIdx + ".mlp.experts.gate_up_proj",
+                       "model.language_model.layers." + layerIdx + ".mlp.experts.up_proj.weight",
+                       "model.layers." + layerIdx + ".mlp.switch_mlp.up_proj.weight",
+                       "language_model.model.layers." + layerIdx + ".mlp.switch_mlp.up_proj.weight");
     }
 
     @Override
@@ -181,7 +198,10 @@ public class Qwen35MoeFamily implements ModelArchitecture {
 
     @Override
     public List<String> expertDownWeightCandidates(int layerIdx, int expertIdx) {
-        return List.of(expertDownWeight(layerIdx, expertIdx), "model.language_model.layers." + layerIdx + ".mlp.experts.down_proj");
+        return List.of(expertDownWeight(layerIdx, expertIdx), 
+                       "model.language_model.layers." + layerIdx + ".mlp.experts.down_proj",
+                       "model.layers." + layerIdx + ".mlp.switch_mlp.down_proj.weight",
+                       "language_model.model.layers." + layerIdx + ".mlp.switch_mlp.down_proj.weight");
     }
 
     @Override

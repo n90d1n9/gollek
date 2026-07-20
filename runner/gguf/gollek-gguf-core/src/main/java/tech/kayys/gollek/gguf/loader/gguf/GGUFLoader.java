@@ -14,13 +14,19 @@ import tech.kayys.gollek.gguf.core.GgmlType;
 public class GGUFLoader {
     
     public static GGUFFile load(Path path) throws IOException {
-        try (Arena arena = Arena.ofShared()) {
+        // Use a persistent arena so tensor MemorySegment slices remain valid
+        // after load() returns.  The caller (GGUFFile) is responsible for closing it.
+        Arena arena = Arena.ofShared();
+        try {
             FileChannel ch = FileChannel.open(path, StandardOpenOption.READ);
             long size = ch.size();
             MemorySegment seg = ch.map(FileChannel.MapMode.READ_ONLY, 0, size, arena);
             ch.close();
             
             return parse(seg, arena);
+        } catch (Exception e) {
+            arena.close();
+            throw e;
         }
     }
     

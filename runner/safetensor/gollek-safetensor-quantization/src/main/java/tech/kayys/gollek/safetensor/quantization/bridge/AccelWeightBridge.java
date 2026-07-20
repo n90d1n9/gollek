@@ -52,8 +52,8 @@ public class AccelWeightBridge {
             // Zero-copy: wrap the mmap'd segment directly
             log.tracef("Bridge zero-copy: '%s' F32 shape=%s", name, java.util.Arrays.toString(shape));
             t = AccelTensor.wrapSegment(st.segment(), shape);
-        } else if (dtype == SafetensorDType.I8 || name.endsWith(".qweight")) {
-             // Handle as Quantized INT8 or INT4
+        } else if (dtype == SafetensorDType.I8 || dtype == SafetensorDType.U32 || name.endsWith(".qweight")) {
+             // Handle as Quantized INT8, INT4, or packed U32 bits (MLX)
              log.debugf("Bridge wrapped (quantized): '%s' %s shape=%s", name, dtype, java.util.Arrays.toString(shape));
              t = AccelTensor.wrapSegment(st.segment(), shape);
              // We'll set the quantization metadata in bridgeAll where we have the full session
@@ -95,7 +95,7 @@ public class AccelWeightBridge {
                 AccelTensor t = bridge(st);
                 
                 if (isWeightTensor(name)) {
-                    attachQuantizationMetadata(t, name, session);
+                    t = attachQuantizationMetadata(t, name, session);
                 }
                 
                 result.put(name, t);
@@ -168,16 +168,16 @@ public class AccelWeightBridge {
         return name.endsWith(".scales") || name.endsWith(".qzeros") || name.endsWith(".g_idx");
     }
 
-    private void attachQuantizationMetadata(AccelTensor t, String weightName, SafetensorShardSession session) {
+    private AccelTensor attachQuantizationMetadata(AccelTensor t, String weightName, SafetensorShardSession session) {
         String baseName = weightName.substring(0, weightName.lastIndexOf("."));
         SafetensorTensor st = session.tensor(weightName);
         
         if (st.dtype() == SafetensorDType.BF16 && st.info().shape().length >= 2) {
             t.withQuantization(AccelTensor.QuantType.BF16, null, null, -1);
-            return;
+            return t;
         } else if (st.dtype() == SafetensorDType.F16 && st.info().shape().length >= 2) {
             t.withQuantization(AccelTensor.QuantType.F16, null, null, -1);
-            return;
+            return t;
         }
         
         String scalesName = baseName + ".scales";
@@ -185,8 +185,28 @@ public class AccelWeightBridge {
             SafetensorTensor scalesSt = session.tensor(scalesName);
             MemorySegment scalesSeg = scalesSt.segment();
             
-            AccelTensor.QuantType type = (weightName.endsWith(".qweight")) ? 
-                    AccelTensor.QuantType.INT4 : AccelTensor.QuantType.INT8;
+            AccelTensor.QuantType type;
+            if (st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.I32 ||
+                st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.U32 ||
+                (st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.I8 && weightName.endsWith(".qweight"))) {
+                type = AccelTensor.QuantType.INT4;
+            } else if (st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.U8 && weightName.endsWith(".qweight")) {
+                type = AccelTensor.QuantType.NF4;
+            } else {
+                type = AccelTensor.QuantType.INT8;
+            }
+            
+            if (type == AccelTensor.QuantType.NF4 || type == AccelTensor.QuantType.INT4) {
+                long[] logicalShape = t.shape().clone();
+                if (st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.U8 ||
+                    st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.I8) {
+                    logicalShape[logicalShape.length - 1] *= 2;
+                } else if (st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.I32 ||
+                           st.dtype() == tech.kayys.gollek.safetensor.loader.SafetensorDType.U32) {
+                    logicalShape[logicalShape.length - 1] *= 8;
+                }
+                t = AccelTensor.wrapSegment(t.dataPtr(), logicalShape);
+            }
             
             String zerosName = baseName + ".qzeros";
             MemorySegment zerosSeg = session.findTensor(zerosName).isPresent() 
@@ -197,5 +217,6 @@ public class AccelWeightBridge {
             t.withQuantization(type, scalesSeg, zerosSeg, groupSize);
             log.debugf("Attached %s quantization to '%s'", type, weightName);
         }
+        return t;
     }
 }

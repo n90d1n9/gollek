@@ -342,9 +342,17 @@ public class AccelTensor implements AutoCloseable {
         this.parent = parent;
         if (parent != null) {
             this.quantType = parent.quantType;
-            this.scales = parent.scales;
-            this.zeros = parent.zeros;
             this.groupSize = parent.groupSize;
+            if (offset == parent.offset || parent.scales == null) {
+                this.scales = parent.scales;
+                this.zeros = parent.zeros;
+            } else {
+                long offsetDiff = offset - parent.offset;
+                long skippedScales = offsetDiff / this.groupSize;
+                long scaleByteSize = (this.quantType == QuantType.INT8 || this.quantType == QuantType.INT4 || this.quantType == QuantType.NF4) ? 4L : 2L;
+                this.scales = parent.scales.asSlice(skippedScales * scaleByteSize);
+                this.zeros = parent.zeros != null ? parent.zeros.asSlice(skippedScales * scaleByteSize) : null;
+            }
         }
     }
 

@@ -48,9 +48,21 @@ final class DirectForwardTransformerLayer {
                 layerWeights,
                 resolvedWeights);
 
+        if (stageContext.verboseLayers()) {
+            System.err.println("  -> AttentionStage");
+        }
         DirectForwardAttentionStage.run(stageContext, context.attentionKernel(), kvCache, startPos, sharedKvStates);
+        if (stageContext.verboseLayers()) {
+            System.err.println("  -> FfnStage");
+        }
         DirectForwardFfnStage.run(stageContext, context.moeForwardPass(), weights);
+        if (stageContext.verboseLayers()) {
+            System.err.println("  -> LayerTailStage");
+        }
         DirectForwardLayerTailStage.run(stageContext, perLayerInput);
+        if (stageContext.verboseLayers()) {
+            System.err.println("  -> Layer complete");
+        }
     }
 
 }

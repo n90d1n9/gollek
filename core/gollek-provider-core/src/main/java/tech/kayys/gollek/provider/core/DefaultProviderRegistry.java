@@ -19,6 +19,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import io.quarkus.arc.DefaultBean;
+
+@DefaultBean
 @ApplicationScoped
 public class DefaultProviderRegistry implements ProviderRegistry {
 

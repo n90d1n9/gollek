@@ -167,11 +167,6 @@ public class GollekCommand implements Runnable {
         configureMcpServersFromEnvironmentAndArgs();
         configureKernelPlatform();
         applyRuntimeOverrides();
-    }
-
-    @Override
-    public void run() {
-        bootstrapInheritedEnvironment();
 
         // Default: hide console logs, log to file
         System.setProperty("quarkus.log.console.enabled", "false");
@@ -188,9 +183,15 @@ public class GollekCommand implements Runnable {
             System.setProperty("quarkus.log.category.\"tech.kayys.gollek.inference.libtorch\".level", "DEBUG");
             System.setProperty("gguf.provider.verbose-logging", "true");
             System.setProperty("gollek.verbose", "true");
-
+            System.setProperty("aljabr.metal.verbose", "true");
         }
     }
+
+    @Override
+    public void run() {
+        bootstrapInheritedEnvironment();
+    }
+
 
     public void applyRuntimeOverrides() {
         if (hasText(mcpServersJson)) {

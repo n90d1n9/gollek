@@ -37,15 +37,14 @@ public class MoeForwardPass {
      * This lets hot experts persist across decode steps while keeping
      * total memory usage bounded.
      */
-    private static final long MAX_EXPERT_CACHE_BYTES =
-            Long.getLong("gollek.moe.expert_cache_bytes", 2_000_000_000L); // 2.0 GB default (fits in 4G limit with lm_head)
+    private long maxExpertCacheBytes = -1L;
     private static final long ENTRY_SHIFT = 1 << 22; // up to 4M entries per tensor
     private long expertCacheBytes = 0L;
     private final java.util.LinkedHashMap<Long, AccelTensor> expertLruCache =
             new java.util.LinkedHashMap<>(256, 0.75f, true) {
                 @Override
                 protected boolean removeEldestEntry(Map.Entry<Long, AccelTensor> eldest) {
-                    if (expertCacheBytes > MAX_EXPERT_CACHE_BYTES) {
+                    if (maxExpertCacheBytes > 0 && expertCacheBytes > maxExpertCacheBytes) {
                         AccelTensor evicted = eldest.getValue();
                         expertCacheBytes -= evictedBytes(evicted);
                         if (!evicted.isClosed()) evicted.close();
@@ -80,10 +79,8 @@ public class MoeForwardPass {
         
         long bytes = cont.numel() * (long) cont.elementByteSize();
         if (cont.isQuantized()) {
-            AccelTensor f16 = cont.toQuantizedF16CachedUpTo(Long.MAX_VALUE);
-            if (f16 != null) {
-                bytes += f16.numel() * (long) f16.elementByteSize();
-            }
+            // Do NOT preemptively dequantize on CPU to avoid SIGILL and memory bloat.
+            // Metal kernel will handle the quantized tensors directly.
         }
         
         expertCacheBytes += bytes;
@@ -105,10 +102,7 @@ public class MoeForwardPass {
         
         long bytes = cont.numel() * (long) cont.elementByteSize();
         if (cont.isQuantized()) {
-            AccelTensor f16 = cont.toQuantizedF16CachedUpTo(Long.MAX_VALUE);
-            if (f16 != null) {
-                bytes += f16.numel() * (long) f16.elementByteSize();
-            }
+            // Do NOT preemptively dequantize on CPU to avoid SIGILL and memory bloat.
         }
         
         expertCacheBytes += bytes;
@@ -116,7 +110,33 @@ public class MoeForwardPass {
         return cont;
     }
 
+    private synchronized void initMaxExpertCacheBytes(ModelConfig config) {
+        if (maxExpertCacheBytes == -1L) {
+            long explicit = Long.getLong("gollek.moe.expert_cache_bytes", -1L);
+            if (explicit > 0) {
+                maxExpertCacheBytes = explicit;
+            } else {
+                long hiddenSize = config.getHiddenSize();
+                long intermSize = config.getMoeIntermediateSize() != null && config.getMoeIntermediateSize() > 0 
+                        ? config.getMoeIntermediateSize() 
+                        : (config.getIntermediateSize() > 0 ? config.getIntermediateSize() : hiddenSize * 4L);
+                long numExpertsPerTok = config.getNumExpertsPerTok() != null && config.getNumExpertsPerTok() > 0
+                        ? config.getNumExpertsPerTok()
+                        : 1;
+                long numHiddenLayers = config.getNumHiddenLayers() > 0 ? config.getNumHiddenLayers() : 32;
+                
+                // Size of 1 active expert across all layers: 3 matrices (Gate, Up, Down) * 2 bytes (F16) = 6
+                long totalActiveBytes = 6L * hiddenSize * intermSize * numExpertsPerTok * numHiddenLayers;
+                
+                // Minimum 2GB, or totalActiveBytes + 1GB buffer
+                maxExpertCacheBytes = Math.max(2_000_000_000L, totalActiveBytes + 1_000_000_000L);
+                log.infof("MoE expert cache size bounded to %d bytes (dynamic based on config)", maxExpertCacheBytes);
+            }
+        }
+    }
+
     public AccelTensor computeAccel(AccelTensor hidden, Map<String, AccelTensor> weights, ModelConfig config, ModelArchitecture arch, int layerIdx) {
+        initMaxExpertCacheBytes(config);
         int numExperts = config.getNumLocalExperts();
         int topK = config.getNumExpertsPerTok();
         log.tracef("MoE layer %d: %d experts, top-%d routing", layerIdx, numExperts, topK);
@@ -145,7 +165,11 @@ public class MoeForwardPass {
             }
         }
 
-        AccelTensor routerLogits = AccelOps.linear(hiddenFlat, gateWeight);
+        AccelTensor routerWeight = gateWeight;
+        if (gateWeight.isQuantized()) {
+            routerWeight = gateWeight.toQuantizedF16CachedUpTo(1024 * 1024 * 1024);
+        }
+        AccelTensor routerLogits = AccelOps.linear(hiddenFlat, routerWeight);
         String modelType = config.getModelType() != null ? config.getModelType() : "";
         boolean useSigmoid = modelType.contains("qwen") || modelType.contains("moe");
         float[] probData = routerLogits.toFloatArray();
@@ -250,7 +274,13 @@ public class MoeForwardPass {
     private static AccelTensor resolveWeight(Map<String, AccelTensor> weights, String prefix, int layerIdx, Iterable<String> archCandidates, String suffix) {
         AccelTensor t = WeightTensorResolver.first(weights, archCandidates);
         if (t != null) return t;
-        return weights.get(prefix + layerIdx + "." + suffix);
+        AccelTensor t2 = weights.get(prefix + layerIdx + "." + suffix);
+        if (t2 != null) return t2;
+        if (suffix.endsWith(".weight")) {
+            AccelTensor t3 = weights.get(prefix + layerIdx + "." + suffix.replace(".weight", ".qweight"));
+            if (t3 != null) return t3;
+        }
+        return weights.get(prefix + layerIdx + "." + suffix + ".qweight");
     }
 
     private static void selectTopK(float[] probs, int numTokens, int numExperts, int k, int[] outIndices, float[] outWeights) {
@@ -284,7 +314,20 @@ public class MoeForwardPass {
             Map<Integer, AccelTensor> gateCache, Map<Integer, AccelTensor> upCache) {
 
         AccelTensor stackedGateUp = weights.get(prefix + layerIdx + ".mlp.experts.gate_up_proj");
+        if (stackedGateUp == null) stackedGateUp = weights.get(prefix + layerIdx + ".mlp.experts.gate_up_proj.qweight");
+        
         AccelTensor stackedDown   = weights.get(prefix + layerIdx + ".mlp.experts.down_proj");
+        if (stackedDown == null) stackedDown = weights.get(prefix + layerIdx + ".mlp.experts.down_proj.qweight");
+
+        AccelTensor stackedGate = weights.get(prefix + layerIdx + ".mlp.experts.gate_proj.weight");
+        if (stackedGate == null) stackedGate = weights.get(prefix + layerIdx + ".mlp.experts.gate_proj.qweight");
+        
+        AccelTensor stackedUp   = weights.get(prefix + layerIdx + ".mlp.experts.up_proj.weight");
+        if (stackedUp == null) stackedUp = weights.get(prefix + layerIdx + ".mlp.experts.up_proj.qweight");
+        if (stackedGate != null && stackedUp != null && stackedDown != null) {
+            return runSeparateStackedExpert(hidden, stackedGate, stackedUp, stackedDown, expertIdx, config, arch,
+                    gateCache, upCache, downCache);
+        }
 
         if (stackedGateUp != null && stackedDown != null) {
             return runStackedExpert(hidden, stackedGateUp, stackedDown, expertIdx, config, arch,
@@ -302,6 +345,27 @@ public class MoeForwardPass {
             return hidden;
         }
         return ffnService.swigluFfn(hidden, arch, config, gateW, null, upW, null, downW, null);
+    }
+
+    private AccelTensor runSeparateStackedExpert(AccelTensor hidden,
+            AccelTensor stackedGate, AccelTensor stackedUp, AccelTensor stackedDown,
+            int expertIdx, ModelConfig config, ModelArchitecture arch,
+            Map<Integer, AccelTensor> gateCache, Map<Integer, AccelTensor> upCache, Map<Integer, AccelTensor> downCache) {
+        try {
+            long[] gShape = stackedGate.shape();
+            if (gShape.length < 3) return hidden;
+            long numExperts = gShape[0];
+            if (expertIdx < 0 || expertIdx >= numExperts) return hidden;
+            
+            AccelTensor gateW = gateCache.computeIfAbsent(expertIdx, idx -> getOrMaterializeExpert(stackedGate, idx, 0));
+            AccelTensor upW = upCache.computeIfAbsent(expertIdx, idx -> getOrMaterializeExpert(stackedUp, idx, 0));
+            AccelTensor downW = downCache.computeIfAbsent(expertIdx, idx -> getOrMaterializeExpert(stackedDown, idx, 0));
+            
+            return ffnService.swigluFfn(hidden, arch, config, gateW, null, upW, null, downW, null);
+        } catch (Exception e) {
+            log.warnf(e, "Separate stacked expert %d computation failed", expertIdx);
+            return hidden;
+        }
     }
 
     private AccelTensor runStackedExpert(AccelTensor hidden,

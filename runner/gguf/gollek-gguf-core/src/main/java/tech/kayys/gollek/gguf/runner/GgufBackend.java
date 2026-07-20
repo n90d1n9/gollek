@@ -1,4 +1,4 @@
-package tech.kayys.gollek.plugin.runner.gguf;
+package tech.kayys.gollek.gguf.runner;
 
 import tech.kayys.gollek.plugin.runner.RunnerRequest;
 import tech.kayys.gollek.plugin.runner.RunnerResult;

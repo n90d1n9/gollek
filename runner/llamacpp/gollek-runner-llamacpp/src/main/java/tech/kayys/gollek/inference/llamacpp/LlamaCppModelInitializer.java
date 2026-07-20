@@ -127,7 +127,9 @@ public class LlamaCppModelInitializer {
         long modelSizeBytes = safeFileSize(modelPath);
         int activeGpuLayers = adjustGpuLayersForLargeModel(configuredGpuLayers, modelSizeBytes);
 
-        int effectiveBatch = Math.min(configuredBatch, 128);
+        // Use the full configured batch size — the 128-token cap was overly conservative
+        // and significantly throttles prefill throughput on Apple Silicon.
+        int effectiveBatch = Math.max(1, configuredBatch);
 
         if (activeGpuLayers != configuredGpuLayers) {
             log.warnf(
@@ -149,18 +151,12 @@ public class LlamaCppModelInitializer {
     }
 
     private int adjustGpuLayersForLargeModel(int configuredGpuLayers, long modelSizeBytes) {
-        boolean forceGpuForLargeModel = Boolean.parseBoolean(
-                System.getProperty(
-                        "gollek.gguf.force.gpu.large-model",
-                        System.getenv().getOrDefault("GOLLEK_GGUF_FORCE_GPU_FOR_LARGE_MODEL", "false")));
-
         if (configuredGpuLayers < -1) {
             configuredGpuLayers = -1;
         }
-
-        if (configuredGpuLayers != 0 && modelSizeBytes >= LARGE_MODEL_THRESHOLD && !forceGpuForLargeModel) {
-            return configuredGpuLayers == -1 ? 8 : Math.min(configuredGpuLayers, 8);
-        }
+        // On Apple Silicon (Unified Memory), capping GPU layers for large models is unnecessarily
+        // conservative — the Metal backend will OOM-fallback to CPU gracefully if needed.
+        // Always honour the configured layer count so the full model offloads to Metal.
         return configuredGpuLayers;
     }
 
@@ -188,7 +184,14 @@ public class LlamaCppModelInitializer {
         binding.setContextParam(contextParams, "n_threads", config.threads);
         binding.setContextParam(contextParams, "n_threads_batch", config.threads);
         binding.setContextParam(contextParams, "offload_kqv", config.gpuLayers != 0);
-        binding.setContextParam(contextParams, "flash_attn_type", 0);
+        binding.setContextParam(contextParams, "flash_attn_type", config.gpuLayers != 0 ? 2 : 0);
+        // Use Q8_0 KV cache quantization when GPU is active + flash attention is on.
+        // Q8_0 halves KV cache memory vs F16 with negligible quality loss, freeing
+        // RAM for longer contexts on 16 GB Apple Silicon devices.
+        if (config.gpuLayers != 0) {
+            binding.setContextParam(contextParams, "type_k", 8); // GGML_TYPE_Q8_0
+            binding.setContextParam(contextParams, "type_v", 8); // GGML_TYPE_Q8_0
+        }
         binding.setContextParam(contextParams, "samplers", MemorySegment.NULL);
         binding.setContextParam(contextParams, "n_samplers", 0L);
 

@@ -1,4 +1,4 @@
-package tech.kayys.gollek.gguf.loader.model;
+package tech.kayys.gollek.gguf.model;
 
 import tech.kayys.gollek.gguf.loader.gguf.GGUFFile;
 
@@ -21,8 +21,10 @@ public record ModelConfig(int contextLength, int embeddingDim, int nLayers, int 
         int bos = (int) f.getLong("tokenizer.ggml.bos_token_id", 1);
         int eos = (int) f.getLong("tokenizer.ggml.eos_token_id", 2);
         
+        int headDim = (int) f.getLong(arch + ".attention.key_length", embDim / nHeads);
+        
         return new ModelConfig(ctxLen, embDim, nLayers, ffnDim, nHeads, nKVHeads,
-                               embDim / nHeads, vocab, eps, freq, bos, eos);
+                               headDim, vocab, eps, freq, bos, eos);
     }
     
     public int kvGroupSize() { return nHeads / nKVHeads; }

@@ -81,7 +81,8 @@ record DirectForwardMetalLinearRoutingPolicy(
             return false;
         }
         boolean isHalfCompatible = quantType == AccelTensor.QuantType.F16
-                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits));
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits))
+                || quantType == AccelTensor.QuantType.NF4;
         boolean isQuantizedToF16 = quantType == AccelTensor.QuantType.INT4
                 || quantType == AccelTensor.QuantType.INT8
                 || quantType == AccelTensor.QuantType.FP8;
@@ -116,7 +117,8 @@ record DirectForwardMetalLinearRoutingPolicy(
                     || allowNativeBf16ToF16Conversion(traits, profileKey);
         }
         if (quantType == AccelTensor.QuantType.F16
-                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits))) {
+                || (quantType == AccelTensor.QuantType.BF16 && allowMetalBf16Linear(traits))
+                || quantType == AccelTensor.QuantType.NF4) {
             return true;
         }
         // Allow quantized weights: they will be converted to F16 on first use and cached.

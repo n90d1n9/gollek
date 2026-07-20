@@ -1,5 +1,5 @@
 plugins {
-    java
+    `java-library`
 }
 
 sourceSets {
@@ -25,14 +25,17 @@ sourceSets {
                 "tech/kayys/gollek/gguf/runtime/*.java",
                 "tech/kayys/gollek/gguf/tokenizer/GGUFTokenizer.java",
                 "tech/kayys/gollek/gguf/writer/GGUFWriter.java",
+                "tech/kayys/gollek/gguf/model/aljabr/*.java",
+                "tech/kayys/gollek/gguf/model/ModelConfig.java",
+                "tech/kayys/gollek/gguf/runner/AljabrWeightAdapter.java",
             )
         }
     }
 }
 
 dependencies {
-    implementation("tech.kayys.aljabr:aljabr-nn:0.1.0")
-    implementation("tech.kayys.aljabr:aljabr-tensor:0.1.0")
+    api("tech.kayys.aljabr:aljabr-nn:0.1.0")
+    api("tech.kayys.aljabr:aljabr-tensor:0.1.0")
     implementation(project(":spi:gollek-spi-model"))
     implementation("com.google.code.gson:gson:2.10.1")
     implementation(project(":core:gollek-tokenizer-core"))

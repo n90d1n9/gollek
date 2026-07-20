@@ -87,10 +87,14 @@ final class DirectModelLoader {
     private WeightLoadResult loadWeights(Path modelPath, QuantizationEngine.QuantStrategy quantStrategy,
             ModelConfig config, ModelRuntimeTraits runtimeTraits) {
         LOG.debugf("DirectInferenceEngine: opening weights from [%s]", modelPath);
+        System.err.printf("[Gollek] Phase 1/4: Opening safetensor shards from %s...%n", modelPath.getFileName());
+        long t0 = System.currentTimeMillis();
 
         Map<String, AccelTensor> weights;
         try (SafetensorShardSession session = safetensorLoader.get().open(modelPath)) {
+            System.err.printf("[Gollek] Phase 2/4: Bridging tensors (%.1fs)...%n", (System.currentTimeMillis() - t0) / 1000.0);
             weights = weightBridge.get().bridgeAll(session);
+            System.err.printf("[Gollek] Phase 2/4: Bridged %d tensors (%.1fs)%n", weights.size(), (System.currentTimeMillis() - t0) / 1000.0);
         } catch (Exception e) {
             LOG.errorf("Failed to load weights from %s: %s", modelPath, e.getMessage());
             throw new IllegalStateException("Failed to load weights: " + e.getMessage(), e);
@@ -99,9 +103,11 @@ final class DirectModelLoader {
         String quantCacheState = "off";
         Path quantCachePath = null;
         if (quantStrategy == QuantizationEngine.QuantStrategy.NONE) {
+            System.err.printf("[Gollek] Phase 3/4: Applying Metal F16 weight cache (%.1fs)...%n", (System.currentTimeMillis() - t0) / 1000.0);
             weights = new MetalF16WeightCache(safetensorLoader.get(), weightBridge.get())
                     .maybeUse(modelPath, weights, config, runtimeTraits);
         } else {
+            System.err.printf("[Gollek] Phase 3/4: Quantizing weights with strategy=%s (%.1fs)...%n", quantStrategy, (System.currentTimeMillis() - t0) / 1000.0);
             QuantizationEngine.InferenceQuantizationResult quantizationResult = quantizationEngine.get()
                     .quantizeWeightsForInferenceDetailed(modelPath, weights, quantStrategy);
             weights = quantizationResult.weights();
@@ -109,7 +115,9 @@ final class DirectModelLoader {
             quantCachePath = quantizationResult.cachePath();
         }
 
+        System.err.printf("[Gollek] Phase 4/4: Expanding weight aliases (%.1fs)...%n", (System.currentTimeMillis() - t0) / 1000.0);
         WeightAliasExpander.applyCommonAliases(weights);
+        System.err.printf("[Gollek] Model ready: %d weights total (%.1fs)%n", weights.size(), (System.currentTimeMillis() - t0) / 1000.0);
         LOG.infof("DirectInferenceEngine: bridged %d tensors (Accelerate/FFM backend, strategy=%s)",
                 weights.size(), quantStrategy);
         return new WeightLoadResult(weights, quantCacheState, quantCachePath);

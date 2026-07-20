@@ -5,7 +5,7 @@ import tech.kayys.gollek.plugin.runner.RunnerResult;
 
 import java.util.Map;
 
-interface GgufBackend extends AutoCloseable {
+public interface GgufBackend extends AutoCloseable {
     String name();
 
     default Map<String, Object> metadata() {

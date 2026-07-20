@@ -1065,7 +1065,7 @@ class PluginAvailabilityCheckerTest {
         assertEquals(UnifiedRuntimeRequirementStatuses.READY, compatibilities.getFirst().status());
         assertTrue(compatibilities.getFirst().compatible());
         assertEquals("gemma4", compatibilities.getFirst().familyId());
-        assertEquals("gemma4_unified", compatibilities.getFirst().getModelType());
+        assertEquals("gemma4_unified", compatibilities.getFirst().modelType());
         assertEquals(List.of("audio", "image", "text", "video"),
                 compatibilities.getFirst().availableInputModalities());
         assertTrue(gate.passed());

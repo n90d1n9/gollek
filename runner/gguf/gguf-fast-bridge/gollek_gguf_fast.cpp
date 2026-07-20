@@ -745,6 +745,16 @@ void *gollek_gguf_open(const char *model_path,
   ctx_params.no_perf = true;
   ctx_params.swa_full = use_swa_full != 0;
 
+  // Enable flash attention when GPU is active — significantly reduces KV cache
+  // memory and improves throughput on Apple Silicon Metal (~2-3x speedup).
+  if (n_gpu_layers != 0 && !env_flag_enabled("GOLLEK_GGUF_NO_FLASH_ATTN")) {
+    ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // Quantize KV cache to Q8_0 (half the size of F16) — negligible quality loss
+    // but frees ~1 GB RAM on the 12B model, enabling longer context on 16 GB devices.
+    ctx_params.type_k = GGML_TYPE_Q8_0;
+    ctx_params.type_v = GGML_TYPE_Q8_0;
+  }
+
   int64_t context_init_start_us = llama_time_us();
   handle->ctx = llama_init_from_model(handle->model_ref->model, ctx_params);
   handle->context_init_us = llama_time_us() - context_init_start_us;

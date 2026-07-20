@@ -31,23 +31,14 @@ final class DirectForwardLinearCachePolicy {
                 config.getNumHiddenLayers())) {
             return null;
         }
-        AccelTensor dequantized = weight.dequantizeCachedUpTo(OPTIONS.ffnDownLargeHalfCachePerTensorMaxBytes());
-        return dequantized == weight ? null : dequantized;
+        // Do not preemptively dequantize to avoid SIGILL on unaligned quantized tensors.
+        return null;
     }
 
     static AccelTensor cachedLogitsLargeHalfWeight(AccelTensor input, AccelTensor weight, String profileKey) {
-        if (!ROUTING.isLogitsLargeHalfCacheProfile(profileKey)) {
-            return null;
-        }
-        if (!ROUTING.shouldCacheLogitsLargeHalfWeight(
-                profileKey,
-                isSingleTokenHalfLinearCandidate(input, weight),
-                weight.dequantizedByteSize())) {
-            return null;
-        }
-        AccelTensor dequantized = weight.dequantizeCachedUpTo(OPTIONS.logitsLargeHalfCacheMaxBytes());
-        return dequantized == weight ? null : dequantized;
+        return null;
     }
+
 
     static AccelTensor toMetalHalfWeight(AccelTensor weight, boolean nativeBf16, boolean gemma4Text,
             boolean allowBf16ToF16, boolean allowMetalBf16Linear) {
@@ -68,11 +59,13 @@ final class DirectForwardLinearCachePolicy {
         if (weight.quantType() == AccelTensor.QuantType.BF16 && allowMetalBf16Linear) {
             return weight.toF16CachedUpTo(OPTIONS.metalF16WeightCacheMaxBytes());
         }
-        // For quantized weights (INT4, BNB, INT8): dequantize to F16 once and cache.
-        // This converts the weight to a Metal-compatible format with a one-time cost,
-        // eliminating the per-token CPU dequantize+sgemm bottleneck on every decode step.
+        if (weight.quantType() == AccelTensor.QuantType.NF4) {
+            return weight;
+        }
         if (weight.isQuantized()) {
-            return weight.toQuantizedF16CachedUpTo(OPTIONS.metalF16WeightCacheMaxBytes());
+            // Do NOT preemptively dequantize on CPU to avoid SIGILL and memory bloat.
+            // Native Metal plugins (e.g. TurboQuant) will handle the quantized tensors directly.
+            return weight;
         }
         return null;
     }
